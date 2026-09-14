@@ -1,0 +1,366 @@
+// The wallet's service worker: the only place the vault is ever open. It answers pages through
+// the bridge, the window and the popup through ports, and holds the unlocked vault in memory —
+// never in storage — until it is locked, by hand or by the idle alarm. Every page request that
+// needs a decision opens the extension's own window; nothing is signed or granted without a
+// click there (SPEC §9).
+import { call, CoreError, nowIso } from './core.js'
+import { CONFIG } from './config.js'
+
+const REQUEST_KINDS = new Set(['requestIdentity', 'issueCertificate', 'listCertificates', 'syncContacts', 'ceremony'])
+const CEREMONY_OPS = new Set(['signup', 'renew', 'move', 'upgrade'])
+
+/** @type {{ passphrase: string, plaintext: any, prfKey: string | null } | null} */
+let session = null
+/** origin → root fingerprint granted this session */
+const grants = new Map()
+/** request id → pending page request */
+const pending = new Map()
+let seq = 0
+
+const fail = (code, why) => Object.assign(new Error(why || code), { code, why: why || code })
+
+// ── storage ───────────────────────────────────────────────────────────────────────────────────
+const stored = async (key) => (await chrome.storage.local.get(key))[key]
+const store = (obj) => chrome.storage.local.set(obj)
+
+// ── lock and idle ─────────────────────────────────────────────────────────────────────────────
+function touch() {
+  chrome.alarms.create('lock', { delayInMinutes: CONFIG.AUTO_LOCK_MINUTES })
+}
+function lock() {
+  if (session) {
+    session.passphrase = ''
+    session.prfKey = null
+    session.plaintext = null
+  }
+  session = null
+  grants.clear()
+  chrome.alarms.clear('lock')
+  broadcast({ type: 'locked' })
+}
+chrome.alarms.onAlarm.addListener((a) => { if (a.name === 'lock') lock() })
+
+function requireUnlocked() {
+  if (!session) throw fail('locked', 'the wallet is locked')
+  touch()
+  return session.plaintext
+}
+
+// Re-seal the vault after any change to its plaintext. The hardware copy is re-sealed only when
+// the PRF key is in memory (the session was opened or enabled with it); otherwise it goes stale
+// and the next hardware unlock asks for the passphrase once.
+async function persist() {
+  const s = session
+  if (!s) throw fail('locked')
+  const { vault } = await call('vault_seal', { passphrase: s.passphrase, plaintext: s.plaintext, kdf: CONFIG.KDF })
+  const updates = { vault }
+  const hw = await stored('hardware')
+  if (hw) {
+    if (s.prfKey) {
+      const sealed = await call('vault_seal', { passphrase: s.prfKey, plaintext: s.plaintext, kdf: CONFIG.KDF })
+      updates.hardware = { ...hw, vault: sealed.vault, stale: false }
+    } else if (!hw.stale) {
+      updates.hardware = { ...hw, stale: true }
+    }
+  }
+  await store(updates)
+}
+
+// ── identities ────────────────────────────────────────────────────────────────────────────────
+const rootsOf = (pt) => (pt.roots || []).map((r) => ({ fingerprint: r.fingerprint, cn: r.cn, created: r.created, alg: r.alg }))
+const ledgerOf = (pt, root) => (pt.ledger || []).filter((l) => l.root === root)
+// A move supersedes the leaf at the previous address in the wallet's own record: the core reads a
+// leaf as live by its dates alone, so the ledger it is handed omits what a move already ended.
+const liveLedger = (pt) => ({ ...pt, ledger: (pt.ledger || []).filter((l) => !l.superseded_at) })
+const hostOf = (u) => { try { return new URL(u).host } catch { return '' } }
+
+async function createIdentity({ name, alg = 'ed25519', passphrase }) {
+  if (!name || !name.trim()) throw fail('bad_request', 'a name is needed')
+  if (!passphrase || passphrase.length < 8) throw fail('bad_request', 'the passphrase needs at least eight characters')
+  const key = await call('generate_key', { alg })
+  const root = await call('build_root', { cn: name.trim(), pkcs8: key.pkcs8, not_before: nowIso() })
+  const entry = { fingerprint: root.fingerprint, cn: name.trim(), alg, pkcs8: key.pkcs8, cert: root.der, created: nowIso() }
+  key.pkcs8 = ''
+  let plaintext
+  if (session) {
+    plaintext = session.plaintext
+    plaintext.roots.push(entry)
+  } else {
+    plaintext = { v: 1, roots: [entry], ledger: [], contacts: [] }
+    session = { passphrase, plaintext, prfKey: null }
+  }
+  await persist()
+  touch()
+  broadcast({ type: 'changed' })
+  return { fingerprint: root.fingerprint, vault: await stored('vault') }
+}
+
+async function unlock(passphrase) {
+  const vault = await stored('vault')
+  if (!vault) throw fail('no_vault', 'no vault on this device: create an identity or import a backup')
+  let plaintext
+  try { ({ plaintext } = await call('vault_open', { passphrase, vault })) } catch { throw fail('wrong_passphrase', 'the passphrase does not open the vault') }
+  session = { passphrase, plaintext, prfKey: null }
+  touch()
+  broadcast({ type: 'unlocked' })
+  return state()
+}
+
+async function unlockHardware(prfKey) {
+  const hw = await stored('hardware')
+  if (!hw) throw fail('no_hardware', 'no hardware-wrapped copy on this device')
+  if (hw.stale) throw fail('stale', 'the hardware copy is behind the vault: unlock with the passphrase once, then the copy is refreshed')
+  let plaintext
+  try { ({ plaintext } = await call('vault_open', { passphrase: prfKey, vault: hw.vault })) } catch { throw fail('wrong_key', 'this security key does not open the vault') }
+  // The passphrase is not known on this path; the vault re-seals under the PRF key only until
+  // the passphrase is entered again, so `persist()` keeps both copies in step when it can.
+  session = { passphrase: '', plaintext, prfKey }
+  touch()
+  broadcast({ type: 'unlocked' })
+  return state()
+}
+
+async function importVault({ vault, passphrase }) {
+  if (!vault || vault.format !== 'pact-vault/1') throw fail('bad_request', 'not a pact-vault/1 document')
+  let plaintext
+  try { ({ plaintext } = await call('vault_open', { passphrase, vault })) } catch { throw fail('wrong_passphrase', 'the passphrase does not open this file') }
+  await store({ vault })
+  await chrome.storage.local.remove('hardware')
+  session = { passphrase, plaintext, prfKey: null }
+  touch()
+  broadcast({ type: 'changed' })
+  return state()
+}
+
+async function state() {
+  const vault = await stored('vault')
+  const hw = await stored('hardware')
+  return {
+    locked: !session,
+    hasVault: !!vault,
+    hardware: hw ? { enabled: true, stale: !!hw.stale } : { enabled: false },
+    roots: session ? rootsOf(session.plaintext) : [],
+    noticeShown: !!(await stored('noticeShown')),
+    drive: !!CONFIG.DRIVE_CLIENT_ID,
+    pending: [...pending.values()].map((p) => ({ id: p.id, kind: p.kind, origin: p.origin })),
+  }
+}
+
+// ── issuance ──────────────────────────────────────────────────────────────────────────────────
+async function rootSpkis(pt) {
+  const out = []
+  for (const r of pt.roots || []) out.push((await call('public_key', { pkcs8: r.pkcs8 })).spki)
+  return out
+}
+
+/** What the window shows before the person signs: the request, checked against the vault. */
+async function prepareIssue(req) {
+  const pt = requireUnlocked()
+  const root = req.root || grants.get(req.origin) || null
+  const check = await call('csr_check', { der: req.args.csr, root_spkis: await rootSpkis(pt) })
+  if (!check.ok) throw fail('bad_csr', check.why)
+  const out = { endpoint: check.endpoint, cn: check.cn, host_fingerprint: check.fingerprint, alg: check.alg, origin: req.origin, move: !!req.args.move, purpose: req.args.purpose || 'issue', root, needs_grant: !root }
+  if (root) {
+    const mine = ledgerOf(pt, root)
+    const now = Date.now()
+    out.new_endpoint = !mine.some((l) => l.endpoint === check.endpoint)
+    out.new_host = !mine.some((l) => hostOf(l.endpoint) === hostOf(check.endpoint))
+    const liveOther = mine.find((l) => !l.superseded_at && l.endpoint !== check.endpoint && Date.parse(l.not_after) > now)
+    out.live_other = liveOther ? liveOther.endpoint : null
+    out.refused = liveOther && !out.move ? `a leaf is live for ${liveOther.endpoint}: a second endpoint is a move, not a second home` : null
+    const validDays = req.args.notAfter ? Math.min(398, Math.max(1, Math.ceil((Date.parse(req.args.notAfter) - now) / 86_400_000))) : CONFIG.VALID_DAYS
+    out.valid_days = validDays
+    out.not_before = nowIso()
+    out.not_after = new Date(now + validDays * 86_400_000).toISOString().replace(/\.\d{3}Z$/, 'Z')
+  }
+  return out
+}
+
+async function issue(req, { root, passphrase }) {
+  const pt = requireUnlocked()
+  const prep = await prepareIssue({ ...req, root })
+  if (!root) throw fail('bad_request', 'no identity chosen')
+  if (prep.refused) throw fail('one_live_leaf', prep.refused)
+  if (prep.new_endpoint) {
+    // A new endpoint needs the passphrase again, even in an unlocked session (SPEC §9).
+    if (session.passphrase) {
+      if (passphrase !== session.passphrase) throw fail('wrong_passphrase', 'the passphrase is needed again for a new endpoint')
+    } else {
+      const vault = await stored('vault')
+      try { await call('vault_open', { passphrase: passphrase || '', vault }) } catch { throw fail('wrong_passphrase', 'the passphrase is needed again for a new endpoint') }
+      session.passphrase = passphrase
+    }
+  }
+  const issued = await call('wallet_issue', { vault_plaintext: liveLedger(pt), root_fingerprint: root, csr: req.args.csr, now: nowIso(), valid_days: prep.valid_days, move: prep.move })
+  if (prep.move) for (const l of ledgerOf(pt, root)) if (!l.superseded_at && l.endpoint !== issued.endpoint) l.superseded_at = nowIso()
+  pt.ledger.push({ ...issued.ledger_entry, origin: req.origin })
+  await persist()
+  grants.set(req.origin, root)
+  const rootCert = pt.roots.find((r) => r.fingerprint === root).cert
+  broadcast({ type: 'changed' })
+  return { chain: [issued.der, rootCert], root_fingerprint: root, endpoint: issued.endpoint, not_before: issued.not_before, not_after: issued.not_after, warnings: issued.warnings }
+}
+
+// ── contacts ──────────────────────────────────────────────────────────────────────────────────
+function diffContacts(book, theirs) {
+  const mine = new Map(book.map((c) => [c.root, c]))
+  const proposed = new Map((theirs || []).filter((c) => c && typeof c.root === 'string').map((c) => [c.root, c]))
+  const out = []
+  for (const [root, c] of proposed) {
+    const m = mine.get(root)
+    if (!m) out.push({ kind: 'added', root, theirs: c })
+    else if (m.endpoint !== c.endpoint || (c.leaf && m.leaf !== c.leaf)) out.push({ kind: 'changed', root, mine: m, theirs: c })
+  }
+  for (const [root, m] of mine) if (!proposed.has(root)) out.push({ kind: 'removed', root, mine: m })
+  return out
+}
+
+// ── page requests ─────────────────────────────────────────────────────────────────────────────
+async function openWindow(reqId) {
+  const url = chrome.runtime.getURL('window.html') + '#req=' + encodeURIComponent(reqId)
+  const w = await chrome.windows.create({ url, type: 'popup', focused: true, width: 480, height: 680 })
+  return w.id
+}
+
+chrome.windows.onRemoved.addListener((windowId) => {
+  for (const p of pending.values()) if (p.windowId === windowId) settle(p.id, null, fail('cancelled', 'the wallet window was closed'))
+})
+
+function settle(id, result, error) {
+  const p = pending.get(id)
+  if (!p) return
+  pending.delete(id)
+  if (error) p.reject(error)
+  else p.resolve(result)
+}
+
+async function handlePage(op, args, origin) {
+  if (!REQUEST_KINDS.has(op)) throw fail('bad_request', `no such call: ${op}`)
+  touch()
+  if (op === 'listCertificates') {
+    const root = grants.get(origin)
+    if (!root) throw fail('not_granted', 'call requestIdentity first')
+    const pt = requireUnlocked()
+    return { root_fingerprint: root, certificates: ledgerOf(pt, root).map((l) => ({ leaf: l.leaf, endpoint: l.endpoint, not_before: l.not_before, not_after: l.not_after, issued_at: l.issued_at, superseded_at: l.superseded_at || null })) }
+  }
+  if (op === 'issueCertificate' && (typeof args?.csr !== 'string' || !args.csr)) throw fail('bad_request', 'issueCertificate needs a CSR (base64url DER)')
+  if (op === 'ceremony') {
+    if (!CEREMONY_OPS.has(args?.op)) throw fail('bad_request', 'unknown ceremony op')
+    if (typeof args.csr !== 'string' || !args.csr) throw fail('bad_request', 'the ceremony needs a CSR')
+  }
+  if (op === 'syncContacts' && !Array.isArray(args?.contacts)) throw fail('bad_request', 'syncContacts needs a list')
+  const id = `r${++seq}-${Math.random().toString(36).slice(2, 8)}`
+  const p = { id, kind: op, origin, args: args || {}, windowId: null, created: Date.now() }
+  const done = new Promise((resolve, reject) => { p.resolve = resolve; p.reject = reject })
+  pending.set(id, p)
+  try { p.windowId = await openWindow(id) } catch (e) { settle(id, null, fail('no_window', String(e))) }
+  return done
+}
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || msg.type !== 'page') return false
+  const origin = sender.origin || (sender.url ? new URL(sender.url).origin : 'null')
+  handlePage(msg.op, msg.args, origin)
+    .then((result) => sendResponse({ ok: true, result }))
+    .catch((e) => sendResponse({ ok: false, error: { code: e.code || 'internal', why: e.why || e.message } }))
+  return true
+})
+
+// ── window and popup ports ────────────────────────────────────────────────────────────────────
+const ports = new Set()
+function broadcast(msg) { for (const p of ports) { try { p.postMessage(msg) } catch { /* gone */ } } }
+
+async function requestFor(reqId) {
+  const p = pending.get(reqId)
+  if (!p) throw fail('no_request', 'that request is gone')
+  const base = { id: p.id, kind: p.kind, origin: p.origin }
+  if (p.kind === 'requestIdentity') return { ...base, granted: grants.get(p.origin) || null }
+  if (p.kind === 'issueCertificate') return { ...base, ...(session ? await prepareIssue(p) : { locked: true }) }
+  if (p.kind === 'ceremony') {
+    const a = p.args
+    const req = { ...p, args: { csr: a.csr, move: a.op === 'move', purpose: a.op } }
+    return { ...base, op: a.op, display_name: a.display_name || '', endpoint_hint: a.endpoint || '', new_host_hint: !!a.new_host, ...(session ? await prepareIssue(req) : { locked: true }) }
+  }
+  if (p.kind === 'syncContacts') {
+    const pt = requireUnlocked()
+    return { ...base, differences: diffContacts(pt.contacts || [], p.args.contacts), count: (pt.contacts || []).length }
+  }
+  return base
+}
+
+async function command(msg) {
+  switch (msg.type) {
+    case 'state': return state()
+    case 'request': return requestFor(msg.reqId)
+    case 'unlock': return unlock(msg.passphrase)
+    case 'unlock:hardware': return unlockHardware(msg.prfKey)
+    case 'lock': lock(); return state()
+    case 'create': return createIdentity(msg)
+    case 'import': return importVault(msg)
+    case 'export': { requireUnlocked(); return { vault: await stored('vault') } }
+    case 'notice:shown': await store({ noticeShown: true }); return { ok: true }
+    case 'grant': {
+      const p = pending.get(msg.reqId)
+      if (!p) throw fail('no_request')
+      requireUnlocked()
+      if (!session.plaintext.roots.some((r) => r.fingerprint === msg.root)) throw fail('bad_request', 'no such identity')
+      grants.set(p.origin, msg.root)
+      if (p.kind === 'requestIdentity') {
+        const r = session.plaintext.roots.find((x) => x.fingerprint === msg.root)
+        settle(p.id, { root_fingerprint: r.fingerprint, cn: r.cn })
+      }
+      return { ok: true }
+    }
+    case 'deny': settle(msg.reqId, null, fail(msg.code || 'denied', msg.why || 'the person declined')); return { ok: true }
+    case 'issue': {
+      const p = pending.get(msg.reqId)
+      if (!p) throw fail('no_request')
+      const req = p.kind === 'ceremony' ? { ...p, args: { csr: p.args.csr, move: p.args.op === 'move', purpose: p.args.op } } : p
+      try {
+        const result = await issue(req, { root: msg.root, passphrase: msg.passphrase })
+        settle(p.id, result)
+        return result
+      } catch (e) {
+        if (e.code === 'one_live_leaf' || e.code === 'bad_csr') settle(p.id, null, e)
+        throw e
+      }
+    }
+    case 'ledger': { const pt = requireUnlocked(); return { entries: ledgerOf(pt, msg.root) } }
+    case 'contacts:get': { const pt = requireUnlocked(); return { contacts: pt.contacts || [] } }
+    case 'contacts:apply': {
+      const pt = requireUnlocked()
+      const p = pending.get(msg.reqId)
+      if (!Array.isArray(msg.book)) throw fail('bad_request')
+      pt.contacts = msg.book.map((c) => ({ root: c.root, endpoint: c.endpoint, name: c.name || '', leaf: c.leaf || undefined, added: c.added || nowIso() }))
+      await persist()
+      if (p) settle(p.id, { contacts: pt.contacts })
+      return { contacts: pt.contacts }
+    }
+    case 'hardware:get': { const hw = await stored('hardware'); return hw ? { credentialId: hw.credentialId, salt: hw.salt, stale: !!hw.stale } : null }
+    case 'hardware:enable': {
+      const pt = requireUnlocked()
+      if (typeof msg.prfKey !== 'string' || msg.prfKey.length < 32) throw fail('bad_request', 'no PRF output')
+      const sealed = await call('vault_seal', { passphrase: msg.prfKey, plaintext: pt, kdf: CONFIG.KDF })
+      await store({ hardware: { credentialId: msg.credentialId, salt: msg.salt, vault: sealed.vault, stale: false } })
+      session.prfKey = msg.prfKey
+      return { ok: true }
+    }
+    case 'hardware:disable': await chrome.storage.local.remove('hardware'); if (session) session.prfKey = null; return { ok: true }
+    default: throw fail('bad_request', `unknown command ${msg.type}`)
+  }
+}
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== 'window' && port.name !== 'popup') return
+  ports.add(port)
+  port.onDisconnect.addListener(() => ports.delete(port))
+  port.onMessage.addListener(async (msg) => {
+    try {
+      const result = await command(msg)
+      port.postMessage({ id: msg.id, ok: true, result })
+    } catch (e) {
+      const code = e instanceof CoreError ? e.code : e.code || 'internal'
+      port.postMessage({ id: msg.id, ok: false, error: { code, why: e.why || e.message } })
+    }
+  })
+})

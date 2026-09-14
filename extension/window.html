@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PACT wallet</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body class="window">
+<header class="bar">
+  <span class="brand">PACT wallet</span>
+  <span id="status" class="pill">…</span>
+</header>
+<main id="main">
+  <section id="s-loading" class="screen">Loading…</section>
+
+  <section id="s-locked" class="screen" hidden>
+    <h1>Unlock</h1>
+    <p class="muted">The vault opens in this window only. Nothing on a page can read it.</p>
+    <form id="f-unlock" class="stack">
+      <label>Passphrase <input type="password" name="passphrase" autocomplete="current-password" required autofocus></label>
+      <button type="submit" class="primary">Unlock</button>
+      <button type="button" id="b-unlock-hw" class="secondary" hidden>Unlock with security key</button>
+      <p id="e-unlock" class="error" role="alert"></p>
+    </form>
+    <p class="links"><a href="#" id="l-create">Create a new identity</a> · <a href="#" id="l-import">Import a vault file</a></p>
+  </section>
+
+  <section id="s-create" class="screen" hidden>
+    <h1>Create an identity</h1>
+    <p class="muted">A root certificate is made here, on this device, and never leaves it except in your own backups.</p>
+    <form id="f-create" class="stack">
+      <label>Your name (shown to contacts; carries no authority) <input name="name" required maxlength="64"></label>
+      <label>Key algorithm <select name="alg"><option value="ed25519">Ed25519 (recommended)</option><option value="p256">P-256</option></select></label>
+      <label>Passphrase (8+ characters) <input type="password" name="passphrase" autocomplete="new-password" minlength="8" required></label>
+      <label>Passphrase again <input type="password" name="again" autocomplete="new-password" minlength="8" required></label>
+      <div id="notice" class="notice">
+        <strong>Read once.</strong> Your identity is this root and the backups you keep of it. There is no
+        recovery: losing every copy of the vault ends the identity, and the people who know you will need
+        a new card from a new one. The vault file downloads when you create the identity — keep it.
+        <label class="check"><input type="checkbox" name="understood" required> I understand there is no recovery</label>
+      </div>
+      <button type="submit" class="primary">Create and download the vault</button>
+      <p id="e-create" class="error" role="alert"></p>
+    </form>
+    <p class="links"><a href="#" id="l-create-back">Back</a></p>
+  </section>
+
+  <section id="s-import" class="screen" hidden>
+    <h1>Import a vault file</h1>
+    <form id="f-import" class="stack">
+      <label>Vault file <input type="file" name="file" accept=".json,application/json" required></label>
+      <label>Its passphrase <input type="password" name="passphrase" autocomplete="current-password" required></label>
+      <button type="submit" class="primary">Import</button>
+      <p id="e-import" class="error" role="alert"></p>
+    </form>
+    <p class="links"><a href="#" id="l-import-back">Back</a></p>
+  </section>
+
+  <section id="s-hardware" class="screen" hidden>
+    <h1>Protect the vault with a security key</h1>
+    <p class="muted">A passkey or security key can replace the passphrase on this device: the vault is re-sealed under a key only the authenticator can derive. Optional, and the passphrase still works.</p>
+    <div class="row">
+      <button id="b-hw-enable" class="primary">Use a security key</button>
+      <button id="b-hw-skip" class="secondary">Not now</button>
+    </div>
+    <p id="e-hardware" class="error" role="alert"></p>
+  </section>
+
+  <section id="s-pick" class="screen" hidden>
+    <h1>Which identity?</h1>
+    <p><span class="origin" id="pick-origin"></span> asks which identity you are here.</p>
+    <form id="f-pick" class="stack">
+      <div id="pick-list" class="list"></div>
+      <div class="row">
+        <button type="submit" class="primary">Allow</button>
+        <button type="button" id="b-pick-deny" class="secondary">Decline</button>
+      </div>
+    </form>
+  </section>
+
+  <section id="s-issue" class="screen" hidden>
+    <h1 id="issue-title">Issue a certificate</h1>
+    <dl class="facts">
+      <dt>Asked by</dt><dd><span class="origin" id="issue-origin"></span></dd>
+      <dt>For the address</dt><dd><code id="issue-endpoint"></code> <span id="issue-newhost" class="tag warn" hidden>new host</span> <span id="issue-newendpoint" class="tag" hidden>new address</span></dd>
+      <dt>Identity</dt><dd id="issue-root"></dd>
+      <dt>Host key</dt><dd><code id="issue-hostkey" class="small"></code></dd>
+      <dt>Valid</dt><dd><span id="issue-dates"></span></dd>
+    </dl>
+    <p id="issue-mismatch" class="warn-text" hidden>The address and the asking origin differ. A provider's portal and the addresses it serves often do; make sure both are the ones you expect.</p>
+    <p id="issue-move" class="warn-text" hidden>This is a <strong>move</strong>: contacts follow the new address as they see the new certificate, and the previous host's leaf is superseded.</p>
+    <p id="issue-refused" class="error" hidden></p>
+    <form id="f-issue" class="stack">
+      <label id="issue-pass-wrap" hidden>Passphrase again — a new address needs it <input type="password" name="passphrase" autocomplete="current-password"></label>
+      <div class="row">
+        <button type="submit" id="b-sign" class="primary">Sign</button>
+        <button type="button" id="b-issue-deny" class="secondary">Decline</button>
+      </div>
+      <p id="e-issue" class="error" role="alert"></p>
+    </form>
+  </section>
+
+  <section id="s-sync" class="screen" hidden>
+    <h1>Reconcile contacts</h1>
+    <p><span class="origin" id="sync-origin"></span> offers a contact book. Every difference against the wallet's own book is listed; nothing changes without your choice.</p>
+    <form id="f-sync" class="stack">
+      <div id="sync-list" class="list"></div>
+      <div class="row">
+        <button type="submit" class="primary">Apply the ticked changes</button>
+        <button type="button" id="b-sync-deny" class="secondary">Decline</button>
+      </div>
+    </form>
+  </section>
+
+  <section id="s-done" class="screen" hidden>
+    <h1 id="done-title">Done</h1>
+    <p id="done-text" class="muted"></p>
+    <button id="b-close" class="primary">Close</button>
+  </section>
+
+  <section id="s-home" class="screen" hidden>
+    <h1>Identities</h1>
+    <div id="home-roots" class="list"></div>
+    <h2>Certificates issued</h2>
+    <div id="home-ledger" class="list small"></div>
+    <h2>Contacts</h2>
+    <p id="home-contacts" class="muted"></p>
+    <h2>Backups</h2>
+    <div class="row wrap">
+      <button id="b-backup-file" class="secondary">Download the vault file</button>
+      <button id="b-backup-import" class="secondary">Import a vault file</button>
+      <button id="b-backup-hw" class="secondary">Security key…</button>
+      <button id="b-backup-drive" class="secondary" hidden>Google Drive…</button>
+    </div>
+    <p id="home-hw" class="muted"></p>
+    <div class="row wrap">
+      <button id="b-new-identity" class="secondary">Create another identity</button>
+      <button id="b-lock" class="secondary">Lock</button>
+    </div>
+    <p id="e-home" class="error" role="alert"></p>
+  </section>
+</main>
+<script type="module" src="window.js"></script>
+</body>
+</html>
