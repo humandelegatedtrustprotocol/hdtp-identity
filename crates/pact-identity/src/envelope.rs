@@ -485,9 +485,12 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
     let msg_id = h.get("msg_id").and_then(|x| x.as_str()).unwrap_or("").to_string();
     let fresh = Freshness { h: &h, now, seen: &node.seen };
 
-    let ok = |tier: &str, root: &str, endpoint: &str, form: &str, extra: Map<String, Value>, effects: Vec<Value>| -> DecideOutput {
+    // `leaf` is the leaf the signature verified under — the chain's, or the pinned one the small
+    // form named — so a host can pin, seal to and answer the caller without opening it again.
+    let ok = |tier: &str, root: &str, endpoint: &str, form: &str, leaf_b64: &str, extra: Map<String, Value>, effects: Vec<Value>| -> DecideOutput {
         let mut r = Map::new();
         r.insert("code".into(), json!("ok"));
+        r.insert("leaf".into(), json!(leaf_b64));
         r.insert("tier".into(), json!(tier));
         r.insert("root".into(), json!(root));
         r.insert("endpoint".into(), json!(endpoint));
@@ -539,7 +542,7 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
         if let Some(early) = fresh.check() {
             return Ok(early);
         }
-        let r = ok("contact", &p.root, &p.endpoint, "leaf", Map::new(), Vec::new());
+        let r = ok("contact", &p.root, &p.endpoint, "leaf", &p.leaf, Map::new(), Vec::new());
         return Ok(pending_or(r, &p.state));
     }
 
@@ -559,11 +562,17 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
         return Ok(early);
     }
     let root = v.root_fingerprint.clone();
+    let leaf_b64 = b64u(&chain[0]);
     let endpoint = v.endpoint.clone();
 
     let as_guest = |why: &str| -> DecideOutput {
         if method != "tools/call" || !tool_ref.map(|t| GUEST_TOOLS.contains(&t)).unwrap_or(false) {
-            return invalid("guest may only redeem or request");
+            // Refused as a guest — with the root and the leaf named, so a host holding a 1.x pin of
+            // this leaf's key can upgrade it (Appendix C row 6) and decide again.
+            let mut d = invalid("guest may only redeem or request");
+            d.result["root"] = json!(root);
+            d.result["leaf"] = json!(b64u(&chain[0]));
+            return d;
         }
         let card_text = body["params"].get("arguments").and_then(|a| a.get("card")).and_then(|c| c.as_str()).unwrap_or("");
         let card = match card::decode(card_text, now) {
@@ -582,7 +591,7 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
         let mut extra = Map::new();
         extra.insert("why".into(), json!(why));
         extra.insert("address_claim".into(), held.or(former).map(Value::String).unwrap_or(Value::Null));
-        ok("guest", &root, &endpoint, "chain", extra, Vec::new())
+        ok("guest", &root, &endpoint, "chain", &leaf_b64, extra, Vec::new())
     };
 
     let Some(p) = node.pins.iter().find(|p| p.root == root) else {
@@ -592,8 +601,8 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
                 let mut extra = Map::new();
                 extra.insert("forced".into(), json!("tombstone"));
                 extra.insert("decision".into(), json!("ask"));
-                let effects = vec![json!({ "op": "pending", "root": root, "endpoint": endpoint, "why": "returned after removal" })];
-                return Ok(ok("pending_new_address", &root, &endpoint, "chain", extra, effects));
+                let effects = vec![json!({ "op": "pending", "root": root, "endpoint": endpoint, "why": "returned after removal", "leaf": b64u(&chain[0]) })];
+                return Ok(ok("pending_new_address", &root, &endpoint, "chain", &leaf_b64, extra, effects));
             }
         }
         return Ok(as_guest("unknown root"));
@@ -616,8 +625,8 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
         if node.accept_new_hosts != "auto" {
             let mut extra = Map::new();
             extra.insert("decision".into(), json!("ask"));
-            let effects = vec![json!({ "op": "pending", "root": root, "endpoint": endpoint, "why": "ask" })];
-            return Ok(ok("pending_new_address", &root, &endpoint, "chain", extra, effects));
+            let effects = vec![json!({ "op": "pending", "root": root, "endpoint": endpoint, "why": "ask", "leaf": b64u(&chain[0]) })];
+            return Ok(ok("pending_new_address", &root, &endpoint, "chain", &leaf_b64, extra, effects));
         }
         effects.push(json!({ "op": "former_endpoint", "root": root, "endpoint": p.endpoint, "at": format_rfc3339(now) }));
         effects.push(json!({ "op": "pin_update", "root": root, "endpoint": endpoint, "leaf": b64u(&chain[0]) }));
@@ -626,7 +635,7 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
         effects.push(json!({ "op": "pin_update", "root": root, "endpoint": endpoint, "leaf": b64u(&chain[0]) }));
         effects.push(json!({ "op": "event", "event": "renewal", "root": root }));
     }
-    let r = ok("contact", &root, &endpoint, "chain", Map::new(), effects);
+    let r = ok("contact", &root, &endpoint, "chain", &leaf_b64, Map::new(), effects);
     if p.state == "pending_out" && !tool_ref.map(|t| PENDING_TOOLS.contains(&t)).unwrap_or(false) {
         // The pin moved (a peer may move between my request and their answer) but the call waits.
         return Ok(DecideOutput { result: json!({ "code": "pending_approval" }), effects: r.effects.into_iter().filter(|e| e["op"] != "seen").collect() });

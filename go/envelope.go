@@ -331,9 +331,13 @@ func Decide(now time.Time, env Envelope, node NodeState) Decision {
 		return nil
 	}
 	msgID, _ := header["msg_id"].(string)
+	// leafB64 is the leaf the signature verified under — the chain's, or the
+	// pinned one the small form named — so a host can pin, seal to and answer
+	// the caller without opening the envelope a second time.
+	leafB64 := ""
 	result := func(tier, root, endpoint, form string, extra map[string]any) Decision {
 		effects = append(effects, map[string]any{"op": "seen", "msg_id": msgID})
-		r := map[string]any{"code": "ok", "tier": tier, "root": root, "endpoint": endpoint, "method": method, "form": form, "params": body["params"]}
+		r := map[string]any{"code": "ok", "tier": tier, "root": root, "endpoint": endpoint, "method": method, "form": form, "params": body["params"], "leaf": leafB64}
 		if hasTool {
 			r["tool"] = tool
 		}
@@ -382,6 +386,7 @@ func Decide(now time.Time, env Envelope, node NodeState) Decision {
 		if early := freshness(); early != nil {
 			return *early
 		}
+		leafB64 = hit.Leaf
 		if hit.State == "pending_out" {
 			if pendingTools[tool] {
 				return result("pending", hit.Root, hit.Endpoint, "leaf", nil)
@@ -415,10 +420,16 @@ func Decide(now time.Time, env Envelope, node NodeState) Decision {
 		return *early
 	}
 	root, endpoint := vr.RootFingerprint, vr.Endpoint
+	leafB64 = B64url(chain[0])
 
 	asGuest := func(why string) Decision {
 		if method != "tools/call" || !guestTools[tool] {
-			return invalid("guest may only redeem or request")
+			// Refused as a guest — with the root and the leaf named, so a host
+			// holding a 1.x pin of this leaf's key can upgrade it (Appendix C
+			// row 6) and decide again.
+			d := invalid("guest may only redeem or request")
+			d.Result["root"], d.Result["leaf"] = root, B64url(chain[0])
+			return d
 		}
 		cardText := ""
 		if params != nil {
@@ -469,7 +480,7 @@ func Decide(now time.Time, env Envelope, node NodeState) Decision {
 				continue
 			}
 			if cmp, err := CompareLeaves(FromB64url(t.Leaf), chain[0]); err == nil && cmp == "newer" {
-				effects = append(effects, map[string]any{"op": "pending", "root": root, "endpoint": endpoint, "why": "returned after removal"})
+				effects = append(effects, map[string]any{"op": "pending", "root": root, "endpoint": endpoint, "why": "returned after removal", "leaf": B64url(chain[0])})
 				return result("pending_new_address", root, endpoint, "chain", map[string]any{"forced": "tombstone", "decision": "ask"})
 			}
 		}
@@ -494,7 +505,7 @@ func Decide(now time.Time, env Envelope, node NodeState) Decision {
 	pinnedEndpoint := pin.Endpoint
 	if endpoint != pin.Endpoint {
 		if node.AcceptNewHosts != "auto" {
-			effects = append(effects, map[string]any{"op": "pending", "root": root, "endpoint": endpoint, "why": "ask"})
+			effects = append(effects, map[string]any{"op": "pending", "root": root, "endpoint": endpoint, "why": "ask", "leaf": B64url(chain[0])})
 			return result("pending_new_address", root, endpoint, "chain", map[string]any{"decision": "ask"})
 		}
 		effects = append(effects,
