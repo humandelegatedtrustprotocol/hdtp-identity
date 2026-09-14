@@ -134,6 +134,12 @@
       <button id="b-backup-drive" class="secondary" hidden>Google Drive…</button>
     </div>
     <p id="home-hw" class="muted"></p>
+    <form id="f-refresh" class="stack" hidden>
+      <p class="muted">The passphrase copy of the vault is behind the security key's. Enter the passphrase once to refresh it.</p>
+      <input type="password" name="passphrase" placeholder="Passphrase" autocomplete="current-password" required>
+      <button type="submit" class="primary">Refresh the passphrase copy</button>
+      <p id="e-refresh" class="error" role="alert"></p>
+    </form>
     <div class="row wrap">
       <button id="b-new-identity" class="secondary">Create another identity</button>
       <button id="b-lock" class="secondary">Lock</button>

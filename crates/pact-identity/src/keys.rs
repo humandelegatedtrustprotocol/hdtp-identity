@@ -89,6 +89,11 @@ impl PublicKey {
                 Public::X25519(k)
             }
             OID_EC_PUBLIC_KEY if alg.len() == 2 && alg[1].tag == 0x06 && read_oid(&alg[1]) == OID_PRIME256V1 => {
+                // RFC 5480 §2.2 allows a compressed point; the profile takes the uncompressed form only,
+                // so one key has one SubjectPublicKeyInfo and one fingerprint.
+                if key.len() != 65 || key[0] != 0x04 {
+                    return err("parse", "P-256 key is not the uncompressed point");
+                }
                 Public::P256(p256::PublicKey::from_sec1_bytes(key).map_err(|_| Error::new("parse", "P-256 key is not a point"))?)
             }
             other => return err("unsupported", format!("unsupported key type {other}")),

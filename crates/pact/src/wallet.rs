@@ -9,11 +9,21 @@ use pact_identity::util::{b64u, from_b64u};
 use pact_identity::x509;
 use serde_json::{json, Value};
 use std::path::Path;
+use zeroize::Zeroize;
 
 struct Vault {
     path: String,
     passphrase: String,
     plaintext: Value,
+}
+
+// What the vault held in memory is cleared when the command is done with it: the passphrase
+// zeroized, the plaintext — root keys among it — dropped to Null so its buffers are freed.
+impl Drop for Vault {
+    fn drop(&mut self) {
+        self.passphrase.zeroize();
+        self.plaintext = Value::Null;
+    }
 }
 
 fn open_vault(path: &str, confirm_passphrase: bool) -> Res<Vault> {

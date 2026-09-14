@@ -46,11 +46,11 @@ and on the `v: 1` vectors in SPEC.md Appendix B.
 | Function | Input | Output |
 |---|---|---|
 | `build_root` | `{"cn", "pkcs8", "not_before", "serial"?: b64url(8..20 bytes)}` | `{"der", "fingerprint"}` |
-| `root_tbs` / `assemble_root` | `{"cn", "spki", "not_before", "serial"?}` → `{"tbs", "sig_alg"}`; `{"tbs", "sig"}` → `{"der"}` | the external-signing seam: a root in a passkey or security key signs `tbs` in the host, the core assembles |
+| `root_tbs` / `assemble_root` | `{"cn", "spki", "not_before", "serial"?}` → `{"tbs", "sig_alg"}`; `{"tbs", "sig", "sig_alg"?}` → `{"der"}` | the external-signing seam: a root in a passkey or security key signs `tbs` in the host, the core assembles. `sig_alg` is the AlgorithmIdentifier as base64url DER — the TBS's own third field; `assemble_*` reads it from the TBS and, when one is handed back, requires it to be equal, so the algorithm outside a certificate can never differ from the one inside |
 | `build_leaf` | `{"cn", "root_cn", "root_pkcs8", "host_spki", "endpoint", "dns_name"?, "not_before", "not_after", "serial"?}` | `{"der"}` |
-| `leaf_tbs` / `assemble_leaf` | as `build_leaf` with `root_spki` in place of `root_pkcs8` → `{"tbs", "sig_alg"}`; `{"tbs", "sig", "sig_alg"}` → `{"der"}` | the same seam for leaves |
+| `leaf_tbs` / `assemble_leaf` | as `build_leaf` with `root_spki` in place of `root_pkcs8` → `{"tbs", "sig_alg"}`; `{"tbs", "sig", "sig_alg"?}` → `{"der"}` | the same seam for leaves, the same `sig_alg` |
 | `parse_certificate` | `{"der"}` | `{"kind": "root"\|"leaf"\|"other", "subject", "issuer", "serial", "not_before", "not_after", "alg", "spki", "fingerprint", "key_id", "ski", "aki", "ca", "path_len", "key_usage": [ints], "eku": [oids], "uris": [], "dns": [], "sig_alg": oid, "profile_error": null\|string, "bytes": int}` |
-| `profile_error` | `{"der", "kind": "root"\|"leaf"}` | `{"error": null\|string}` — the exact strings of `x509.mjs profileError` |
+| `profile_error` | `{"der", "kind": "root"\|"leaf"}` | `{"error": null\|string}` — the exact strings of `x509.mjs profileError`. Parsing itself refuses, with a `parse` error, what DER has one encoding for and the certificate spells another way: the AlgorithmIdentifier inside the TBS differing from the one outside (`signature algorithm inside and outside differ`), a BOOLEAN that is not `0xFF` or is an explicit FALSE, a non-minimal INTEGER, a BIT STRING with unused bits set, a validity of other than two times, an extension of other than two or three parts or whose OCTET STRING holds more than one TLV, a P-256 key that is not the uncompressed point |
 | `validate_chain` | `{"chain": [leaf, root], "now", "expected_root"?, "expected_endpoint"?}` | accept: `{"ok": true, "leaf_spki", "leaf_fingerprint", "root_fingerprint", "endpoint", "not_before", "not_after", "alg"}`; refuse: `{"ok": false, "rule": 1..5, "reason"}` |
 | `compare_leaves` | `{"pinned", "presented"}` | `{"order": "same"\|"newer"\|"superseded"\|"conflict"}` |
 | `is_normal_https` | `{"url"}` | `{"normal": bool}` |
@@ -176,7 +176,7 @@ host holding a 1.x pin of that leaf's key can upgrade the pin (Appendix C row 6)
 `{"code": "pending_approval"}`; and `{"code": "ok", "replayed": true}` for a seen `msg_id`.
 The `why` strings are the seed's, verbatim, so the intrusion suite reads both ports alike.
 
-Order, as `receive()` has it: decode `protected` → header members exactly `cty,exp,kid,msg_id,suite,ts,v`
+Order, as `receive()` has it (freshness also refuses `exp − ts` over 30 days, §13.1, as `exp too far from ts`): decode `protected` → header members exactly `cty,exp,kid,msg_id,suite,ts,v`
 → `v` = 2 and a known suite → `kid` held (current, or superseded and not past `notAfter`), else a
 sibling's → `envelope_invalid`, a former → `certificate_renewed`, unknown → `envelope_invalid` → suite
 fits the held leaf's key → HPKE open → plaintext members exactly `chain,method,params` or
@@ -224,7 +224,13 @@ canonical JSON of the document without `ct`. The plaintext is:
 | `wallet_issue` | `{"vault_plaintext", "root_fingerprint", "csr", "now", "valid_days"?}` | `{"der", "ledger_entry", "warnings": [...]}` — the wallet's rules: `csr_check` with the vault's roots as `root_spkis`; the endpoint's host flagged `new_host: true` when no ledger entry names it; refuses a second live leaf for the root unless it names the same endpoint (a replacement) or the caller passes `move: true`; `not_before` monotonic over the ledger |
 
 Passphrases never appear in arguments of the CLI; the ceremony and the extension hold them in memory
-only for the call. The core zeroes key material it decoded as soon as the call returns.
+only for the call, and an empty passphrase seals nothing (`bad_request`). What the core zeroizes
+when a call returns: every private key it decoded, the PKCS #8 bytes it decoded them from, the
+HPKE ephemeral, shared secret, key, nonce and the HMAC chaining buffers, the vault's derived key
+and its decrypted bytes. What it does not: the JSON argument and answer strings — including a
+`pkcs8` member and a vault's decoded plaintext as a JSON value — and wasm-bindgen's copies of
+those strings in linear memory, which are freed but not cleared. A host that must not leave key
+material behind treats the strings it passes and receives as its own to clear.
 
 ## 7. Gates
 

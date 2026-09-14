@@ -19,8 +19,18 @@ pub const MAX_CERT_BYTES: usize = 4096;
 pub fn name(cn: &str) -> Vec<u8> {
     der::seq(&[der::set(&[der::seq(&[der::oid(OID_CN), der::utf8(cn)])])])
 }
-fn sig_alg(oid: &str) -> Vec<u8> {
+pub fn sig_alg(oid: &str) -> Vec<u8> {
     der::seq(&[der::oid(oid)])
+}
+/// The AlgorithmIdentifier a TBS declares as its third field, raw — what the seam hands out and
+/// what `assemble_raw` puts outside, so the two can never differ.
+pub fn declared_alg(tbs: &[u8]) -> Result<Vec<u8>> {
+    let node = read(tbs, 0)?;
+    let f = children(&node)?;
+    if f.len() < 3 {
+        return err("parse", "tbs shape");
+    }
+    Ok(f[2].raw.to_vec())
 }
 fn ext(o: &str, critical: bool, value: &[u8]) -> Vec<u8> {
     let mut parts = vec![der::oid(o)];
@@ -64,6 +74,10 @@ pub struct Unsigned {
 
 pub fn assemble(tbs: &[u8], sig_alg_oid: &str, sig: &[u8]) -> Vec<u8> {
     der::seq(&[tbs.to_vec(), sig_alg(sig_alg_oid), der::bitstr(sig, 0)])
+}
+/// Assemble with the AlgorithmIdentifier as DER bytes — the TBS's own third field.
+pub fn assemble_raw(tbs: &[u8], alg_der: &[u8], sig: &[u8]) -> Vec<u8> {
+    der::seq(&[tbs.to_vec(), alg_der.to_vec(), der::bitstr(sig, 0)])
 }
 
 pub fn root_tbs(cn: &str, key: &PublicKey, not_before: i64, serial: &[u8]) -> Result<Unsigned> {
@@ -221,17 +235,28 @@ pub fn parse(der_bytes: &[u8]) -> Result<Cert> {
     }
     let (tbs, alg, sig) = (&top[0], &top[1], &top[2]);
     let f = children(tbs)?;
-    let version_ok = f.len() == 8 && f[0].tag == 0xa0 && children(&f[0]).map(|v| !v.is_empty() && v[0].content.first() == Some(&2)).unwrap_or(false) && f[7].tag == 0xa3;
+    // version [0] EXPLICIT INTEGER 2, exactly: one minimal INTEGER whose value is 2.
+    let version_ok = f.len() == 8
+        && f[0].tag == 0xa0
+        && children(&f[0]).map(|v| v.len() == 1 && v[0].tag == 0x02 && v[0].content == [2u8]).unwrap_or(false)
+        && f[7].tag == 0xa3;
     if !version_ok {
         return err("parse", "not a v3 certificate with extensions");
     }
+    if !der::int_minimal(f[1].content) {
+        return err("parse", "INTEGER not minimal");
+    }
     let validity = children(&f[4])?;
-    if validity.len() < 2 {
+    if validity.len() != 2 {
         return err("parse", "time not in the DER form");
     }
     let alg_parts = children(alg)?;
-    if alg_parts.is_empty() {
+    if alg_parts.len() != 1 || alg_parts[0].tag != 0x06 {
         return err("parse", "certificate shape");
+    }
+    // RFC 5280 §4.1.1.2: the algorithm inside the TBS and the one outside are the same field twice.
+    if f[2].raw != alg.raw {
+        return err("parse", "signature algorithm inside and outside differ");
     }
     let public_key = PublicKey::from_spki(f[6].raw)?;
     let mut out = Cert {
@@ -266,33 +291,66 @@ pub fn parse(der_bytes: &[u8]) -> Result<Cert> {
     }
     for e in children(&ext_wrapper[0])? {
         let parts = children(&e)?;
-        if parts.is_empty() {
+        // Extension ::= SEQUENCE { extnID, critical BOOLEAN DEFAULT FALSE, extnValue OCTET STRING }:
+        // two or three parts; a critical BOOLEAN present is TRUE and encoded as 0xFF (DER never
+        // encodes the default); the OCTET STRING holds exactly one TLV.
+        if parts.len() < 2 || parts.len() > 3 || parts[0].tag != 0x06 || parts[parts.len() - 1].tag != 0x04 {
             return err("parse", "certificate shape");
         }
+        let critical = if parts.len() == 3 {
+            if !der::bool_true(&parts[1]) {
+                return err("parse", "BOOLEAN not in the DER form");
+            }
+            true
+        } else {
+            false
+        };
         let id = read_oid(&parts[0]);
-        let critical = parts.len() == 3 && parts[1].content.first().map(|b| *b != 0).unwrap_or(true);
-        let value = read(parts[parts.len() - 1].content, 0)?;
+        let octets = parts[parts.len() - 1].content;
+        let value = read(octets, 0)?;
+        if value.end != octets.len() {
+            return err("parse", "extension value has trailing bytes");
+        }
         out.extensions.push(Extension { id: id.clone(), critical });
         match id.as_str() {
             OID_BASIC_CONSTRAINTS => {
                 let c = children(&value)?;
                 if let Some(first) = c.first() {
                     if first.tag == 0x01 {
-                        out.ca = first.content.first().map(|b| *b != 0).unwrap_or(true);
+                        // cA BOOLEAN DEFAULT FALSE: present means TRUE, and TRUE is 0xFF.
+                        if !der::bool_true(first) {
+                            return err("parse", "BOOLEAN not in the DER form");
+                        }
+                        out.ca = true;
                     }
                 }
                 if let Some(last) = c.last() {
                     if last.tag == 0x02 {
+                        if !der::int_minimal(last.content) || last.content.len() > 8 {
+                            return err("parse", "INTEGER not minimal");
+                        }
                         // An empty INTEGER reads as `undefined` in the seed: present, and equal to nothing.
-                        out.path_len = Some(last.content.first().map(|b| *b as i64).unwrap_or(-1));
+                        out.path_len = Some(if last.content.is_empty() { -1 } else { last.content.iter().fold(0i64, |acc, b| (acc << 8) | *b as i64) });
                     }
                 }
             }
             OID_KEY_USAGE => {
-                let byte = value.content.get(1).copied().unwrap_or(0);
-                for b in 0..8u8 {
-                    if byte & (0x80 >> b) != 0 {
-                        out.key_usage.push(b);
+                // BIT STRING: the first byte says how many trailing bits of the last byte are unused;
+                // every named bit of every byte counts, so a second byte (decipherOnly) is seen.
+                let unused = value.content.first().copied().unwrap_or(0) as usize;
+                let bits = &value.content[1.min(value.content.len())..];
+                if unused > 7 || (bits.is_empty() && unused != 0) {
+                    return err("parse", "BIT STRING not in the DER form");
+                }
+                let total = bits.len() * 8 - unused;
+                for i in 0..total {
+                    if bits[i / 8] & (0x80 >> (i % 8)) != 0 {
+                        out.key_usage.push(i as u8);
+                    }
+                }
+                if let Some(last) = bits.last() {
+                    if unused > 0 && last & ((1u8 << unused) - 1) != 0 {
+                        return err("parse", "BIT STRING not in the DER form");
                     }
                 }
             }

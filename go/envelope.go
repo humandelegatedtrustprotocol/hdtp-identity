@@ -213,6 +213,16 @@ func numberOf(v any) (float64, bool) {
 		return f, err == nil
 	case float64:
 		return x, true
+	case float32:
+		return float64(x), true
+	case int:
+		return float64(x), true
+	case int64:
+		return float64(x), true
+	case uint32:
+		return float64(x), true
+	case uint8:
+		return float64(x), true
 	}
 	return 0, false
 }
@@ -315,6 +325,10 @@ func Decide(now time.Time, env Envelope, node NodeState) Decision {
 		ts, okT := numberOf(header["ts"])
 		if !okE || !okT || !(nowS < exp) || math.Abs(nowS-ts) > SkewSeconds {
 			d := invalid("outside the time window")
+			return &d
+		}
+		if exp-ts > MaxLifetimeSeconds {
+			d := invalid("exp too far from ts")
 			return &d
 		}
 		msgID, ok := header["msg_id"].(string)
@@ -578,8 +592,13 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 	if msgID, _ := header["msg_id"].(string); msgID != o.MsgID {
 		return nil, errors.New("msg_id does not correlate")
 	}
-	if exp, ok := numberOf(header["exp"]); !ok || !(float64(o.Now.Unix()) < exp) {
+	exp, okE := numberOf(header["exp"])
+	ts, okT := numberOf(header["ts"])
+	if !okE || !okT || !(float64(o.Now.Unix()) < exp) || math.Abs(float64(o.Now.Unix())-ts) > SkewSeconds {
 		return nil, errors.New("outside the time window")
+	}
+	if exp-ts > MaxLifetimeSeconds {
+		return nil, errors.New("exp too far from ts")
 	}
 	enc, ct := FromB64url(env.Enc), FromB64url(env.Ct)
 	plaintext, err := Open(suite, o.Recipient, []byte(InfoV2), aad, enc, ct)
@@ -623,7 +642,10 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 				return nil, errors.New("signature is not the named leaf's key")
 			}
 			if o.ExpectedRoot != "" && p.Root != o.ExpectedRoot {
-				return nil, errors.New("the named leaf is another identity's")
+				return nil, errors.New("root is not the one expected")
+			}
+			if o.ExpectedEndpoint != "" && p.Endpoint != o.ExpectedEndpoint {
+				return nil, errors.New("endpoint differs from the one in question")
 			}
 			out.Root, out.Endpoint = p.Root, p.Endpoint
 			return &out, nil
@@ -681,6 +703,9 @@ func FollowRenewed(answerChain [][]byte, pinnedRoot string, pinnedLeaf []byte, d
 	}
 	if cmp == "superseded" {
 		return false, "older than the pinned leaf", nil
+	}
+	if cmp == "conflict" {
+		return false, "a different leaf with the same notBefore", nil
 	}
 	return true, "", answerChain[0]
 }

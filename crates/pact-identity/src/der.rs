@@ -157,6 +157,23 @@ pub fn children<'a>(node: &Node<'a>) -> Result<Vec<Node<'a>>> {
     Ok(out)
 }
 
+/// DER's one encoding of TRUE: a single 0xFF byte.
+pub fn bool_true(node: &Node<'_>) -> bool {
+    node.tag == 0x01 && node.content == [0xff]
+}
+
+/// DER's INTEGER: at least one byte, and no leading 0x00 before a byte under 0x80 (nor 0xFF before
+/// one at or above it) — the shortest two's-complement form.
+pub fn int_minimal(content: &[u8]) -> bool {
+    match content {
+        [] => false,
+        [_] => true,
+        [0x00, b, ..] => b & 0x80 != 0,
+        [0xff, b, ..] => b & 0x80 == 0,
+        _ => true,
+    }
+}
+
 pub fn read_oid(node: &Node<'_>) -> String {
     let b = node.content;
     if b.is_empty() {

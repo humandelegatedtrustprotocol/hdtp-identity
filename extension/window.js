@@ -315,6 +315,7 @@ async function home() {
   const { contacts } = await rpc('contacts:get')
   text('home-contacts', `${contacts.length} contact${contacts.length === 1 ? '' : 's'} in the wallet's own book.`)
   text('home-hw', state.hardware.enabled ? (state.hardware.stale ? 'Security key: enabled, behind the vault until the next passphrase unlock.' : 'Security key: enabled on this device.') : 'Security key: not enabled.')
+  $('f-refresh').hidden = !state.vaultStale
   $('b-backup-drive').hidden = !drive.driveEnabled()
   show('s-home')
 }
@@ -334,6 +335,16 @@ $('b-backup-drive').onclick = async () => {
     await drive.upload(vault)
     text('home-hw', 'Uploaded to Drive app data.')
   } catch (x) { err('e-home', x) }
+}
+$('f-refresh').onsubmit = async (e) => {
+  e.preventDefault()
+  err('e-refresh')
+  try {
+    await rpc('passphrase:refresh', { passphrase: e.target.elements.passphrase.value })
+    e.target.reset()
+    await refreshStatus()
+    home()
+  } catch (x) { err('e-refresh', x) }
 }
 $('b-new-identity').onclick = () => show('s-create')
 $('b-lock').onclick = async () => { await rpc('lock'); await refreshStatus(); route() }

@@ -48,7 +48,7 @@ func AddressGuard(endpoint, selfEndpoint string, guest bool) (bool, string) {
 	if !IsNormalHTTPS(endpoint) {
 		return false, "endpoint is not an https URL in normal form"
 	}
-	host := hostOf(endpoint)
+	host := strings.TrimSuffix(hostOf(endpoint), ".") // a trailing dot names the same host
 	bare := strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
 	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
 		return false, "host is loopback"

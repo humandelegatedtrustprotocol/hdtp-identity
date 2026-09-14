@@ -11,6 +11,7 @@ name = "pact"
 path = "src/main.rs"
 
 [dependencies]
+zeroize = "1"
 pact-identity = { path = "../pact-identity" }
 clap = { version = "4", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
