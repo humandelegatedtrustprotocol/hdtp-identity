@@ -676,16 +676,44 @@ func isUnreservedEncoded(h, l byte) bool {
 	return (v >= 'a' && v <= 'z') || (v >= 'A' && v <= 'Z') || (v >= '0' && v <= '9') || strings.IndexByte("-._~", v) >= 0
 }
 
+// normalPort accepts a port as RFC 3986 normal form writes one: digits with no leading zero, in
+// range, and never the scheme's default (443), which the normal form omits.
+func normalPort(p string) bool {
+	if p == "" || len(p) > 5 || p[0] == '0' || p == "443" {
+		return false
+	}
+	n := 0
+	for i := 0; i < len(p); i++ {
+		if p[i] < '0' || p[i] > '9' {
+			return false
+		}
+		n = n*10 + int(p[i]-'0')
+	}
+	return n >= 1 && n <= 65535
+}
+
 func normalHost(h string) bool {
 	if h == "" {
 		return false
 	}
 	if strings.HasPrefix(h, "[") {
-		if !strings.HasSuffix(h, "]") {
+		end := strings.IndexByte(h, ']')
+		if end < 0 {
 			return false
 		}
-		ip := parseIP(h[1 : len(h)-1])
-		return ip.IsValid() && ip.Is6() && !ip.Is4In6() && ip.String() == h[1:len(h)-1]
+		if rest := h[end+1:]; rest != "" {
+			if rest[0] != ':' || !normalPort(rest[1:]) {
+				return false
+			}
+		}
+		ip := parseIP(h[1:end])
+		return ip.IsValid() && ip.Is6() && !ip.Is4In6() && ip.String() == h[1:end]
+	}
+	if i := strings.IndexByte(h, ':'); i >= 0 {
+		if !normalPort(h[i+1:]) {
+			return false
+		}
+		h = h[:i]
 	}
 	if strings.ContainsAny(h, ":@") {
 		return false
