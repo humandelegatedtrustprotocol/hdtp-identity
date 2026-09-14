@@ -1,0 +1,24 @@
+[package]
+name = "pact"
+description = "The PACT command line: the implementer's tools and the wallet a script can drive"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "pact"
+path = "src/main.rs"
+
+[dependencies]
+pact-identity = { path = "../pact-identity" }
+clap = { version = "4", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+rpassword = "7"
+base64 = "0.22"
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+
+[dev-dependencies]
+assert_cmd = "2"
+tempfile = "3"
+predicates = "3"

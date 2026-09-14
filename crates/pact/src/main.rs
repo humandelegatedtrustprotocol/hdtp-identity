@@ -1,0 +1,365 @@
+//! `pact`: the PACT 2.0 command line. One native binary, two halves — the implementer's tools
+//! (cards, chains, certificates, requests, vectors, an intrusion run) and the wallet a person or a
+//! script drives (a root in a vault, leaves issued under SPEC §9's rules, the ledger, the contact
+//! book). Every rule is the core's; this binary is the terminal.
+mod implementer;
+mod io;
+mod vectors;
+mod wallet;
+
+use clap::{Args, Parser, Subcommand};
+use io::Res;
+
+#[derive(Parser)]
+#[command(name = "pact", version, about = "PACT 2.0: certificates, cards, envelopes and the wallet, from the terminal", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    cmd: Cmd,
+}
+
+#[derive(Subcommand)]
+enum Cmd {
+    /// A contact card: read it as a receiver would
+    Card {
+        #[command(subcommand)]
+        cmd: CardCmd,
+    },
+    /// A chain of leaf and root: validate it (SPEC §14.2)
+    Chain {
+        #[command(subcommand)]
+        cmd: ChainCmd,
+    },
+    /// One certificate: what it says and whether it is in the profile (§14.1)
+    Cert {
+        #[command(subcommand)]
+        cmd: CertCmd,
+    },
+    /// Certificate signing requests: a host makes one, a wallet checks one (§9)
+    Csr {
+        #[command(subcommand)]
+        cmd: CsrCmd,
+    },
+    /// Leaf keys for a host
+    Key {
+        #[command(subcommand)]
+        cmd: KeyCmd,
+    },
+    /// Appendix B: regenerate, prove, and aim the intrusion scenarios at a live endpoint
+    Vectors {
+        #[command(subcommand)]
+        cmd: VectorsCmd,
+    },
+    /// The wallet: an identity is a root in a vault, and this is where leaves come from
+    Id {
+        #[command(subcommand)]
+        cmd: IdCmd,
+    },
+    /// The wallet's contact book, which outlives any host
+    Contacts {
+        #[command(subcommand)]
+        cmd: ContactsCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum CardCmd {
+    /// Decode a card: name, root, endpoint, validity, seal, what was ignored
+    Show {
+        /// A vCard file, or - for stdin
+        file: String,
+        #[arg(long)]
+        now: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// The intake verdict (§3): accepted, or refused with the reason; exit 1 on refusal
+    Check {
+        file: String,
+        #[arg(long)]
+        now: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ChainCmd {
+    /// Validate a chain; exit 1 with the rule and the reason on refusal
+    Check {
+        /// The leaf certificate (DER or PEM)
+        #[arg(long)]
+        leaf: Option<String>,
+        /// The root certificate (DER or PEM)
+        #[arg(long)]
+        root: Option<String>,
+        /// A PEM bundle, leaf first, instead of --leaf and --root
+        #[arg(long, conflicts_with_all = ["leaf", "root"])]
+        chain: Option<String>,
+        /// The root fingerprint the verifier already holds
+        #[arg(long)]
+        expect_root: Option<String>,
+        /// The address in question: dialed, pinned, or on the card
+        #[arg(long)]
+        expect_endpoint: Option<String>,
+        /// The verifier's clock, RFC 3339; the system clock otherwise
+        #[arg(long)]
+        now: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum CertCmd {
+    /// Parse a certificate and report the profile verdict
+    Show {
+        file: String,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum CsrCmd {
+    /// A host's request for a leaf: its key, its endpoint, proof of possession
+    New {
+        /// The host's leaf key (PKCS #8 DER or PEM)
+        #[arg(long)]
+        key: String,
+        /// The endpoint the leaf will name, an https URL in normal form
+        #[arg(long)]
+        endpoint: String,
+        /// The subject name; the endpoint's host when absent
+        #[arg(long)]
+        cn: Option<String>,
+        /// Add the endpoint's host as a dNSName beside the URI
+        #[arg(long)]
+        dns: bool,
+        /// Write the PEM here instead of stdout
+        #[arg(long)]
+        out: Option<String>,
+    },
+    /// What a wallet checks before signing: the profile, the proof of possession, the root-key refusal
+    Check {
+        file: String,
+        /// A root's public key or certificate; a request carrying that key is refused
+        #[arg(long = "root-spki")]
+        root_spki: Vec<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum KeyCmd {
+    /// A fresh leaf key, written owner-only; prints its fingerprint
+    New {
+        #[arg(long, default_value = "ed25519", value_parser = ["ed25519", "p256"])]
+        alg: String,
+        #[arg(long)]
+        out: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum VectorsCmd {
+    /// Regenerate the 2.0 vectors from their labelled seeds
+    Gen {
+        #[arg(long)]
+        out: Option<String>,
+    },
+    /// Prove the vectors: from a SPEC.md's Appendix B, or from a vector file
+    Check {
+        #[arg(long, conflicts_with = "file")]
+        spec: Option<String>,
+        #[arg(long)]
+        file: Option<String>,
+    },
+    /// Aim the black-box intrusion scenarios at a live endpoint and judge by the answers
+    Intrude {
+        /// The endpoint, https://host/slug
+        #[arg(long)]
+        against: String,
+        #[arg(long)]
+        now: Option<String>,
+    },
+}
+
+#[derive(Args)]
+struct IssueCommon {
+    /// The vault holding the root
+    #[arg(long)]
+    vault: String,
+    /// The host's request (PEM or DER)
+    #[arg(long)]
+    csr: String,
+    /// How long the leaf lives: 1y, 90d, 6w (at most 398 days)
+    #[arg(long, default_value = "1y")]
+    valid: String,
+    /// The origin of the page or host that asked, shown beside the endpoint
+    #[arg(long)]
+    origin: Option<String>,
+    /// Which root, when the vault holds several
+    #[arg(long)]
+    root: Option<String>,
+    /// Sign without asking (scripts and the harness)
+    #[arg(long)]
+    yes: bool,
+    /// Write the leaf PEM here instead of stdout
+    #[arg(long)]
+    out: Option<String>,
+    /// Also write leaf and root as one PEM bundle here
+    #[arg(long)]
+    chain_out: Option<String>,
+    /// The wallet's clock, RFC 3339; the system clock otherwise
+    #[arg(long)]
+    now: Option<String>,
+}
+
+#[derive(Subcommand)]
+enum IdCmd {
+    /// A new identity: a root, in a new vault under a passphrase asked twice
+    Create {
+        #[arg(long)]
+        name: String,
+        #[arg(long, default_value = "ed25519", value_parser = ["ed25519", "p256"])]
+        alg: String,
+        #[arg(long)]
+        vault: String,
+    },
+    /// Issue a leaf for a request, after showing what it names and asking
+    Issue {
+        #[command(flatten)]
+        common: IssueCommon,
+        /// A second endpoint while a leaf is live is a move, not a second home; say so
+        #[arg(long = "move")]
+        moving: bool,
+    },
+    /// Renew: a leaf for an endpoint already in the ledger, with a fresh key
+    Renew {
+        #[command(flatten)]
+        common: IssueCommon,
+    },
+    /// Every leaf this vault issued
+    Ledger {
+        #[arg(long)]
+        vault: String,
+        #[arg(long)]
+        root: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// The root certificate (public), as PEM
+    Show {
+        #[arg(long)]
+        vault: String,
+        #[arg(long)]
+        root: Option<String>,
+        #[arg(long)]
+        out: Option<String>,
+    },
+    /// A copy of the vault, proven to open
+    Backup {
+        #[arg(long)]
+        vault: String,
+        #[arg(long)]
+        to: String,
+    },
+    /// Bring a copy back to a path that is empty
+    Restore {
+        #[arg(long)]
+        from: String,
+        #[arg(long)]
+        vault: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum ContactsCmd {
+    /// The contact book as JSON on stdout
+    Export {
+        #[arg(long)]
+        vault: String,
+    },
+    /// Reconcile a book from a host against the wallet's, showing every difference first
+    Import {
+        #[arg(long)]
+        vault: String,
+        file: String,
+        #[arg(long)]
+        yes: bool,
+    },
+}
+
+fn run(cli: Cli) -> Res<i32> {
+    match cli.cmd {
+        Cmd::Card { cmd } => match cmd {
+            CardCmd::Show { file, now, json } => implementer::card_show(&file, now.as_deref(), json),
+            CardCmd::Check { file, now } => implementer::card_check(&file, now.as_deref()),
+        },
+        Cmd::Chain { cmd } => match cmd {
+            ChainCmd::Check { leaf, root, chain, expect_root, expect_endpoint, now } => implementer::chain_check(leaf.as_deref(), root.as_deref(), chain.as_deref(), expect_root.as_deref(), expect_endpoint.as_deref(), now.as_deref()),
+        },
+        Cmd::Cert { cmd } => match cmd {
+            CertCmd::Show { file, json } => implementer::cert_show(&file, json),
+        },
+        Cmd::Csr { cmd } => match cmd {
+            CsrCmd::New { key, endpoint, cn, dns, out } => implementer::csr_new(&key, &endpoint, cn.as_deref(), dns, out.as_deref()),
+            CsrCmd::Check { file, root_spki } => implementer::csr_check(&file, &root_spki),
+        },
+        Cmd::Key { cmd } => match cmd {
+            KeyCmd::New { alg, out } => implementer::key_new(&alg, &out),
+        },
+        Cmd::Vectors { cmd } => match cmd {
+            VectorsCmd::Gen { out } => vectors::gen(out.as_deref()),
+            VectorsCmd::Check { spec, file } => vectors::check(spec.as_deref(), file.as_deref()),
+            VectorsCmd::Intrude { against, now } => vectors::intrude(&against, now.as_deref()),
+        },
+        Cmd::Id { cmd } => match cmd {
+            IdCmd::Create { name, alg, vault } => wallet::id_create(&name, &alg, &vault),
+            IdCmd::Issue { common: c, moving } => wallet::id_issue(wallet::IssueArgs { vault: &c.vault, csr: &c.csr, valid_days: io::parse_valid(&c.valid)?, moving, renew_only: false, origin: c.origin.as_deref(), root: c.root.as_deref(), yes: c.yes, out: c.out.as_deref(), chain_out: c.chain_out.as_deref(), now: c.now.as_deref() }),
+            IdCmd::Renew { common: c } => wallet::id_issue(wallet::IssueArgs { vault: &c.vault, csr: &c.csr, valid_days: io::parse_valid(&c.valid)?, moving: false, renew_only: true, origin: c.origin.as_deref(), root: c.root.as_deref(), yes: c.yes, out: c.out.as_deref(), chain_out: c.chain_out.as_deref(), now: c.now.as_deref() }),
+            IdCmd::Ledger { vault, root, json } => wallet::id_ledger(&vault, root.as_deref(), json),
+            IdCmd::Show { vault, root, out } => wallet::id_show(&vault, root.as_deref(), out.as_deref()),
+            IdCmd::Backup { vault, to } => wallet::id_backup(&vault, &to),
+            IdCmd::Restore { from, vault } => wallet::id_restore(&from, &vault),
+        },
+        Cmd::Contacts { cmd } => match cmd {
+            ContactsCmd::Export { vault } => wallet::contacts_export(&vault),
+            ContactsCmd::Import { vault, file, yes } => wallet::contacts_import(&vault, &file, yes),
+        },
+    }
+}
+
+fn main() {
+    let cli = Cli::parse();
+    match run(cli) {
+        Ok(code) => std::process::exit(code),
+        Err(e) => {
+            eprintln!("pact: {}", e.0);
+            std::process::exit(1);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn the_command_tree_is_well_formed() {
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn arguments_parse_as_documented() {
+        let cli = Cli::try_parse_from(["pact", "id", "issue", "--vault", "v.json", "--csr", "r.pem", "--valid", "90d", "--move", "--yes"]).unwrap();
+        match cli.cmd {
+            Cmd::Id { cmd: IdCmd::Issue { common, moving } } => {
+                assert!(moving && common.yes);
+                assert_eq!(common.valid, "90d");
+            }
+            _ => panic!("issue"),
+        }
+        // There is no way to hand a passphrase on the command line, and renew has no --move.
+        assert!(Cli::try_parse_from(["pact", "id", "create", "--name", "x", "--vault", "v", "--passphrase", "p"]).is_err());
+        assert!(Cli::try_parse_from(["pact", "id", "renew", "--vault", "v", "--csr", "r", "--move"]).is_err());
+        assert!(Cli::try_parse_from(["pact", "id", "export"]).is_err());
+        assert!(Cli::try_parse_from(["pact", "chain", "check", "--chain", "b.pem", "--leaf", "l"]).is_err());
+    }
+}
