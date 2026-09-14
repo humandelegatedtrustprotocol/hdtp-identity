@@ -275,6 +275,7 @@ test('(4b) syncContacts shows every difference and applies only what is ticked',
 
 test('(5) hardware wrap: a PRF credential re-seals the vault and unlocks it after a lock', async (t) => {
   const w = await browser.newPage()
+  try { w.target().__seen = true } catch {} // this page is the test's own window.html, not a wallet popup walletWindow() should return
   const cdp = await w.createCDPSession()
   let prf = 'virtual authenticator'
   await cdp.send('WebAuthn.enable', { enableUI: false })
@@ -317,6 +318,57 @@ test('(5) hardware wrap: a PRF credential re-seals the vault and unlocks it afte
   await w.type('#f-unlock input[name=passphrase]', PASS)
   await w.click('#f-unlock button[type=submit]')
   await waitScreen(w, 's-home')
+
+  // (5b) A session opened by the security key does not know the passphrase. A renewal issued in it
+  // must leave the passphrase copy exactly as stored — never re-sealed under the empty string.
+  await w.click('#b-lock')
+  await waitScreen(w, 's-locked')
+  await w.click('#b-unlock-hw')
+  await waitScreen(w, 's-home')
+  const before = await w.evaluate(() => chrome.storage.local.get(['vault']))
+  const renew2 = newCsr('https://bharat.pact.contact/alina/mcp') // the live address since the move in (4); a renewal there asks for no passphrase
+  const h5 = await ask(pageA, `window.pact.issueCertificate(${JSON.stringify(renew2.csr)})`)
+  const ww = await walletWindow()
+  await waitScreen(ww, 's-pick')
+  await ww.click('#f-pick button[type=submit]')
+  await waitScreen(ww, 's-issue')
+  assert.equal(await visible(ww, '#issue-pass-wrap'), false, 'a renewal for a known endpoint asks for no passphrase')
+  await ww.click('#b-sign')
+  await waitScreen(ww, 's-done')
+  const v5 = await h5.value()
+  assert.equal(v5.ok, true, JSON.stringify(v5))
+  await ww.close()
+  const after = await w.evaluate(() => chrome.storage.local.get(['vault', 'vaultStale']))
+  assert.equal(after.vaultStale, true, 'the passphrase copy is marked behind')
+  assert.deepEqual(after.vault, before.vault, 'the passphrase copy was left exactly as stored')
+  assert.throws(() => call('vault_open', { passphrase: '', vault: after.vault }), /vault/, 'nothing opens it with an empty passphrase')
+  const stale = call('vault_open', { passphrase: PASS, vault: after.vault })
+  const issuedNow = v5.r.chain[0]
+  assert.equal(stale.plaintext.ledger.some((l) => l.leaf === issuedNow), false, 'the stored passphrase copy predates the renewal')
+  // The stale copy is not opened as if it were current: the passphrase unlock says so.
+  await w.click('#b-lock')
+  await waitScreen(w, 's-locked')
+  await w.type('#f-unlock input[name=passphrase]', PASS)
+  await w.click('#f-unlock button[type=submit]')
+  await w.waitForFunction(() => document.getElementById('e-unlock').textContent.length > 0, { timeout: 10000 })
+  assert.match(await textOf(w, '#e-unlock'), /behind the security key/)
+  // The security key opens the current copy, and the passphrase, entered once, refreshes the other.
+  await w.click('#b-unlock-hw')
+  await waitScreen(w, 's-home')
+  assert.equal(await visible(w, '#f-refresh'), true)
+  await w.type('#f-refresh input[name=passphrase]', PASS)
+  await w.click('#f-refresh button[type=submit]')
+  await w.waitForFunction(() => document.getElementById('f-refresh').hidden, { timeout: 10000 })
+  const refreshed = await w.evaluate(() => chrome.storage.local.get(['vault', 'vaultStale']))
+  assert.equal(refreshed.vaultStale, false)
+  const current = call('vault_open', { passphrase: PASS, vault: refreshed.vault })
+  assert.equal(current.plaintext.ledger.some((l) => l.leaf === issuedNow), true, 'the passphrase copy now carries the renewal')
+  await w.click('#b-lock')
+  await waitScreen(w, 's-locked')
+  await w.$eval('#f-unlock input[name=passphrase]', (el) => { el.value = '' }) // the refused attempt above left its text in the field
+  await w.type('#f-unlock input[name=passphrase]', PASS)
+  await w.click('#f-unlock button[type=submit]')
+  await waitScreen(w, 's-home')
   await w.close()
 })
 
@@ -331,7 +383,7 @@ test('(6) lock clears the unlocked state: grants are gone and a page call is ref
   assert.equal((await h.value()).ok, true)
   await w.close()
   const certs = (await pageA.evaluate(() => window.pact.listCertificates())).certificates
-  assert.equal(certs.length, 4)
+  assert.equal(certs.length, 5) // A, the move to B, its renewal, the move in (4), and the renewal issued under the security key in (5)
   assert.equal(certs.filter((c) => c.superseded_at).length, 3, 'the two moves superseded every leaf they left behind: A, then B and its renewal')
 
   const popup = await browser.newPage()

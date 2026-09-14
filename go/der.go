@@ -168,6 +168,27 @@ func derChildren(n derNode) ([]derNode, error) {
 	return out, nil
 }
 
+// derBoolTrue is DER's one encoding of TRUE: a single 0xFF byte.
+func derBoolTrue(n derNode) bool {
+	return n.tag == 0x01 && len(n.content) == 1 && n.content[0] == 0xff
+}
+
+// derIntMinimal is DER's INTEGER: at least one byte, no leading 0x00 before a byte under 0x80 nor
+// 0xFF before one at or above it — the shortest two's-complement form.
+func derIntMinimal(content []byte) bool {
+	switch {
+	case len(content) == 0:
+		return false
+	case len(content) == 1:
+		return true
+	case content[0] == 0x00:
+		return content[1]&0x80 != 0
+	case content[0] == 0xff:
+		return content[1]&0x80 == 0
+	}
+	return true
+}
+
 func readOid(n derNode) string {
 	b := n.content
 	if len(b) == 0 {

@@ -158,19 +158,19 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
         }
         "root_tbs" => {
             let u = x509::root_tbs(s(a, "cn")?, &public(a, "spki")?, instant(a, "not_before")?, &serial(a)?)?;
-            json!({ "tbs": b64u(&u.tbs), "sig_alg": u.sig_alg })
+            json!({ "tbs": b64u(&u.tbs), "sig_alg": b64u(&x509::sig_alg(&u.sig_alg)) })
         }
         "assemble_root" | "assemble_leaf" => {
             let tbs = bytes(a, "tbs")?;
-            let alg = match opt_s(a, "sig_alg") {
-                Some(o) => o.to_string(),
-                None => {
-                    // The declared algorithm is inside the TBS; read it back so the caller need not repeat it.
-                    let c = x509::parse(&x509::assemble(&tbs, "1.3.101.112", &[0u8; 64]))?;
-                    c.sig_alg
+            // The algorithm outside is the TBS's own third field; a `sig_alg` handed back (base64url
+            // DER of the AlgorithmIdentifier) must equal it, so the two can never differ.
+            let declared = x509::declared_alg(&tbs)?;
+            if let Some(given) = opt_bytes(a, "sig_alg")? {
+                if given != declared {
+                    return err("bad_request", "sig_alg is not the algorithm the tbs declares");
                 }
-            };
-            json!({ "der": b64u(&x509::assemble(&tbs, &alg, &bytes(a, "sig")?)) })
+            }
+            json!({ "der": b64u(&x509::assemble_raw(&tbs, &declared, &bytes(a, "sig")?)) })
         }
         "build_leaf" => {
             let root = private(a, "root_pkcs8")?;
@@ -184,7 +184,7 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
             let host = public(a, "host_spki")?;
             let spec = leaf_spec(a, &issuer, &host, serial(a)?)?;
             let u = x509::leaf_tbs(&spec)?;
-            json!({ "tbs": b64u(&u.tbs), "sig_alg": u.sig_alg })
+            json!({ "tbs": b64u(&u.tbs), "sig_alg": b64u(&x509::sig_alg(&u.sig_alg)) })
         }
         "parse_certificate" => cert_json(&x509::parse(&bytes(a, "der")?)?),
         "profile_error" => json!({ "error": x509::profile_error(&x509::parse(&bytes(a, "der")?)?, s(a, "kind")?) }),
@@ -217,7 +217,7 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
             roots.push(root.spki().to_vec());
             let req = csr::check(&bytes(a, "csr")?, &roots)?;
             let (u, nb, na) = csr::issue_tbs(&req, s(a, "root_cn")?, &root, instant(a, "now")?, opt_instant(a, "previous_not_before")?, opt_int(a, "valid_days").unwrap_or(365))?;
-            json!({ "tbs": b64u(&u.tbs), "sig_alg": u.sig_alg, "endpoint": req.endpoint, "not_before": format_rfc3339(nb), "not_after": format_rfc3339(na) })
+            json!({ "tbs": b64u(&u.tbs), "sig_alg": b64u(&x509::sig_alg(&u.sig_alg)), "endpoint": req.endpoint, "not_before": format_rfc3339(nb), "not_after": format_rfc3339(na) })
         }
 
         // §4 cards

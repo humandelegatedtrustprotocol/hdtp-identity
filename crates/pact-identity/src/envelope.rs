@@ -10,9 +10,12 @@ use crate::util::{b64u, err, from_b64u, Error, Result};
 use crate::x509::{self, compare_leaves, parse, validate_chain, ChainResult};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
+use zeroize::Zeroizing;
 
 pub const HEADER_MEMBERS: &str = "cty,exp,kid,msg_id,suite,ts,v";
 pub const SKEW_S: i64 = 300;
+/// §13.1: `exp − ts` is at most 30 days, so no receiver is asked to remember a msg_id for ever.
+pub const MAX_LIFETIME_S: i64 = 30 * 86_400;
 pub const CLAIM_WINDOW_S: i64 = 30 * 86_400;
 pub const TOMBSTONE_S: i64 = 30 * 86_400;
 pub const CTY_CALL: &str = "application/pact-call+json";
@@ -202,7 +205,11 @@ pub fn open_result(a: OpenResultArgs<'_>) -> Result<Value> {
     }
     let (ts, exp) = (h.get("ts").and_then(|t| t.as_i64()), h.get("exp").and_then(|t| t.as_i64()));
     match (ts, exp) {
-        (Some(ts), Some(exp)) if a.now < exp && (a.now - ts).abs() <= SKEW_S => {}
+        (Some(ts), Some(exp)) if a.now < exp && (a.now - ts).abs() <= SKEW_S => {
+            if exp - ts > MAX_LIFETIME_S {
+                return invalid("exp too far from ts");
+            }
+        }
         _ => return invalid("outside the time window"),
     }
     let enc = from_b64u(&a.envelope.enc).map_err(|_| Error::new("envelope_invalid", "does not open"))?;
@@ -406,7 +413,11 @@ impl Freshness<'_> {
         let ts = self.h.get("ts").and_then(|t| t.as_i64());
         let exp = self.h.get("exp").and_then(|t| t.as_i64());
         match (ts, exp) {
-            (Some(ts), Some(exp)) if self.now < exp && (self.now - ts).abs() <= SKEW_S => {}
+            (Some(ts), Some(exp)) if self.now < exp && (self.now - ts).abs() <= SKEW_S => {
+                if exp - ts > MAX_LIFETIME_S {
+                    return Some(invalid("exp too far from ts"));
+                }
+            }
             _ => return Some(invalid("outside the time window")),
         }
         let msg_id = self.h.get("msg_id").and_then(|m| m.as_str()).unwrap_or("");
@@ -461,7 +472,7 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
     if suite_for(&held_leaf.public_key) != suite {
         return Ok(invalid("suite does not fit the leaf"));
     }
-    let key = PrivateKey::from_pkcs8(&from_b64u(&held.pkcs8)?)?;
+    let key = PrivateKey::from_pkcs8(&Zeroizing::new(from_b64u(&held.pkcs8)?))?;
 
     let (Ok(enc), Ok(ct)) = (from_b64u(&e.enc), from_b64u(&e.ct)) else { return Ok(invalid("does not open")) };
     let body: Value = match hpke::open(suite, &key, INFO_V2, &aad, &enc, &ct).ok().and_then(|p| serde_json::from_slice(&p).ok()) {

@@ -266,6 +266,11 @@ func SignDetached(priv *PrivateKey, data []byte) ([]byte, error) {
 func VerifyDetached(pub *PublicKey, data, sig []byte) bool {
 	switch pub.Alg {
 	case AlgEd25519:
+		// crypto/ed25519 accepts a public key or an R of small order; the Rust core's verify_strict
+		// refuses them, and so does this port, so a chain reads the same in both.
+		if len(sig) != ed25519.SignatureSize || !ed25519PointOK(pub.Ed) || !ed25519PointOK(sig[:32]) {
+			return false
+		}
 		return ed25519.Verify(pub.Ed, data, sig)
 	case AlgP256:
 		h := sha256.Sum256(data)

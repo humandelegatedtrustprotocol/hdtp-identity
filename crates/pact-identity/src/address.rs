@@ -50,7 +50,13 @@ pub fn host_of(endpoint: &str) -> Option<String> {
 }
 
 pub fn address_guard(endpoint: &str, self_endpoint: Option<&str>, guest: bool) -> Result<()> {
+    // The normal form first (§14.1): every other spelling of an address — an IPv4 in decimal,
+    // hex or octal, a host with an odd case — is refused here, never resolved.
+    if !crate::x509::is_normal_https(endpoint) {
+        return err("bad_request", "endpoint is not an https URL in normal form");
+    }
     let Some(host) = host_of(endpoint) else { return err("bad_request", "endpoint is not an https URL") };
+    let host = host.trim_end_matches('.').to_string();
     if host == "localhost" || host.ends_with(".localhost") {
         return err("bad_request", "endpoint host is local");
     }
@@ -85,6 +91,12 @@ mod tests {
             "https://[fd00::1]/mcp",
             "https://[::ffff:10.0.0.1]/mcp",
             "http://agent.alina.example/mcp",
+            "https://127.1/mcp",
+            "https://2130706433/mcp",
+            "https://0x7f000001/mcp",
+            "https://0177.0.0.1/mcp",
+            "https://localhost./mcp",
+            "https://LOCALHOST/mcp",
         ] {
             assert!(address_guard(bad, None, false).is_err(), "{bad}");
         }

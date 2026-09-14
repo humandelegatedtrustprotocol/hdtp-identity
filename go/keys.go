@@ -107,7 +107,7 @@ func ParseSPKI(spki []byte) (*PublicKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(parts) != 2 || parts[0].tag != 0x30 || parts[1].tag != 0x03 || len(parts[1].content) < 1 {
+	if len(parts) != 2 || parts[0].tag != 0x30 || parts[1].tag != 0x03 || len(parts[1].content) < 1 || parts[1].content[0] != 0 {
 		return nil, errors.New("SPKI shape")
 	}
 	alg, err := derChildren(parts[0])
