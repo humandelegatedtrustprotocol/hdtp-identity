@@ -194,7 +194,9 @@ func WalletIssue(plain VaultPlaintext, rootFingerprint string, csr []byte, now t
 	host := hostOf(info.Endpoint)
 	newHost := true
 	var previous *time.Time
-	for _, e := range plain.Ledger {
+	var newest *LedgerEntry
+	for i := range plain.Ledger {
+		e := &plain.Ledger[i]
 		if e.Root != rootFingerprint {
 			continue
 		}
@@ -204,8 +206,13 @@ func WalletIssue(plain VaultPlaintext, rootFingerprint string, csr []byte, now t
 		if nb, ok := parseInstant(e.NotBefore); ok && (previous == nil || nb.After(*previous)) {
 			t := nb
 			previous = &t
+			newest = e
 		}
-		if na, ok := parseInstant(e.NotAfter); ok && na.After(now) && e.Endpoint != info.Endpoint && !move {
+	}
+	// The live leaf is the newest one issued (§14.3: a later notBefore supersedes every earlier
+	// leaf the instant it is seen), if it has not expired. Earlier entries are history.
+	if newest != nil && !move && newest.Endpoint != info.Endpoint {
+		if na, ok := parseInstant(newest.NotAfter); ok && na.After(now) {
 			return nil, errors.New("a live leaf names another endpoint: a second endpoint is a move, not a second home")
 		}
 	}
