@@ -1,0 +1,311 @@
+package pactidentity
+
+// Keys: Ed25519 and P-256, their SPKI and PKCS #8 forms, fingerprints, deterministic derivation for
+// the vectors, and the conversions to X25519 that §13.1 names.
+
+import (
+	"crypto/ecdh"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/sha512"
+	"crypto/x509"
+	"encoding/base64"
+	"errors"
+	"math/big"
+)
+
+const (
+	AlgEd25519 = "ed25519"
+	AlgP256    = "p256"
+)
+
+var (
+	p256N, _       = new(big.Int).SetString("FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551", 16)
+	p25519         = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 255), big.NewInt(19))
+	oidEd25519     = "1.3.101.112"
+	oidEcPublicKey = "1.2.840.10045.2.1"
+	oidPrime256v1  = "1.2.840.10045.3.1.7"
+)
+
+// PublicKey is one of the two key algorithms the profile admits, with its SPKI bytes kept as parsed.
+type PublicKey struct {
+	Alg  string
+	Ed   ed25519.PublicKey
+	EC   *ecdsa.PublicKey
+	SPKI []byte
+}
+
+// PrivateKey pairs a private key with its public half.
+type PrivateKey struct {
+	Alg    string
+	Ed     ed25519.PrivateKey
+	EC     *ecdsa.PrivateKey
+	Public *PublicKey
+}
+
+// B64url encodes without padding, the JSON form of every byte string in the contract.
+func B64url(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
+
+// FromB64url decodes leniently, as Node's Buffer.from(s, 'base64url') does: characters outside the
+// alphabet are skipped, padding is ignored, and a trailing partial group is dropped.
+func FromB64url(s string) []byte {
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	var idx [256]int8
+	for i := range idx {
+		idx[i] = -1
+	}
+	for i := 0; i < len(alphabet); i++ {
+		idx[alphabet[i]] = int8(i)
+	}
+	idx['+'] = 62
+	idx['/'] = 63
+	out := make([]byte, 0, len(s)*3/4)
+	var acc uint32
+	bits := 0
+	for i := 0; i < len(s); i++ {
+		v := idx[s[i]]
+		if v < 0 {
+			continue
+		}
+		acc = acc<<6 | uint32(v)
+		bits += 6
+		if bits >= 8 {
+			bits -= 8
+			out = append(out, byte(acc>>uint(bits)))
+			acc &= (1 << uint(bits)) - 1
+		}
+	}
+	return out
+}
+
+func sha256Sum(b []byte) []byte { h := sha256.Sum256(b); return h[:] }
+
+// Seed derives every secret in the vectors from a label, so the generator is reproducible.
+func Seed(label string) []byte { return sha256Sum([]byte("pact-2.0-vectors/" + label)) }
+
+// Fingerprint is "sha256:" + base64url(SHA-256(SPKI)), the 1.x form applied to any key.
+func Fingerprint(spki []byte) string { return "sha256:" + B64url(sha256Sum(spki)) }
+
+// KeyID is the 32 raw bytes of the fingerprint's hash: subjectKeyIdentifier and authorityKeyIdentifier.
+func KeyID(spki []byte) []byte { return sha256Sum(spki) }
+
+// ParseSPKI reads a SubjectPublicKeyInfo. The structure must be sound; an algorithm the profile does not
+// admit parses with an empty Alg, so the profile check can name it (the seed's createPublicKey accepts
+// any algorithm OpenSSL knows and profileError refuses it afterwards).
+func ParseSPKI(spki []byte) (*PublicKey, error) {
+	n, err := derRead(spki, 0)
+	if err != nil {
+		return nil, err
+	}
+	if n.tag != 0x30 || n.end != len(spki) {
+		return nil, errors.New("SPKI is not one SEQUENCE")
+	}
+	parts, err := derChildren(n)
+	if err != nil {
+		return nil, err
+	}
+	if len(parts) != 2 || parts[0].tag != 0x30 || parts[1].tag != 0x03 || len(parts[1].content) < 1 {
+		return nil, errors.New("SPKI shape")
+	}
+	alg, err := derChildren(parts[0])
+	if err != nil || len(alg) < 1 || alg[0].tag != 0x06 {
+		return nil, errors.New("SPKI algorithm")
+	}
+	key := parts[1].content[1:]
+	out := &PublicKey{SPKI: append([]byte(nil), spki...)}
+	switch readOid(alg[0]) {
+	case oidEd25519:
+		if len(alg) != 1 || len(key) != ed25519.PublicKeySize {
+			return nil, errors.New("Ed25519 key shape")
+		}
+		out.Alg = AlgEd25519
+		out.Ed = ed25519.PublicKey(append([]byte(nil), key...))
+	case oidEcPublicKey:
+		if len(alg) == 2 && alg[1].tag == 0x06 && readOid(alg[1]) == oidPrime256v1 {
+			pub, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), key)
+			if err != nil {
+				return nil, errors.New("P-256 point")
+			}
+			out.Alg = AlgP256
+			out.EC = pub
+		}
+	}
+	return out, nil
+}
+
+// ParsePKCS8 reads a PKCS #8 private key of either algorithm.
+func ParsePKCS8(der []byte) (*PrivateKey, error) {
+	k, err := x509.ParsePKCS8PrivateKey(der)
+	if err != nil {
+		return nil, errors.New("PKCS #8 does not parse")
+	}
+	switch key := k.(type) {
+	case ed25519.PrivateKey:
+		return newEd25519(key)
+	case *ecdsa.PrivateKey:
+		if key.Curve != elliptic.P256() {
+			return nil, errors.New("unsupported key type")
+		}
+		return newP256(key)
+	}
+	return nil, errors.New("unsupported key type")
+}
+
+func newEd25519(key ed25519.PrivateKey) (*PrivateKey, error) {
+	pub := key.Public().(ed25519.PublicKey)
+	spki, err := x509.MarshalPKIXPublicKey(pub)
+	if err != nil {
+		return nil, err
+	}
+	return &PrivateKey{Alg: AlgEd25519, Ed: key, Public: &PublicKey{Alg: AlgEd25519, Ed: pub, SPKI: spki}}, nil
+}
+
+func newP256(key *ecdsa.PrivateKey) (*PrivateKey, error) {
+	spki, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	if err != nil {
+		return nil, err
+	}
+	return &PrivateKey{Alg: AlgP256, EC: key, Public: &PublicKey{Alg: AlgP256, EC: &key.PublicKey, SPKI: spki}}, nil
+}
+
+// PKCS8 exports the private key in PKCS #8 DER, in the minimal form the vectors carry: Ed25519 per
+// RFC 8410; P-256 as an ECPrivateKey of version 1 and the scalar alone, the curve named once in the
+// algorithm identifier and the public key derived, never stored.
+func (k *PrivateKey) PKCS8() ([]byte, error) {
+	if k.Alg == AlgEd25519 {
+		return x509.MarshalPKCS8PrivateKey(k.Ed)
+	}
+	scalar := k.EC.D.FillBytes(make([]byte, 32))
+	ecKey := seq(derIntN(1), octet(scalar))
+	return seq(derIntN(0), seq(oidBytes(oidEcPublicKey), oidBytes(oidPrime256v1)), octet(ecKey)), nil
+}
+
+// GenerateKey draws a fresh key of the algorithm.
+func GenerateKey(alg string) (*PrivateKey, error) {
+	switch alg {
+	case AlgEd25519:
+		_, priv, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			return nil, err
+		}
+		return newEd25519(priv)
+	case AlgP256:
+		priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			return nil, err
+		}
+		return newP256(priv)
+	}
+	return nil, errors.New("unsupported key type " + alg)
+}
+
+// KeyFromSeed is the vectors' derivation: an Ed25519 seed used directly; a P-256 scalar of seed mod n,
+// zero becoming one.
+func KeyFromSeed(alg string, seed []byte) (*PrivateKey, error) {
+	if len(seed) != 32 {
+		return nil, errors.New("seed is not 32 bytes")
+	}
+	switch alg {
+	case AlgEd25519:
+		return newEd25519(ed25519.NewKeyFromSeed(seed))
+	case AlgP256:
+		k := new(big.Int).SetBytes(seed)
+		k.Mod(k, p256N)
+		if k.Sign() == 0 {
+			k.SetInt64(1)
+		}
+		priv, err := ecdsa.ParseRawPrivateKey(elliptic.P256(), k.FillBytes(make([]byte, 32)))
+		if err != nil {
+			return nil, err
+		}
+		return newP256(priv)
+	}
+	return nil, errors.New("unsupported key type " + alg)
+}
+
+// AlgorithmOf names the key's algorithm, or errors for one the profile does not admit.
+func AlgorithmOf(pub *PublicKey) (string, error) {
+	if pub == nil || pub.Alg == "" {
+		return "", errors.New("unsupported key type")
+	}
+	return pub.Alg, nil
+}
+
+func leBytesToInt(b []byte) *big.Int {
+	r := make([]byte, len(b))
+	for i := range b {
+		r[len(b)-1-i] = b[i]
+	}
+	return new(big.Int).SetBytes(r)
+}
+
+func intToLE(v *big.Int, n int) []byte {
+	be := v.FillBytes(make([]byte, n))
+	out := make([]byte, n)
+	for i := range be {
+		out[n-1-i] = be[i]
+	}
+	return out
+}
+
+// ed25519PublicToX25519 is RFC 7748 §4.1: u = (1 + y) / (1 - y) on the Ed25519 public key's y coordinate.
+func ed25519PublicToX25519(pub ed25519.PublicKey) []byte {
+	y := leBytesToInt(pub)
+	y.And(y, new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 255), big.NewInt(1)))
+	num := new(big.Int).Add(big.NewInt(1), y)
+	den := new(big.Int).Sub(big.NewInt(1), y)
+	den.Add(den, p25519)
+	den.Mod(den, p25519)
+	den.ModInverse(den, p25519)
+	u := new(big.Int).Mul(num, den)
+	u.Mod(u, p25519)
+	return intToLE(u, 32)
+}
+
+// ed25519PrivateToX25519 is RFC 8032 §5.1.5: the clamped low half of SHA-512(seed) is the scalar.
+func ed25519PrivateToX25519(priv ed25519.PrivateKey) []byte {
+	h := sha512.Sum512(priv.Seed())
+	a := append([]byte(nil), h[:32]...)
+	return clamp(a)
+}
+
+func clamp(a []byte) []byte {
+	a[0] &= 248
+	a[31] &= 127
+	a[31] |= 64
+	return a
+}
+
+// x25519FromSeed clamps a 32-byte seed into an X25519 private key, as the vectors' ephemerals are made.
+func x25519FromSeed(seed []byte) (*ecdh.PrivateKey, error) {
+	a := clamp(append([]byte(nil), seed...))
+	return ecdh.X25519().NewPrivateKey(a)
+}
+
+func p256Uncompressed(pub *ecdsa.PublicKey) []byte {
+	b, _ := pub.Bytes()
+	return b
+}
+
+func mustHex(s string) []byte {
+	out := make([]byte, len(s)/2)
+	for i := 0; i < len(out); i++ {
+		var v byte
+		for j := 0; j < 2; j++ {
+			c := s[2*i+j]
+			switch {
+			case c >= '0' && c <= '9':
+				v = v<<4 | (c - '0')
+			case c >= 'a' && c <= 'f':
+				v = v<<4 | (c - 'a' + 10)
+			case c >= 'A' && c <= 'F':
+				v = v<<4 | (c - 'A' + 10)
+			}
+		}
+		out[i] = v
+	}
+	return out
+}
