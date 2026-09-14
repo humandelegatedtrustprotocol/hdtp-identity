@@ -15,6 +15,13 @@ import { sealEnvelope } from '../../pact-protocol/vectors/lib/envelope.mjs';
 import { makePort, portFromArgv } from './port.mjs';
 import { makeDefender } from './defender.mjs';
 
+if (portFromArgv() === 'live') {
+  const { runLive } = await import('./live.mjs');
+  const i = process.argv.indexOf('--endpoint');
+  if (i < 0) { console.error('--port live needs --endpoint https://host/slug'); process.exit(2); }
+  const { reproduces } = await runLive({ endpoint: process.argv[i + 1] });
+  process.exit(reproduces ? 1 : 0);
+}
 const port = await makePort(portFromArgv());
 if (!port) { console.log('the Go port is not built (go/bin/pact-identity-go): nothing to aim at'); process.exit(2); }
 const { validateChain, open, seal, sealDeterministic, decodeCard, makeNode, renew, forgetKeysPast, pin, removeContact, receive } = makeDefender(port);
