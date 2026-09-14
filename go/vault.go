@@ -247,9 +247,13 @@ func WalletIssue(plain VaultPlaintext, rootFingerprint string, csr []byte, now t
 	}
 	// The live leaf is the newest one issued (§14.3: a later notBefore supersedes every earlier
 	// leaf the instant it is seen), if it has not expired. Earlier entries are history.
-	if newest != nil && !move && newest.Endpoint != info.Endpoint {
+	movingFrom := ""
+	if newest != nil && newest.Endpoint != info.Endpoint {
 		if na, ok := parseInstant(newest.NotAfter); ok && na.After(now) {
-			return nil, errors.New("a live leaf names another endpoint: a second endpoint is a move, not a second home")
+			if !move {
+				return nil, errors.New("a leaf is live for " + newest.Endpoint + ": a second endpoint is a move, not a second home")
+			}
+			movingFrom = newest.Endpoint
 		}
 	}
 	issued, err := IssueFromCSR(csr, IssueOpts{RootCN: root.CN, RootKey: rootKey, RootSPKIs: rootSPKIs, Now: now, PreviousNotBefore: previous, ValidDays: validDays})
@@ -262,7 +266,10 @@ func WalletIssue(plain VaultPlaintext, rootFingerprint string, csr []byte, now t
 		IssuedAt: now.UTC().Format(time.RFC3339),
 	}}
 	if newHost {
-		out.Warnings = append(out.Warnings, "new host: no leaf has been issued to "+host+" before")
+		out.Warnings = append(out.Warnings, "new host: this endpoint's host has never been issued to")
+	}
+	if movingFrom != "" {
+		out.Warnings = append(out.Warnings, "move: the live leaf at the previous endpoint is superseded once contacts see this one")
 	}
 	return out, nil
 }

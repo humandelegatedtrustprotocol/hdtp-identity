@@ -221,7 +221,7 @@ canonical JSON of the document without `ct`. The plaintext is:
 |---|---|---|
 | `vault_seal` | `{"passphrase", "plaintext": {…}, "kdf"?, "salt"?, "nonce"?}` | `{"vault": {…}}` — `salt`/`nonce` are for tests only |
 | `vault_open` | `{"passphrase", "vault": {…}}` | `{"plaintext": {…}}` or `{"error": "vault", "why"}` (a wrong passphrase and a tampered document are one message) |
-| `wallet_issue` | `{"vault_plaintext", "root_fingerprint", "csr", "now", "valid_days"?}` | `{"der", "ledger_entry", "warnings": [...]}` — the wallet's rules: `csr_check` with the vault's roots as `root_spkis`; the endpoint's host flagged `new_host: true` when no ledger entry names it; refuses a second live leaf for the root unless it names the same endpoint (a replacement) or the caller passes `move: true`; `not_before` monotonic over the ledger |
+| `wallet_issue` | `{"vault_plaintext", "root_fingerprint", "csr", "now", "valid_days"?, "move"?}` | `{"der", "endpoint", "not_before", "not_after", "ledger_entry", "new_host": bool, "warnings": [...]}` — the wallet's rules: `csr_check` with the vault's roots as `root_spkis`; `new_host` true when no ledger entry names that endpoint's host, with the warning `new host: this endpoint's host has never been issued to`; the **live leaf is the newest one issued** (§14.3) and a second endpoint while it is unexpired is refused unless `move: true`, which instead warns `move: the live leaf at the previous endpoint is superseded once contacts see this one`; `not_before` monotonic over the ledger; `valid_days` absent means 365 and an explicit 0 is refused |
 
 Passphrases never appear in arguments of the CLI; the ceremony and the extension hold them in memory
 only for the call, and an empty passphrase seals nothing (`bad_request`). What the core zeroizes
@@ -241,8 +241,13 @@ material behind treats the strings it passes and receives as its own to clear.
    envelopes' `enc`/`ct` from their ephemeral seeds.
 2. `js/check.mjs` runs the same proof through the Wasm bindings in Node, reading vectors from SPEC.md
    as the seed's `check.mjs` does.
-3. `js/intrude.mjs` replays the 79 scenarios of `pact-protocol/vectors/intrude.mjs` with Mallory built
+3. `js/intrude.mjs` replays every scenario of `pact-protocol/vectors/intrude.mjs` with Mallory built
    on the seed library and the defender on a port: `--port wasm` (default) or `--port go`. Every
-   scenario's verdict must match the seed's: blocked, residual, never REPRODUCES.
-4. `wasm-bindgen-test` in headless Chrome for the browser build; the gateway's vitest pool for the
-   Worker build (phase 2.0).
+   scenario's verdict must match the seed's: blocked, residual, never REPRODUCES — and the run fails
+   if the two suites do not hold the same scenarios, so neither side's count is written down here.
+4. `js/parity.mjs` feeds both ports the same arguments — a missing one, bytes that will not decode,
+   an explicit `valid_days: 0`, a mismatched `sig_alg`, a name that straddles the vCard fold — and
+   compares the answers member by member. The vectors prove the bytes a peer sees; this proves the
+   codes, the words and the shapes a *caller* sees, which no vector carries.
+5. `wasm-bindgen-test` in headless Chrome for the browser build; the gateway's vitest pool for the
+   Worker build (phase 2.0); `extension/ npm test` for the wallet that loads `pkg-web`.

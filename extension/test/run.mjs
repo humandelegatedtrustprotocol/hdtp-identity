@@ -258,7 +258,11 @@ test('(4) the ceremony message signup from another origin is answered with a lea
 })
 
 test('(4b) syncContacts shows every difference and applies only what is ticked', async () => {
-  const contacts = [{ root: 'sha256:' + 'a'.repeat(43), endpoint: 'https://b.example/mcp', name: 'Bharat', root_cert: 'MIIB' + 'r'.repeat(40) }]
+  // A real root certificate, and the fingerprint it hashes to: a `root_cert` is worth exactly its
+  // binding to the root the book pins, so the wallet checks the two agree before storing either.
+  const bharat = call('generate_key', { alg: 'ed25519' })
+  const bharatRoot = call('build_root', { cn: 'Bharat', pkcs8: bharat.pkcs8, not_before: new Date(Date.now() - 86400000).toISOString().replace(/\.\d+Z$/, 'Z') })
+  const contacts = [{ root: bharatRoot.fingerprint, endpoint: 'https://b.example/mcp', name: 'Bharat', root_cert: bharatRoot.der }]
   const h = await ask(pageA, `window.pact.syncContacts(${JSON.stringify(contacts)})`)
   const w = await walletWindow()
   await waitScreen(w, 's-sync')
@@ -274,6 +278,36 @@ test('(4b) syncContacts shows every difference and applies only what is ticked',
   assert.equal(v.r.contacts[0].root_cert, contacts[0].root_cert)
   assert.equal(v.r.book[0].root_cert, contacts[0].root_cert)
   await w.close()
+})
+
+test('(4c) a root certificate that is not the pinned root\'s is refused, and nothing is stored', async () => {
+  // A former host's own certificate under a friend's fingerprint: §14.5's poisoned archive, arriving
+  // through the book instead. The wallet refuses it, says so, and writes nothing; the page's request
+  // stays open, so the person can untick the row and apply again or decline.
+  const stranger = call('generate_key', { alg: 'ed25519' })
+  const strangerRoot = call('build_root', { cn: 'Not Bharat', pkcs8: stranger.pkcs8, not_before: new Date(Date.now() - 86400000).toISOString().replace(/\.\d+Z$/, 'Z') })
+  const chenRoot = 'sha256:' + 'a'.repeat(43)
+  const contacts = [{ root: chenRoot, endpoint: 'https://c.example/mcp', name: 'Chen', root_cert: strangerRoot.der }]
+  const h = await ask(pageA, `window.pact.syncContacts(${JSON.stringify(contacts)})`)
+  const w = await walletWindow()
+  await waitScreen(w, 's-sync')
+  await w.click('#f-sync button[type=submit]')
+  await w.waitForFunction(() => document.getElementById('e-sync').textContent.length > 0, { timeout: 10000 })
+  assert.match(await textOf(w, '#e-sync'), /not for the root this contact is pinned by/)
+  assert.equal(await visible(w, '#f-sync'), true, 'the form stays open so the row can be unticked')
+  assert.equal(await h.settled(), null, 'the page is still waiting, not answered')
+  // Nothing was written: declining leaves the wallet's own book as (4b) left it.
+  await w.click('#b-sync-deny')
+  const v = await h.value()
+  assert.equal(v.ok, false)
+  const again = await ask(pageA, 'window.pact.syncContacts([])')
+  const w2 = await walletWindow()
+  await waitScreen(w2, 's-sync')
+  const list = await textOf(w2, '#sync-list')
+  assert.match(list, /remove Bharat/, 'Bharat from (4b) is still the book')
+  assert.ok(!/Chen/.test(list), 'Chen was never stored')
+  await w2.click('#b-sync-deny')
+  await again.value().catch(() => {})
 })
 
 test('(5) hardware wrap: a PRF credential re-seals the vault and unlocks it after a lock', async (t) => {
@@ -292,6 +326,12 @@ test('(5) hardware wrap: a PRF credential re-seals the vault and unlocks it afte
   await w.click('#b-backup-hw')
   await w.waitForFunction(() => /enabled on this device|behind the vault/.test(document.getElementById('home-hw').textContent) || document.getElementById('e-home').textContent.length > 0, { timeout: 15000 })
   let hw = await textOf(w, '#home-hw')
+  if (!/enabled on this device/.test(hw) && !process.env.PACT_FAKE_PRF) {
+    // A real WebAuthn PRF path that does not work is a failure, not a diagnostic. Testing the wrap
+    // logic against an injected PRF is still useful where the platform has no authenticator, so it
+    // stays available — behind PACT_FAKE_PRF=1, never as a silent fallback.
+    assert.fail(`the PRF path did not work and PACT_FAKE_PRF is not set: ${await textOf(w, '#e-home')}`)
+  }
   if (!/enabled on this device/.test(hw)) {
     // WebAuthn refused from the extension origin (or the virtual authenticator lacks PRF): test
     // the wrap logic with an injected PRF and say so.

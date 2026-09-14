@@ -7,13 +7,26 @@
 // tombstone) or a look inside the node, and are counted as skipped rather than pretended. One
 // scenario (a contact request with a matching card) leaves a pending request behind on the
 // target, because that is what it proves; aim it at a test identity.
+import { spawnSync } from 'node:child_process';
 import { seed, ed25519FromSeed, b64url } from '../../pact-protocol/vectors/lib/keys.mjs';
 import { buildRoot, buildLeaf } from '../../pact-protocol/vectors/lib/x509.mjs';
 import { encodeCard, decodeCard } from '../../pact-protocol/vectors/lib/card.mjs';
 import { sealEnvelope } from '../../pact-protocol/vectors/lib/envelope.mjs';
 
 const H = 3_600_000, D = 86_400_000;
-export const SEED_SCENARIOS = 79;
+
+/**
+ * How many scenarios the seed suite has, counted from the seed itself rather than written down
+ * here. A number in this file was a number to go stale: it said 79 while the seed had 81, so a live
+ * run understated what it had not tested. The seed prints one line per scenario, and that is the
+ * count.
+ */
+export function seedScenarioCount() {
+  const run = spawnSync(process.execPath, [new URL('../../pact-protocol/vectors/intrude.mjs', import.meta.url).pathname], { encoding: 'utf8' });
+  const m = /^(\d+) scenarios:/m.exec(run.stdout || '');
+  if (!m) throw new Error('the seed suite did not report a scenario count');
+  return Number(m[1]);
+}
 
 /** What a stranger can read from an answer: the error's code, or `sealed` for a sealed result. */
 export function answerCode(body) {
@@ -84,8 +97,9 @@ export async function runLive({ endpoint, fetchImpl = fetch, now = Date.now(), l
     log(`  ${verdict.padEnd(10)} ${s.name} → ${got}${s.note ? ` (${s.note})` : ''}`);
   }
   const reproduces = results.filter((r) => r.verdict === 'REPRODUCES').length;
-  log(`\n${results.length} scenarios against ${target.endpoint}: ${results.length - reproduces} blocked, ${reproduces} reproduce; ${SEED_SCENARIOS - results.length} of the seed's ${SEED_SCENARIOS} need the owner's state and were not run`);
-  return { results, reproduces, skipped: SEED_SCENARIOS - results.length };
+  const total = seedScenarioCount();
+  log(`\n${results.length} scenarios against ${target.endpoint}: ${results.length - reproduces} blocked, ${reproduces} reproduce; ${total - results.length} of the seed's ${total} need the owner's state and were not run`);
+  return { results, reproduces, skipped: total - results.length, seedScenarios: total };
 }
 
 if (process.argv[1] && new URL(import.meta.url).pathname === process.argv[1]) {

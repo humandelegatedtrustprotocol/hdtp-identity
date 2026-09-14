@@ -12,6 +12,7 @@
   <span id="status" class="pill">…</span>
 </header>
 <main id="main">
+  <p id="disconnected" class="warn-text" hidden>The wallet was locked while this window was open — nothing was signed. Close this window and start again.</p>
   <section id="s-loading" class="screen">Loading…</section>
 
   <section id="s-locked" class="screen" hidden>
@@ -106,6 +107,7 @@
     <p><span class="origin" id="sync-origin"></span> offers a contact book. Every difference against the wallet's own book is listed; nothing changes without your choice.</p>
     <form id="f-sync" class="stack">
       <div id="sync-list" class="list"></div>
+      <p id="e-sync" class="error"></p>
       <div class="row">
         <button type="submit" class="primary">Apply the ticked changes</button>
         <button type="button" id="b-sync-deny" class="secondary">Decline</button>

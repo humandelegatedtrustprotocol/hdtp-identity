@@ -174,6 +174,9 @@ enum VectorsCmd {
         /// The endpoint, https://host/slug
         #[arg(long)]
         against: String,
+        /// Allow a target the address guard refuses — a node on your own machine, and nothing else
+        #[arg(long)]
+        allow_insecure: bool,
         #[arg(long)]
         now: Option<String>,
     },
@@ -258,6 +261,9 @@ enum IdCmd {
         vault: String,
         #[arg(long)]
         to: String,
+        /// Write over an existing file at --to
+        #[arg(long)]
+        force: bool,
     },
     /// Bring a copy back to a path that is empty
     Restore {
@@ -307,7 +313,7 @@ fn run(cli: Cli) -> Res<i32> {
         Cmd::Vectors { cmd } => match cmd {
             VectorsCmd::Gen { out } => vectors::gen(out.as_deref()),
             VectorsCmd::Check { spec, file } => vectors::check(spec.as_deref(), file.as_deref()),
-            VectorsCmd::Intrude { against, now } => vectors::intrude(&against, now.as_deref()),
+            VectorsCmd::Intrude { against, allow_insecure, now } => vectors::intrude(&against, allow_insecure, now.as_deref()),
         },
         Cmd::Id { cmd } => match cmd {
             IdCmd::Create { name, alg, vault } => wallet::id_create(&name, &alg, &vault),
@@ -315,7 +321,7 @@ fn run(cli: Cli) -> Res<i32> {
             IdCmd::Renew { common: c } => wallet::id_issue(wallet::IssueArgs { vault: &c.vault, csr: &c.csr, valid_days: io::parse_valid(&c.valid)?, moving: false, renew_only: true, origin: c.origin.as_deref(), root: c.root.as_deref(), yes: c.yes, out: c.out.as_deref(), chain_out: c.chain_out.as_deref(), now: c.now.as_deref() }),
             IdCmd::Ledger { vault, root, json } => wallet::id_ledger(&vault, root.as_deref(), json),
             IdCmd::Show { vault, root, out } => wallet::id_show(&vault, root.as_deref(), out.as_deref()),
-            IdCmd::Backup { vault, to } => wallet::id_backup(&vault, &to),
+            IdCmd::Backup { vault, to, force } => wallet::id_backup(&vault, &to, force),
             IdCmd::Restore { from, vault } => wallet::id_restore(&from, &vault),
         },
         Cmd::Contacts { cmd } => match cmd {

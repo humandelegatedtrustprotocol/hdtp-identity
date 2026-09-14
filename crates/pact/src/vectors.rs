@@ -454,9 +454,23 @@ fn sealed_call(endpoint: &str, wire: &Value, id: u32) -> Res<String> {
     Ok(answer_code(&post(endpoint, &body.to_string())?))
 }
 
-pub fn intrude(against: &str, now: Option<&str>) -> Res<i32> {
+pub fn intrude(against: &str, allow_insecure: bool, now: Option<&str>) -> Res<i32> {
     let now = now_or(now)?;
     let endpoint = against.trim_end_matches('/').to_string();
+    // This command dials what it is given and posts sealed envelopes there. The same guard a
+    // receiver applies to a card's endpoint (§3, §14.2) applies to the target, so `--against` can
+    // never be talked into reaching a loopback or a metadata address; a node on your own machine
+    // is the one case worth an explicit flag.
+    if !allow_insecure {
+        let normal = core("is_normal_https", json!({ "url": &endpoint }))?;
+        if normal["normal"].as_bool() != Some(true) {
+            return fail(format!("{endpoint} is not an https endpoint in the normal form of §14.1 (pass --allow-insecure for a node on your own machine)"));
+        }
+        let guard = core("address_guard", json!({ "endpoint": &endpoint, "guest": false }))?;
+        if guard["ok"].as_bool() != Some(true) {
+            return fail(format!("{endpoint}: {} (pass --allow-insecure for a node on your own machine)", guard["why"].as_str().unwrap_or("the address guard refuses this endpoint")));
+        }
+    }
     let card_text = ureq::get(format!("{endpoint}/card.vcf"))
         .call()
         .and_then(|mut r| r.body_mut().read_to_string())
