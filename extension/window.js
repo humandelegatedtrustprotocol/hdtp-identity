@@ -273,7 +273,7 @@ async function syncScreen() {
     diffs.forEach((d, i) => {
       if (!fd.get(`d${i}`)) return
       if (d.kind === 'removed') book.delete(d.root)
-      else book.set(d.root, { ...(book.get(d.root) || {}), root: d.root, endpoint: d.theirs.endpoint, name: d.theirs.name || (book.get(d.root) || {}).name || '', leaf: d.theirs.leaf })
+      else book.set(d.root, { ...(book.get(d.root) || {}), root: d.root, endpoint: d.theirs.endpoint, name: d.theirs.name || (book.get(d.root) || {}).name || '', leaf: d.theirs.leaf, root_cert: d.theirs.root_cert || (book.get(d.root) || {}).root_cert })
     })
     await rpc('contacts:apply', { reqId, book: [...book.values()] })
     done('Contacts reconciled', 'The wallet keeps its own copy of your contact book; it outlives any host.')
