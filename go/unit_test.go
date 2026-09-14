@@ -13,7 +13,7 @@ import (
 
 func TestIsNormalHTTPS(t *testing.T) {
 	good := []string{"https://agent.alina.example/mcp", "https://alina.pact.contact/alina/mcp", "https://a.example/x/y-z_1.2~", "https://a.example/%2F", "https://192.0.2.1/mcp", "https://[2001:db8::1]/mcp"}
-	bad := []string{"http://agent.alina.example/mcp", "https://agent.alina.example/", "https://agent.alina.example", "https://Agent.Alina.example/mcp", "https://agent.alina.example@mallory.example/mcp", "https://agent.alina.example:443/mcp", "https://agent.alina.example:8443/mcp", "https://agent.alina.example/mcp/", "https://agent.alina.example/mcp?x=1", "https://agent.alina.example/mcp#f", "https://agent.alina.example/mcp/../admin", "https://agent.alina.example/./mcp", "https://a.example/%2f", "https://a.example/%41", "https://a.example/a b", "https://a.example/a\\b", "https://a.example/ü", "https://a.example/%zz", "https://.a.example/mcp", "https://a..example/mcp", "https://01.2.3.4/mcp", "https://[2001:DB8::1]/mcp", "https://[::ffff:1.2.3.4]/mcp"}
+	bad := []string{"http://agent.alina.example/mcp", "https://agent.alina.example/", "https://agent.alina.example", "https://Agent.Alina.example/mcp", "https://agent.alina.example@mallory.example/mcp", "https://agent.alina.example:443/mcp", "https://agent.alina.example/mcp/", "https://agent.alina.example/mcp?x=1", "https://agent.alina.example/mcp#f", "https://agent.alina.example/mcp/../admin", "https://agent.alina.example/./mcp", "https://a.example/%2f", "https://a.example/%41", "https://a.example/a b", "https://a.example/a\\b", "https://a.example/ü", "https://a.example/%zz", "https://.a.example/mcp", "https://a..example/mcp", "https://01.2.3.4/mcp", "https://[2001:DB8::1]/mcp", "https://[::ffff:1.2.3.4]/mcp"}
 	for _, u := range good {
 		if !IsNormalHTTPS(u) {
 			t.Errorf("should be normal: %s", u)
@@ -201,6 +201,19 @@ func TestWalletIssue(t *testing.T) {
 	rootCSR, _ := CSRNew("Alina Rao", root, endpointA, "")
 	if _, err := WalletIssue(plain, fp, rootCSR, now, 365, false); err == nil {
 		t.Error("root key as a leaf should be refused")
+	}
+}
+
+func TestNormalFormPorts(t *testing.T) {
+	for _, good := range []string{"https://[2001:db8::1]:8443/mcp", "https://203.0.113.9:8080/mcp"} {
+		if !IsNormalHTTPS(good) {
+			t.Errorf("%s should be normal", good)
+		}
+	}
+	for _, bad := range []string{"https://agent.alina.example:443/mcp", "https://agent.alina.example:0/mcp", "https://agent.alina.example:08443/mcp", "https://agent.alina.example:65536/mcp", "https://agent.alina.example:/mcp", "https://[2001:db8::1]8443/mcp", "https://a.example:8443:1/mcp"} {
+		if IsNormalHTTPS(bad) {
+			t.Errorf("%s should not be normal", bad)
+		}
 	}
 }
 

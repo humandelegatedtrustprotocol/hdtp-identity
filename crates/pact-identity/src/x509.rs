@@ -524,8 +524,14 @@ pub fn is_normal_https(s: &str) -> bool {
     if host.is_empty() || host.contains('@') {
         return false;
     }
+    // A port stays as written when it is not the default: digits, no leading zero, in range, never 443.
+    let normal_port = |p: &str| p.len() <= 5 && !p.is_empty() && !p.starts_with('0') && p != "443" && p.bytes().all(|b| b.is_ascii_digit()) && p.parse::<u32>().map(|n| (1..=65535).contains(&n)).unwrap_or(false);
     if let Some(inner) = host.strip_prefix('[') {
-        let Some(inner) = inner.strip_suffix(']') else { return false };
+        let Some(end) = inner.find(']') else { return false };
+        let (inner, rest) = (&inner[..end], &inner[end + 1..]);
+        if !rest.is_empty() && !rest.strip_prefix(':').map(normal_port).unwrap_or(false) {
+            return false;
+        }
         match inner.parse::<std::net::Ipv6Addr>() {
             Ok(ip) => {
                 if ip.to_string() != inner || inner.contains('.') {
@@ -535,7 +541,16 @@ pub fn is_normal_https(s: &str) -> bool {
             Err(_) => return false,
         }
     } else {
-        if host.contains(':') || !host.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'.') {
+        let host = match host.split_once(':') {
+            Some((h, p)) => {
+                if !normal_port(p) {
+                    return false;
+                }
+                h
+            }
+            None => host,
+        };
+        if !host.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'.') {
             return false;
         }
         if ends_in_a_number(host) && !canonical_ipv4(host) {
@@ -617,10 +632,10 @@ mod tests {
         assert!(is_normal_https("https://agent.alina.example/mcp"));
         assert!(is_normal_https("https://alina.pact.contact/alina/mcp"));
         assert!(is_normal_https("https://203.0.113.9/mcp"));
-        for good in ["https://a.example/x/y-z_~", "https://a.example/p%20q", "https://a.example/a:b@c"] {
+        for good in ["https://a.example/x/y-z_~", "https://a.example/p%20q", "https://a.example/a:b@c", "https://agent.alina.example:8443/mcp", "https://[2001:db8::1]:8443/mcp", "https://203.0.113.9:8080/mcp"] {
             assert!(is_normal_https(good), "{good}");
         }
-        for bad in ["https://a.example/p%2fq", "https://a.example/p%41", "https://a.example/p%7e", "https://a.example/x|y", "https://a.example/p%2", "https://a.example/p%"] {
+        for bad in ["https://a.example/p%2fq", "https://a.example/p%41", "https://a.example/p%7e", "https://a.example/x|y", "https://a.example/p%2", "https://a.example/p%", "https://a.example:443/mcp", "https://a.example:0/mcp", "https://a.example:08443/mcp", "https://a.example:65536/mcp", "https://a.example:/mcp", "https://[2001:db8::1]8443/mcp"] {
             assert!(!is_normal_https(bad), "{bad}");
         }
         for bad in [
