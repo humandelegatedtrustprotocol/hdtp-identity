@@ -1,0 +1,401 @@
+//! Appendix B, proven from the core: the seven certificates rebuilt byte for byte, the four `v: 1`
+//! envelopes opened, every chain, newest-leaf and certificate_renewed case, every `v: 2` envelope
+//! opened and re-sealed from its ephemeral seed, and `decide` on the vector envelopes.
+use pact_identity::envelope::{self, DecideInput, Form, SealRequest};
+use pact_identity::hpke::{self, suite_for, Suite};
+use pact_identity::keys::{Alg, PrivateKey, PublicKey};
+use pact_identity::time::parse_rfc3339;
+use pact_identity::util::{b64u, from_b64u, from_hex, hex, seed};
+use pact_identity::x509::{self, compare_leaves, fingerprint_of, parse, serial_of, validate_chain, ChainResult, LeafSpec};
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+fn root_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")
+}
+
+fn vectors() -> Value {
+    let path = std::env::var("PACT_VECTORS").map(PathBuf::from).unwrap_or_else(|_| root_dir().join("pact-protocol/vectors/pact-2.0-vectors.json"));
+    serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))).unwrap()
+}
+
+fn spec() -> String {
+    let path = std::env::var("PACT_SPEC").map(PathBuf::from).unwrap_or_else(|_| root_dir().join("pact-protocol/SPEC.md"));
+    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+}
+
+/// The JSON blocks of Appendix B: the `v: 1` vectors first, the 2.0 vectors second.
+fn appendix_b_blocks() -> Vec<Value> {
+    let s = spec();
+    let start = s.find("## Appendix B").expect("Appendix B");
+    let end = s.find("## Appendix C").expect("Appendix C");
+    let b = &s[start..end];
+    let mut out = Vec::new();
+    let mut rest = b;
+    while let Some(i) = rest.find("```json\n") {
+        let after = &rest[i + 8..];
+        let j = after.find("\n```").expect("fence");
+        out.push(serde_json::from_str(&after[..j]).expect("json block"));
+        rest = &after[j + 4..];
+    }
+    out
+}
+
+const NOW: &str = "2026-09-13T12:00:00Z";
+const ENDPOINT_A: &str = "https://agent.alina.example/mcp";
+const ENDPOINT_B: &str = "https://agent.bharat.example/mcp";
+
+struct Cast {
+    root_a: PrivateKey,
+    root_b: PrivateKey,
+    hosts: HashMap<&'static str, PrivateKey>,
+}
+
+fn cast() -> Cast {
+    let mut hosts = HashMap::new();
+    hosts.insert("leaf_a", PrivateKey::from_seed(Alg::Ed25519, &seed("host/alina/2026")).unwrap());
+    hosts.insert("leaf_a_next", PrivateKey::from_seed(Alg::Ed25519, &seed("host/alina/2027")).unwrap());
+    hosts.insert("leaf_b", PrivateKey::from_seed(Alg::P256, &seed("host/bharat/2026")).unwrap());
+    Cast { root_a: PrivateKey::from_seed(Alg::Ed25519, &seed("root/alina")).unwrap(), root_b: PrivateKey::from_seed(Alg::P256, &seed("root/bharat")).unwrap(), hosts }
+}
+
+fn at(s: &str) -> i64 {
+    parse_rfc3339(s).unwrap()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn leaf<'a>(c: &'a Cast, cn: &'a str, root: &'a PrivateKey, issuer: &'a PublicKey, host: &'a PublicKey, endpoint: &str, dns: Option<&str>, nb: &str, na: &str, label: &str) -> Vec<u8> {
+    let _ = c;
+    let spec = LeafSpec {
+        cn,
+        root_cn: cn,
+        issuer,
+        host_key: host,
+        uris: vec![endpoint.to_string()],
+        dns_name: dns.map(|d| d.to_string()),
+        not_before: at(nb),
+        not_after: at(na),
+        serial: serial_of(label),
+        ca: false,
+        usage: None,
+        aki: None,
+        extra: Vec::new(),
+        alg_oid: None,
+    };
+    x509::build_leaf(&spec, root).unwrap()
+}
+
+fn der_of(v: &Value) -> HashMap<String, Vec<u8>> {
+    v["certificates"].as_object().unwrap().iter().map(|(k, c)| (k.clone(), from_hex(c["der_hex"].as_str().unwrap()).unwrap())).collect()
+}
+
+#[test]
+fn the_seven_certificates_reproduce() {
+    let v = vectors();
+    let der = der_of(&v);
+    let c = cast();
+    let (pub_a, pub_b) = (c.root_a.public(), c.root_b.public());
+    let h = |n: &str| c.hosts[n].public();
+
+    let root_a = x509::build_root("Alina Rao", &c.root_a, at("2026-09-01T00:00:00Z"), &serial_of("root_a")).unwrap();
+    assert_eq!(hex(&root_a), hex(&der["root_a"]), "root_a byte for byte");
+    let root_b = x509::build_root("Bharat Mehta", &c.root_b, at("2026-09-01T00:00:00Z"), &serial_of("root_b")).unwrap();
+    assert_eq!(parse(&root_b).unwrap().tbs, parse(&der["root_b"]).unwrap().tbs, "root_b TBS");
+    assert!(x509::verify_cert(&parse(&der["root_b"]).unwrap(), &pub_b), "root_b verifies under its key");
+
+    let leaf_a = leaf(&c, "Alina Rao", &c.root_a, &pub_a, &h("leaf_a"), ENDPOINT_A, Some("agent.alina.example"), "2026-09-01T00:00:00Z", "2027-09-01T00:00:00Z", "leaf_a");
+    assert_eq!(hex(&leaf_a), hex(&der["leaf_a"]), "leaf_a byte for byte");
+    let leaf_b = leaf(&c, "Bharat Mehta", &c.root_b, &pub_b, &h("leaf_b"), ENDPOINT_B, None, "2026-09-01T00:00:00Z", "2027-09-01T00:00:00Z", "leaf_b");
+    assert_eq!(parse(&leaf_b).unwrap().tbs, parse(&der["leaf_b"]).unwrap().tbs, "leaf_b TBS");
+    assert!(x509::verify_cert(&parse(&der["leaf_b"]).unwrap(), &pub_b), "leaf_b verifies under root_b");
+    let expired = leaf(&c, "Alina Rao", &c.root_a, &pub_a, &h("leaf_a"), ENDPOINT_A, None, "2025-06-01T00:00:00Z", "2026-06-01T00:00:00Z", "leaf_a_expired");
+    assert_eq!(hex(&expired), hex(&der["leaf_a_expired"]));
+    let long = leaf(&c, "Alina Rao", &c.root_a, &pub_a, &h("leaf_a"), ENDPOINT_A, None, "2026-09-01T00:00:00Z", "2027-10-10T00:00:00Z", "leaf_a_long");
+    assert_eq!(hex(&long), hex(&der["leaf_a_long"]));
+    let next = leaf(&c, "Alina Rao", &c.root_a, &pub_a, &h("leaf_a_next"), ENDPOINT_A, None, "2027-08-02T00:00:00Z", "2028-08-01T00:00:00Z", "leaf_a_next");
+    assert_eq!(hex(&next), hex(&der["leaf_a_next"]));
+
+    for (name, pkcs8_hex) in v["leaf_keys_pkcs8_hex"].as_object().unwrap() {
+        let k = PrivateKey::from_pkcs8(&from_hex(pkcs8_hex.as_str().unwrap()).unwrap()).unwrap();
+        assert_eq!(k.public().spki(), c.hosts[name.as_str()].public().spki(), "{name}: key");
+        if k.alg() == Alg::Ed25519 {
+            assert_eq!(hex(&k.to_pkcs8()), pkcs8_hex.as_str().unwrap(), "{name}: PKCS #8 byte for byte");
+        }
+    }
+    for (name, bytes) in &der {
+        assert!(bytes.len() <= 4096, "{name} under 4 KiB");
+        let c = parse(bytes).unwrap();
+        assert_eq!(c.kind(), if name.starts_with("root") { "root" } else { "leaf" }, "{name}");
+    }
+}
+
+#[test]
+fn the_v1_vectors_open() {
+    let blocks = appendix_b_blocks();
+    let v1 = blocks[0].as_array().expect("v1 block");
+    assert_eq!(v1.len(), 4);
+    for v in v1 {
+        let name = v["name"].as_str().unwrap();
+        let suite = Suite::parse(v["suite"].as_str().unwrap()).unwrap();
+        let recipient = PrivateKey::from_pkcs8(&from_hex(v["recipient_key_pkcs8_hex"].as_str().unwrap()).unwrap()).unwrap();
+        let sender = PrivateKey::from_pkcs8(&from_hex(v["sender_key_pkcs8_hex"].as_str().unwrap()).unwrap()).unwrap();
+        let aad = from_b64u(v["protected"].as_str().unwrap()).unwrap();
+        let enc = from_b64u(v["enc"].as_str().unwrap()).unwrap();
+        let ct = from_b64u(v["ct"].as_str().unwrap()).unwrap();
+        let pt = hpke::open(suite, &recipient, b"PACT-SEAL-v1", &aad, &enc, &ct).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(hex(&pt), v["plaintext_hex"].as_str().unwrap(), "{name}: plaintext");
+        let mut signed = aad.clone();
+        signed.extend_from_slice(&enc);
+        signed.extend_from_slice(&ct);
+        assert!(sender.public().verify(&signed, &from_b64u(v["sig"].as_str().unwrap()).unwrap()), "{name}: signature");
+        assert!(hpke::open(suite, &recipient, b"PACT-SEAL-v2", &aad, &enc, &ct).is_err(), "{name}: never opens as 2.0");
+    }
+}
+
+#[test]
+fn spec_carries_the_generated_vectors_unchanged() {
+    let blocks = appendix_b_blocks();
+    assert!(blocks.len() >= 2, "Appendix B has the 2.0 block");
+    assert_eq!(blocks[1].to_string(), vectors().to_string());
+}
+
+#[test]
+fn chain_cases() {
+    let v = vectors();
+    let der = der_of(&v);
+    let mut n = 0;
+    for c in v["chain_cases"].as_array().unwrap() {
+        let name = c["name"].as_str().unwrap();
+        let chain: Vec<Vec<u8>> = c["chain"].as_array().unwrap().iter().map(|x| der[x.as_str().unwrap()].clone()).collect();
+        let r = validate_chain(&chain, at(c["now"].as_str().unwrap()), c["expected_root"].as_str(), c["expected_endpoint"].as_str());
+        match (c["expect"].as_str().unwrap(), r) {
+            ("accept", ChainResult::Ok(_)) => {}
+            ("refuse", ChainResult::Refused { rule, .. }) if rule as u64 == c["rule"].as_u64().unwrap() => {}
+            (want, ChainResult::Ok(_)) => panic!("{name}: expected {want}, got accept"),
+            (want, ChainResult::Refused { rule, reason }) => panic!("{name}: expected {want} rule {}, got rule {rule} ({reason})", c["rule"]),
+        }
+        n += 1;
+    }
+    assert_eq!(n, 12);
+}
+
+#[test]
+fn newest_leaf_cases() {
+    let v = vectors();
+    let der = der_of(&v);
+    for c in v["newest_leaf_cases"].as_array().unwrap() {
+        let got = compare_leaves(&der[c["pinned"].as_str().unwrap()], &der[c["presented"].as_str().unwrap()]).unwrap();
+        assert_eq!(got, c["expect"].as_str().unwrap(), "{} then {}", c["pinned"], c["presented"]);
+    }
+}
+
+#[test]
+fn certificate_renewed_cases() {
+    let v = vectors();
+    let der = der_of(&v);
+    for c in v["certificate_renewed_cases"].as_array().unwrap() {
+        let pinned = &der[c["pinned_leaf"].as_str().unwrap()];
+        let pinned_root = pact_identity::keys::fingerprint_of_id(parse(pinned).unwrap().aki.as_ref().unwrap());
+        let r = envelope::follow_renewed(&c["answer"], &pinned_root, pinned, c["dialed"].as_str().unwrap(), at(c["now"].as_str().unwrap()));
+        assert_eq!(r["follow"].as_bool().unwrap(), c["expect"] == "follow", "{}: {r}", c["name"]);
+    }
+}
+
+#[test]
+fn v2_envelopes_open_and_reproduce() {
+    let v = vectors();
+    let der = der_of(&v);
+    let c = cast();
+    let ts = at(NOW);
+    let mut seen = 0;
+    for e in v["envelopes"].as_array().unwrap() {
+        let name = e["name"].as_str().unwrap();
+        let form = e["form"].as_str().unwrap();
+        let recipient_name = e["recipient_chain"][0].as_str().unwrap();
+        let sender_name = e["sender_chain"][0].as_str().unwrap();
+        let recipient_leaf = parse(&der[recipient_name]).unwrap();
+        let recipient = PrivateKey::from_pkcs8(&from_hex(v["leaf_keys_pkcs8_hex"][recipient_name].as_str().unwrap()).unwrap()).unwrap();
+        let aad = from_b64u(e["protected"].as_str().unwrap()).unwrap();
+        let enc = from_b64u(e["enc"].as_str().unwrap()).unwrap();
+        let ct = from_b64u(e["ct"].as_str().unwrap()).unwrap();
+        let sig = from_b64u(e["sig"].as_str().unwrap()).unwrap();
+        let header: Value = serde_json::from_slice(&aad).unwrap();
+        let mut members: Vec<&str> = header.as_object().unwrap().keys().map(|k| k.as_str()).collect();
+        members.sort();
+        assert_eq!(members.join(","), envelope::HEADER_MEMBERS, "{name}: header members");
+        let suite = Suite::parse(e["suite"].as_str().unwrap()).unwrap();
+        assert_eq!(header["v"], 2);
+        assert_eq!(header["suite"], e["suite"]);
+        assert_eq!(suite_for(&recipient_leaf.public_key), suite, "{name}: suite follows the recipient key");
+        assert_eq!(header["kid"], recipient_leaf.public_key.fingerprint(), "{name}: kid is the recipient leaf key");
+        assert_eq!(recipient.public().spki(), &recipient_leaf.spki[..], "{name}: the recipient key is the leaf's");
+        let pt = hpke::open(suite, &recipient, b"PACT-SEAL-v2", &aad, &enc, &ct).unwrap_or_else(|err| panic!("{name}: {err}"));
+        assert_eq!(hex(&pt), e["plaintext_hex"].as_str().unwrap(), "{name}: plaintext");
+        let body: Value = serde_json::from_slice(&pt).unwrap();
+        let mut signed = aad.clone();
+        signed.extend_from_slice(&enc);
+        signed.extend_from_slice(&ct);
+        let sender_leaf = parse(&der[sender_name]).unwrap();
+        let mut bm: Vec<&str> = body.as_object().unwrap().keys().map(|k| k.as_str()).collect();
+        bm.sort();
+        if form == "leaf" {
+            assert_eq!(bm.join(","), "leaf,method,params");
+            assert_eq!(body["leaf"], sender_leaf.public_key.fingerprint(), "{name}: leaf names the sender's held leaf");
+            assert!(sender_leaf.public_key.verify(&signed, &sig), "{name}: signature under the held leaf's key");
+            assert!(ct.len() < 400, "{name}: small form stays small ({} bytes sealed)", ct.len());
+        } else {
+            assert_eq!(bm.join(","), "chain,method,params");
+            let chain: Vec<Vec<u8>> = body["chain"].as_array().unwrap().iter().map(|x| from_b64u(x.as_str().unwrap()).unwrap()).collect();
+            let r = validate_chain(&chain, at(v["now"].as_str().unwrap()), None, None);
+            let ChainResult::Ok(ok) = r else { panic!("{name}: chain inside validates") };
+            assert_eq!(chain[0], der[sender_name], "{name}: chain inside is the sender's");
+            assert!(ok.leaf.public_key.verify(&signed, &sig), "{name}: signature under the chain's leaf key");
+        }
+
+        // Re-seal from the same inputs and the vector's ephemeral seed: enc and ct reproduce.
+        let sender = &c.hosts[sender_name];
+        let chain: Vec<Vec<u8>> = e["sender_chain"].as_array().unwrap().iter().map(|x| der[x.as_str().unwrap()].clone()).collect();
+        let wire = envelope::seal_request(SealRequest {
+            recipient: &recipient_leaf.public_key,
+            sender,
+            form: Form::parse(form).unwrap(),
+            sender_chain: Some(&chain),
+            method: "tools/call".into(),
+            params: body["params"].clone(),
+            msg_id: header["msg_id"].as_str().unwrap().into(),
+            ts,
+            exp: Some(ts + 600),
+            cty: None,
+            ephemeral_seed: Some(seed(&format!("ephemeral/{name}"))),
+        })
+        .unwrap();
+        assert_eq!(wire.protected, e["protected"], "{name}: protected reproduces");
+        assert_eq!(wire.enc, e["enc"], "{name}: enc reproduces");
+        assert_eq!(wire.ct, e["ct"], "{name}: ct reproduces");
+        if sender.alg() == Alg::Ed25519 {
+            assert_eq!(wire.sig, e["sig"], "{name}: Ed25519 signature reproduces");
+        }
+        seen += 1;
+    }
+    assert_eq!(seen, 3);
+}
+
+fn node_for(v: &Value, der: &HashMap<String, Vec<u8>>, me: &str, root_cert: &str, pins: Vec<Value>) -> Value {
+    let leaf = parse(&der[me]).unwrap();
+    json!({
+        "endpoint": leaf.uris[0],
+        "accept_new_hosts": "auto",
+        "chain": [b64u(&der[me]), b64u(&der[root_cert])],
+        "keys": [{ "kid": leaf.public_key.fingerprint(), "leaf": b64u(&der[me]), "pkcs8": b64u(&from_hex(v["leaf_keys_pkcs8_hex"][me].as_str().unwrap()).unwrap()), "current": true }],
+        "former": [], "sibling_kids": [], "pins": pins, "tombstones": [], "former_endpoints": [], "seen": []
+    })
+}
+
+#[test]
+fn decide_on_the_vector_envelopes() {
+    let v = vectors();
+    let der = der_of(&v);
+    let envelopes = v["envelopes"].as_array().unwrap();
+    let full = &envelopes[0]; // alina → bharat, chain form, send_message
+    let small = &envelopes[2]; // alina → bharat, leaf form
+    let root_a = fingerprint_of(&parse(&der["root_a"]).unwrap());
+    let pin_a = json!({ "root": root_a, "endpoint": ENDPOINT_A, "leaf": b64u(&der["leaf_a"]), "state": "active" });
+    let wire = |e: &Value| json!({ "protected": e["protected"], "enc": e["enc"], "ct": e["ct"], "sig": e["sig"] });
+
+    // A stranger with a chain calling send_message: the guest binding refuses it.
+    let input: DecideInput = serde_json::from_value(json!({ "now": NOW, "envelope": wire(full), "node": node_for(&v, &der, "leaf_b", "root_b", vec![]) })).unwrap();
+    let out = envelope::decide(&input).unwrap();
+    assert_eq!(out.result["code"], "envelope_invalid");
+    assert_eq!(out.result["why"], "guest may only redeem or request");
+    assert!(out.effects.is_empty());
+
+    // The same envelope from a pinned contact is a contact-tier call, with the message id recorded.
+    let input: DecideInput = serde_json::from_value(json!({ "now": NOW, "envelope": wire(full), "node": node_for(&v, &der, "leaf_b", "root_b", vec![pin_a.clone()]) })).unwrap();
+    let out = envelope::decide(&input).unwrap();
+    assert_eq!(out.result["code"], "ok", "{}", out.result);
+    assert_eq!(out.result["tier"], "contact");
+    assert_eq!(out.result["form"], "chain");
+    assert_eq!(out.result["root"], root_a);
+    assert_eq!(out.result["endpoint"], ENDPOINT_A);
+    assert_eq!(out.result["tool"], "send_message");
+    assert_eq!(out.result["params"]["arguments"]["text"], "hello from the PACT test vectors");
+    assert_eq!(out.effects, vec![json!({ "op": "seen", "msg_id": "vec-v2-alina-to-bharat" })]);
+
+    // The small form: chain_required for a stranger, contact for a pinned leaf.
+    let input: DecideInput = serde_json::from_value(json!({ "now": NOW, "envelope": wire(small), "node": node_for(&v, &der, "leaf_b", "root_b", vec![]) })).unwrap();
+    assert_eq!(envelope::decide(&input).unwrap().result, json!({ "code": "chain_required" }));
+    let input: DecideInput = serde_json::from_value(json!({ "now": NOW, "envelope": wire(small), "node": node_for(&v, &der, "leaf_b", "root_b", vec![pin_a.clone()]) })).unwrap();
+    let out = envelope::decide(&input).unwrap();
+    assert_eq!(out.result["tier"], "contact");
+    assert_eq!(out.result["form"], "leaf");
+
+    // A replay is acknowledged, not re-executed.
+    let mut node = node_for(&v, &der, "leaf_b", "root_b", vec![pin_a.clone()]);
+    node["seen"] = json!(["vec-v2-alina-to-bharat"]);
+    let input: DecideInput = serde_json::from_value(json!({ "now": NOW, "envelope": wire(full), "node": node })).unwrap();
+    assert_eq!(envelope::decide(&input).unwrap().result, json!({ "code": "ok", "replayed": true }));
+
+    // The same through the boundary.
+    let out: Value = serde_json::from_str(&pact_identity::call("decide", &json!({ "now": NOW, "envelope": wire(full), "node": node_for(&v, &der, "leaf_b", "root_b", vec![pin_a]) }).to_string())).unwrap();
+    assert_eq!(out["result"]["tier"], "contact");
+}
+
+#[test]
+fn a_result_seals_back_and_opens_on_the_caller_side() {
+    let v = vectors();
+    let der = der_of(&v);
+    let c = cast();
+    let ts = at(NOW);
+    let alina = &c.hosts["leaf_a"];
+    let bharat = &c.hosts["leaf_b"];
+    let chain_b = vec![der["leaf_b"].clone(), der["root_b"].clone()];
+    let root_b = fingerprint_of(&parse(&der["root_b"]).unwrap());
+    let wire = envelope::seal_result(envelope::SealResult {
+        recipient: &alina.public(),
+        sender: bharat,
+        form: Form::Chain,
+        sender_chain: Some(&chain_b),
+        result: Some(json!({ "content": [{ "type": "text", "text": "ok" }] })),
+        error: None,
+        msg_id: "m-1".into(),
+        ts,
+        exp: None,
+        ephemeral_seed: None,
+    })
+    .unwrap();
+    let out = envelope::open_result(envelope::OpenResultArgs {
+        envelope: &wire,
+        my_key: alina,
+        msg_id: "m-1",
+        now: ts + 5,
+        pins: &[],
+        expected_root: Some(&root_b),
+        expected_endpoint: Some(ENDPOINT_B),
+    })
+    .unwrap();
+    assert_eq!(out["ok"], true);
+    assert_eq!(out["result"]["content"][0]["text"], "ok");
+    assert_eq!(out["root"], root_b);
+    assert_eq!(out["leaf_update"], b64u(&der["leaf_b"]));
+    // The wrong msg_id does not correlate; a request envelope is not a result.
+    let bad = envelope::open_result(envelope::OpenResultArgs { envelope: &wire, my_key: alina, msg_id: "m-2", now: ts, pins: &[], expected_root: None, expected_endpoint: None });
+    assert_eq!(bad.unwrap_err().why, "msg_id does not correlate");
+    let pins = vec![envelope::CallerPin { root: root_b.clone(), endpoint: ENDPOINT_B.into(), leaf: b64u(&der["leaf_b"]), state: "active".into() }];
+    let small = envelope::seal_result(envelope::SealResult {
+        recipient: &alina.public(),
+        sender: bharat,
+        form: Form::Leaf,
+        sender_chain: None,
+        result: None,
+        error: Some(json!({ "code": "permission_denied", "message": "no" })),
+        msg_id: "m-3".into(),
+        ts,
+        exp: None,
+        ephemeral_seed: None,
+    })
+    .unwrap();
+    let out = envelope::open_result(envelope::OpenResultArgs { envelope: &small, my_key: alina, msg_id: "m-3", now: ts, pins: &pins, expected_root: Some(&root_b), expected_endpoint: Some(ENDPOINT_B) }).unwrap();
+    assert_eq!(out["form"], "leaf");
+    assert_eq!(out["error"]["code"], "permission_denied");
+}

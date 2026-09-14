@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = ["crates/pact-identity", "crates/pact-identity-wasm"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/tech-sumit/pact-gateway"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
