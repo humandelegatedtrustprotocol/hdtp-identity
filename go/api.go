@@ -791,7 +791,7 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 			return failErr("parse", err)
 		}
 		if a.Passphrase == "" {
-			return fail("vault", "a passphrase is required")
+			return fail("bad_request", "empty passphrase")
 		}
 		pt, err := compactJSON(a.Plaintext)
 		if err != nil {
@@ -812,13 +812,20 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 	},
 	"vault_open": func(args json.RawMessage) json.RawMessage {
 		var a struct {
-			Passphrase string `json:"passphrase"`
-			Vault      Vault  `json:"vault"`
+			Passphrase string          `json:"passphrase"`
+			Vault      json.RawMessage `json:"vault"`
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return failErr("parse", err)
 		}
-		pt, err := VaultOpen(a.Passphrase, a.Vault)
+		// The document as received, every member of it: the AAD is the header as written, so a
+		// member added after sealing fails to open here as it does in the Rust core.
+		dv, err := decodeJSON(a.Vault)
+		doc, isDoc := dv.(map[string]any)
+		if err != nil || !isDoc {
+			return fail("vault", "not a pact-vault/1 document")
+		}
+		pt, err := VaultOpenDoc(a.Passphrase, doc)
 		if err != nil {
 			return failErr("vault", err)
 		}

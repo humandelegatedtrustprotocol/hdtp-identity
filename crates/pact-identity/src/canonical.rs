@@ -41,16 +41,32 @@ fn write(v: &Value, out: &mut String) {
     }
 }
 
+/// A number as ECMAScript's Number::toString prints it (what RFC 8785 requires): integers without
+/// a fraction, the shortest round-trip form otherwise, and the exponent form — `1e+21`, `1e-7` —
+/// past 1e21 and under 1e-6. Integers serde keeps as integers print as they are.
 fn number(n: &serde_json::Number) -> String {
-    if let Some(f) = n.as_f64() {
-        if n.is_f64() {
-            if f.is_finite() && f.fract() == 0.0 && f.abs() < 1e21 {
-                return format!("{}", f as i64);
-            }
-            return n.to_string();
-        }
+    if !n.is_f64() {
+        return n.to_string();
     }
-    n.to_string()
+    let f = n.as_f64().unwrap_or(0.0);
+    if !f.is_finite() {
+        return "null".into();
+    }
+    if f == 0.0 {
+        return "0".into();
+    }
+    let abs = f.abs();
+    if (1e-6..1e21).contains(&abs) {
+        // Rust's Display for f64 is the shortest round-trip form without an exponent, which is
+        // ECMAScript's in this range; an integral value prints without ".0".
+        return format!("{}", f);
+    }
+    // ECMAScript's exponent form: one digit, an optional fraction, `e`, an explicit sign.
+    let s = format!("{:e}", f);
+    match s.split_once('e') {
+        Some((m, e)) if !e.starts_with('-') => format!("{m}e+{e}"),
+        _ => s,
+    }
 }
 
 /// JSON.stringify's escaping: `"`, `\`, the C0 controls as `\b \f \n \r \t` or `\u00xx`; nothing else.
@@ -81,5 +97,24 @@ mod tests {
     fn sorts_and_strips() {
         let v: Value = serde_json::from_str(r#"{"v":2,"suite":"PACT-SEAL-P256","kid":"k","ts":1,"exp":2,"cty":"c","msg_id":"m\n"}"#).unwrap();
         assert_eq!(canonical(&v), r#"{"cty":"c","exp":2,"kid":"k","msg_id":"m\n","suite":"PACT-SEAL-P256","ts":1,"v":2}"#);
+    }
+    #[test]
+    fn numbers_as_ecmascript_prints_them() {
+        let cases: &[(&str, &str)] = &[
+            ("1e21", "1e+21"),
+            ("1.5e300", "1.5e+300"),
+            ("1e-7", "1e-7"),
+            ("0.000001", "0.000001"),
+            ("100.0", "100"),
+            ("9223372036854775808.0", "9223372036854776000"), // the shortest round-trip form, as ECMAScript prints 2^63
+            ("1e20", "100000000000000000000"),
+            ("0.1", "0.1"),
+            ("-0.0", "0"),
+            ("42", "42"),
+        ];
+        for (input, want) in cases {
+            let v: Value = serde_json::from_str(input).unwrap();
+            assert_eq!(canonical(&v), *want, "{input}");
+        }
     }
 }

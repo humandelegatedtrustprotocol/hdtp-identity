@@ -61,18 +61,19 @@ fn i2osp2(n: u16) -> [u8; 2] {
     n.to_be_bytes()
 }
 
-fn hmac(key: &[u8], data: &[u8]) -> Vec<u8> {
+fn hmac(key: &[u8], data: &[u8]) -> Zeroizing<Vec<u8>> {
     let mut m = <HmacSha256 as Mac>::new_from_slice(key).expect("HMAC accepts any key length");
     m.update(data);
-    m.finalize().into_bytes().to_vec()
+    Zeroizing::new(m.finalize().into_bytes().to_vec())
 }
 
+// The chaining buffers carry key material; they are zeroized on drop.
 fn expand(prk: &[u8], info: &[u8], l: usize) -> Vec<u8> {
-    let mut t: Vec<u8> = Vec::new();
-    let mut okm: Vec<u8> = Vec::new();
+    let mut t: Zeroizing<Vec<u8>> = Zeroizing::new(Vec::new());
+    let mut okm: Zeroizing<Vec<u8>> = Zeroizing::new(Vec::new());
     let mut i = 1u8;
     while okm.len() < l {
-        let mut data = t.clone();
+        let mut data = Zeroizing::new(t.to_vec());
         data.extend_from_slice(info);
         data.push(i);
         t = hmac(prk, &data);
@@ -80,13 +81,13 @@ fn expand(prk: &[u8], info: &[u8], l: usize) -> Vec<u8> {
         i = i.wrapping_add(1);
     }
     okm.truncate(l);
-    okm
+    okm.to_vec()
 }
 
 const V: &[u8] = b"HPKE-v1";
 
-fn labeled_extract(id: &[u8], salt: &[u8], label: &str, ikm: &[u8]) -> Vec<u8> {
-    let mut data = V.to_vec();
+fn labeled_extract(id: &[u8], salt: &[u8], label: &str, ikm: &[u8]) -> Zeroizing<Vec<u8>> {
+    let mut data = Zeroizing::new(V.to_vec());
     data.extend_from_slice(id);
     data.extend_from_slice(label.as_bytes());
     data.extend_from_slice(ikm);
@@ -108,9 +109,9 @@ fn key_schedule(s: Suite, shared_secret: &[u8], info: &[u8]) -> (Zeroizing<Vec<u
     id.extend_from_slice(&i2osp2(Suite::KDF));
     id.extend_from_slice(&i2osp2(s.aead()));
     let mut ksc = vec![0u8];
-    ksc.extend(labeled_extract(&id, &[], "psk_id_hash", &[]));
-    ksc.extend(labeled_extract(&id, &[], "info_hash", info));
-    let secret = Zeroizing::new(labeled_extract(&id, shared_secret, "secret", &[]));
+    ksc.extend_from_slice(&labeled_extract(&id, &[], "psk_id_hash", &[]));
+    ksc.extend_from_slice(&labeled_extract(&id, &[], "info_hash", info));
+    let secret = labeled_extract(&id, shared_secret, "secret", &[]);
     (Zeroizing::new(labeled_expand(&id, &secret, "key", &ksc, s.nk())), Zeroizing::new(labeled_expand(&id, &secret, "base_nonce", &ksc, Suite::NN)))
 }
 
@@ -120,7 +121,7 @@ fn shared_secret(s: Suite, dh: &[u8], kem_context: &[u8]) -> Result<Zeroizing<Ve
     }
     let mut id = b"KEM".to_vec();
     id.extend_from_slice(&i2osp2(s.kem()));
-    let eae_prk = Zeroizing::new(labeled_extract(&id, &[], "eae_prk", dh));
+    let eae_prk = labeled_extract(&id, &[], "eae_prk", dh);
     Ok(Zeroizing::new(labeled_expand(&id, &eae_prk, "shared_secret", kem_context, Suite::NSECRET)))
 }
 
@@ -162,6 +163,9 @@ fn decap(suite: Suite, key: &PrivateKey, enc: &[u8]) -> Result<Zeroizing<Vec<u8>
     match suite {
         Suite::P256 => {
             let sk = key.p256()?;
+            if enc.len() != 65 || enc[0] != 0x04 {
+                return err("internal", "encapsulated key is not the uncompressed P-256 point");
+            }
             let point = p256::PublicKey::from_sec1_bytes(enc).map_err(|_| Error::new("internal", "encapsulated key is not a P-256 point"))?;
             let dh = p256::ecdh::diffie_hellman(sk.to_nonzero_scalar(), point.as_affine());
             shared_secret(suite, dh.raw_secret_bytes(), &ctx)

@@ -46,14 +46,22 @@ function requireUnlocked() {
   return session.plaintext
 }
 
-// Re-seal the vault after any change to its plaintext. The hardware copy is re-sealed only when
-// the PRF key is in memory (the session was opened or enabled with it); otherwise it goes stale
-// and the next hardware unlock asks for the passphrase once.
+// Re-seal the vault after any change to its plaintext. Each copy is re-sealed only under a secret
+// that is in memory: the passphrase copy when the passphrase is known, the hardware copy when the
+// PRF key is. A copy whose secret is not known is left exactly as stored and marked behind — never
+// re-sealed under an empty string — and the next unlock through the other secret asks for this one
+// once, so the two copies come back in step.
 async function persist() {
   const s = session
   if (!s) throw fail('locked')
-  const { vault } = await call('vault_seal', { passphrase: s.passphrase, plaintext: s.plaintext, kdf: CONFIG.KDF })
-  const updates = { vault }
+  const updates = {}
+  if (s.passphrase) {
+    const { vault } = await call('vault_seal', { passphrase: s.passphrase, plaintext: s.plaintext, kdf: CONFIG.KDF })
+    updates.vault = vault
+    updates.vaultStale = false
+  } else {
+    updates.vaultStale = true
+  }
   const hw = await stored('hardware')
   if (hw) {
     if (s.prfKey) {
@@ -98,6 +106,12 @@ async function createIdentity({ name, alg = 'ed25519', passphrase }) {
 async function unlock(passphrase) {
   const vault = await stored('vault')
   if (!vault) throw fail('no_vault', 'no vault on this device: create an identity or import a backup')
+  const hw = await stored('hardware')
+  if ((await stored('vaultStale')) && hw && !hw.stale) {
+    // The passphrase copy is behind the security key's: opening it would show an older ledger and,
+    // on the next change, overwrite the newer copy with it. The key opens the current one.
+    throw fail('stale_vault', 'the passphrase copy is behind the security key\'s: unlock with the security key, then enter the passphrase once to refresh it')
+  }
   let plaintext
   try { ({ plaintext } = await call('vault_open', { passphrase, vault })) } catch { throw fail('wrong_passphrase', 'the passphrase does not open the vault') }
   session = { passphrase, plaintext, prfKey: null }
@@ -138,6 +152,8 @@ async function state() {
   return {
     locked: !session,
     hasVault: !!vault,
+    vaultStale: !!(await stored('vaultStale')),
+    passphraseKnown: !!(session && session.passphrase),
     hardware: hw ? { enabled: true, stale: !!hw.stale } : { enabled: false },
     roots: session ? rootsOf(session.plaintext) : [],
     noticeShown: !!(await stored('noticeShown')),
@@ -297,7 +313,23 @@ async function command(msg) {
     case 'lock': lock(); return state()
     case 'create': return createIdentity(msg)
     case 'import': return importVault(msg)
-    case 'export': { requireUnlocked(); return { vault: await stored('vault') } }
+    case 'export': {
+      requireUnlocked()
+      if (await stored('vaultStale')) throw fail('stale_vault', 'the passphrase copy is behind: enter the passphrase once to refresh it before exporting')
+      return { vault: await stored('vault') }
+    }
+    case 'passphrase:refresh': {
+      // After a security-key unlock: prove the passphrase opens the stored copy, then re-seal both
+      // copies from the plaintext in memory so the passphrase copy is current again.
+      const pt = requireUnlocked()
+      const vault = await stored('vault')
+      try { await call('vault_open', { passphrase: msg.passphrase || '', vault }) } catch { throw fail('wrong_passphrase', 'the passphrase does not open the vault') }
+      session.passphrase = msg.passphrase
+      session.plaintext = pt
+      await persist()
+      broadcast({ type: 'changed' })
+      return state()
+    }
     case 'notice:shown': await store({ noticeShown: true }); return { ok: true }
     case 'grant': {
       const p = pending.get(msg.reqId)

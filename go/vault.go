@@ -35,15 +35,20 @@ type Vault struct {
 	Ct     string `json:"ct"`
 }
 
-var errVault = errors.New("the passphrase is wrong or the vault has been altered")
+var errVault = errors.New("the passphrase is wrong or the vault is damaged")
 
+// vaultAAD is the canonical form of the header exactly as sealed: the four members a sealer writes.
 func vaultAAD(v Vault) []byte {
-	return Canonical(map[string]any{
+	return Canonical(vaultDoc(v))
+}
+
+func vaultDoc(v Vault) map[string]any {
+	return map[string]any{
 		"format": v.Format,
 		"kdf":    map[string]any{"name": v.KDF.Name, "m_kib": int64(v.KDF.MKiB), "t": int64(v.KDF.T), "p": int64(v.KDF.P)},
 		"salt":   v.Salt,
 		"nonce":  v.Nonce,
-	})
+	}
 }
 
 func vaultKey(passphrase string, v Vault) ([]byte, error) {
@@ -95,8 +100,33 @@ func VaultSeal(passphrase string, plaintext []byte, kdf *KDF, salt, nonce []byte
 	return &v, nil
 }
 
-// VaultOpen decrypts; a wrong passphrase and a tampered document are one message.
+// VaultOpen decrypts a typed document; a wrong passphrase and a tampered document are one message.
 func VaultOpen(passphrase string, v Vault) ([]byte, error) {
+	doc := vaultDoc(v)
+	doc["ct"] = v.Ct
+	return VaultOpenDoc(passphrase, doc)
+}
+
+// VaultOpenDoc decrypts the document as received: the AAD is every member but ct, canonicalised,
+// so a member added after sealing — or one changed — fails to open, exactly as in the Rust core.
+func VaultOpenDoc(passphrase string, doc map[string]any) ([]byte, error) {
+	var v Vault
+	v.Format, _ = doc["format"].(string)
+	v.Salt, _ = doc["salt"].(string)
+	v.Nonce, _ = doc["nonce"].(string)
+	v.Ct, _ = doc["ct"].(string)
+	if kdf, ok := doc["kdf"].(map[string]any); ok {
+		v.KDF.Name, _ = kdf["name"].(string)
+		if m, ok := numberOf(kdf["m_kib"]); ok {
+			v.KDF.MKiB = uint32(m)
+		}
+		if t, ok := numberOf(kdf["t"]); ok {
+			v.KDF.T = uint32(t)
+		}
+		if p, ok := numberOf(kdf["p"]); ok {
+			v.KDF.P = uint8(p)
+		}
+	}
 	key, err := vaultKey(passphrase, v)
 	if err != nil {
 		return nil, err
@@ -113,7 +143,13 @@ func VaultOpen(passphrase string, v Vault) ([]byte, error) {
 	if len(nonce) != 12 {
 		return nil, errVault
 	}
-	pt, err := gcm.Open(nil, nonce, FromB64url(v.Ct), vaultAAD(v))
+	header := make(map[string]any, len(doc))
+	for k, val := range doc {
+		if k != "ct" {
+			header[k] = val
+		}
+	}
+	pt, err := gcm.Open(nil, nonce, FromB64url(v.Ct), Canonical(header))
 	if err != nil {
 		return nil, errVault
 	}

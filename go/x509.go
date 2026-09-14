@@ -285,17 +285,25 @@ func Parse(der []byte) (*Cert, error) {
 	if len(f) != 8 || f[0].tag != 0xa0 || f[7].tag != 0xa3 {
 		return nil, errors.New("not a v3 certificate with extensions")
 	}
+	// version [0] EXPLICIT INTEGER 2, exactly: one minimal INTEGER whose value is 2.
 	ver, err := derChildren(f[0])
-	if err != nil || len(ver) < 1 || len(ver[0].content) < 1 || ver[0].content[0] != 2 {
+	if err != nil || len(ver) != 1 || ver[0].tag != 0x02 || !bytes.Equal(ver[0].content, []byte{2}) {
 		return nil, errors.New("not a v3 certificate with extensions")
 	}
+	if !derIntMinimal(f[1].content) {
+		return nil, errors.New("INTEGER not minimal")
+	}
 	algParts, err := derChildren(alg)
-	if err != nil || len(algParts) < 1 {
+	if err != nil || len(algParts) != 1 || algParts[0].tag != 0x06 {
 		return nil, errors.New("certificate shape")
 	}
+	// RFC 5280 §4.1.1.2: the algorithm inside the TBS and the one outside are the same field twice.
+	if !bytes.Equal(f[2].raw, alg.raw) {
+		return nil, errors.New("signature algorithm inside and outside differ")
+	}
 	validity, err := derChildren(f[4])
-	if err != nil || len(validity) < 2 {
-		return nil, errors.New("certificate shape")
+	if err != nil || len(validity) != 2 {
+		return nil, errors.New("time not in the DER form")
 	}
 	notBefore, err := readTime(validity[0])
 	if err != nil {
@@ -336,14 +344,27 @@ func Parse(der []byte) (*Cert, error) {
 		if err != nil {
 			return nil, err
 		}
-		if len(parts) < 2 {
+		// Extension ::= SEQUENCE { extnID, critical BOOLEAN DEFAULT FALSE, extnValue OCTET STRING }:
+		// two or three parts; a critical BOOLEAN present is TRUE and encoded as 0xFF (DER never
+		// encodes the default); the OCTET STRING holds exactly one TLV.
+		if len(parts) < 2 || len(parts) > 3 || parts[0].tag != 0x06 || parts[len(parts)-1].tag != 0x04 {
 			return nil, errors.New("certificate shape")
 		}
+		critical := false
+		if len(parts) == 3 {
+			if !derBoolTrue(parts[1]) {
+				return nil, errors.New("BOOLEAN not in the DER form")
+			}
+			critical = true
+		}
 		id := readOid(parts[0])
-		critical := len(parts) == 3 && len(parts[1].content) > 0 && parts[1].content[0] != 0
-		value, err := derRead(parts[len(parts)-1].content, 0)
+		octets := parts[len(parts)-1].content
+		value, err := derRead(octets, 0)
 		if err != nil {
 			return nil, err
+		}
+		if value.end != len(octets) {
+			return nil, errors.New("extension value has trailing bytes")
 		}
 		out.Extensions = append(out.Extensions, extInfo{ID: id, Critical: critical})
 		switch id {
@@ -353,24 +374,42 @@ func Parse(der []byte) (*Cert, error) {
 				return nil, err
 			}
 			if len(c) > 0 && c[0].tag == 0x01 {
-				out.CA = len(c[0].content) > 0 && c[0].content[0] != 0
+				// cA BOOLEAN DEFAULT FALSE: present means TRUE, and TRUE is 0xFF.
+				if !derBoolTrue(c[0]) {
+					return nil, errors.New("BOOLEAN not in the DER form")
+				}
+				out.CA = true
 			}
 			if len(c) > 0 && c[len(c)-1].tag == 0x02 {
+				pl := c[len(c)-1].content
+				if !derIntMinimal(pl) || len(pl) > 8 {
+					return nil, errors.New("INTEGER not minimal")
+				}
 				v := 0
-				if len(c[len(c)-1].content) > 0 {
-					v = int(c[len(c)-1].content[0])
+				for _, b := range pl {
+					v = v<<8 | int(b)
 				}
 				out.PathLen = &v
 			}
 		case OIDKeyUsage:
-			var b byte
-			if len(value.content) > 1 {
-				b = value.content[1]
+			// BIT STRING: the first byte says how many trailing bits of the last byte are unused;
+			// every named bit of every byte counts, so a second byte (decipherOnly) is seen.
+			if len(value.content) < 1 {
+				return nil, errors.New("BIT STRING not in the DER form")
 			}
-			for bit := 0; bit < 8; bit++ {
-				if b&(0x80>>uint(bit)) != 0 {
-					out.KeyUsage = append(out.KeyUsage, bit)
+			unused := int(value.content[0])
+			bits := value.content[1:]
+			if unused > 7 || (len(bits) == 0 && unused != 0) {
+				return nil, errors.New("BIT STRING not in the DER form")
+			}
+			total := len(bits)*8 - unused
+			for i := 0; i < total; i++ {
+				if bits[i/8]&(0x80>>uint(i%8)) != 0 {
+					out.KeyUsage = append(out.KeyUsage, i)
 				}
+			}
+			if len(bits) > 0 && unused > 0 && bits[len(bits)-1]&(1<<uint(unused)-1) != 0 {
+				return nil, errors.New("BIT STRING not in the DER form")
 			}
 		case OIDExtKeyUsage:
 			c, err := derChildren(value)
@@ -729,10 +768,21 @@ func normalHost(h string) bool {
 	}
 	labels := strings.Split(h, ".")
 	last := labels[len(labels)-1]
+	// The WHATWG "ends in a number" rule: a last label that is all digits, or 0x followed by hex
+	// digits, makes the host an IPv4 address to a URL parser — so only the canonical dotted quad
+	// is the normal form, and 127.1, 2130706433, 0x7f000001 and 0177.0.0.1 are refused.
 	numeric := last != ""
-	for i := 0; i < len(last); i++ {
-		if last[i] < '0' || last[i] > '9' {
-			numeric = false
+	if strings.HasPrefix(last, "0x") {
+		for i := 2; i < len(last); i++ {
+			if !((last[i] >= '0' && last[i] <= '9') || (last[i] >= 'a' && last[i] <= 'f')) {
+				numeric = false
+			}
+		}
+	} else {
+		for i := 0; i < len(last); i++ {
+			if last[i] < '0' || last[i] > '9' {
+				numeric = false
+			}
 		}
 	}
 	if numeric {

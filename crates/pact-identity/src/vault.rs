@@ -59,6 +59,9 @@ fn header(kdf: Kdf, salt: &[u8], nonce: &[u8]) -> Map<String, Value> {
 }
 
 pub fn seal(passphrase: &str, plaintext: &Value, kdf: Option<Kdf>, salt: Option<Vec<u8>>, nonce: Option<Vec<u8>>) -> Result<Value> {
+    if passphrase.is_empty() {
+        return err("bad_request", "empty passphrase");
+    }
     let kdf = kdf.unwrap_or_default();
     let salt = match salt {
         Some(s) => s,
@@ -119,13 +122,13 @@ pub fn wallet_issue(plaintext: &Value, root_fingerprint: &str, csr_der: &[u8], n
     let root_spkis: Vec<Vec<u8>> = roots
         .iter()
         .filter_map(|r| r.get("pkcs8").and_then(|p| p.as_str()))
-        .filter_map(|p| from_b64u(p).ok())
+        .filter_map(|p| from_b64u(p).ok().map(Zeroizing::new))
         .filter_map(|p| PrivateKey::from_pkcs8(&p).ok().map(|k| k.public().spki().to_vec()))
         .collect();
     let Some(root) = roots.iter().find(|r| r.get("fingerprint").and_then(|f| f.as_str()) == Some(root_fingerprint)) else {
         return err("bad_request", "no such root in the vault");
     };
-    let root_key = PrivateKey::from_pkcs8(&from_b64u(root.get("pkcs8").and_then(|p| p.as_str()).unwrap_or(""))?)?;
+    let root_key = PrivateKey::from_pkcs8(&Zeroizing::new(from_b64u(root.get("pkcs8").and_then(|p| p.as_str()).unwrap_or(""))?))?;
     let root_cn = root.get("cn").and_then(|c| c.as_str()).unwrap_or("");
     let request = csr::check(csr_der, &root_spkis)?;
     let host = x509::host_of(&request.endpoint).to_string();
