@@ -11,4 +11,7 @@ export const CONFIG = {
   AUTO_LOCK_MINUTES: 15,
   // Default leaf validity, days (SPEC §14.1: at most 398, one year recommended).
   VALID_DAYS: 365,
+  // How long a page's request may wait for a decision before it is refused. A page left holding a
+  // promise nobody will ever answer is worse than one told no.
+  REQUEST_TIMEOUT_MINUTES: 10,
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf16"
 )
 
 func TestIsNormalHTTPS(t *testing.T) {
@@ -214,6 +215,35 @@ func TestNormalFormPorts(t *testing.T) {
 		if IsNormalHTTPS(bad) {
 			t.Errorf("%s should not be normal", bad)
 		}
+	}
+}
+
+// The fold threshold is UTF-16 code units, as the seed counts them (CONTRACT §0) — not octets,
+// which is what this port counted until the 2026-09-15 review.
+func TestCardFoldsOnUTF16CodeUnits(t *testing.T) {
+	short := "FN:" + strings.Repeat("é", 40) // 43 code units, 83 octets
+	if got := fold(short); got != short {
+		t.Errorf("43 code units must stay one line, got %d lines", len(strings.Split(got, "\r\n")))
+	}
+	long := "FN:" + strings.Repeat("é", 80) // 83 code units
+	lines := strings.Split(fold(long), "\r\n")
+	if len(lines) != 2 {
+		t.Fatalf("83 code units folds once, got %d lines", len(lines))
+	}
+	if n := len(utf16.Encode([]rune(lines[0]))); n != 75 {
+		t.Errorf("first line is %d code units, want 75", n)
+	}
+	if n := len(utf16.Encode([]rune(lines[1]))); n != 9 {
+		t.Errorf("second line is %d code units, want 9 (a space and 8)", n)
+	}
+	// A break inside a surrogate pair moves one unit earlier; nothing is lost.
+	astral := "FN:" + strings.Repeat("a", 74) + strings.Repeat("\U0001F600", 3)
+	f := fold(astral)
+	if strings.ContainsRune(f, 0xFFFD) {
+		t.Errorf("a surrogate pair was split: %q", f)
+	}
+	if got := unfoldRE.ReplaceAllString(f, ""); got != astral {
+		t.Errorf("unfold round trip: %q", got)
 	}
 }
 

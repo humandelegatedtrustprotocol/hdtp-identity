@@ -47,7 +47,10 @@ test('every black-box scenario is blocked by the seed node behind an HTTP door',
   server.close();
   assert.equal(out.reproduces, 0, lines.join('\n'));
   assert.equal(out.results.length, 10);
-  assert.equal(out.skipped, 69);
+  // The count comes from the seed, so this test cannot lock a stale number in: what it asserts is
+  // that the two add up.
+  assert.equal(out.skipped, out.seedScenarios - out.results.length);
+  assert.ok(out.seedScenarios >= out.results.length, 'the seed has at least the scenarios a live run covers');
   assert.ok(out.results.every((r) => r.verdict === 'blocked'));
 });
 

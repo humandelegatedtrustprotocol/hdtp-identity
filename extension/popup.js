@@ -11,6 +11,15 @@ port.onMessage.addListener((m) => {
 })
 const rpc = (type, fields = {}) => new Promise((resolve, reject) => { const id = ++n; waiting.set(id, { resolve, reject }); port.postMessage({ id, type, ...fields }) })
 
+// The service worker can be stopped at any moment; a call left pending would hang the popup.
+port.onDisconnect.addListener(() => {
+  const gone = Object.assign(new Error('the wallet was locked; open this popup again'), { code: 'disconnected' })
+  for (const { reject } of waiting.values()) reject(gone)
+  waiting.clear()
+  const status = document.getElementById('status')
+  if (status) { status.textContent = 'locked'; status.className = 'pill locked' }
+})
+
 async function render() {
   const s = await rpc('state')
   const status = document.getElementById('status')

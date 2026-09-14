@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf16"
 )
 
 // EncodeCard writes a 2.0 card. seal is "" for none; extra lines go between the certificate and the seal.
@@ -43,18 +44,28 @@ func EncodeCompatCard(fn string, cert []byte, seal string) (string, error) {
 	return strings.Join(lines, "\r\n") + "\r\n", nil
 }
 
-// fold breaks a line at 75 octets with one-space continuations, as the seed does on ASCII lines.
+// fold breaks a line with one-space continuations, counted in UTF-16 code units — what the seed
+// library counts, and so the definition every port follows (CONTRACT §0). Counting octets (as this
+// once did) or code points makes three implementations that agree only on ASCII. Where a break
+// would fall between the halves of a surrogate pair it moves one unit earlier, so the pair stays
+// whole; the seed emits a lone surrogate there, which UTF-8 cannot carry.
 func fold(line string) string {
-	if len(line) <= 75 {
+	units := utf16.Encode([]rune(line))
+	if len(units) <= 75 {
 		return line
 	}
-	parts := []string{line[:75]}
-	for i := 75; i < len(line); i += 74 {
-		end := i + 74
-		if end > len(line) {
-			end = len(line)
+	whole := func(i int) int {
+		if i > 0 && i < len(units) && units[i-1] >= 0xD800 && units[i-1] < 0xDC00 {
+			return i - 1
 		}
-		parts = append(parts, " "+line[i:end])
+		return i
+	}
+	first := whole(75)
+	parts := []string{string(utf16.Decode(units[:first]))}
+	for i := first; i < len(units); {
+		end := whole(min(i+74, len(units)))
+		parts = append(parts, " "+string(utf16.Decode(units[i:end])))
+		i = end
 	}
 	return strings.Join(parts, "\r\n")
 }

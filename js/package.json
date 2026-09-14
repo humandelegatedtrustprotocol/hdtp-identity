@@ -13,7 +13,9 @@
     "verify": "node verify.mjs",
     "check": "node check.mjs",
     "intrude": "node intrude.mjs",
-    "intrude:go": "node intrude.mjs --port go"
+    "intrude:go": "node intrude.mjs --port go",
+    "parity": "node parity.mjs",
+    "live": "node --test live.test.mjs"
   },
   "engines": { "node": ">=20" }
 }

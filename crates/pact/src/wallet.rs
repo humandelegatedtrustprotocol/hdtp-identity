@@ -119,9 +119,12 @@ pub fn id_issue(a: IssueArgs<'_>) -> Res<i32> {
     if a.moving {
         eprintln!("move        the live leaf at the previous endpoint is superseded once contacts see this one");
     }
-    if new_host && !a.yes {
-        // SPEC §9: a new endpoint needs the passphrase again, even in an unlocked session. The
-        // vault was just opened with it; asking once more is the deliberate friction.
+    if !known_endpoint {
+        // SPEC §9: a NEW ENDPOINT needs the passphrase again, even in an unlocked session — a new
+        // host is only the loudest case of one. The vault was just opened with it; asking once
+        // more is the deliberate friction, and `--yes` does not skip it: `--yes` answers the
+        // question below, not this one. With PACT_PASSPHRASE_FILE the file is read again, so the
+        // re-check proves the file still opens the vault rather than asking a person.
         let again = passphrase(false)?;
         if again != v.passphrase {
             return fail("the passphrase does not match: nothing signed");
@@ -204,7 +207,10 @@ pub fn id_show(vault: &str, root: Option<&str>, out: Option<&str>) -> Res<i32> {
     Ok(0)
 }
 
-pub fn id_backup(vault: &str, to: &str) -> Res<i32> {
+pub fn id_backup(vault: &str, to: &str, force: bool) -> Res<i32> {
+    if Path::new(to).exists() && !force {
+        return fail(format!("{to} exists: a backup never writes over a file (pass --force to replace it)"));
+    }
     let v = open_vault(vault, false)?;
     let raw = read_input(vault)?;
     write_private(Path::new(to), &raw)?;
@@ -237,12 +243,40 @@ fn contact_line(c: &Value) -> String {
     format!("{}  {}  {}", c["root"].as_str().unwrap_or("?"), c["endpoint"].as_str().unwrap_or("?"), c["name"].as_str().unwrap_or(""))
 }
 
+/// A root fingerprint as §2 writes one: `sha256:` and the base64url of a 32-byte hash.
+fn is_fingerprint(v: &Value) -> bool {
+    v.as_str().is_some_and(|f| {
+        f.strip_prefix("sha256:").is_some_and(|b| b.len() == 43 && b.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_'))
+    })
+}
+
+/// A contact's `root_cert` is what proves a leaf of theirs off the wire (an archive's, say), so it
+/// is worth exactly as much as its binding to the fingerprint the book pins. A certificate that
+/// hashes to something else is a former host's certificate under a friend's name: refused here, not
+/// stored and shown later as a difference.
+fn check_root_cert(c: &Value) -> Res<()> {
+    let Some(cert) = c["root_cert"].as_str() else { return Ok(()) };
+    let root = c["root"].as_str().unwrap_or("?");
+    let parsed = core("parse_certificate", json!({ "der": cert })).map_err(|e| Fail(format!("{root}: root_cert does not parse ({})", e.0)))?;
+    if parsed["fingerprint"].as_str() != Some(root) {
+        return fail(format!(
+            "{root}: root_cert is a certificate for {}, not for the root this contact is pinned by",
+            parsed["fingerprint"].as_str().unwrap_or("an unreadable key")
+        ));
+    }
+    if parsed["kind"].as_str() != Some("root") {
+        return fail(format!("{root}: root_cert is not a root certificate ({})", parsed["profile_error"].as_str().unwrap_or("not self-signed")));
+    }
+    Ok(())
+}
+
 pub fn contacts_import(vault: &str, file: &str, yes: bool) -> Res<i32> {
     let incoming: Vec<Value> = serde_json::from_slice(&read_input(file)?).map_err(|e| Fail(format!("{file}: a JSON array of contacts ({e})")))?;
     for c in &incoming {
-        if c["root"].as_str().is_none_or(|r| !r.starts_with("sha256:")) || c["endpoint"].as_str().is_none() {
+        if !is_fingerprint(&c["root"]) || c["endpoint"].as_str().is_none() {
             return fail(format!("{file}: every contact needs a root fingerprint and an endpoint"));
         }
+        check_root_cert(c)?;
     }
     let mut v = open_vault(vault, false)?;
     let mine: Vec<Value> = v.plaintext["contacts"].as_array().cloned().unwrap_or_default();

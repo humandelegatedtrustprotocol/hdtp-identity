@@ -132,7 +132,7 @@ func CSRCheck(der []byte, rootSPKIs [][]byte) CSRInfo {
 	}
 	for _, r := range rootSPKIs {
 		if bytes.Equal(r, pub.SPKI) {
-			return csrRefuse("the key is a root's: a root never becomes a leaf")
+			return csrRefuse("the request's key is a root")
 		}
 	}
 	endpoint := uris[0]
@@ -180,7 +180,7 @@ func issuePlan(csr []byte, o IssueOpts) (LeafOpts, CSRInfo, error) {
 	}
 	days := o.ValidDays
 	if days == 0 {
-		days = 365
+		days = 365 // a Go caller that omits the field takes the default; the JSON boundary refuses an explicit 0
 	}
 	if days < 1 || days > MaxLeafDays {
 		return LeafOpts{}, info, errors.New("validity must be between one and 398 days")

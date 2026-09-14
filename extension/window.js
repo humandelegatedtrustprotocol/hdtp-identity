@@ -17,6 +17,17 @@ port.onMessage.addListener((m) => {
   }
   if (m && (m.type === 'locked' || m.type === 'changed' || m.type === 'unlocked')) refreshStatus()
 })
+// MV3 stops the service worker when it decides to. Every call still in flight would otherwise stay
+// pending for ever: the Sign button disabled, the pill still reading "unlocked", and no reason
+// shown. A disconnect refuses them all and says what happened.
+port.onDisconnect.addListener(() => {
+  const gone = Object.assign(new Error('the wallet was locked; reopen this window to carry on'), { code: 'disconnected' })
+  for (const { reject } of waiting.values()) reject(gone)
+  waiting.clear()
+  const note = document.getElementById('disconnected')
+  if (note) note.hidden = false
+})
+
 function rpc(type, fields = {}) {
   const id = ++n
   return new Promise((resolve, reject) => {
@@ -275,7 +286,16 @@ async function syncScreen() {
       if (d.kind === 'removed') book.delete(d.root)
       else book.set(d.root, { ...(book.get(d.root) || {}), root: d.root, endpoint: d.theirs.endpoint, name: d.theirs.name || (book.get(d.root) || {}).name || '', leaf: d.theirs.leaf, root_cert: d.theirs.root_cert || (book.get(d.root) || {}).root_cert })
     })
-    await rpc('contacts:apply', { reqId, book: [...book.values()] })
+    err('e-sync', null)
+    try {
+      await rpc('contacts:apply', { reqId, book: [...book.values()] })
+    } catch (e) {
+      // A book the wallet will not keep — a root certificate that is not the pinned root's, say —
+      // is shown here and nothing is written. The page's request stays open: the person can untick
+      // the offending row and apply again, or decline.
+      err('e-sync', e)
+      return
+    }
     done('Contacts reconciled', 'The wallet keeps its own copy of your contact book; it outlives any host.')
   }
   $('b-sync-deny').onclick = async () => { await rpc('deny', { reqId, code: 'denied', why: 'the person declined' }); window.close() }

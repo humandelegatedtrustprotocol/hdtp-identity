@@ -54,7 +54,7 @@ func AddressGuard(endpoint, selfEndpoint string, guest bool) (bool, string) {
 		return false, "host is loopback"
 	}
 	if a := parseIP(bare); a.IsValid() && IPIsPrivate(bare) {
-		return false, "host is a loopback, link-local or private address"
+		return false, "endpoint host is a loopback, link-local or private address"
 	}
 	if guest && selfEndpoint != "" && endpoint == selfEndpoint {
 		return false, "a guest's endpoint is the receiver's own"

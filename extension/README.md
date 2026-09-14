@@ -69,7 +69,8 @@ rebuilding the core.
 
 ## Known limits
 
-- The core's ledger entry has no supersession field; the extension records `superseded_at` on a
-  move and hands the core a ledger without superseded entries, so the core's one-live-leaf rule
-  holds after a move. The CLI wallet needs the same convention (or the core a field).
+- The core reads the live leaf as **the newest one issued** (§14.3), and so does this extension; the
+  `superseded_at` it records on a move is a convenience for what the window shows, not a rule any
+  port depends on. A vault the CLI wrote — which records no `superseded_at` — therefore renews here
+  exactly as it renews there.
 - The wasm module is loaded unoptimised (623 KB; binaryen is not installed on the build machine).

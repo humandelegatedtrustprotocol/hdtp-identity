@@ -4,17 +4,34 @@ use crate::time::DAY;
 use crate::util::{b64u, from_b64u, err, Result};
 use crate::x509::{self, Cert, MAX_LEAF_DAYS};
 
+/// RFC 6350 folding, counted in **UTF-16 code units** — what the seed library counts, and so the
+/// definition every port follows (CONTRACT §0). Counting code points (as this once did) or octets
+/// (as the Go port once did) makes three implementations that agree only on ASCII.
+///
+/// One deliberate difference from the seed: where a break would fall between the halves of a
+/// surrogate pair the break moves one unit earlier, so the pair stays whole. The seed emits a lone
+/// surrogate there, which is not a thing UTF-8 can carry — a card's bytes could not hold it.
 fn fold(line: &str) -> String {
-    let chars: Vec<char> = line.chars().collect();
-    if chars.len() <= 75 {
+    let units: Vec<u16> = line.encode_utf16().collect();
+    if units.len() <= 75 {
         return line.to_string();
     }
-    let mut parts = vec![chars[..75].iter().collect::<String>()];
-    let mut i = 75;
-    while i < chars.len() {
-        let end = (i + 74).min(chars.len());
-        parts.push(format!(" {}", chars[i..end].iter().collect::<String>()));
-        i += 74;
+    let whole = |i: usize| -> usize {
+        // A high surrogate at the break means its pair continues past it: step back one unit.
+        if i > 0 && i < units.len() && (0xD800..0xDC00).contains(&units[i - 1]) {
+            i - 1
+        } else {
+            i
+        }
+    };
+    let decode = |r: &[u16]| String::from_utf16_lossy(r);
+    let first = whole(75);
+    let mut parts = vec![decode(&units[..first])];
+    let mut i = first;
+    while i < units.len() {
+        let end = whole((i + 74).min(units.len()));
+        parts.push(format!(" {}", decode(&units[i..end])));
+        i = end;
     }
     parts.join("\r\n")
 }
@@ -149,6 +166,28 @@ pub fn decode(text: &str, now: i64) -> Result<Card> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// The threshold is UTF-16 code units, as the seed counts them: a name of accented letters
+    /// folds where JavaScript would fold it, not where its bytes or its code points would.
+    #[test]
+    fn folds_on_utf16_code_units() {
+        // 40 two-byte characters: 40 code units, 80 octets. "FN:" + 40 = 43 units, under 75 — one line.
+        let short = format!("FN:{}", "é".repeat(40));
+        assert_eq!(fold(&short), short, "43 code units is one line, though it is 83 octets");
+        // 80 of them is 83 units: folded once, at unit 75.
+        let long = format!("FN:{}", "é".repeat(80));
+        let folded = fold(&long);
+        let lines: Vec<&str> = folded.split("\r\n").collect();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].encode_utf16().count(), 75);
+        assert_eq!(lines[1].encode_utf16().count(), 1 + 8); // one space, the remaining 8 units
+        assert_eq!(unfold(&format!("{folded}\r\nEND:VCARD\r\n"))[0], long);
+        // A break that would land inside a surrogate pair moves one unit earlier, and the pair survives.
+        let astral = format!("FN:{}{}", "a".repeat(74), "\u{1F600}".repeat(3));
+        let f = fold(&astral);
+        assert!(!f.contains('\u{FFFD}'), "no half of a pair is lost: {f}");
+        assert_eq!(unfold(&format!("{f}\r\nEND:VCARD\r\n"))[0], astral);
+    }
+
     #[test]
     fn folds_at_75() {
         let long = format!("X-PACT-CERT:{}", "A".repeat(200));
