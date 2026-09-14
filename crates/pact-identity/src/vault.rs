@@ -135,11 +135,15 @@ pub fn wallet_issue(plaintext: &Value, root_fingerprint: &str, csr_der: &[u8], n
     if new_host {
         warnings.push(json!("new host: this endpoint's host has never been issued to"));
     }
-    let live: Vec<&&Value> = mine
+    // The live leaf is the newest one issued (§14.3: a later notBefore supersedes every earlier
+    // leaf the instant it is seen), if it has not expired. Earlier entries are history.
+    let newest = mine
         .iter()
-        .filter(|l| l.get("not_after").and_then(|t| t.as_str()).and_then(|t| parse_rfc3339(t).ok()).map(|t| t > now).unwrap_or(false))
-        .collect();
-    if let Some(other) = live.iter().find(|l| l.get("endpoint").and_then(|e| e.as_str()) != Some(request.endpoint.as_str())) {
+        .filter_map(|l| l.get("not_before").and_then(|t| t.as_str()).and_then(|t| parse_rfc3339(t).ok()).map(|t| (t, *l)))
+        .max_by_key(|(t, _)| *t)
+        .map(|(_, l)| l);
+    let live = newest.filter(|l| l.get("not_after").and_then(|t| t.as_str()).and_then(|t| parse_rfc3339(t).ok()).map(|t| t > now).unwrap_or(false));
+    if let Some(other) = live.filter(|l| l.get("endpoint").and_then(|e| e.as_str()) != Some(request.endpoint.as_str())) {
         if !moving {
             return err("bad_request", format!("a leaf is live for {}: a second endpoint is a move, not a second home", other.get("endpoint").and_then(|e| e.as_str()).unwrap_or("?")));
         }
@@ -200,6 +204,14 @@ mod tests {
         assert!(wallet_issue(&with, &fp, &req2, now + 10, 365, false).is_err());
         let moved = wallet_issue(&with, &fp, &req2, now + 10, 365, true).unwrap();
         assert_eq!(moved["not_before"], format_rfc3339(now + 10 - 3600)); // an hour before issuance, later than the previous leaf plus one second
+        // After the move the new address is the live one: a renewal there is not a second home,
+        // and a leaf for the old address now is the move back, refused without the flag.
+        with["ledger"] = json!([out["ledger_entry"].clone(), moved["ledger_entry"].clone()]);
+        let host3 = PrivateKey::from_seed(Alg::Ed25519, &seed("vault/host3")).unwrap();
+        let req3 = csr::csr_new("Alina Rao", &host3, "https://alina.pact.contact/alina/mcp", None).unwrap();
+        let renewed = wallet_issue(&with, &fp, &req3, now + 20, 365, false).unwrap();
+        assert_eq!(renewed["new_host"], false);
+        assert!(wallet_issue(&with, &fp, &req, now + 20, 365, false).is_err());
         // The root's own key in a request is refused by the wallet.
         let bad = csr::csr_new("Alina Rao", &root, "https://x.example/mcp", None).unwrap();
         assert_eq!(wallet_issue(&plaintext, &fp, &bad, now, 365, false).unwrap_err().why, "the request's key is a root");

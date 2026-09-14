@@ -186,6 +186,17 @@ func TestWalletIssue(t *testing.T) {
 	if err != nil || !moved.NewHost {
 		t.Errorf("move: %v", err)
 	}
+	// After the move the new address is the live one: a renewal there is not a second home, and
+	// a leaf for the old address now is the move back, refused without the flag.
+	plain.Ledger = append(plain.Ledger, moved.Entry)
+	host3, _ := GenerateKey("ed25519")
+	csr4, _ := CSRNew("Alina Rao", host3, "https://alina.pact.contact/alina/mcp", "")
+	if renewed, err := WalletIssue(plain, fp, csr4, now.Add(2*time.Minute), 365, false); err != nil || renewed.NewHost {
+		t.Errorf("renewal after a move: %v", err)
+	}
+	if _, err := WalletIssue(plain, fp, csr, now.Add(2*time.Minute), 365, false); err == nil {
+		t.Error("the old address after a move is a move back")
+	}
 	// The root's own key in a CSR is refused by the wallet too.
 	rootCSR, _ := CSRNew("Alina Rao", root, endpointA, "")
 	if _, err := WalletIssue(plain, fp, rootCSR, now, 365, false); err == nil {

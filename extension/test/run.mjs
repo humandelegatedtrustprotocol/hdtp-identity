@@ -1,0 +1,383 @@
+// The extension driven end to end in Chrome: a page asks, the wallet's window decides, the page
+// gets exactly what it asked for. Run with `npm test`; Chrome for Testing comes from
+// PUPPETEER_EXECUTABLE_PATH or ~/.cache/puppeteer.
+import { test, before, after } from 'node:test'
+import assert from 'node:assert/strict'
+import { createRequire } from 'node:module'
+import { createServer } from 'node:http'
+import { readFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { homedir } from 'node:os'
+import puppeteer from 'puppeteer-core'
+
+const here = dirname(fileURLToPath(import.meta.url))
+const EXT = join(here, '..')
+const require = createRequire(import.meta.url)
+const core = require('../../js/pkg-node/pact_identity_wasm.js')
+const call = (name, args) => {
+  const out = JSON.parse(core.call(name, JSON.stringify(args)))
+  if (out && out.error && !('ok' in out)) throw new Error(`${name}: ${out.error}: ${out.why}`)
+  return out
+}
+
+function chromePath() {
+  if (process.env.PUPPETEER_EXECUTABLE_PATH) return process.env.PUPPETEER_EXECUTABLE_PATH
+  const base = join(homedir(), '.cache', 'puppeteer', 'chrome')
+  if (existsSync(base)) {
+    const versions = readdirSync(base).filter((d) => d.startsWith('mac_arm-') || d.startsWith('mac-') || d.startsWith('linux-')).sort()
+    for (const v of versions.reverse()) {
+      for (const rel of ['chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing', 'chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing', 'chrome-linux64/chrome']) {
+        const p = join(base, v, rel)
+        if (existsSync(p)) return p
+      }
+    }
+  }
+  for (const p of ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/usr/bin/google-chrome']) if (existsSync(p)) return p
+  throw new Error('no Chrome found; set PUPPETEER_EXECUTABLE_PATH')
+}
+
+const PASS = 'correct horse battery'
+const ENDPOINT_A = 'https://agent.alina.example/mcp'
+const ENDPOINT_B = 'https://alina.pact.contact/alina/mcp'
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+let browser, extId, servers = [], pageA, pageB, originA, originB, downloads
+
+function serve() {
+  const html = readFileSync(join(here, 'fixtures', 'page.html'))
+  return new Promise((resolve) => {
+    const s = createServer((req, res) => { res.setHeader('content-type', 'text/html; charset=utf-8'); res.end(html) })
+    s.listen(0, '127.0.0.1', () => { servers.push(s); resolve(`http://127.0.0.1:${s.address().port}`) })
+  })
+}
+
+async function walletWindow() {
+  const t = await browser.waitForTarget((t) => t.type() === 'page' && t.url().startsWith(`chrome-extension://${extId}/window.html`) && (t.__seen === undefined), { timeout: 15000 })
+  t.__seen = true
+  const p = await t.page()
+  await p.waitForSelector('#main', { timeout: 10000 })
+  return p
+}
+const visible = (p, sel) => p.evaluate((s) => { const el = document.querySelector(s); return !!el && !el.hidden && el.offsetParent !== null }, sel)
+async function waitScreen(p, id) {
+  await p.waitForFunction((s) => { const el = document.getElementById(s); return el && !el.hidden }, { timeout: 20000 }, id)
+}
+const textOf = (p, sel) => p.$eval(sel, (el) => el.textContent.trim())
+
+/** Starts a wallet call on a page and returns a handle to read its settled value later. */
+async function ask(page, expr) {
+  const key = 'k' + Math.random().toString(36).slice(2, 8)
+  await page.evaluate((k, e) => { window[k] = (0, eval)(e).then((r) => ({ ok: true, r }), (x) => ({ ok: false, code: x.code, message: x.message })) }, key, expr)
+  return {
+    settled: () => page.evaluate((k) => Promise.race([window[k], new Promise((r) => setTimeout(() => r(null), 50))]), key),
+    value: () => page.evaluate((k) => window[k], key),
+  }
+}
+
+function newCsr(endpoint) {
+  const host = call('generate_key', { alg: 'ed25519' })
+  const { der } = call('csr_new', { cn: 'Alina Rao', host_pkcs8: host.pkcs8, endpoint })
+  return { csr: der, host }
+}
+
+before(async () => {
+  downloads = join(here, 'tmp', 'downloads')
+  mkdirSync(downloads, { recursive: true })
+  browser = await puppeteer.launch({
+    executablePath: chromePath(),
+    headless: true,
+    enableExtensions: [EXT],
+    args: ['--no-first-run', '--no-default-browser-check'],
+  })
+  const sw = await browser.waitForTarget((t) => t.type() === 'service_worker' && t.url().startsWith('chrome-extension://'), { timeout: 20000 })
+  extId = new URL(sw.url()).host
+  const cdp = await browser.target().createCDPSession()
+  await cdp.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: downloads, eventsEnabled: true })
+  originA = await serve()
+  originB = await serve()
+  pageA = await browser.newPage()
+  await pageA.goto(originA + '/page.html')
+  await pageA.waitForFunction(() => !!window.pact, { timeout: 10000 })
+})
+
+after(async () => {
+  for (const s of servers) s.close()
+  if (browser) await browser.close()
+})
+
+test('window.pact is present and frozen; the page sees nothing else', async () => {
+  const shape = await pageA.evaluate(() => ({ keys: Object.keys(window.pact).sort(), frozen: Object.isFrozen(window.pact), version: window.pact.version }))
+  assert.deepEqual(shape.keys, ['__wallet', 'ceremony', 'issueCertificate', 'listCertificates', 'requestIdentity', 'syncContacts', 'version'])
+  assert.equal(shape.frozen, true)
+  const r = await pageA.evaluate(() => window.pact.listCertificates().then(() => 'ok', (e) => e.code))
+  assert.equal(r, 'not_granted')
+})
+
+test('(1) requestIdentity: the person creates an identity in the wallet window and grants it', async () => {
+  const h = await ask(pageA, 'window.pact.requestIdentity()')
+  const w = await walletWindow()
+  await waitScreen(w, 's-create')
+  assert.equal(await h.settled(), null, 'nothing is answered before the person acts')
+  await w.type('#f-create input[name=name]', 'Alina Rao')
+  await w.type('#f-create input[name=passphrase]', PASS)
+  await w.type('#f-create input[name=again]', PASS)
+  await w.click('#f-create input[name=understood]')
+  await w.click('#f-create button[type=submit]')
+  await waitScreen(w, 's-hardware')
+  await w.click('#b-hw-skip')
+  await waitScreen(w, 's-pick')
+  assert.equal(await textOf(w, '#pick-origin'), originA)
+  assert.equal(await h.settled(), null, 'still pending until Allow')
+  await w.click('#f-pick button[type=submit]')
+  await waitScreen(w, 's-done')
+  const v = await h.value()
+  assert.equal(v.ok, true, JSON.stringify(v))
+  assert.deepEqual(Object.keys(v.r).sort(), ['cn', 'root_fingerprint'])
+  assert.equal(v.r.cn, 'Alina Rao')
+  assert.match(v.r.root_fingerprint, /^sha256:[A-Za-z0-9_-]{43}$/)
+  await sleep(500)
+  const files = readdirSync(downloads).filter((f) => f.endsWith('.pact-vault.json'))
+  assert.ok(files.length >= 1, 'the vault file was downloaded: ' + files.join(','))
+  const vault = JSON.parse(readFileSync(join(downloads, files[0]), 'utf8'))
+  assert.equal(vault.format, 'pact-vault/1')
+  const { plaintext } = call('vault_open', { passphrase: PASS, vault })
+  assert.equal(plaintext.roots[0].fingerprint, v.r.root_fingerprint)
+  await w.close()
+})
+
+let firstChain
+test('(2) issueCertificate: the window shows the endpoint, the passphrase is asked for a new address, Sign returns a valid chain', async () => {
+  const { csr } = newCsr(ENDPOINT_A)
+  const h = await ask(pageA, `window.pact.issueCertificate(${JSON.stringify(csr)})`)
+  const w = await walletWindow()
+  await waitScreen(w, 's-issue')
+  assert.equal(await textOf(w, '#issue-endpoint'), ENDPOINT_A)
+  assert.equal(await textOf(w, '#issue-origin'), originA)
+  assert.equal(await visible(w, '#issue-newhost'), true, 'a host never issued to is flagged')
+  assert.equal(await visible(w, '#issue-pass-wrap'), true, 'a new endpoint asks for the passphrase again')
+  assert.equal(await h.settled(), null, 'nothing is signed before the click')
+  await w.click('#b-sign')
+  await waitScreen(w, 's-issue')
+  await w.waitForFunction(() => document.getElementById('e-issue').textContent.length > 0, { timeout: 10000 })
+  assert.match(await textOf(w, '#e-issue'), /passphrase/, 'an empty passphrase is refused')
+  await w.type('#f-issue input[name=passphrase]', PASS)
+  await w.click('#b-sign')
+  await waitScreen(w, 's-done')
+  const v = await h.value()
+  assert.equal(v.ok, true, JSON.stringify(v))
+  assert.deepEqual(Object.keys(v.r).sort(), ['chain', 'endpoint', 'not_after', 'not_before', 'root_fingerprint', 'warnings'])
+  assert.equal(v.r.chain.length, 2)
+  const check = call('validate_chain', { chain: v.r.chain, now: new Date().toISOString().replace(/\.\d+Z$/, 'Z'), expected_endpoint: ENDPOINT_A, expected_root: v.r.root_fingerprint })
+  assert.equal(check.ok, true, JSON.stringify(check))
+  firstChain = v.r.chain
+  const list = await pageA.evaluate(() => window.pact.listCertificates())
+  assert.equal(list.certificates.length, 1)
+  assert.equal(list.certificates[0].endpoint, ENDPOINT_A)
+  assert.ok(!('pkcs8' in list.certificates[0]) && !JSON.stringify(list).includes('pkcs8'), 'no key material reaches the page')
+  await w.close()
+})
+
+test('(3) a second live leaf at another address is refused without move; with move it is issued; a renewal needs the click alone', async () => {
+  const { csr } = newCsr(ENDPOINT_B)
+  const h = await ask(pageA, `window.pact.issueCertificate(${JSON.stringify(csr)})`)
+  let w = await walletWindow()
+  await waitScreen(w, 's-issue')
+  assert.equal(await visible(w, '#issue-refused'), true)
+  assert.match(await textOf(w, '#issue-refused'), /a second endpoint is a move/)
+  assert.equal(await w.$eval('#b-sign', (b) => b.disabled), true)
+  await w.waitForFunction(() => true)
+  let v
+  for (let i = 0; i < 40 && !(v = await h.settled()); i++) await sleep(100)
+  assert.equal(v.ok, false)
+  assert.equal(v.code, 'one_live_leaf')
+  await w.close()
+
+  const h2 = await ask(pageA, `window.pact.issueCertificate(${JSON.stringify(csr)}, { move: true })`)
+  w = await walletWindow()
+  await waitScreen(w, 's-issue')
+  assert.equal(await visible(w, '#issue-move'), true)
+  assert.equal(await visible(w, '#issue-pass-wrap'), true)
+  await w.type('#f-issue input[name=passphrase]', PASS)
+  await w.click('#b-sign')
+  await waitScreen(w, 's-done')
+  const v2 = await h2.value()
+  assert.equal(v2.ok, true, JSON.stringify(v2))
+  assert.equal(call('validate_chain', { chain: v2.r.chain, now: new Date().toISOString().replace(/\.\d+Z$/, 'Z'), expected_endpoint: ENDPOINT_B }).ok, true)
+  assert.equal(call('compare_leaves', { pinned: firstChain[0], presented: v2.r.chain[0] }).order, 'newer')
+  await w.close()
+
+  const renew = newCsr(ENDPOINT_B)
+  const h3 = await ask(pageA, `window.pact.issueCertificate(${JSON.stringify(renew.csr)})`)
+  w = await walletWindow()
+  await waitScreen(w, 's-issue')
+  assert.equal(await visible(w, '#issue-pass-wrap'), false, 'a renewal for a known endpoint asks for no passphrase')
+  assert.equal(await visible(w, '#issue-refused'), false)
+  await w.click('#b-sign')
+  await waitScreen(w, 's-done')
+  const v3 = await h3.value()
+  assert.equal(v3.ok, true, JSON.stringify(v3))
+  assert.equal(call('compare_leaves', { pinned: v2.r.chain[0], presented: v3.r.chain[0] }).order, 'newer')
+  await w.close()
+})
+
+test('(4) the ceremony message signup from another origin is answered with a leaf', async () => {
+  pageB = await browser.newPage()
+  await pageB.goto(originB + '/page.html')
+  await pageB.waitForFunction(() => !!window.pact, { timeout: 10000 })
+  const endpoint = 'https://bharat.pact.contact/alina/mcp'
+  const { csr } = newCsr(endpoint)
+  await pageB.evaluate((m) => window.postMessage(m, '*'), { pact: 'ceremony/1', op: 'signup', csr, endpoint, display_name: 'Alina Rao', new_host: true })
+  const w = await walletWindow()
+  await waitScreen(w, 's-pick')
+  assert.equal(await textOf(w, '#pick-origin'), originB)
+  await w.click('#f-pick button[type=submit]')
+  await waitScreen(w, 's-issue')
+  assert.equal(await textOf(w, '#issue-title'), 'Issue the first certificate')
+  assert.equal(await textOf(w, '#issue-endpoint'), endpoint)
+  assert.equal(await visible(w, '#issue-refused'), true, 'the identity already has a live leaf elsewhere: a signup at a second address is a move')
+  await sleep(300)
+  let answers = await pageB.evaluate(() => window.__ceremony)
+  assert.equal(answers.length, 1)
+  assert.equal(answers[0].op, 'error')
+  await w.close()
+
+  await pageB.evaluate((m) => window.postMessage(m, '*'), { pact: 'ceremony/1', op: 'move', csr, endpoint, display_name: 'Alina Rao', new_host: true })
+  const w2 = await walletWindow()
+  await waitScreen(w2, 's-issue')
+  await w2.type('#f-issue input[name=passphrase]', PASS)
+  await w2.click('#b-sign')
+  await waitScreen(w2, 's-done')
+  await pageB.waitForFunction(() => window.__ceremony.length === 2, { timeout: 10000 })
+  answers = await pageB.evaluate(() => window.__ceremony)
+  assert.equal(answers[1].op, 'leaf')
+  assert.equal(answers[1].chain.length, 2)
+  assert.equal(call('validate_chain', { chain: answers[1].chain, now: new Date().toISOString().replace(/\.\d+Z$/, 'Z'), expected_endpoint: endpoint }).ok, true)
+  assert.equal(answers[1].root_fingerprint, call('parse_certificate', { der: answers[1].chain[1] }).fingerprint)
+  await w2.close()
+})
+
+test('(4b) syncContacts shows every difference and applies only what is ticked', async () => {
+  const contacts = [{ root: 'sha256:' + 'a'.repeat(43), endpoint: 'https://b.example/mcp', name: 'Bharat' }]
+  const h = await ask(pageA, `window.pact.syncContacts(${JSON.stringify(contacts)})`)
+  const w = await walletWindow()
+  await waitScreen(w, 's-sync')
+  assert.equal((await w.$$('#sync-list .item')).length, 1)
+  assert.match(await textOf(w, '#sync-list'), /add Bharat/)
+  await w.click('#f-sync button[type=submit]')
+  await waitScreen(w, 's-done')
+  const v = await h.value()
+  assert.equal(v.ok, true)
+  assert.equal(v.r.contacts.length, 1)
+  assert.equal(v.r.contacts[0].root, contacts[0].root)
+  await w.close()
+})
+
+test('(5) hardware wrap: a PRF credential re-seals the vault and unlocks it after a lock', async (t) => {
+  const w = await browser.newPage()
+  const cdp = await w.createCDPSession()
+  let prf = 'virtual authenticator'
+  await cdp.send('WebAuthn.enable', { enableUI: false })
+  try {
+    await cdp.send('WebAuthn.addVirtualAuthenticator', { options: { protocol: 'ctap2', ctap2Version: 'ctap2_1', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true, hasPrf: true } })
+  } catch (e) {
+    prf = 'fake PRF (virtual authenticator without hasPrf: ' + e.message + ')'
+  }
+  await w.goto(`chrome-extension://${extId}/window.html`)
+  await waitScreen(w, 's-home')
+  await w.click('#b-backup-hw')
+  await w.waitForFunction(() => /enabled on this device|behind the vault/.test(document.getElementById('home-hw').textContent) || document.getElementById('e-home').textContent.length > 0, { timeout: 15000 })
+  let hw = await textOf(w, '#home-hw')
+  if (!/enabled on this device/.test(hw)) {
+    // WebAuthn refused from the extension origin (or the virtual authenticator lacks PRF): test
+    // the wrap logic with an injected PRF and say so.
+    prf = 'fake PRF injected (' + (await textOf(w, '#e-home')) + ')'
+    await w.evaluateOnNewDocument(() => {
+      const fake = { create: async (o) => ({ rawId: new Uint8Array(16).buffer, getClientExtensionResults: () => ({ prf: { enabled: true, results: { first: new Uint8Array(32).fill(7).buffer } } }) }), get: async (o) => ({ getClientExtensionResults: () => ({ prf: { results: { first: new Uint8Array(32).fill(7).buffer } } }) }) }
+      Object.defineProperty(navigator, 'credentials', { value: fake, configurable: true })
+      window.PublicKeyCredential = function () {}
+    })
+    await w.reload()
+    await waitScreen(w, 's-home')
+    await w.click('#b-backup-hw')
+    await w.waitForFunction(() => /enabled on this device/.test(document.getElementById('home-hw').textContent), { timeout: 15000 })
+    hw = await textOf(w, '#home-hw')
+  }
+  t.diagnostic('PRF source: ' + prf)
+  assert.match(hw, /enabled on this device/)
+  await w.click('#b-lock')
+  await waitScreen(w, 's-locked')
+  assert.equal(await visible(w, '#b-unlock-hw'), true)
+  await w.click('#b-unlock-hw')
+  await waitScreen(w, 's-home')
+  assert.match(await textOf(w, '#status'), /unlocked/)
+  // The vault re-sealed under the passphrase still opens: both copies stay in step.
+  await w.click('#b-lock')
+  await waitScreen(w, 's-locked')
+  await w.type('#f-unlock input[name=passphrase]', PASS)
+  await w.click('#f-unlock button[type=submit]')
+  await waitScreen(w, 's-home')
+  await w.close()
+})
+
+test('(6) lock clears the unlocked state: grants are gone and a page call is refused', async () => {
+  const before = await pageA.evaluate(() => window.pact.listCertificates().then(() => 'ok', (e) => e.code))
+  assert.equal(before, 'not_granted', 'the locks in (5) dropped every grant')
+  const h = await ask(pageA, 'window.pact.requestIdentity()')
+  const w = await walletWindow()
+  await waitScreen(w, 's-pick')
+  await w.click('#f-pick button[type=submit]')
+  await waitScreen(w, 's-done')
+  assert.equal((await h.value()).ok, true)
+  await w.close()
+  const certs = (await pageA.evaluate(() => window.pact.listCertificates())).certificates
+  assert.equal(certs.length, 4)
+  assert.equal(certs.filter((c) => c.superseded_at).length, 3, 'the two moves superseded every leaf they left behind: A, then B and its renewal')
+
+  const popup = await browser.newPage()
+  await popup.goto(`chrome-extension://${extId}/popup.html`)
+  await popup.waitForFunction(() => /unlocked/.test(document.getElementById('status').textContent), { timeout: 10000 })
+  await popup.click('#b-lock')
+  await popup.waitForFunction(() => /locked/.test(document.getElementById('status').textContent) && !/unlocked/.test(document.getElementById('status').textContent), { timeout: 10000 })
+  const after = await pageA.evaluate(() => window.pact.listCertificates().then(() => 'ok', (e) => e.code))
+  assert.equal(after, 'not_granted')
+  await popup.close()
+
+  // The idle alarm takes the same path: unlock, fire the alarm now, watch it lock.
+  const w2 = await browser.newPage()
+  await w2.goto(`chrome-extension://${extId}/window.html`)
+  await waitScreen(w2, 's-locked')
+  await w2.type('#f-unlock input[name=passphrase]', PASS)
+  await w2.click('#f-unlock button[type=submit]')
+  await waitScreen(w2, 's-home')
+  const swTarget = await browser.waitForTarget((t) => t.type() === 'service_worker' && t.url().startsWith(`chrome-extension://${extId}`))
+  const sw = await swTarget.worker()
+  await sw.evaluate(() => chrome.alarms.create('lock', { when: Date.now() }))
+  await w2.waitForFunction(() => !document.getElementById('s-locked').hidden || /locked/.test(document.getElementById('status').textContent) && !/unlocked/.test(document.getElementById('status').textContent), { timeout: 15000 })
+  await w2.close()
+})
+
+test('manifest loads without errors and declares what the README says', async () => {
+  const swTarget = await browser.waitForTarget((t) => t.type() === 'service_worker' && t.url().startsWith(`chrome-extension://${extId}`))
+  const sw = await swTarget.worker()
+  const m = await sw.evaluate(() => chrome.runtime.getManifest())
+  assert.equal(m.manifest_version, 3)
+  assert.deepEqual(m.permissions.sort(), ['alarms', 'storage'])
+  assert.equal(m.host_permissions, undefined)
+  const ext = await browser.newPage()
+  await ext.goto(`chrome://extensions/?id=${extId}`)
+  await sleep(800)
+  const errors = await ext.evaluate(() => {
+    const texts = []
+    const walk = (root) => {
+      for (const el of root.querySelectorAll('*')) {
+        if (el.shadowRoot) walk(el.shadowRoot)
+        if (el.id === 'errors-button' || el.id === 'warnings') texts.push(`${el.id}:${el.hidden ? 'hidden' : 'shown'}:${el.textContent.trim().slice(0, 80)}`)
+      }
+    }
+    walk(document)
+    return texts
+  })
+  assert.ok(!errors.some((e) => e.startsWith('errors-button:shown')), 'chrome://extensions shows an Errors button: ' + errors.join(' | '))
+  await ext.close()
+})
