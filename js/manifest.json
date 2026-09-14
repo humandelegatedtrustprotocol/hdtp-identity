@@ -1,0 +1,15 @@
+{
+  "crate_version": "0.1.0",
+  "rustc": "rustc 1.92.0 (ded5c06cf 2025-12-08)",
+  "wasm_pack": "wasm-pack 0.15.0",
+  "files": {
+    "pkg-web/pact_identity_wasm_bg.wasm": {
+      "sha256": "59837548955715f2533dc690f053eb9237fd16ab1a1b390285f87ad625867ac1",
+      "bytes": 623236
+    },
+    "pkg-node/pact_identity_wasm_bg.wasm": {
+      "sha256": "59837548955715f2533dc690f053eb9237fd16ab1a1b390285f87ad625867ac1",
+      "bytes": 623236
+    }
+  }
+}
