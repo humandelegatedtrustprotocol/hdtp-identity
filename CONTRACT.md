@@ -157,20 +157,22 @@ Output:
 {
   "result": {"code": "ok", "tier": "contact" | "pending" | "guest" | "pending_new_address",
              "root": "sha256:…", "endpoint": "https://…", "method": "tools/call", "tool": "send_message",
-             "params": {…}, "form": "chain" | "leaf", "replayed"?: true, "why"?: "…",
+             "params": {…}, "form": "chain" | "leaf", "leaf": "<leaf der the signature verified under>",
+             "replayed"?: true, "why"?: "…",
              "address_claim"?: "sha256:…", "forced"?: "tombstone", "decision"?: "ask"},
   "effects": [
     {"op": "seen", "msg_id": "…"},
     {"op": "pin_update", "root": "…", "endpoint": "…", "leaf": "…"},
     {"op": "former_endpoint", "root": "…", "endpoint": "…", "at": "…"},
     {"op": "event", "event": "new_address" | "renewal", "root": "…", "endpoint"?: "…"},
-    {"op": "pending", "root": "…", "endpoint": "…", "why": "ask" | "returned after removal"}
+    {"op": "pending", "root": "…", "endpoint": "…", "leaf": "<leaf der>", "why": "ask" | "returned after removal"}
   ]
 }
 ```
 
 The other results, each with an empty `effects` list unless stated: `{"code": "envelope_invalid",
-"why"}`; `{"code": "chain_required"}`; `{"code": "certificate_renewed", "data": {"chain": [...]}}`;
+"why"}` — and when `why` is `guest may only redeem or request` it also carries `root` and `leaf`, so a
+host holding a 1.x pin of that leaf's key can upgrade the pin (Appendix C row 6) and decide again; `{"code": "chain_required"}`; `{"code": "certificate_renewed", "data": {"chain": [...]}}`;
 `{"code": "pending_approval"}`; and `{"code": "ok", "replayed": true}` for a seen `msg_id`.
 The `why` strings are the seed's, verbatim, so the intrusion suite reads both ports alike.
 
@@ -190,6 +192,10 @@ or a former endpoint within 30 days; root pinned and blocked → guest; supersed
 `envelope_invalid`; another endpoint → `ask` pending or `auto` re-pin with the former endpoint recorded
 and a `new_address` event; newer at the pinned endpoint → `pin_update` and a `renewal` event; then
 `pending_out` allows `contact_accepted`/`contact_rejected` only, else `pending_approval`; else contact.
+
+A `pending_new_address` result is the host's to answer as SPEC §5.3 words it: the `update_contact` that
+brought the new address answers `{"status": "pending"}`; every other call from that address, until the
+owner decides, answers `pending_approval`.
 
 ## 6. Vault (SPEC §9; the format shared by the ceremony, the CLI and the extension)
 
