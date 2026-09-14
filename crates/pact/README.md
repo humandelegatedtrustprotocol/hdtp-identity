@@ -12,7 +12,10 @@ self-hoster needs nothing installed beside it. Two halves:
   terminal adds its discipline: the passphrase from a prompt (twice when a vault is made), never
   from an argument; `PACT_PASSPHRASE_FILE` for scripts, read once and refused when anyone but its
   owner can read it; the vault and every key written mode 0600; a new endpoint asks the passphrase
-  again even in the same session; no command ever prints a root key — there is no `id export`.
+  again even in the same session, and `--yes` does not skip that — with `PACT_PASSPHRASE_FILE` set
+  the file is read again, so what the re-check proves is that the file still opens the vault, not
+  that a person is present; a backup refuses to write over a file unless told `--force`; no command
+  ever prints a root key — there is no `id export`.
 
 ```
 $ pact --help

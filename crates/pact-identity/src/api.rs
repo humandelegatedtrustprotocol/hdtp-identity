@@ -46,6 +46,15 @@ fn opt_int(a: &Value, k: &str) -> Option<i64> {
 fn boolean(a: &Value, k: &str) -> bool {
     a.get(k).and_then(|v| v.as_bool()).unwrap_or(false)
 }
+/// An optional list of DER members: absent is an empty list, present is parsed or refused. A list
+/// that cannot be read must never read as "no roots to refuse against" — that is §9's root-key
+/// refusal failing open.
+fn opt_chain(a: &Value, k: &str) -> Result<Vec<Vec<u8>>> {
+    if a.get(k).is_none() || a.get(k) == Some(&Value::Null) {
+        return Ok(Vec::new());
+    }
+    chain(a, k)
+}
 fn chain(a: &Value, k: &str) -> Result<Vec<Vec<u8>>> {
     let Some(items) = a.get(k).and_then(|v| v.as_array()) else { return err("bad_request", format!("{k} is required")) };
     items.iter().map(|c| c.as_str().ok_or_else(|| Error::new("bad_request", "chain members are base64url")).and_then(from_b64u)).collect()
@@ -199,13 +208,13 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
 
         // §3 CSR
         "csr_new" => json!({ "der": b64u(&csr::csr_new(s(a, "cn")?, &private(a, "host_pkcs8")?, s(a, "endpoint")?, opt_s(a, "dns_name"))?) }),
-        "csr_check" => match csr::check(&bytes(a, "der")?, &chain(a, "root_spkis").unwrap_or_default()) {
+        "csr_check" => match csr::check(&bytes(a, "der")?, &opt_chain(a, "root_spkis")?) {
             Ok(c) => json!({ "ok": true, "cn": c.cn, "spki": b64u(c.key.spki()), "fingerprint": c.key.fingerprint(), "alg": c.key.alg().name(), "endpoint": c.endpoint, "dns_name": c.dns_name }),
             Err(e) => json!({ "ok": false, "why": e.why }),
         },
         "issue_from_csr" => {
             let root = private(a, "root_pkcs8")?;
-            let mut roots = chain(a, "root_spkis").unwrap_or_default();
+            let mut roots = opt_chain(a, "root_spkis")?;
             roots.push(root.public().spki().to_vec());
             let req = csr::check(&bytes(a, "csr")?, &roots)?;
             let i = csr::issue(&req, s(a, "root_cn")?, &root, instant(a, "now")?, opt_instant(a, "previous_not_before")?, opt_int(a, "valid_days").unwrap_or(365))?;
@@ -213,7 +222,7 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
         }
         "issue_tbs_from_csr" => {
             let root = public(a, "root_spki")?;
-            let mut roots = chain(a, "root_spkis").unwrap_or_default();
+            let mut roots = opt_chain(a, "root_spkis")?;
             roots.push(root.spki().to_vec());
             let req = csr::check(&bytes(a, "csr")?, &roots)?;
             let (u, nb, na) = csr::issue_tbs(&req, s(a, "root_cn")?, &root, instant(a, "now")?, opt_instant(a, "previous_not_before")?, opt_int(a, "valid_days").unwrap_or(365))?;

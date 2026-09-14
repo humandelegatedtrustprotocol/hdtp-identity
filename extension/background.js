@@ -51,7 +51,18 @@ function requireUnlocked() {
 // PRF key is. A copy whose secret is not known is left exactly as stored and marked behind — never
 // re-sealed under an empty string — and the next unlock through the other secret asks for this one
 // once, so the two copies come back in step.
-async function persist() {
+// Every mutate-seal-store runs in turn. Sealing is Argon2id over 64 MiB, so two flows that overlap
+// — a page's issuance in the window and a contacts:apply, or two windows — would otherwise seal
+// from the same plaintext and store in the wrong order, and the later write would drop the earlier
+// change from storage while memory still showed both.
+let persisting = Promise.resolve()
+function persist() {
+  const run = persisting.then(persistNow, persistNow)
+  persisting = run.catch(() => {})
+  return run
+}
+
+async function persistNow() {
   const s = session
   if (!s) throw fail('locked')
   const updates = {}
@@ -181,7 +192,13 @@ async function prepareIssue(req) {
     const now = Date.now()
     out.new_endpoint = !mine.some((l) => l.endpoint === check.endpoint)
     out.new_host = !mine.some((l) => hostOf(l.endpoint) === hostOf(check.endpoint))
-    const liveOther = mine.find((l) => !l.superseded_at && l.endpoint !== check.endpoint && Date.parse(l.not_after) > now)
+    // The live leaf is the NEWEST one issued, which is how the core decides (§14.3: a later
+    // notBefore supersedes every earlier leaf the instant it is seen). Reading any unexpired entry
+    // as live refused a renewal at the wallet's own current address whenever an older leaf
+    // elsewhere had not expired — which is every vault the CLI wrote, since it records no
+    // `superseded_at`.
+    const newest = mine.filter((l) => !l.superseded_at).reduce((a, l) => (a && Date.parse(a.not_before) >= Date.parse(l.not_before) ? a : l), null)
+    const liveOther = newest && newest.endpoint !== check.endpoint && Date.parse(newest.not_after) > now ? newest : null
     out.live_other = liveOther ? liveOther.endpoint : null
     out.refused = liveOther && !out.move ? `a leaf is live for ${liveOther.endpoint}: a second endpoint is a move, not a second home` : null
     const validDays = req.args.notAfter ? Math.min(398, Math.max(1, Math.ceil((Date.parse(req.args.notAfter) - now) / 86_400_000))) : CONFIG.VALID_DAYS
@@ -218,6 +235,26 @@ async function issue(req, { root, passphrase }) {
 }
 
 // ── contacts ──────────────────────────────────────────────────────────────────────────────────
+/** A root fingerprint as §2 writes one: `sha256:` and the base64url of a 32-byte hash. */
+const isFingerprint = (f) => typeof f === 'string' && /^sha256:[A-Za-z0-9_-]{43}$/.test(f)
+
+/**
+ * A contact's `root_cert` is what proves a leaf of theirs off the wire, so it is worth exactly as
+ * much as its binding to the fingerprint the book pins. A certificate that hashes to something else
+ * is a former host's certificate under a friend's name; it is refused here rather than stored and
+ * shown later as a difference.
+ */
+async function checkContact(c) {
+  if (!c || !isFingerprint(c.root)) throw fail('bad_request', 'every contact needs a root fingerprint')
+  if (typeof c.endpoint !== 'string' || !c.endpoint) throw fail('bad_request', `${c.root}: every contact needs an endpoint`)
+  if (!c.root_cert) return
+  let parsed
+  try { parsed = await call('parse_certificate', { der: c.root_cert }) }
+  catch (e) { throw fail('bad_request', `${c.root}: root_cert does not parse (${e.why || e.message})`) }
+  if (parsed.fingerprint !== c.root) throw fail('bad_request', `${c.root}: root_cert is a certificate for ${parsed.fingerprint}, not for the root this contact is pinned by`)
+  if (parsed.kind !== 'root') throw fail('bad_request', `${c.root}: root_cert is not a root certificate (${parsed.profile_error || 'not self-signed'})`)
+}
+
 function diffContacts(book, theirs) {
   const mine = new Map(book.map((c) => [c.root, c]))
   const proposed = new Map((theirs || []).filter((c) => c && typeof c.root === 'string').map((c) => [c.root, c]))
@@ -248,6 +285,7 @@ function settle(id, result, error) {
   const p = pending.get(id)
   if (!p) return
   pending.delete(id)
+  if (p.timer) clearTimeout(p.timer)
   if (error) p.reject(error)
   else p.resolve(result)
 }
@@ -268,10 +306,23 @@ async function handlePage(op, args, origin) {
   }
   if (op === 'syncContacts' && !Array.isArray(args?.contacts)) throw fail('bad_request', 'syncContacts needs a list')
   const id = `r${++seq}-${Math.random().toString(36).slice(2, 8)}`
-  const p = { id, kind: op, origin, args: args || {}, windowId: null, created: Date.now() }
+  const p = { id, kind: op, origin, args: args || {}, windowId: null, created: Date.now(), opening: true }
   const done = new Promise((resolve, reject) => { p.resolve = resolve; p.reject = reject })
   pending.set(id, p)
-  try { p.windowId = await openWindow(id) } catch (e) { settle(id, null, fail('no_window', String(e))) }
+  // A page that is never answered is worse than one that is refused: a request left in the map
+  // keeps a promise alive in the page for ever. It ends when its window closes, when the person
+  // decides, or when this deadline passes.
+  p.timer = setTimeout(() => settle(id, null, fail('timeout', 'the wallet was not answered in time')), CONFIG.REQUEST_TIMEOUT_MINUTES * 60_000)
+  try {
+    p.windowId = await openWindow(id)
+    p.opening = false
+    // A window closed while it was still opening is not in `onRemoved`'s reach: check now.
+    const gone = !(await chrome.windows.get(p.windowId).catch(() => null))
+    if (gone) settle(id, null, fail('cancelled', 'the wallet window was closed'))
+  } catch (e) {
+    p.opening = false
+    settle(id, null, fail('no_window', String(e)))
+  }
   return done
 }
 
@@ -365,6 +416,7 @@ async function command(msg) {
       const pt = requireUnlocked()
       const p = pending.get(msg.reqId)
       if (!Array.isArray(msg.book)) throw fail('bad_request')
+      for (const c of msg.book) await checkContact(c)
       pt.contacts = msg.book.map((c) => ({ root: c.root, endpoint: c.endpoint, name: c.name || '', leaf: c.leaf || undefined, root_cert: c.root_cert || undefined, added: c.added || nowIso() }))
       await persist()
       if (p) settle(p.id, { contacts: pt.contacts, book: pt.contacts }) // `book`: the name the portal's return-with-archive screen reads

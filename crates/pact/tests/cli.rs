@@ -102,17 +102,48 @@ fn a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates() {
     let book = pact().env("PACT_PASSPHRASE_FILE", &pass).args(["contacts", "export", "--vault"]).arg(&vault).assert().success();
     assert_eq!(String::from_utf8(book.get_output().stdout.clone()).unwrap().trim(), "[]");
     let incoming = d.join("book.json");
-    fs::write(&incoming, r#"[{"root":"sha256:AAAA","endpoint":"https://b.example/mcp","name":"Bharat"}]"#).unwrap();
+    // Bharat, with a root of his own: a contact is pinned by a fingerprint, so the book carries one
+    // that is the shape §2 defines, and a `root_cert` is worth only its binding to it.
+    let bharat_vault = d.join("bharat.json");
+    pact().env("PACT_PASSPHRASE_FILE", &pass).args(["id", "create", "--name", "Bharat", "--vault"]).arg(&bharat_vault).assert().success();
+    let bharat_cert = pact().env("PACT_PASSPHRASE_FILE", &pass).args(["id", "show", "--vault"]).arg(&bharat_vault).assert().success();
+    let bharat_pem = String::from_utf8(bharat_cert.get_output().stdout.clone()).unwrap();
+    let bharat_der: String = bharat_pem.lines().filter(|l| !l.starts_with("-----")).collect::<Vec<_>>().join("");
+    let bharat_der_b64u = bharat_der.replace('+', "-").replace('/', "_").replace('=', "");
+    // The fingerprint to pin is the root certificate's own, read back through `cert show`.
+    let bharat_pem_path = d.join("bharat.pem");
+    fs::write(&bharat_pem_path, &bharat_pem).unwrap();
+    let shown = pact().args(["cert", "show", "--json"]).arg(&bharat_pem_path).assert().success();
+    let bharat_fp = serde_json::from_slice::<serde_json::Value>(&shown.get_output().stdout).unwrap()["fingerprint"].as_str().unwrap().to_string();
+
+    fs::write(&incoming, format!(r#"[{{"root":"{bharat_fp}","endpoint":"https://b.example/mcp","name":"Bharat"}}]"#)).unwrap();
     pact().env("PACT_PASSPHRASE_FILE", &pass).args(["contacts", "import", "--yes", "--vault"]).arg(&vault).arg(&incoming).assert().success().stderr(predicate::str::contains("1 added, 0 removed, 0 changed"));
-    fs::write(&incoming, r#"[{"root":"sha256:AAAA","endpoint":"https://c.example/mcp","name":"Bharat"}]"#).unwrap();
+    fs::write(&incoming, format!(r#"[{{"root":"{bharat_fp}","endpoint":"https://c.example/mcp","name":"Bharat"}}]"#)).unwrap();
     pact().env("PACT_PASSPHRASE_FILE", &pass).args(["contacts", "import", "--yes", "--vault"]).arg(&vault).arg(&incoming).assert().success().stderr(predicate::str::contains("0 added, 0 removed, 1 changed"));
     let book = pact().env("PACT_PASSPHRASE_FILE", &pass).args(["contacts", "export", "--vault"]).arg(&vault).assert().success();
     assert!(String::from_utf8(book.get_output().stdout.clone()).unwrap().contains("https://c.example/mcp"));
-    // A root certificate arriving in the book is a change, is kept, and is exported again.
-    fs::write(&incoming, r#"[{"root":"sha256:AAAA","endpoint":"https://c.example/mcp","name":"Bharat","root_cert":"MIIBrootcert"}]"#).unwrap();
+
+    // A root certificate that is not the pinned root's is refused, and nothing is written: §14.5's
+    // poisoned archive arriving through the book instead.
+    let mine_cert = pact().env("PACT_PASSPHRASE_FILE", &pass).args(["id", "show", "--vault"]).arg(&vault).assert().success();
+    let mine_der: String = String::from_utf8(mine_cert.get_output().stdout.clone()).unwrap().lines().filter(|l| !l.starts_with("-----")).collect::<Vec<_>>().join("").replace('+', "-").replace('/', "_").replace('=', "");
+    fs::write(&incoming, format!(r#"[{{"root":"{bharat_fp}","endpoint":"https://c.example/mcp","name":"Bharat","root_cert":"{mine_der}"}}]"#)).unwrap();
+    pact().env("PACT_PASSPHRASE_FILE", &pass).args(["contacts", "import", "--yes", "--vault"]).arg(&vault).arg(&incoming).assert().failure().stderr(predicate::str::contains("not for the root this contact is pinned by"));
+    // A book whose root is not a fingerprint at all is refused before anything is read.
+    fs::write(&incoming, r#"[{"root":"sha256:AAAA","endpoint":"https://c.example/mcp","name":"Bharat"}]"#).unwrap();
+    pact().env("PACT_PASSPHRASE_FILE", &pass).args(["contacts", "import", "--yes", "--vault"]).arg(&vault).arg(&incoming).assert().failure().stderr(predicate::str::contains("root fingerprint"));
+
+    // Bharat's own certificate under Bharat's fingerprint is a change, is kept, and is exported again.
+    fs::write(&incoming, format!(r#"[{{"root":"{bharat_fp}","endpoint":"https://c.example/mcp","name":"Bharat","root_cert":"{bharat_der_b64u}"}}]"#)).unwrap();
     pact().env("PACT_PASSPHRASE_FILE", &pass).args(["contacts", "import", "--yes", "--vault"]).arg(&vault).arg(&incoming).assert().success().stderr(predicate::str::contains("0 added, 0 removed, 1 changed").and(predicate::str::contains("root certificate differs")));
     let book = pact().env("PACT_PASSPHRASE_FILE", &pass).args(["contacts", "export", "--vault"]).arg(&vault).assert().success();
-    assert!(String::from_utf8(book.get_output().stdout.clone()).unwrap().contains("MIIBrootcert"));
+    assert!(String::from_utf8(book.get_output().stdout.clone()).unwrap().contains(&bharat_der_b64u));
+
+    // A backup never writes over a file that is there, unless it is told to.
+    let occupied = d.join("occupied.json");
+    fs::write(&occupied, "not a vault").unwrap();
+    pact().env("PACT_PASSPHRASE_FILE", &pass).args(["id", "backup", "--vault"]).arg(&vault).arg("--to").arg(&occupied).assert().failure().stderr(predicate::str::contains("exists"));
+    pact().env("PACT_PASSPHRASE_FILE", &pass).args(["id", "backup", "--force", "--vault"]).arg(&vault).arg("--to").arg(&occupied).assert().success().stderr(predicate::str::contains("the copy opens"));
 }
 
 #[test]
