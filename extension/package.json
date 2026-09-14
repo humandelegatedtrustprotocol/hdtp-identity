@@ -1,0 +1,15 @@
+{
+  "name": "@pact-protocol/wallet-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PACT wallet: the browser extension that holds a person's root and issues hosts their leaves",
+  "scripts": {
+    "test": "node --test test/run.mjs",
+    "vendor": "sh vendor.sh"
+  },
+  "devDependencies": {
+    "puppeteer-core": "25.9.0"
+  },
+  "engines": { "node": ">=20" }
+}

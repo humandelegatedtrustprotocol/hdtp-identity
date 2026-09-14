@@ -1,0 +1,9 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>A page that asks the wallet</title>
+<p id="out">ready</p>
+<script>
+  // Collect ceremony answers posted back to this window.
+  window.__ceremony = []
+  window.addEventListener('message', (e) => { if (e.data && e.data.pact === 'ceremony/1' && ['leaf', 'error', 'cancel'].includes(e.data.op)) window.__ceremony.push(e.data) })
+</script>
