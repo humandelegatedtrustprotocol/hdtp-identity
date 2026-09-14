@@ -225,7 +225,9 @@ function diffContacts(book, theirs) {
   for (const [root, c] of proposed) {
     const m = mine.get(root)
     if (!m) out.push({ kind: 'added', root, theirs: c })
-    else if (m.endpoint !== c.endpoint || (c.leaf && m.leaf !== c.leaf)) out.push({ kind: 'changed', root, mine: m, theirs: c })
+    // A root certificate the host holds and the book does not is a difference too: the book
+    // keeps it once ticked, and with it a leaf of this contact can be proven off the wire.
+    else if (m.endpoint !== c.endpoint || (c.leaf && m.leaf !== c.leaf) || (c.root_cert && m.root_cert !== c.root_cert)) out.push({ kind: 'changed', root, mine: m, theirs: c })
   }
   for (const [root, m] of mine) if (!proposed.has(root)) out.push({ kind: 'removed', root, mine: m })
   return out
@@ -363,7 +365,7 @@ async function command(msg) {
       const pt = requireUnlocked()
       const p = pending.get(msg.reqId)
       if (!Array.isArray(msg.book)) throw fail('bad_request')
-      pt.contacts = msg.book.map((c) => ({ root: c.root, endpoint: c.endpoint, name: c.name || '', leaf: c.leaf || undefined, added: c.added || nowIso() }))
+      pt.contacts = msg.book.map((c) => ({ root: c.root, endpoint: c.endpoint, name: c.name || '', leaf: c.leaf || undefined, root_cert: c.root_cert || undefined, added: c.added || nowIso() }))
       await persist()
       if (p) settle(p.id, { contacts: pt.contacts, book: pt.contacts }) // `book`: the name the portal's return-with-archive screen reads
       return { contacts: pt.contacts }

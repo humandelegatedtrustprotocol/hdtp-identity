@@ -258,7 +258,7 @@ test('(4) the ceremony message signup from another origin is answered with a lea
 })
 
 test('(4b) syncContacts shows every difference and applies only what is ticked', async () => {
-  const contacts = [{ root: 'sha256:' + 'a'.repeat(43), endpoint: 'https://b.example/mcp', name: 'Bharat' }]
+  const contacts = [{ root: 'sha256:' + 'a'.repeat(43), endpoint: 'https://b.example/mcp', name: 'Bharat', root_cert: 'MIIB' + 'r'.repeat(40) }]
   const h = await ask(pageA, `window.pact.syncContacts(${JSON.stringify(contacts)})`)
   const w = await walletWindow()
   await waitScreen(w, 's-sync')
@@ -270,6 +270,9 @@ test('(4b) syncContacts shows every difference and applies only what is ticked',
   assert.equal(v.ok, true)
   assert.equal(v.r.contacts.length, 1)
   assert.equal(v.r.contacts[0].root, contacts[0].root)
+  // The root certificate the host holds rides into the book and back out under the name the portal reads.
+  assert.equal(v.r.contacts[0].root_cert, contacts[0].root_cert)
+  assert.equal(v.r.book[0].root_cert, contacts[0].root_cert)
   await w.close()
 })
 

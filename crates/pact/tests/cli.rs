@@ -108,6 +108,11 @@ fn a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates() {
     pact().env("PACT_PASSPHRASE_FILE", &pass).args(["contacts", "import", "--yes", "--vault"]).arg(&vault).arg(&incoming).assert().success().stderr(predicate::str::contains("0 added, 0 removed, 1 changed"));
     let book = pact().env("PACT_PASSPHRASE_FILE", &pass).args(["contacts", "export", "--vault"]).arg(&vault).assert().success();
     assert!(String::from_utf8(book.get_output().stdout.clone()).unwrap().contains("https://c.example/mcp"));
+    // A root certificate arriving in the book is a change, is kept, and is exported again.
+    fs::write(&incoming, r#"[{"root":"sha256:AAAA","endpoint":"https://c.example/mcp","name":"Bharat","root_cert":"MIIBrootcert"}]"#).unwrap();
+    pact().env("PACT_PASSPHRASE_FILE", &pass).args(["contacts", "import", "--yes", "--vault"]).arg(&vault).arg(&incoming).assert().success().stderr(predicate::str::contains("0 added, 0 removed, 1 changed").and(predicate::str::contains("root certificate differs")));
+    let book = pact().env("PACT_PASSPHRASE_FILE", &pass).args(["contacts", "export", "--vault"]).arg(&vault).assert().success();
+    assert!(String::from_utf8(book.get_output().stdout.clone()).unwrap().contains("MIIBrootcert"));
 }
 
 #[test]

@@ -52,7 +52,7 @@
     issueCertificate: (csr, opts) => send('issueCertificate', { csr, notAfter: opts && opts.notAfter, move: !!(opts && opts.move) }),
     /** The ledger of the identity granted to this origin. */
     listCertificates: () => send('listCertificates', {}),
-    /** contacts: [{root, endpoint, name, leaf?}] → the wallet's book after the person reconciles. */
+    /** contacts: [{root, endpoint, name, leaf?, root_cert?}] → {contacts, book}: the wallet's book after the person reconciles; `root_cert` (base64url DER) is what proves a leaf of that contact off the wire. */
     syncContacts: (contacts) => send('syncContacts', { contacts }),
     ceremony,
   })

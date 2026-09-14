@@ -255,10 +255,17 @@ pub fn contacts_import(vault: &str, file: &str, yes: bool) -> Res<i32> {
                 added += 1;
                 eprintln!("+ {}", contact_line(c));
             }
-            Some(m) if m["endpoint"] != c["endpoint"] || m["leaf"] != c["leaf"] => {
+            // `root_cert` is the contact's root certificate, kept beside the leaf: it is what
+            // proves a leaf of theirs off the wire, so a book that gains or changes one differs.
+            Some(m) if m["endpoint"] != c["endpoint"] || m["leaf"] != c["leaf"] || m["root_cert"] != c["root_cert"] => {
                 changed += 1;
                 eprintln!("~ {}", contact_line(m));
-                eprintln!("  now {}{}", c["endpoint"].as_str().unwrap_or("?"), if m["leaf"] != c["leaf"] { " (leaf differs)" } else { "" });
+                eprintln!(
+                    "  now {}{}{}",
+                    c["endpoint"].as_str().unwrap_or("?"),
+                    if m["leaf"] != c["leaf"] { " (leaf differs)" } else { "" },
+                    if m["root_cert"] != c["root_cert"] { " (root certificate differs)" } else { "" }
+                );
             }
             Some(_) => {}
         }
