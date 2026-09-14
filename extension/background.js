@@ -333,7 +333,7 @@ async function command(msg) {
       if (!Array.isArray(msg.book)) throw fail('bad_request')
       pt.contacts = msg.book.map((c) => ({ root: c.root, endpoint: c.endpoint, name: c.name || '', leaf: c.leaf || undefined, added: c.added || nowIso() }))
       await persist()
-      if (p) settle(p.id, { contacts: pt.contacts })
+      if (p) settle(p.id, { contacts: pt.contacts, book: pt.contacts }) // `book`: the name the portal's return-with-archive screen reads
       return { contacts: pt.contacts }
     }
     case 'hardware:get': { const hw = await stored('hardware'); return hw ? { credentialId: hw.credentialId, salt: hw.salt, stale: !!hw.stale } : null }
