@@ -189,6 +189,53 @@ func derIntMinimal(content []byte) bool {
 	return true
 }
 
+// derOidMinimal reports DER's one encoding of an OBJECT IDENTIFIER: every subidentifier in its
+// shortest base-128 form, so no leading 0x80, and the last byte ends one. A padded arc reads as the
+// same OID to a lenient parser and as nothing at all to a strict one.
+func derOidMinimal(n derNode) bool {
+	b := n.content
+	if n.tag != 0x06 || len(b) == 0 || b[len(b)-1]&0x80 != 0 {
+		return false
+	}
+	start := true
+	for _, x := range b[1:] {
+		if start && x == 0x80 {
+			return false
+		}
+		start = x&0x80 == 0
+	}
+	return true
+}
+
+// derNamedBitsOK reports DER's BIT STRING form for a named bit list (keyUsage): the unused bits are
+// zero, and trailing zero bits are removed, so the lowest bit still encoded is set. Either spelling
+// of one set is a second encoding. Not for the signature or the public key, where `unused` is 0 and
+// every bit is carried.
+func derNamedBitsOK(content []byte) bool {
+	unused := 0
+	if len(content) > 0 {
+		unused = int(content[0])
+	}
+	bits := content[min(1, len(content)):]
+	if unused > 7 {
+		return false
+	}
+	if len(bits) == 0 {
+		return unused == 0
+	}
+	last := bits[len(bits)-1]
+	return last&((1<<unused)-1) == 0 && last&(1<<unused) != 0
+}
+
+// readOidStrict is how every OID a certificate carries is read, so no call site can be the one that
+// forgot: the profile is exact, and an exactness applied at one of four read positions is not one.
+func readOidStrict(n derNode) (string, error) {
+	if !derOidMinimal(n) {
+		return "", errors.New("OID not in the DER form")
+	}
+	return readOid(n), nil
+}
+
 func readOid(n derNode) string {
 	b := n.content
 	if len(b) == 0 {
