@@ -26,12 +26,16 @@ const (
 type suite struct {
 	kem, kdf, aead  uint16
 	nk, nn, nsecret int
-	chacha          bool
+	// npk is the encapsulated key's length (RFC 9180 §7.1): an uncompressed P-256 point, or an
+	// X25519 key. §13.1 pins it so `enc` has one length per suite and the signature over
+	// `protected ‖ enc ‖ ct` cannot be read with the boundary in a second place.
+	npk    int
+	chacha bool
 }
 
 var suites = map[string]suite{
-	SuiteP256:   {kem: 0x0010, kdf: 0x0001, aead: 0x0001, nk: 16, nn: 12, nsecret: 32},
-	SuiteX25519: {kem: 0x0020, kdf: 0x0001, aead: 0x0003, nk: 32, nn: 12, nsecret: 32, chacha: true},
+	SuiteP256:   {kem: 0x0010, kdf: 0x0001, aead: 0x0001, nk: 16, nn: 12, nsecret: 32, npk: 65},
+	SuiteX25519: {kem: 0x0020, kdf: 0x0001, aead: 0x0003, nk: 32, nn: 12, nsecret: 32, npk: 32, chacha: true},
 }
 
 // SuiteKnown reports whether a suite id is one of the two.
@@ -282,3 +286,6 @@ func VerifyDetached(pub *PublicKey, data, sig []byte) bool {
 	}
 	return false
 }
+
+// SuiteNpk is the encapsulated key's one length for a suite, or 0 when the suite is unknown.
+func SuiteNpk(suite string) int { return suites[suite].npk }

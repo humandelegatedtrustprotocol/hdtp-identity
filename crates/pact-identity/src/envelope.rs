@@ -158,6 +158,14 @@ fn header_checks(h: &Map<String, Value>) -> Result<Suite> {
     if keys.join(",") != HEADER_MEMBERS {
         return err("envelope_invalid", "header members");
     }
+    // The closed set of names exists so two implementations cannot disagree about what was signed;
+    // latitude in the types reopens the same gap, since `"1757000000"` and `1757000000` are different
+    // bytes under one signature and compare alike in a language that coerces.
+    let ints_ok = ["v", "ts", "exp"].iter().all(|k| h.get(*k).map(|v| v.is_i64()).unwrap_or(false));
+    let strings_ok = ["suite", "kid", "msg_id", "cty"].iter().all(|k| h.get(*k).map(Value::is_string).unwrap_or(false));
+    if !ints_ok || !strings_ok {
+        return err("envelope_invalid", "header member types");
+    }
     let suite = h.get("suite").and_then(|s| s.as_str()).and_then(Suite::parse);
     match (h.get("v"), suite) {
         (Some(v), Some(s)) if v.as_i64() == Some(2) => Ok(s),
@@ -219,6 +227,9 @@ pub fn open_result(a: OpenResultArgs<'_>) -> Result<Value> {
     }
     let enc = from_b64u(&a.envelope.enc).map_err(|_| Error::new("envelope_invalid", "does not open"))?;
     let ct = from_b64u(&a.envelope.ct).map_err(|_| Error::new("envelope_invalid", "does not open"))?;
+    if enc.len() != suite.npk() {
+        return err("envelope_invalid", "encapsulated key is not the suite's length");
+    }
     let sig = from_b64u(&a.envelope.sig).map_err(|_| Error::new("envelope_invalid", "signature"))?;
     let plaintext = hpke::open(suite, a.my_key, INFO_V2, &aad, &enc, &ct).map_err(|_| Error::new("envelope_invalid", "does not open"))?;
     let body: Value = serde_json::from_slice(&plaintext).map_err(|_| Error::new("envelope_invalid", "does not open"))?;
@@ -480,6 +491,12 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
     let key = PrivateKey::from_pkcs8(&Zeroizing::new(from_b64u(&held.pkcs8)?))?;
 
     let (Ok(enc), Ok(ct)) = (from_b64u(&e.enc), from_b64u(&e.ct)) else { return Ok(invalid("does not open")) };
+    // `sig` covers the three members concatenated with nothing between them, so the suite's own `enc`
+    // length is what fixes the boundary: without it a byte moved from `enc` into `ct` leaves the
+    // signed bytes identical.
+    if enc.len() != suite.npk() {
+        return Ok(invalid("encapsulated key is not the suite's length"));
+    }
     let body: Value = match hpke::open(suite, &key, INFO_V2, &aad, &enc, &ct).ok().and_then(|p| serde_json::from_slice(&p).ok()) {
         Some(b) => b,
         None => return Ok(invalid("does not open")),
@@ -597,6 +614,11 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
         };
         if card.cert != chain[0] {
             return invalid("guest card certificate is not the chain's leaf");
+        }
+        // §14.5: a guest's endpoint never equals the receiver's own. Otherwise a stranger is pinned
+        // to this node's own address and every reply it is sent comes straight back here.
+        if endpoint == node.endpoint {
+            return invalid("guest endpoint is this node's own address");
         }
         let held = node.pins.iter().find(|p| p.root != root && p.endpoint == endpoint).map(|p| p.root.clone());
         let former = node

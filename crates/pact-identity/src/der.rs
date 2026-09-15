@@ -174,6 +174,48 @@ pub fn int_minimal(content: &[u8]) -> bool {
     }
 }
 
+/// DER's OBJECT IDENTIFIER: every subidentifier in its shortest base-128 form, so no leading 0x80,
+/// and the last byte ends one. A padded arc reads as the same OID to a lenient parser and as nothing
+/// at all to a strict one, which is the parser differential in four bytes.
+pub fn oid_minimal(node: &Node<'_>) -> bool {
+    let b = node.content;
+    if node.tag != 0x06 || b.is_empty() || b[b.len() - 1] & 0x80 != 0 {
+        return false;
+    }
+    let mut start = true;
+    for &x in &b[1..] {
+        if start && x == 0x80 {
+            return false;
+        }
+        start = x & 0x80 == 0;
+    }
+    true
+}
+
+/// DER's BIT STRING for a named bit list (keyUsage): the unused bits are zero, and trailing zero bits
+/// are removed, so the lowest bit still encoded is set. Either spelling of one set is a second
+/// encoding. Not for the signature or the public key, where every bit is carried and `unused` is 0.
+pub fn named_bits_ok(content: &[u8]) -> bool {
+    let unused = content.first().copied().unwrap_or(0);
+    let bits = &content[1.min(content.len())..];
+    if unused > 7 {
+        return false;
+    }
+    match bits.last() {
+        None => unused == 0,
+        Some(&last) => last & ((1u8 << unused) - 1) == 0 && last & (1u8 << unused) != 0,
+    }
+}
+
+/// Every OID a certificate carries is read through this, so no call site can be the one that forgot:
+/// the profile is exact, and an exactness applied at one of four read positions is not one.
+pub fn read_oid_strict(node: &Node<'_>) -> Result<String> {
+    if !oid_minimal(node) {
+        return err("parse", "OID not in the DER form");
+    }
+    Ok(read_oid(node))
+}
+
 pub fn read_oid(node: &Node<'_>) -> String {
     let b = node.content;
     if b.is_empty() {

@@ -29,6 +29,15 @@ impl Suite {
             _ => None,
         }
     }
+    /// The encapsulated key's length (RFC 9180 §7.1's `Npk`): an uncompressed P-256 point, or an
+    /// X25519 key. §13.1 pins it so `enc` has one length per suite and the signature over
+    /// `protected ‖ enc ‖ ct` cannot be read with the boundary in a second place.
+    pub const fn npk(self) -> usize {
+        match self {
+            Suite::P256 => 65,
+            Suite::X25519 => 32,
+        }
+    }
     fn kem(self) -> u16 {
         match self {
             Suite::P256 => 0x0010,

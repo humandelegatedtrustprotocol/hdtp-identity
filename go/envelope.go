@@ -229,6 +229,29 @@ func numberOf(v any) (float64, bool) {
 	return 0, false
 }
 
+// headerTypesOK is §13.1's other half: the closed set of member names exists so two implementations
+// cannot disagree about what was signed, and latitude in the types reopens the same gap — `"1757000000"`
+// and `1757000000` are different bytes under one signature and compare alike where a language coerces.
+func headerTypesOK(h map[string]any) bool {
+	for _, k := range []string{"v", "ts", "exp"} {
+		// decodeJSON keeps numbers as json.Number, which a JSON string never becomes: a `"1757000000"`
+		// arrives as a Go string and is refused here rather than coerced downstream.
+		n, ok := h[k].(json.Number)
+		if !ok {
+			return false
+		}
+		if _, err := n.Int64(); err != nil {
+			return false
+		}
+	}
+	for _, k := range []string{"suite", "kid", "msg_id", "cty"} {
+		if _, ok := h[k].(string); !ok {
+			return false
+		}
+	}
+	return true
+}
+
 // Decide is receive() of the seed, without the mutation.
 func Decide(now time.Time, env Envelope, node NodeState) Decision {
 	effects := []map[string]any{}
@@ -240,6 +263,9 @@ func Decide(now time.Time, env Envelope, node NodeState) Decision {
 	header, ok := hv.(map[string]any)
 	if !ok || sortedKeys(header) != HeaderMembers {
 		return invalid("header members")
+	}
+	if !headerTypesOK(header) {
+		return invalid("header member types")
 	}
 	v, _ := numberOf(header["v"])
 	suite, _ := header["suite"].(string)
@@ -289,6 +315,12 @@ func Decide(now time.Time, env Envelope, node NodeState) Decision {
 		return invalid("does not open")
 	}
 	enc, ct := FromB64url(env.Enc), FromB64url(env.Ct)
+	// `sig` covers the three members concatenated with nothing between them, so the suite's own `enc`
+	// length is what fixes the boundary: without it a byte moved from `enc` into `ct` leaves the signed
+	// bytes identical.
+	if len(enc) != SuiteNpk(suite) {
+		return invalid("encapsulated key is not the suite's length")
+	}
 	plaintext, err := Open(suite, priv, []byte(InfoV2), aad, enc, ct)
 	if err != nil {
 		return invalid("does not open")
@@ -460,6 +492,11 @@ func Decide(now time.Time, env Envelope, node NodeState) Decision {
 		if !bytes.Equal(card.Cert, chain[0]) {
 			return invalid("guest card certificate is not the chain's leaf")
 		}
+		// §14.5: a guest's endpoint never equals the receiver's own. Otherwise a stranger is pinned
+		// to this node's own address and every reply it is sent comes straight back here.
+		if endpoint == node.Endpoint {
+			return invalid("guest endpoint is this node's own address")
+		}
 		var claim any
 		for _, p := range node.Pins {
 			if p.Root != root && p.Endpoint == endpoint {
@@ -579,6 +616,9 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 	if !ok || sortedKeys(header) != HeaderMembers {
 		return nil, errors.New("header members")
 	}
+	if !headerTypesOK(header) {
+		return nil, errors.New("header member types")
+	}
 	v, _ := numberOf(header["v"])
 	suite, _ := header["suite"].(string)
 	mine, _ := SuiteForKey(o.Recipient.Public)
@@ -603,6 +643,9 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 		return nil, errors.New("exp too far from ts")
 	}
 	enc, ct := FromB64url(env.Enc), FromB64url(env.Ct)
+	if len(enc) != SuiteNpk(suite) {
+		return nil, errors.New("encapsulated key is not the suite's length")
+	}
 	plaintext, err := Open(suite, o.Recipient, []byte(InfoV2), aad, enc, ct)
 	if err != nil {
 		return nil, errors.New("does not open")
