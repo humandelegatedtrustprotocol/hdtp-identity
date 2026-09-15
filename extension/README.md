@@ -32,6 +32,27 @@ and records the hash in `vendor/VENDORED.md`; it must equal `../js/manifest.json
 7. Lock (the popup's button and the idle alarm) clears the unlocked state and every grant; the page's next call is refused.
 8. The manifest loads with no error on `chrome://extensions`, permissions are exactly `storage` and `alarms`, no host permissions.
 
+`test/cdp.mjs` settles, in the same browser, three things that were once argued from source
+(`test/harness.mjs` is what the two suites share):
+
+9. The service worker is evicted mid-decision — its CDP target is closed outright — and the open
+   window says so rather than leaving Sign armed, while the page's call is refused `unavailable`
+   instead of waiting for ever; the next attempt, on the restarted worker, goes through.
+10. A request nobody answers ends at `CONFIG.REQUEST_TIMEOUT_MINUTES` (the worker's own
+    `setTimeout` is clamped for the test, so the code is unchanged and only its clock is shorter),
+    and a window removed before `chrome.windows.create` returns is answered `cancelled` by the
+    guard after the await.
+11. With `PACT_FAKE_PRF` unset, an authenticator without PRF is reported as a failure — "the
+    authenticator returned no PRF output" — and no half-wrapped copy of the vault is written. That
+    is the state in which test 6 fails rather than falling back.
+
+It also holds the portal to its claim: the certificate section reads `…/certificate` and
+`…/addresses/pending` once per identity, not once per keystroke. The portal is built to a scratch
+directory (never `pact-cloud/gateway/public`, which a local Worker serves) and served with stubbed
+`/v1`. Against the bundle that predates the fix, ten keystrokes took each count from 2 to 14; with the fix
+each stays at 1.
+`PACT_PORTAL_DIST=<a built portal>` aims the same test at any copy, which is how that was shown.
+
 Chrome comes from `PUPPETEER_EXECUTABLE_PATH` or `~/.cache/puppeteer` (Chrome for Testing). Node 20+.
 
 ## How the ceremony converges on the extension
