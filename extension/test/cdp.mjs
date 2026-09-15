@@ -185,3 +185,34 @@ test('(2) the portal fetches the certificate once per identity, not once per key
   assert.deepEqual(afterTyping, afterLoad, `typing re-fetched: load ${JSON.stringify(afterLoad)} then ${JSON.stringify(afterTyping)}`)
   await page.close()
 })
+
+test('(3) the person locks the wallet and the worker is evicted: the window does not claim it locked itself', async () => {
+  // The notice exists for a real loss: an unlocked vault, or a request being decided, that died
+  // with the worker. After a deliberate Lock there is neither, and Chrome stops an idle worker
+  // about thirty seconds later as a matter of course — so a window left open on the locked screen
+  // would tell the person their wallet had locked itself, over and over, having done nothing.
+  const w = await browser.newPage()
+  // The keepalive is pushed out of this test's way: a call in flight when the worker goes IS a
+  // loss and the notice would be right to appear. Only the code under test is in question here.
+  await w.evaluateOnNewDocument(() => { const si = window.setInterval; window.setInterval = (fn, ms, ...a) => si(fn, Math.max(ms || 0, 3_600_000), ...a) })
+  await w.goto(`chrome-extension://${extId}/window.html`)
+  await w.waitForSelector('#main', { timeout: 10000 })
+  await w.waitForFunction(() => [...document.querySelectorAll('.screen')].some((s) => !s.hidden), { timeout: 20000 })
+  if (await visible(w, '#s-locked')) {
+    await w.type('#f-unlock input[name=passphrase]', PASS)
+    await w.click('#f-unlock button[type=submit]')
+  }
+  await waitScreen(w, 's-home') // the identity from (1), unlocked: the state the notice is about
+
+  await w.click('#b-lock')
+  await waitScreen(w, 's-locked')
+  assert.equal(await visible(w, '#disconnected'), false, 'locking is not itself a loss')
+
+  const targetId = await serviceWorkerTargetId(browserCdp, extId)
+  assert.ok(targetId, 'the extension has a service_worker target')
+  await browserCdp.send('Target.closeTarget', { targetId })
+  await w.waitForFunction(() => true, { timeout: 5000 })
+  await sleep(1500)
+  assert.equal(await visible(w, '#disconnected'), false, 'nothing unlocked was lost, so nothing is claimed to be')
+  await w.close()
+})

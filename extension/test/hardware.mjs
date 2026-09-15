@@ -41,8 +41,14 @@ async function hwPage(t, options) {
     options: { protocol: 'ctap2', ctap2Version: 'ctap2_1', transport: 'usb', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true, ...options },
   })
   await w.goto(`chrome-extension://${id}/window.html`)
-  await w.waitForFunction(() => [...document.querySelectorAll('.screen')].some((s) => !s.hidden), { timeout: 30000 })
-  if (await visible(w, '#s-create')) {
+  // Which screen the wallet opened on, by the flag the wallet itself sets. `visible()` also asks for
+  // `offsetParent`, which is null until the page has been laid out — so on a loaded machine this
+  // read "neither create nor locked" a frame after the create form appeared, took neither branch,
+  // and then waited ninety seconds for a home screen nothing was ever going to reach. Two runs of
+  // the full suite were lost to it; the page it timed out on was showing `s-create` the whole time.
+  const on = (sel) => w.evaluate((x) => { const el = document.getElementById(x); return !!el && !el.hidden }, sel)
+  await w.waitForFunction(() => ['s-create', 's-locked', 's-home'].some((x) => { const el = document.getElementById(x); return el && !el.hidden }), { timeout: 30000 })
+  if (await on('s-create')) {
     await w.type('#f-create input[name=name]', 'Hardware Holder')
     await w.type('#f-create input[name=passphrase]', PASS)
     await w.type('#f-create input[name=again]', PASS)
@@ -51,11 +57,25 @@ async function hwPage(t, options) {
     await waitScreen(w, 's-hardware')
     await w.click('#b-hw-skip')
   }
-  if (await visible(w, '#s-locked')) {
+  if (await on('s-locked')) {
     await w.type('#f-unlock input[name=passphrase]', PASS)
     await w.click('#f-unlock button[type=submit]')
   }
-  await w.waitForFunction(() => { const h = document.getElementById('s-home'); return h && !h.hidden }, { timeout: 30000 })
+  // Setup, not an assertion: this waits on an Argon2id seal at 64 MiB inside wasm, and on a loaded
+  // machine that is where the whole suite's time goes.
+  try {
+    await w.waitForFunction(() => { const h = document.getElementById('s-home'); return h && !h.hidden }, { timeout: 90000 })
+  } catch (e) {
+    // A wait that says only "timed out" is where an afternoon goes. Name the screen it stopped on
+    // and whatever that screen was trying to say.
+    const seen = await w.evaluate(() => ({
+      screen: ([...document.querySelectorAll('.screen')].find((x) => !x.hidden) || {}).id || 'none',
+      status: (document.getElementById('status') || {}).textContent || '',
+      errors: [...document.querySelectorAll('.err, [id^=e-]')].map((x) => x.textContent.trim()).filter(Boolean),
+      disconnected: !(document.getElementById('disconnected') || { hidden: true }).hidden,
+    })).catch(() => null)
+    throw new Error(`the wallet never reached its home screen: ${JSON.stringify(seen)} — ${e.message}`)
+  }
   return w
 }
 
@@ -65,8 +85,15 @@ test('(3) with PACT_FAKE_PRF unset, an authenticator without PRF is a reported f
   // runs on its own as readily as it runs after the others.
   const w = await hwPage(t, {})
   await w.click('#b-backup-hw')
-  // Nothing is enabled: the wallet takes the person to the enrolment screen and says why, where
-  // the gate offer of (5) waits for a second, explicit click.
+  // From home the wallet goes to the screen with the two doors rather than registering on the spot.
+  // An unpinned registration is one a password manager can take from a security key, which is the
+  // whole reason that screen has two buttons and home no longer has one.
+  await waitScreen(w, 's-hardware')
+  assert.equal(await visible(w, '#b-hw-enable'), true, 'the security-key door')
+  assert.equal(await visible(w, '#b-hw-device'), true, 'and this device\'s own')
+  await w.click('#b-hw-enable') // this virtual authenticator is `usb`: the security-key door
+  // Nothing is enabled: the wallet stays on the enrolment screen and says why, where the gate offer
+  // of (5) waits for a second, explicit click.
   await waitScreen(w, 's-hardware')
   await w.waitForFunction(() => document.getElementById('e-hardware').textContent.length > 0, { timeout: 20000 })
   const hw = await textOf(w, '#home-hw')
@@ -84,7 +111,12 @@ test('(3) with PACT_FAKE_PRF unset, an authenticator without PRF is a reported f
 test('(5) gate: a passkey that can hold nothing is offered as a gate, only after the cost is stated', async (t) => {
   const w = await hwPage(t, {}) // neither PRF nor largeBlob: where 1Password lands
   await w.click('#b-backup-hw')
-  // Nothing is enabled behind the person's back: the enrolment screen comes up with the offer.
+  // From home the wallet goes to the screen with the two doors rather than registering on the spot.
+  // An unpinned registration is one a password manager can take from a security key, which is the
+  // whole reason that screen has two buttons and home no longer has one.
+  await waitScreen(w, 's-hardware')
+  await w.click('#b-hw-enable')
+  // Nothing is enabled behind the person's back: the offer appears on the same screen.
   await waitScreen(w, 's-hardware')
   await w.waitForFunction(() => { const g = document.getElementById('hw-gate'); return g && !g.hidden }, { timeout: 20000 })
   // The markup wraps, so the assertions read the collapsed text rather than the source's line breaks.

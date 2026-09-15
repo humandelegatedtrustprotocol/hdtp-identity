@@ -93,6 +93,81 @@ const ledgerOf = (pt, root) => (pt.ledger || []).filter((l) => l.root === root)
 const liveLedger = (pt) => ({ ...pt, ledger: (pt.ledger || []).filter((l) => !l.superseded_at) })
 const hostOf = (u) => { try { return new URL(u).host } catch { return '' } }
 
+/**
+ * The three things a root record must agree about: the key, the certificate, and the fingerprint it
+ * is filed under. The key is the identity — what contacts pin is the fingerprint of its public key
+ * (SPEC §2) — so everything else is checked against what the key derives to, and a record whose
+ * parts disagree is refused rather than stored and signed with later.
+ *
+ * Every path that takes a root from outside this worker comes through here. What a certificate that
+ * does not bind would cost is entirely silent: the wallet would show one fingerprint, sign with
+ * another key, and every peer would fail chain validation with nothing on this side to say why.
+ */
+async function bindRoot(record, where) {
+  const { fingerprint, pkcs8, cn, created, alg } = record
+  const name = (typeof cn === 'string' && cn.trim()) || 'Restored identity'
+  if (!isFingerprint(fingerprint)) throw fail('bad_request', `${where} names an identity that is not a fingerprint`)
+  if (typeof pkcs8 !== 'string' || !pkcs8) {
+    // A card-held root has no key here by design, and a browser cannot reach a smartcard: saying so
+    // is worth more than "holds no key" to someone whose vault the CLI wrote.
+    const held = record.holder && record.holder.mode
+    throw fail('bad_request', held
+      ? `${where}: ${fingerprint} is held on a smartcard, which a browser cannot reach — that identity stays with the pact CLI`
+      : `${where} holds no key for ${fingerprint}`)
+  }
+  let pub
+  try { pub = await call('public_key', { pkcs8 }) }
+  catch (e) { throw fail('bad_request', `${where}: the key for ${fingerprint} does not parse (${e.why || e.message})`) }
+  if (pub.fingerprint !== fingerprint) throw fail('bad_request', `${where}: the key is not the identity it names — it is ${pub.fingerprint}`)
+  // The algorithm is read from the key, never from the record: a keys-only backup carries none at
+  // all, and a record claiming one the bytes contradict is refused rather than believed.
+  if (typeof alg === 'string' && alg && alg !== pub.alg) throw fail('bad_request', `${where}: ${fingerprint} claims ${alg} and its key is ${pub.alg}`)
+  let cert = record.cert || null
+  let rebuilt = false
+  if (cert) {
+    let parsed
+    try { parsed = await call('parse_certificate', { der: cert }) }
+    catch (e) { throw fail('bad_request', `${where}: the certificate for ${fingerprint} does not parse (${e.why || e.message})`) }
+    if (parsed.fingerprint !== fingerprint) throw fail('bad_request', `${where}: the certificate filed under ${fingerprint} is a certificate for ${parsed.fingerprint}`)
+    if (parsed.kind !== 'root') throw fail('bad_request', `${where}: the certificate for ${fingerprint} is not a root certificate (${parsed.profile_error || 'not self-signed'})`)
+  } else {
+    // Rebuilt from the key, which is the same identity: §14.2 rule 2 computes the root's key
+    // identifier from its key rather than reading it, so only the bytes differ.
+    cert = (await call('build_root', { cn: name, pkcs8, not_before: created || nowIso() })).der
+    rebuilt = true
+  }
+  return { fingerprint, cn: name, alg: pub.alg, pkcs8, cert, created: created || nowIso(), certRebuilt: rebuilt }
+}
+
+/** Every root in a vault this worker did not seal itself, checked before the session adopts it. */
+async function verifyRoots(plaintext, where) {
+  const roots = (plaintext && plaintext.roots) || []
+  if (!Array.isArray(roots) || !roots.length) throw fail('bad_request', `${where} holds no identity`)
+  for (const r of roots) await bindRoot(r || {}, where)
+}
+
+/**
+ * One way into an unlocked session. Grants are per origin AND per identity, so a session that
+ * replaces the vault — an import, a restore — must not leave a page holding a grant for an identity
+ * this wallet no longer has; `issue` would look that fingerprint up in the new roots and not find it.
+ */
+function adoptSession(plaintext, passphrase, hwKey = null) {
+  grants.clear()
+  session = { passphrase, plaintext, hwKey }
+  touch()
+}
+
+/**
+ * `vaultStale` says the passphrase copy is behind the hardware copy, which can only be true while a
+ * hardware copy exists. Derived here rather than trusted from storage, so no path that removes that
+ * copy can leave a flag behind which refuses the passphrase afterwards.
+ */
+async function staleness() {
+  const flag = !!(await stored('vaultStale'))
+  const hw = await stored('hardware')
+  return flag && !!hw && !hw.stale
+}
+
 async function createIdentity({ name, alg = 'ed25519', passphrase }) {
   if (!name || !name.trim()) throw fail('bad_request', 'a name is needed')
   if (!passphrase || passphrase.length < 8) throw fail('bad_request', 'the passphrase needs at least eight characters')
@@ -106,7 +181,7 @@ async function createIdentity({ name, alg = 'ed25519', passphrase }) {
     plaintext.roots.push(entry)
   } else {
     plaintext = { v: 1, roots: [entry], ledger: [], contacts: [] }
-    session = { passphrase, plaintext, hwKey: null }
+    adoptSession(plaintext, passphrase)
   }
   await persist()
   touch()
@@ -117,16 +192,14 @@ async function createIdentity({ name, alg = 'ed25519', passphrase }) {
 async function unlock(passphrase) {
   const vault = await stored('vault')
   if (!vault) throw fail('no_vault', 'no vault on this device: create an identity or import a backup')
-  const hw = await stored('hardware')
-  if ((await stored('vaultStale')) && hw && !hw.stale) {
+  if (await staleness()) {
     // The passphrase copy is behind the security key's: opening it would show an older ledger and,
     // on the next change, overwrite the newer copy with it. The key opens the current one.
     throw fail('stale_vault', 'the passphrase copy is behind the security key\'s: unlock with the security key, then enter the passphrase once to refresh it')
   }
   let plaintext
   try { ({ plaintext } = await call('vault_open', { passphrase, vault })) } catch { throw fail('wrong_passphrase', 'the passphrase does not open the vault') }
-  session = { passphrase, plaintext, hwKey: null }
-  touch()
+  adoptSession(plaintext, passphrase)
   broadcast({ type: 'unlocked' })
   return state()
 }
@@ -143,8 +216,7 @@ async function unlockHardware({ key, asserted }) {
   try { ({ plaintext } = await call('vault_open', { passphrase: hwKey, vault: hw.vault })) } catch { throw fail('wrong_key', 'this security key does not open the vault') }
   // The passphrase is not known on this path; the vault re-seals under the PRF key only until
   // the passphrase is entered again, so `persist()` keeps both copies in step when it can.
-  session = { passphrase: '', plaintext, hwKey }
-  touch()
+  adoptSession(plaintext, '', hwKey)
   broadcast({ type: 'unlocked' })
   return state()
 }
@@ -153,10 +225,15 @@ async function importVault({ vault, passphrase }) {
   if (!vault || vault.format !== 'pact-vault/1') throw fail('bad_request', 'not a pact-vault/1 document')
   let plaintext
   try { ({ plaintext } = await call('vault_open', { passphrase, vault })) } catch { throw fail('wrong_passphrase', 'the passphrase does not open this file') }
-  await store({ vault })
-  await chrome.storage.local.remove('hardware')
-  session = { passphrase, plaintext, hwKey: null }
-  touch()
+  // This worker did not seal this file, so nothing in it has been bound to the fingerprints it
+  // files things under. A restore checks that; an import is the same act with a different wrapper.
+  await verifyRoots(plaintext, 'that vault file')
+  await store({ vault, vaultStale: false })
+  // Both records belong to the vault being replaced: the hardware copy seals a different plaintext
+  // under a different secret, and the backup note says a passkey holds an identity this wallet is
+  // about to stop having. Neither survives the import.
+  await chrome.storage.local.remove(['hardware', 'passkeyBackup'])
+  adoptSession(plaintext, passphrase)
   broadcast({ type: 'changed' })
   return state()
 }
@@ -167,7 +244,7 @@ async function state() {
   return {
     locked: !session,
     hasVault: !!vault,
-    vaultStale: !!(await stored('vaultStale')),
+    vaultStale: await staleness(),
     passphraseKnown: !!(session && session.passphrase),
     hardware: hw ? { enabled: true, mode: hw.mode || 'prf', stale: !!hw.stale } : { enabled: false },
     roots: session ? rootsOf(session.plaintext) : [],
@@ -218,6 +295,10 @@ async function issue(req, { root, passphrase }) {
   const pt = requireUnlocked()
   const prep = await prepareIssue({ ...req, root })
   if (!root) throw fail('bad_request', 'no identity chosen')
+  // `grant` checks this and signing did not, so a grant held across a vault that changed underneath
+  // reached `wallet_issue` with a fingerprint this wallet no longer has — and then read `.cert` off
+  // the undefined it found. Sessions now clear their grants, and this says so if anything else does.
+  if (!pt.roots.some((r) => r.fingerprint === root)) throw fail('bad_request', 'no such identity in this wallet')
   if (prep.refused) throw fail('one_live_leaf', prep.refused)
   if (prep.new_endpoint) {
     // A new endpoint needs the passphrase again, even in an unlocked session (SPEC §9).
@@ -356,6 +437,10 @@ async function requestFor(reqId) {
     return { ...base, op: a.op, display_name: a.display_name || '', endpoint_hint: a.endpoint || '', new_host_hint: !!a.new_host, ...(session ? await prepareIssue(req) : { locked: true }) }
   }
   if (p.kind === 'syncContacts') {
+    // Locked is a state this window can do something about, and the other two kinds already say so
+    // by returning it. Throwing here instead showed "that request is gone" over a request that was
+    // not gone at all, with no way back to the unlock screen.
+    if (!session) return { ...base, locked: true }
     const pt = requireUnlocked()
     return { ...base, differences: diffContacts(pt.contacts || [], p.args.contacts), count: (pt.contacts || []).length }
   }
@@ -377,7 +462,7 @@ async function command(msg) {
     case 'import': return importVault(msg)
     case 'export': {
       requireUnlocked()
-      if (await stored('vaultStale')) throw fail('stale_vault', 'the passphrase copy is behind: enter the passphrase once to refresh it before exporting')
+      if (await staleness()) throw fail('stale_vault', 'the passphrase copy is behind: enter the passphrase once to refresh it before exporting')
       return { vault: await stored('vault') }
     }
     case 'passphrase:refresh': {
@@ -454,27 +539,17 @@ async function command(msg) {
       if (!entries.length) throw fail('bad_request', 'that backup holds no identity')
       const roots = []
       for (const [fingerprint, r] of entries) {
-        const pkcs8 = typeof r === 'string' ? r : r.pkcs8
-        if (!pkcs8) throw fail('bad_request', 'that backup holds no key')
-        const cn = (typeof r === 'object' && r.cn) || 'Restored identity'
-        // The certificate, rebuilt from the key when the blob could not carry it. The identity is
-        // the fingerprint of the public key (SPEC §2), so the rebuilt one is the same identity and
-        // every contact's pin still matches; only the bytes differ.
-        let cert = typeof r === 'object' ? r.cert : null
-        let rebuilt = false
-        if (!cert) {
-          const made = await call('build_root', { cn, pkcs8, not_before: (typeof r === 'object' && r.created) || nowIso() })
-          if (made.fingerprint !== fingerprint) throw fail('bad_request', 'the key in that backup is not the identity it names')
-          cert = made.der
-          rebuilt = true
-        }
-        roots.push({ fingerprint, cn, alg: (typeof r === 'object' && r.alg) || 'ed25519', pkcs8, cert, created: (typeof r === 'object' && r.created) || nowIso(), restored: true, certRebuilt: rebuilt })
+        // Whatever the blob held — the full record or the key alone — is checked against the
+        // fingerprint it is filed under before any of it is kept. A certificate that carries this
+        // far unexamined is the worst kind: the wallet would show one identity and sign as another.
+        const record = typeof r === 'string' ? { pkcs8: r } : { ...(r || {}) }
+        roots.push({ ...(await bindRoot({ ...record, fingerprint }, 'that backup')), restored: true })
       }
       const plaintext = { v: 1, roots, ledger: [], contacts: [] }
       const { vault } = await call('vault_seal', { passphrase, plaintext, kdf: CONFIG.KDF })
       await store({ vault, vaultStale: false, noticeShown: true })
-      session = { passphrase, plaintext, hwKey: null }
-      touch()
+      await chrome.storage.local.remove(['hardware', 'passkeyBackup'])
+      adoptSession(plaintext, passphrase)
       broadcast({ type: 'changed' })
       return { roots: rootsOf(plaintext), rebuilt: roots.some((r) => r.certRebuilt) }
     }
@@ -492,7 +567,22 @@ async function command(msg) {
       session.hwKey = msg.key
       return { ok: true }
     }
-    case 'hardware:disable': await chrome.storage.local.remove('hardware'); if (session) session.hwKey = null; return { ok: true }
+    case 'hardware:disable': {
+      const hw = await stored('hardware')
+      if (!hw) { if (session) session.hwKey = null; await store({ vaultStale: false }); return { ok: true } }
+      // The security key's copy can be AHEAD of the passphrase one — every change made in a session
+      // opened by the key leaves it so. Removing it then would throw the only current vault away and
+      // silently roll the wallet back to whenever the passphrase was last entered.
+      if (session && session.passphrase) await persist()
+      else if (await staleness()) throw fail('stale_vault', 'the security key holds the current copy: unlock and enter the passphrase once to refresh it, then the key can be removed')
+      await chrome.storage.local.remove('hardware')
+      // Nothing is behind anything once there is only one copy, and a flag left set here refused
+      // every export and every passphrase unlock afterwards, with no key left to fix it with.
+      await store({ vaultStale: false })
+      if (session) session.hwKey = null
+      broadcast({ type: 'changed' })
+      return { ok: true }
+    }
     default: throw fail('bad_request', `unknown command ${msg.type}`)
   }
 }

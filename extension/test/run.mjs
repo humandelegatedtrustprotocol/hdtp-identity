@@ -276,18 +276,23 @@ test('(5) hardware wrap: a PRF credential re-seals the vault and unlocks it afte
   await w.goto(`chrome-extension://${extId}/window.html`)
   await waitScreen(w, 's-home')
   await w.click('#b-backup-hw')
-  await w.waitForFunction(() => /enabled on this device|behind the vault/.test(document.getElementById('home-hw').textContent) || document.getElementById('e-home').textContent.length > 0, { timeout: 15000 })
+  // From home the wallet goes to the screen with the two doors rather than registering on the spot.
+  // An unpinned registration is one a password manager can take from a security key, which is the
+  // whole reason that screen has two buttons and home no longer has one.
+  await waitScreen(w, 's-hardware')
+  await w.click('#b-hw-device') // this virtual authenticator is `internal`: the platform door
+  await w.waitForFunction(() => /enabled on this device|behind the vault/.test(document.getElementById('home-hw').textContent) || document.getElementById('e-hardware').textContent.length > 0, { timeout: 15000 })
   let hw = await textOf(w, '#home-hw')
   if (!/enabled on this device/.test(hw) && !process.env.PACT_FAKE_PRF) {
     // A real WebAuthn PRF path that does not work is a failure, not a diagnostic. Testing the wrap
     // logic against an injected PRF is still useful where the platform has no authenticator, so it
     // stays available — behind PACT_FAKE_PRF=1, never as a silent fallback.
-    assert.fail(`the PRF path did not work and PACT_FAKE_PRF is not set: ${await textOf(w, '#e-home')}`)
+    assert.fail(`the PRF path did not work and PACT_FAKE_PRF is not set: ${await textOf(w, '#e-hardware')}`)
   }
   if (!/enabled on this device/.test(hw)) {
     // WebAuthn refused from the extension origin (or the virtual authenticator lacks PRF): test
     // the wrap logic with an injected PRF and say so.
-    prf = 'fake PRF injected (' + (await textOf(w, '#e-home')) + ')'
+    prf = 'fake PRF injected (' + (await textOf(w, '#e-hardware')) + ')'
     await w.evaluateOnNewDocument(() => {
       const fake = { create: async (o) => ({ rawId: new Uint8Array(16).buffer, getClientExtensionResults: () => ({ prf: { enabled: true, results: { first: new Uint8Array(32).fill(7).buffer } } }) }), get: async (o) => ({ getClientExtensionResults: () => ({ prf: { results: { first: new Uint8Array(32).fill(7).buffer } } }) }) }
       Object.defineProperty(navigator, 'credentials', { value: fake, configurable: true })
@@ -296,6 +301,8 @@ test('(5) hardware wrap: a PRF credential re-seals the vault and unlocks it afte
     await w.reload()
     await waitScreen(w, 's-home')
     await w.click('#b-backup-hw')
+    await waitScreen(w, 's-hardware')
+    await w.click('#b-hw-device')
     await w.waitForFunction(() => /enabled on this device/.test(document.getElementById('home-hw').textContent), { timeout: 15000 })
     hw = await textOf(w, '#home-hw')
   }
