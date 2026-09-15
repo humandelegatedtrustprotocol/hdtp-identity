@@ -9,7 +9,7 @@ import { CONFIG } from './config.js'
 const REQUEST_KINDS = new Set(['requestIdentity', 'issueCertificate', 'listCertificates', 'syncContacts', 'ceremony'])
 const CEREMONY_OPS = new Set(['signup', 'renew', 'move', 'upgrade'])
 
-/** @type {{ passphrase: string, plaintext: any, prfKey: string | null } | null} */
+/** @type {{ passphrase: string, plaintext: any, hwKey: string | null } | null} */
 let session = null
 /** origin → root fingerprint granted this session */
 const grants = new Map()
@@ -30,7 +30,7 @@ function touch() {
 function lock() {
   if (session) {
     session.passphrase = ''
-    session.prfKey = null
+    session.hwKey = null
     session.plaintext = null
   }
   session = null
@@ -48,7 +48,7 @@ function requireUnlocked() {
 
 // Re-seal the vault after any change to its plaintext. Each copy is re-sealed only under a secret
 // that is in memory: the passphrase copy when the passphrase is known, the hardware copy when the
-// PRF key is. A copy whose secret is not known is left exactly as stored and marked behind — never
+// authenticator's secret is. A copy whose secret is not known is left exactly as stored — never
 // re-sealed under an empty string — and the next unlock through the other secret asks for this one
 // once, so the two copies come back in step.
 // Every mutate-seal-store runs in turn. Sealing is Argon2id over 64 MiB, so two flows that overlap
@@ -75,8 +75,8 @@ async function persistNow() {
   }
   const hw = await stored('hardware')
   if (hw) {
-    if (s.prfKey) {
-      const sealed = await call('vault_seal', { passphrase: s.prfKey, plaintext: s.plaintext, kdf: CONFIG.KDF })
+    if (s.hwKey) {
+      const sealed = await call('vault_seal', { passphrase: s.hwKey, plaintext: s.plaintext, kdf: CONFIG.KDF })
       updates.hardware = { ...hw, vault: sealed.vault, stale: false }
     } else if (!hw.stale) {
       updates.hardware = { ...hw, stale: true }
@@ -106,7 +106,7 @@ async function createIdentity({ name, alg = 'ed25519', passphrase }) {
     plaintext.roots.push(entry)
   } else {
     plaintext = { v: 1, roots: [entry], ledger: [], contacts: [] }
-    session = { passphrase, plaintext, prfKey: null }
+    session = { passphrase, plaintext, hwKey: null }
   }
   await persist()
   touch()
@@ -125,21 +125,25 @@ async function unlock(passphrase) {
   }
   let plaintext
   try { ({ plaintext } = await call('vault_open', { passphrase, vault })) } catch { throw fail('wrong_passphrase', 'the passphrase does not open the vault') }
-  session = { passphrase, plaintext, prfKey: null }
+  session = { passphrase, plaintext, hwKey: null }
   touch()
   broadcast({ type: 'unlocked' })
   return state()
 }
 
-async function unlockHardware(prfKey) {
+async function unlockHardware({ key, asserted }) {
   const hw = await stored('hardware')
   if (!hw) throw fail('no_hardware', 'no hardware-wrapped copy on this device')
   if (hw.stale) throw fail('stale', 'the hardware copy is behind the vault: unlock with the passphrase once, then the copy is refreshed')
+  // In `gate` mode the key is the wallet's own and lives in this profile; the credential's part is
+  // to have answered. That is a gate on the flow, not a secret at rest, and the wallet says so.
+  const hwKey = hw.mode === 'gate' ? (asserted ? hw.key : null) : key
+  if (!hwKey) throw fail('wrong_key', 'the authenticator did not answer')
   let plaintext
-  try { ({ plaintext } = await call('vault_open', { passphrase: prfKey, vault: hw.vault })) } catch { throw fail('wrong_key', 'this security key does not open the vault') }
+  try { ({ plaintext } = await call('vault_open', { passphrase: hwKey, vault: hw.vault })) } catch { throw fail('wrong_key', 'this security key does not open the vault') }
   // The passphrase is not known on this path; the vault re-seals under the PRF key only until
   // the passphrase is entered again, so `persist()` keeps both copies in step when it can.
-  session = { passphrase: '', plaintext, prfKey }
+  session = { passphrase: '', plaintext, hwKey }
   touch()
   broadcast({ type: 'unlocked' })
   return state()
@@ -151,7 +155,7 @@ async function importVault({ vault, passphrase }) {
   try { ({ plaintext } = await call('vault_open', { passphrase, vault })) } catch { throw fail('wrong_passphrase', 'the passphrase does not open this file') }
   await store({ vault })
   await chrome.storage.local.remove('hardware')
-  session = { passphrase, plaintext, prfKey: null }
+  session = { passphrase, plaintext, hwKey: null }
   touch()
   broadcast({ type: 'changed' })
   return state()
@@ -165,9 +169,10 @@ async function state() {
     hasVault: !!vault,
     vaultStale: !!(await stored('vaultStale')),
     passphraseKnown: !!(session && session.passphrase),
-    hardware: hw ? { enabled: true, stale: !!hw.stale } : { enabled: false },
+    hardware: hw ? { enabled: true, mode: hw.mode || 'prf', stale: !!hw.stale } : { enabled: false },
     roots: session ? rootsOf(session.plaintext) : [],
     noticeShown: !!(await stored('noticeShown')),
+    passkeyBackup: (await stored('passkeyBackup')) || null,
     drive: !!CONFIG.DRIVE_CLIENT_ID,
     pending: [...pending.values()].map((p) => ({ id: p.id, kind: p.kind, origin: p.origin })),
   }
@@ -359,10 +364,14 @@ async function requestFor(reqId) {
 
 async function command(msg) {
   switch (msg.type) {
+    // A window that is open holds the worker awake so the unlocked vault survives while a person
+    // is filling a form. It deliberately does NOT touch(): the idle lock is about the person
+    // being away, and a ticking keepalive must not stand in for them being here.
+    case 'keepalive': return { awake: true }
     case 'state': return state()
     case 'request': return requestFor(msg.reqId)
     case 'unlock': return unlock(msg.passphrase)
-    case 'unlock:hardware': return unlockHardware(msg.prfKey)
+    case 'unlock:hardware': return unlockHardware({ key: msg.key, asserted: !!msg.asserted })
     case 'lock': lock(); return state()
     case 'create': return createIdentity(msg)
     case 'import': return importVault(msg)
@@ -422,16 +431,68 @@ async function command(msg) {
       if (p) settle(p.id, { contacts: pt.contacts, book: pt.contacts }) // `book`: the name the portal's return-with-archive screen reads
       return { contacts: pt.contacts }
     }
-    case 'hardware:get': { const hw = await stored('hardware'); return hw ? { credentialId: hw.credentialId, salt: hw.salt, stale: !!hw.stale } : null }
+    // Only that one was made, and when: the passkey holds the backup, not this record.
+    case 'passkey:noted': { await store({ passkeyBackup: { at: nowIso(), count: msg.count || 1 } }); return { ok: true } }
+    case 'hardware:get': { const hw = await stored('hardware'); return hw ? { mode: hw.mode || 'prf', credentialId: hw.credentialId, salt: hw.salt, stale: !!hw.stale } : null }
+    // The root keys, handed to the wallet's own window for one purpose: writing them into an
+    // authenticator that can hold them. No page can reach this — the bridge does not forward it —
+    // but it is the one moment a root leaves the worker, and it is worth naming as such.
+    case 'hardware:secrets': {
+      const pt = requireUnlocked()
+      // Everything a restore needs to rebuild the identity: the key, the name the certificate
+      // carries, the certificate itself when the blob will take it, and when it was made.
+      return { roots: Object.fromEntries((pt.roots || []).map((r) => [r.fingerprint, { pkcs8: r.pkcs8, cn: r.cn, cert: r.cert, created: r.created, alg: r.alg }])) }
+    }
+    // A restore on a machine that has never seen this wallet: the passkey held the root, the rest
+    // is rebuilt. The ledger and the contact book were not in it and are not invented here — the
+    // wallet says so rather than starting with an empty history that looks like a real one.
+    case 'restore:passkey': {
+      if (await stored('vault')) throw fail('bad_request', 'this device already holds a vault; a restore would replace it')
+      const passphrase = msg.passphrase
+      if (!passphrase || passphrase.length < 8) throw fail('bad_request', 'the passphrase needs at least eight characters')
+      const entries = Object.entries(msg.roots || {})
+      if (!entries.length) throw fail('bad_request', 'that backup holds no identity')
+      const roots = []
+      for (const [fingerprint, r] of entries) {
+        const pkcs8 = typeof r === 'string' ? r : r.pkcs8
+        if (!pkcs8) throw fail('bad_request', 'that backup holds no key')
+        const cn = (typeof r === 'object' && r.cn) || 'Restored identity'
+        // The certificate, rebuilt from the key when the blob could not carry it. The identity is
+        // the fingerprint of the public key (SPEC §2), so the rebuilt one is the same identity and
+        // every contact's pin still matches; only the bytes differ.
+        let cert = typeof r === 'object' ? r.cert : null
+        let rebuilt = false
+        if (!cert) {
+          const made = await call('build_root', { cn, pkcs8, not_before: (typeof r === 'object' && r.created) || nowIso() })
+          if (made.fingerprint !== fingerprint) throw fail('bad_request', 'the key in that backup is not the identity it names')
+          cert = made.der
+          rebuilt = true
+        }
+        roots.push({ fingerprint, cn, alg: (typeof r === 'object' && r.alg) || 'ed25519', pkcs8, cert, created: (typeof r === 'object' && r.created) || nowIso(), restored: true, certRebuilt: rebuilt })
+      }
+      const plaintext = { v: 1, roots, ledger: [], contacts: [] }
+      const { vault } = await call('vault_seal', { passphrase, plaintext, kdf: CONFIG.KDF })
+      await store({ vault, vaultStale: false, noticeShown: true })
+      session = { passphrase, plaintext, hwKey: null }
+      touch()
+      broadcast({ type: 'changed' })
+      return { roots: rootsOf(plaintext), rebuilt: roots.some((r) => r.certRebuilt) }
+    }
     case 'hardware:enable': {
       const pt = requireUnlocked()
-      if (typeof msg.prfKey !== 'string' || msg.prfKey.length < 32) throw fail('bad_request', 'no PRF output')
-      const sealed = await call('vault_seal', { passphrase: msg.prfKey, plaintext: pt, kdf: CONFIG.KDF })
-      await store({ hardware: { credentialId: msg.credentialId, salt: msg.salt, vault: sealed.vault, stale: false } })
-      session.prfKey = msg.prfKey
+      const mode = msg.mode || 'prf'
+      if (!['prf', 'root-on-key', 'gate'].includes(mode)) throw fail('bad_request', `unknown hardware mode ${mode}`)
+      if (typeof msg.key !== 'string' || msg.key.length < 32) throw fail('bad_request', 'the authenticator gave no secret')
+      const sealed = await call('vault_seal', { passphrase: msg.key, plaintext: pt, kdf: CONFIG.KDF })
+      const record = { mode, credentialId: msg.credentialId, salt: msg.salt, vault: sealed.vault, stale: false }
+      // `gate` alone keeps its key here: nothing else can hold it, which is the whole of what that
+      // mode is and is not.
+      if (mode === 'gate') record.key = msg.key
+      await store({ hardware: record })
+      session.hwKey = msg.key
       return { ok: true }
     }
-    case 'hardware:disable': await chrome.storage.local.remove('hardware'); if (session) session.prfKey = null; return { ok: true }
+    case 'hardware:disable': await chrome.storage.local.remove('hardware'); if (session) session.hwKey = null; return { ok: true }
     default: throw fail('bad_request', `unknown command ${msg.type}`)
   }
 }
