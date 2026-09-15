@@ -42,22 +42,52 @@ func IPIsPrivate(ip string) bool {
 	return false
 }
 
+// bareHost is the host of an https URL's authority with no brackets, no userinfo and NO PORT — what
+// every check below compares against a name or parses as an address.
+//
+// `hostOf` is the authority, port and all, which is what the dNSName rule (§14.1) and the wallet's
+// same-host test want. The guard wants the other thing, and using the authority here was a hole: a
+// normal-form endpoint may carry a non-default port (§14.1 omits only the default), so
+// `https://127.0.0.1:8443/mcp` compared "127.0.0.1:8443" against "127.0.0.1", matched nothing,
+// parsed as no address at all, and passed — while the Rust core, whose `host_of` strips the port,
+// refused it. Two ports disagreeing about what is local is exactly what CONTRACT §0 forbids.
+func bareHost(endpoint string) string {
+	host := hostOf(endpoint)
+	if i := strings.LastIndexByte(host, '@'); i >= 0 {
+		host = host[i+1:]
+	}
+	if strings.HasPrefix(host, "[") {
+		if end := strings.IndexByte(host, ']'); end >= 0 {
+			return host[1:end]
+		}
+		return strings.TrimPrefix(host, "[")
+	}
+	if i := strings.IndexByte(host, ':'); i >= 0 {
+		host = host[:i]
+	}
+	return host
+}
+
 // AddressGuard vets an endpoint before intake or a dial. selfEndpoint is the receiver's own; guest says
 // the caller is not a pinned contact, for whom the receiver's own address is never a valid claim.
 func AddressGuard(endpoint, selfEndpoint string, guest bool) (bool, string) {
+	// The normal form first (§14.1): every other spelling of an address — an IPv4 in decimal, hex or
+	// octal, a host with an odd case — is refused here, never resolved.
 	if !IsNormalHTTPS(endpoint) {
 		return false, "endpoint is not an https URL in normal form"
 	}
-	host := strings.TrimSuffix(hostOf(endpoint), ".") // a trailing dot names the same host
-	bare := strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
-	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
-		return false, "host is loopback"
+	host := strings.ToLower(strings.TrimSuffix(bareHost(endpoint), ".")) // a trailing dot names the same host
+	if host == "" {
+		return false, "endpoint is not an https URL"
 	}
-	if a := parseIP(bare); a.IsValid() && IPIsPrivate(bare) {
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return false, "endpoint host is local"
+	}
+	if a := parseIP(host); a.IsValid() && IPIsPrivate(host) {
 		return false, "endpoint host is a loopback, link-local or private address"
 	}
 	if guest && selfEndpoint != "" && endpoint == selfEndpoint {
-		return false, "a guest's endpoint is the receiver's own"
+		return false, "a guest's endpoint names this node's own address"
 	}
 	return true, ""
 }

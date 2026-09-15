@@ -39,9 +39,11 @@ pub fn from_b64u(s: &str) -> Result<Vec<u8>> {
         c => c,
     }).collect();
     let trimmed = cleaned.trim_end_matches('=');
+    // One fixed message, not the decoder's: the Go port cannot reproduce another library's wording,
+    // and CONTRACT §0 promises the same answer from both, `why` included.
     base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(trimmed)
-        .map_err(|e| Error::new("parse", format!("base64url: {e}")))
+        .map_err(|_| Error::new("parse", "not base64url"))
 }
 
 pub fn sha256(b: &[u8]) -> [u8; 32] {

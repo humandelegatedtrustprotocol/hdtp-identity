@@ -51,7 +51,9 @@ type SealOpts struct {
 	TS           int64
 	Exp          int64
 	Cty          string
-	Seed         []byte // test-only: a deterministic ephemeral for the vectors
+	// Seed fixes the ephemeral so a vector can be reproduced byte for byte, which is how a port
+	// proves its sealing agrees with the seed library's. Production leaves it nil and draws its own.
+	Seed []byte
 }
 
 func headerJSON(suite, kid, msgID string, ts, exp int64, cty string) []byte {
@@ -62,13 +64,13 @@ func proofMember(o SealOpts) ([]byte, error) {
 	switch o.Form {
 	case "chain":
 		if len(o.SenderChain) != 2 {
-			return nil, errors.New("sender_chain must be the leaf and the root")
+			return nil, errArg("sender_chain must be the leaf and the root")
 		}
 		return []byte(`,"chain":[` + jsonString(B64url(o.SenderChain[0])) + `,` + jsonString(B64url(o.SenderChain[1])) + `]`), nil
 	case "leaf":
 		return []byte(`,"leaf":` + jsonString(Fingerprint(o.Sender.Public.SPKI))), nil
 	}
-	return nil, errors.New("form must be chain or leaf")
+	return nil, errArg("form is chain or leaf")
 }
 
 func sealBody(o SealOpts, body []byte) (*Envelope, error) {
@@ -135,7 +137,7 @@ func SealResult(o SealOpts) (*Envelope, error) {
 		}
 		lead = concat([]byte(`{"error":`), e)
 	default:
-		return nil, errors.New("exactly one of result and error")
+		return nil, errArg("a result carries exactly one of result and error")
 	}
 	proof, err := proofMember(o)
 	if err != nil {
@@ -672,10 +674,12 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 		return nil, errors.New("signature is not the chain's leaf key")
 	}
 	out.Form, out.Root, out.Endpoint = "chain", vr.RootFingerprint, vr.Endpoint
+	pinned := false
 	for _, p := range o.Pins {
 		if p.Root != vr.RootFingerprint {
 			continue
 		}
+		pinned = true
 		cmp, err := CompareLeaves(FromB64url(p.Leaf), chain[0])
 		if err != nil || cmp == "superseded" {
 			return nil, errors.New("superseded leaf")
@@ -683,9 +687,15 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 		if cmp == "conflict" {
 			return nil, errors.New("a different leaf with the same notBefore")
 		}
-		if cmp == "newer" || p.Endpoint != vr.Endpoint {
+		if cmp == "newer" {
 			out.LeafUpdate = chain[0]
 		}
+	}
+	// No pin for this root is first contact, and the leaf that rode along is what a caller pins.
+	// Handing it back only from inside the loop meant a caller holding no pins was never told what to
+	// pin — it could read a result and still have nothing to recognise the peer by next time.
+	if !pinned {
+		out.LeafUpdate = chain[0]
 	}
 	return &out, nil
 }

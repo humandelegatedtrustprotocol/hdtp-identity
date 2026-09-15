@@ -58,6 +58,11 @@ fn proof(form: Form, sender: &PrivateKey, sender_chain: Option<&[Vec<u8>]>) -> R
     match form {
         Form::Chain => {
             let chain = sender_chain.ok_or_else(|| Error::new("bad_request", "the chain form needs sender_chain"))?;
+            // §13: the chain form carries the leaf and the root, in that order. Two is the only
+            // length that is a chain; one or three was assembled here and refused by the Go port.
+            if chain.len() != 2 {
+                return err("bad_request", "sender_chain must be the leaf and the root");
+            }
             Ok(("chain", Value::Array(chain.iter().map(|c| Value::String(b64u(c))).collect())))
         }
         Form::Leaf => Ok(("leaf", Value::String(sender.public().fingerprint()))),

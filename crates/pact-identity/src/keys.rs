@@ -240,8 +240,13 @@ impl PrivateKey {
             ])),
             PrivateKey::P256(k) => {
                 let d = Zeroizing::new(k.to_bytes());
-                let pubkey = k.public_key().to_encoded_point(false);
-                let ec = Zeroizing::new(der::seq(&[der::int(1), der::octet(&d[..]), der::explicit(1, &der::bitstr(pubkey.as_bytes(), 0))]));
+                // RFC 5915's optional publicKey is left out, because the seed library's
+                // `export({format:'der',type:'pkcs8'})` leaves it out and the seed is the authority
+                // on bytes (CONTRACT §0). Including it made this core's P-256 private keys a
+                // different 138-byte string for the same key the Go port and the vectors write in 67
+                // — two spellings of one key, which is the thing the profile exists to prevent. The
+                // reader still accepts either form, so keys written before this still open.
+                let ec = Zeroizing::new(der::seq(&[der::int(1), der::octet(&d[..])]));
                 Zeroizing::new(der::seq(&[
                     der::int(0),
                     der::seq(&[der::oid(OID_EC_PUBLIC_KEY), der::oid(OID_PRIME256V1)]),
@@ -327,9 +332,14 @@ mod tests {
         let k = PrivateKey::from_pkcs8(&compact).unwrap();
         let derived = PrivateKey::from_seed(Alg::P256, &seed("host/bharat/2026")).unwrap();
         assert_eq!(k.public().spki(), derived.public().spki());
-        let full = k.to_pkcs8();
+        // Written in the seed library's form: RFC 5915's optional publicKey left out, so one key is
+        // one byte string wherever it is written (CONTRACT §0).
+        assert_eq!(&k.to_pkcs8()[..], &compact[..]);
+        // Read in either form, because keys written before that was true are still keys.
+        let full = from_hex("308187020100301306072a8648ce3d020106082a8648ce3d030107046d306b02010104206a261bbb098c126fe60dcc26a72045d97db5079d52cd59826220705150ad60d7a14403420004d6e652937ca86505559bc84e4936573de2d110833c4718cef004a203c054a92dcdfb5e5765ebc267dc3d241783447ba3b58cec954ea8ca5f24fdb8963dca1897").unwrap();
         assert_eq!(full.len(), 138);
         assert_eq!(PrivateKey::from_pkcs8(&full).unwrap().public().spki(), k.public().spki());
+        assert_eq!(&PrivateKey::from_pkcs8(&full).unwrap().to_pkcs8()[..], &compact[..]);
         let sig = k.sign(b"x");
         assert!(k.public().verify(b"x", &sig));
         let spki = PublicKey::from_spki(k.public().spki()).unwrap();

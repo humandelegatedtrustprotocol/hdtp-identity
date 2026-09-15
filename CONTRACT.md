@@ -22,6 +22,19 @@ and on the `v: 1` vectors in SPEC.md Appendix B.
   (`envelope_invalid`, `chain_required`, `certificate_renewed`, `bad_request`, `pending_approval`) and
   otherwise one of `parse`, `profile`, `unsupported`, `key`, `vault`, `internal`. Ports never throw
   across the boundary.
+- **A member that is absent is not a member that is empty.** Absent answers `{"error": "bad_request",
+  "why": "<name> is required"}` naming the member the caller left out; present but unusable — `""`,
+  bytes that will not decode, a string where an object belongs — answers what is wrong with the value
+  (`parse`/`"not base64url"`, a parser's own words). A port whose zero value and missing value are
+  the same thing loses this distinction, and both have: `{"spki": ""}` once read as "spki is
+  required" in one port and as a truncated DER in the other. The JSON literal `null` counts as absent.
+- **The order a function reads its members is part of its answer.** When several required members are
+  missing, the one named is the first the function needs, and both ports read them in the same order.
+- **`why` is part of the answer.** Two ports refusing the same call in different words is a
+  divergence, not a detail: it is what a person debugging reads, and what a caller's test asserts. No
+  `why` may be a library's own error text — one port cannot reproduce another library's wording.
+- **`version` is the one exception.** It describes the port, not a rule, so its answer differs and
+  nothing compares it.
 - The Wasm boundary takes `&str` JSON and `&[u8]` DER and returns `String` JSON. The Go port exposes
   the same functions as Go functions on `[]byte`/`string` returning structs, plus a `pact-identity-go`
   binary that reads one JSON request on stdin (`{"fn": "<name>", "args": {...}}`) and writes the
@@ -87,7 +100,7 @@ Strict DER, nothing trailing.
 | Function | Input | Output |
 |---|---|---|
 | `card_encode` | `{"fn", "cert", "seal"?: "none"\|"optional"\|"required", "extra"?: [lines]}` | `{"vcard"}` — folded per RFC 6350 at 75 octets, CRLF, exactly as `card.mjs` |
-| `card_decode` | `{"vcard", "now"}` | `{"fn", "version": 2, "seal", "cert", "root", "endpoint", "expired": bool, "ignored": [names], "bytes": int}` or `{"error": "bad_request", "why"}` with the exact `why` strings of `card.mjs` |
+| `card_decode` | `{"vcard", "now"}` | `{"fn", "version": 2, "seal", "cert", "root", "endpoint", "expired": bool, "ignored": [names], "bytes": int, "leaf": the certificate read back, as `parse_certificate` answers it}` or `{"error": "bad_request", "why"}` with the exact `why` strings of `card.mjs` |
 | `card_compat_encode` (Appendix C) | `{"fn", "cert", "seal"?, "gateway"?}` | a `X-PACT-VERSION:1` card carrying `X-PACT-ENDPOINT` and `X-PACT-KEY` from the leaf, for a peer known to be 1.x |
 
 `card_decode` is intake: it refuses no version, a version it does not implement, zero or several
@@ -239,15 +252,30 @@ material behind treats the strings it passes and receives as its own to clear.
    exactly as `gen.mjs`), open the four `v: 1` vectors from SPEC.md Appendix B, prove every chain
    case, newest-leaf case, `certificate_renewed` case and `v: 2` envelope, and reproduce the three
    envelopes' `enc`/`ct` from their ephemeral seeds.
-2. `js/check.mjs` runs the same proof through the Wasm bindings in Node, reading vectors from SPEC.md
-   as the seed's `check.mjs` does.
+2. `js/check.mjs` runs the same proof through a port in Node, reading vectors from SPEC.md as the
+   seed's `check.mjs` does: `--port wasm` (default) or `--port go`. **Both**, because for a long time
+   only the first was run and the second was failing three assertions unseen — the three that re-seal
+   a vector from its ephemeral seed and compare the bytes, which is the only check proving a port's
+   envelopes are the vectors' envelopes.
 3. `js/intrude.mjs` replays every scenario of `pact-protocol/vectors/intrude.mjs` with Mallory built
    on the seed library and the defender on a port: `--port wasm` (default) or `--port go`. Every
    scenario's verdict must match the seed's: blocked, residual, never REPRODUCES — and the run fails
    if the two suites do not hold the same scenarios, so neither side's count is written down here.
-4. `js/parity.mjs` feeds both ports the same arguments — a missing one, bytes that will not decode,
-   an explicit `valid_days: 0`, a mismatched `sig_alg`, a name that straddles the vCard fold — and
-   compares the answers member by member. The vectors prove the bytes a peer sees; this proves the
-   codes, the words and the shapes a *caller* sees, which no vector carries.
+4. `js/parity.mjs` is a **gate**, not a courtesy. It feeds both ports the same arguments — a missing
+   member, a member that is `null`, bytes that will not decode, an explicit `valid_days: 0`, a
+   mismatched `sig_alg`, a name that straddles the vCard fold, every private and loopback spelling of
+   an address, a root offered as a key id — and compares the whole answer, `why` strings included.
+   The vectors prove the bytes a peer sees; this proves the codes, the words and the shapes a
+   *caller* sees, which no vector carries. It also fails when:
+   - the two dispatchers stop naming the same set of functions (`version` lived in one and not the
+     other until this check existed);
+   - a function on either dispatcher has no case here, so the contract cannot grow past its guard;
+   - a function is only ever compared through a list of named keys rather than whole. That last one
+     is the point: `card_decode` dropped its entire `leaf` member in one port, and a key list would
+     never have noticed, because a key list only looks at the keys someone thought to name. Where an
+     answer carries something genuinely per-run — a random serial, a fresh ephemeral — the case
+     passes a function that replaces that one value with a description of it, and everything else is
+     still compared. Narrowing a case to `['error']` to make a disagreement go away is not a fix: a
+     differing `why` *is* the finding.
 5. `wasm-bindgen-test` in headless Chrome for the browser build; the gateway's vitest pool for the
    Worker build (phase 2.0); `extension/ npm test` for the wallet that loads `pkg-web`.
