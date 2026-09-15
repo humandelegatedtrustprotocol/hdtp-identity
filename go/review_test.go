@@ -297,3 +297,38 @@ func TestLifetimeAndCallerSideChecks(t *testing.T) {
 	}
 	_ = time.Second
 }
+
+// The 1-in-256 bug the strict reader surfaced: eight random bytes beginning 0x00 used to encode as a
+// non-minimal INTEGER, and ParseCertificate then refused a certificate this port had just issued.
+// Both halves are asserted, because either alone passes: the encoder produces minimal bytes, and the
+// serial generator never hands it a value that would shrink under 64 bits.
+func TestIntegersAreMinimalAndSerialsStaySixtyFourBits(t *testing.T) {
+	for _, c := range []struct {
+		in   []byte
+		want []byte
+	}{
+		{[]byte{0x00, 0x11, 0x22}, []byte{0x02, 0x02, 0x11, 0x22}},
+		{[]byte{0x00, 0x00, 0x01}, []byte{0x02, 0x01, 0x01}},
+		{[]byte{0x80, 0x11}, []byte{0x02, 0x03, 0x00, 0x80, 0x11}},
+		{[]byte{0x00, 0x80, 0x11}, []byte{0x02, 0x03, 0x00, 0x80, 0x11}},
+		{[]byte{0x00}, []byte{0x02, 0x01, 0x00}},
+	} {
+		if got := derInt(c.in); !bytes.Equal(got, c.want) {
+			t.Errorf("derInt(%x) = %x, want %x", c.in, got, c.want)
+		}
+		node, err := derRead(derInt(c.in), 0)
+		if err != nil || !derIntMinimal(node.content) {
+			t.Errorf("derInt(%x) does not read back as minimal", c.in)
+		}
+	}
+	for i := 0; i < 512; i++ {
+		s := randomSerial()
+		if len(s) != 8 || s[0] == 0 {
+			t.Fatalf("randomSerial gave %x, which the profile would refuse once encoded", s)
+		}
+		node, err := derRead(derInt(s), 0)
+		if err != nil || !derIntMinimal(node.content) || len(node.content) < 8 {
+			t.Fatalf("serial %x encoded to %d non-minimal bytes", s, len(node.content))
+		}
+	}
+}
