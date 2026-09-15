@@ -320,8 +320,31 @@ func TestSealAndOpenResult(t *testing.T) {
 	if d.Result["code"] != "ok" || d.Result["tier"] != "contact" {
 		t.Errorf("decide on a sealed request: %v", d.Result)
 	}
-	if !bytes.Contains(Call("seal_request", mustJSON(map[string]any{"recipient_leaf": B64url(der("leaf_b")), "sender_pkcs8": B64url(hexBytes(t, v.LeafKeys["leaf_a"])), "form": "leaf", "params": json.RawMessage(`{}`), "msg_id": "m", "ts": 1, "ephemeral_seed": B64url(make([]byte, 32))})), []byte("refused")) {
-		t.Error("seal_request should refuse a seed")
+	// A seed fixes the ephemeral so the same call lands on the same bytes twice — the property the
+	// vector checker leans on when it re-seals a vector and compares. This port used to refuse the
+	// seed, so that check could not run here at all.
+	sealArgs := map[string]any{"recipient_leaf": B64url(der("leaf_b")), "sender_pkcs8": B64url(hexBytes(t, v.LeafKeys["leaf_a"])), "form": "leaf", "params": json.RawMessage(`{}`), "msg_id": "m", "ts": 1, "ephemeral_seed": B64url(make([]byte, 32))}
+	first, second := Call("seal_request", mustJSON(sealArgs)), Call("seal_request", mustJSON(sealArgs))
+	if !bytes.Equal(first, second) || bytes.Contains(first, []byte(`"error"`)) {
+		t.Errorf("seal_request from a seed should repeat exactly: %s / %s", first, second)
+	}
+	sealArgs["ephemeral_seed"] = B64url(make([]byte, 8))
+	if !bytes.Contains(Call("seal_request", mustJSON(sealArgs)), []byte("32 bytes")) {
+		t.Error("seal_request should refuse a seed that is not 32 bytes")
+	}
+}
+
+// Arguments that are not an object, including the literal `null`, are one answer in both ports.
+// `js/parity.mjs` cannot reach this: its shim turns a null into `{}` before either port sees it.
+func TestArgsMustBeAnObject(t *testing.T) {
+	for _, args := range []string{`null`, `[]`, `3`, `"x"`, `true`} {
+		if out := Call("key_info", json.RawMessage(args)); !bytes.Contains(out, []byte("args is a JSON object")) {
+			t.Errorf("key_info(%s): %s", args, out)
+		}
+	}
+	// An absent `args` is not the same thing, and still reaches the function.
+	if out := Call("key_info", nil); !bytes.Contains(out, []byte("spki is required")) {
+		t.Errorf("key_info with no args: %s", out)
 	}
 }
 
