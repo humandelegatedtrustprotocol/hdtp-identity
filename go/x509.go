@@ -62,10 +62,20 @@ func keyUsageBits(bits []int) []byte {
 // SerialOf is the vectors' serial: SHA-256("serial/" + label), first 8 bytes.
 func SerialOf(label string) []byte { return sha256Sum([]byte("serial/" + label))[:8] }
 
+// randomSerial draws eight random bytes with a non-zero first byte.
+//
+// The profile wants a positive serial of 64–160 bits, and derInt is now canonical — so a value
+// beginning 0x00 would encode to seven significant bytes and be refused for being under 64 bits.
+// Drawing again is the unbiased way to keep all eight significant; it costs one extra draw once in
+// every 256 certificates.
 func randomSerial() []byte {
-	b := make([]byte, 8)
-	_, _ = rand.Read(b)
-	return b
+	for {
+		b := make([]byte, 8)
+		_, _ = rand.Read(b)
+		if b[0] != 0 {
+			return b
+		}
+	}
 }
 
 // RootOpts builds a root certificate to the profile.

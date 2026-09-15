@@ -61,8 +61,19 @@ pub fn serial_of(label: &str) -> Vec<u8> {
     crate::util::sha256(format!("serial/{label}").as_bytes())[..8].to_vec()
 }
 
+/// Eight random bytes, the first of them never zero.
+///
+/// The profile wants a positive serial of 64–160 bits, and `int_bytes` is now canonical — so a
+/// value beginning 0x00 would encode to seven significant bytes and be refused by the profile
+/// check below for being under 64 bits. Drawing again is the unbiased way to keep all eight
+/// significant, and it costs one extra draw once in every 256 certificates.
 pub fn random_serial() -> Result<Vec<u8>> {
-    crate::util::random(8)
+    loop {
+        let b = crate::util::random(8)?;
+        if b[0] != 0 {
+            return Ok(b);
+        }
+    }
 }
 
 /// One certificate's TBS and the algorithm it declares, ready to be signed by the issuer — inside

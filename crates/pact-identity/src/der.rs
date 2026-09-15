@@ -58,7 +58,18 @@ pub fn null() -> Vec<u8> {
 }
 
 /// INTEGER from big-endian magnitude bytes: a leading zero is added when the high bit is set.
+/// A DER INTEGER: minimal two's-complement, always.
+///
+/// Prepending 0x00 for a set top bit was only half the rule; a *redundant* leading 0x00 has to
+/// come off. `random_serial` hands eight random bytes straight here, so one serial in 256 began
+/// 0x00 and was encoded non-minimally — and `parse_certificate`, strict since the cryptographic
+/// review, then refused a certificate this core had just issued.
 pub fn int_bytes(v: &[u8]) -> Vec<u8> {
+    let mut at = 0;
+    while at + 1 < v.len() && v[at] == 0 && v[at + 1] & 0x80 == 0 {
+        at += 1;
+    }
+    let v = &v[at..];
     if !v.is_empty() && v[0] & 0x80 != 0 {
         let mut c = vec![0u8];
         c.extend_from_slice(v);
@@ -236,6 +247,42 @@ pub fn read_oid(node: &Node<'_>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// The 1-in-256 bug: eight random bytes beginning 0x00 used to encode non-minimally, and the
+    /// strict reader the cryptographic review added then refused a certificate this core had just
+    /// issued. Asserted on the encoder and through the reader, because either half alone passes.
+    #[test]
+    fn integers_are_minimal_whatever_they_are_handed() {
+        // A redundant leading zero comes off.
+        assert_eq!(int_bytes(&[0x00, 0x11, 0x22]), vec![0x02, 0x02, 0x11, 0x22]);
+        assert_eq!(int_bytes(&[0x00, 0x00, 0x01]), vec![0x02, 0x01, 0x01]);
+        // A necessary one goes on, and is not then stripped again.
+        assert_eq!(int_bytes(&[0x80, 0x11]), vec![0x02, 0x03, 0x00, 0x80, 0x11]);
+        assert_eq!(int_bytes(&[0x00, 0x80, 0x11]), vec![0x02, 0x03, 0x00, 0x80, 0x11]);
+        // Zero is one byte, not none.
+        assert_eq!(int_bytes(&[0x00]), vec![0x02, 0x01, 0x00]);
+        // And every one of them reads back as minimal.
+        for v in [vec![0x00, 0x11, 0x22], vec![0x00], vec![0x80, 0x11], vec![0x00, 0x00, 0x01]] {
+            let encoded = int_bytes(&v);
+            let node = read(&encoded, 0).unwrap();
+            assert!(int_minimal(node.content), "{v:02x?} encoded non-minimally");
+        }
+    }
+
+    /// A serial the profile will accept: eight significant bytes, never a leading zero, so the
+    /// canonical encoding cannot shrink it under the 64 bits the profile asks for.
+    #[test]
+    fn random_serials_survive_canonical_encoding() {
+        for _ in 0..512 {
+            let serial = crate::x509::random_serial().unwrap();
+            assert_eq!(serial.len(), 8);
+            assert_ne!(serial[0], 0);
+            let encoded = int_bytes(&serial);
+            let node = read(&encoded, 0).unwrap();
+            assert!(int_minimal(node.content));
+            assert!(node.content.len() >= 8, "a serial must stay at least 64 bits");
+        }
+    }
+
     #[test]
     fn encodes_and_reads() {
         assert_eq!(oid("1.2.840.10045.4.3.2"), vec![0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x02]);
