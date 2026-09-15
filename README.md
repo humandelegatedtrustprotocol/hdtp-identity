@@ -42,6 +42,16 @@ the profile is exact, and every byte is under this crate's control.
 `panic = "abort"`, no `wasm-opt` — binaryen is not installed here; `WASM_OPT= sh js/build.sh` runs it
 when it is, and typically takes 15–25 % off). Argon2id and the P-256 field arithmetic are most of it.
 
+**In CI.** `.github/workflows/pact-identity.yml` runs the same list. It cannot use
+`actions/checkout`'s `submodules: true`, because every repository here is private and a runner's
+`GITHUB_TOKEN` is scoped to the one it is running in — git answers "Repository not found" for a
+sibling, which reads like a missing repository rather than a missing permission, and this job failed
+that way on every run it had before 2026-09-15. It now checks out `pact-protocol` by name, at the
+commit this tree pins, using a **`PACT_PROTOCOL_TOKEN`** secret: a fine-grained PAT with read-only
+Contents on that repository (a read-only deploy key via `ssh-key` works too). Without the secret the
+job stops at its first step and says so, rather than failing at checkout for a reason that looks
+unrelated. `pact-cloud` is not fetched; nothing here reads it.
+
 **Workers.** Workers Builds has no Rust toolchain, so the gateway vendors the built `js/pkg-web`
 files and checks `pact_identity_wasm_bg.wasm` against `js/manifest.json` with `node js/verify.mjs
 <file>` before it ships. wasm-bindgen's bundler target does not run on workerd; the web package does,
