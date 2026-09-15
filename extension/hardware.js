@@ -114,8 +114,12 @@ export async function unlockKey({ mode, credentialId, salt }) {
 async function prfEvaluate(credentialId, salt) {
   const ext = await assertWith(credentialId, { prf: { eval: { first: b64u.decode(salt) } } })
   const first = ext.prf && ext.prf.results && ext.prf.results.first
+  // Typed, and carrying the credential: an authenticator that says it supports PRF at registration
+  // and then evaluates to nothing is exactly the case the gate offer exists for — a password
+  // manager, most often. A plain Error here reached the window with no `code`, so the offer that
+  // would have let the person carry on was never made and they were left at a dead end.
   if (!first) {
-    throw new Error(ext.prf
+    throw new NoSecret(credentialId, ext.prf
       ? 'the authenticator verified you but returned no PRF output: this credential cannot hold the wallet\'s secret'
       : 'this authenticator does not support the PRF extension')
   }

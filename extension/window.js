@@ -98,9 +98,11 @@ let state = null
 let request = null
 
 async function refreshStatus() {
-  // Remembered so a disconnect knows whether an unlocked session died with the worker.
+  // Remembered so a disconnect knows whether an unlocked session died with the worker. It tracks
+  // the wallet rather than latching: after a deliberate Lock, or the idle lock, nothing unlocked is
+  // left to lose, and a worker evicted afterwards must not tell the person it locked itself.
   state = await rpc('state')
-  if (!state.locked) unlockedHere = true
+  unlockedHere = !state.locked
   text('status', state.locked ? 'locked' : `${state.roots.length} identit${state.roots.length === 1 ? 'y' : 'ies'} · unlocked`)
   $('status').className = 'pill ' + (state.locked ? 'locked' : 'open')
 }
@@ -130,15 +132,24 @@ function route() {
       if (request && request.kind === 'ceremony') $('f-create').elements.name.value = request.display_name || ''
       return show('s-create')
     }
-    $('b-unlock-hw').hidden = !(state.hardware.enabled && !state.hardware.stale && hardware.hasWebAuthn())
-    return show('s-locked')
+    return lockedScreen()
   }
   if (!request) return home()
   return handleRequest()
 }
 
+function lockedScreen() {
+  $('b-unlock-hw').hidden = !(state.hardware.enabled && !state.hardware.stale && hardware.hasWebAuthn())
+  return show('s-locked')
+}
+
 async function handleRequest() {
   try { request = await rpc('request', { reqId }) } catch (e) { return done('Request gone', e.message) }
+  // The wallet can lock between this window being routed and the request being read. The worker
+  // says so on every kind of request now, and this is what that answer is for: the unlock screen,
+  // which comes back through `route` the moment the person is past it. Without this the shape was
+  // returned and ignored, and the screen drew itself from fields that were not there.
+  if (request.locked) { await refreshStatus(); return lockedScreen() }
   switch (request.kind) {
     case 'requestIdentity': return pick()
     case 'issueCertificate':
@@ -260,15 +271,12 @@ function offerGate(x) {
 async function enableHardware(attachment) {
   if (!hardware.hasWebAuthn()) throw new Error('WebAuthn is not available here')
   const root = state.roots[0]
-  // The roots travel to this window only so an authenticator that can hold them does. They are
-  // dropped the moment the write is done, and nothing else here keeps a reference.
-  let secrets = await rpc('hardware:secrets')
-  try {
-    const { mode, credentialId, salt, key } = await hardware.enroll(root ? root.cn : 'pact', attachment, secrets.roots)
-    await rpc('hardware:enable', { mode, credentialId, salt, key })
-  } finally {
-    secrets = null
-  }
+  // No roots here. Enrolment registers a credential and asks it for a secret; it never writes an
+  // identity anywhere, and `enroll` takes no roots. Fetching them anyway put every private key in
+  // this window's heap on a path that had no use for one — the backup button (`b-backup-passkey`)
+  // is the only caller that does, and it is the only one that asks.
+  const { mode, credentialId, salt, key } = await hardware.enroll(root ? root.cn : 'pact', attachment)
+  await rpc('hardware:enable', { mode, credentialId, salt, key })
   await refreshStatus()
 }
 
@@ -452,12 +460,23 @@ async function home() {
   $('b-backup-drive').hidden = !drive.driveEnabled()
   show('s-home')
 }
-$('b-backup-file').onclick = async () => { const { vault } = await rpc('export'); download('pact-vault.json', vault) }
+// Export refuses while the passphrase copy is behind the security key's, and this was the one home
+// button that did not say so — it rejected into nothing and looked like a button that does not work.
+$('b-backup-file').onclick = async () => {
+  err('e-home')
+  try { const { vault } = await rpc('export'); download('pact-vault.json', vault) } catch (x) { err('e-home', x) }
+}
 $('b-backup-import').onclick = () => show('s-import')
 $('b-backup-hw').onclick = async () => {
   err('e-home')
   try {
-    if (state.hardware.enabled) { await rpc('hardware:disable') } else { await enableHardware() }
+    // Enabling goes to the enrolment screen and its two doors. Calling `enableHardware()` here with
+    // no attachment was the same mistake that screen exists to prevent: an unpinned registration is
+    // one a password manager can take, which is how a credential that cannot derive a secret ends up
+    // holding the wallet's enrolment.
+    if (!state.hardware.enabled) { show('s-hardware'); return }
+    await rpc('hardware:disable')
+    await refreshStatus()
     home()
   } catch (x) {
     // The offer to use a credential as a gate lives on the enrolment screen, with the paragraph
