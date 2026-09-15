@@ -1,6 +1,6 @@
 //! Keys: Ed25519 and P-256 in PKCS #8 and SubjectPublicKeyInfo, fingerprints, and the conversions
 //! §13.1 names (RFC 7748 §4.1 and RFC 8032 §5.1.5 to X25519).
-use crate::der::{self, children, read, read_oid};
+use crate::der::{self, children, read, read_oid, read_oid_strict};
 use crate::util::{b64u, err, sha256, Error, Result};
 use p256::ecdsa::signature::{Signer, Verifier};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
@@ -79,7 +79,7 @@ impl PublicKey {
             return err("parse", "SubjectPublicKeyInfo algorithm");
         }
         let key = &f[1].content[1..];
-        let inner = match read_oid(&alg[0]).as_str() {
+        let inner = match read_oid_strict(&alg[0])?.as_str() {
             OID_ED25519 if alg.len() == 1 => {
                 let k: [u8; 32] = key.try_into().map_err(|_| Error::new("parse", "Ed25519 key is not 32 bytes"))?;
                 Public::Ed25519(ed25519_dalek::VerifyingKey::from_bytes(&k).map_err(|_| Error::new("parse", "Ed25519 key is not a point"))?)
@@ -88,7 +88,7 @@ impl PublicKey {
                 let k: [u8; 32] = key.try_into().map_err(|_| Error::new("parse", "X25519 key is not 32 bytes"))?;
                 Public::X25519(k)
             }
-            OID_EC_PUBLIC_KEY if alg.len() == 2 && alg[1].tag == 0x06 && read_oid(&alg[1]) == OID_PRIME256V1 => {
+            OID_EC_PUBLIC_KEY if alg.len() == 2 && alg[1].tag == 0x06 && der::oid_minimal(&alg[1]) && read_oid(&alg[1]) == OID_PRIME256V1 => {
                 // RFC 5480 §2.2 allows a compressed point; the profile takes the uncompressed form only,
                 // so one key has one SubjectPublicKeyInfo and one fingerprint.
                 if key.len() != 65 || key[0] != 0x04 {
@@ -204,7 +204,7 @@ impl PrivateKey {
         if alg.is_empty() || alg[0].tag != 0x06 {
             return err("parse", "PKCS #8 algorithm");
         }
-        match read_oid(&alg[0]).as_str() {
+        match read_oid_strict(&alg[0])?.as_str() {
             OID_ED25519 => {
                 let inner = read(f[2].content, 0)?;
                 if inner.tag != 0x04 || inner.end != f[2].content.len() {
@@ -213,7 +213,7 @@ impl PrivateKey {
                 let seed: [u8; 32] = inner.content.try_into().map_err(|_| Error::new("parse", "Ed25519 seed is not 32 bytes"))?;
                 Ok(PrivateKey::Ed25519(ed25519_dalek::SigningKey::from_bytes(&seed)))
             }
-            OID_EC_PUBLIC_KEY if alg.len() == 2 && alg[1].tag == 0x06 && read_oid(&alg[1]) == OID_PRIME256V1 => {
+            OID_EC_PUBLIC_KEY if alg.len() == 2 && alg[1].tag == 0x06 && der::oid_minimal(&alg[1]) && read_oid(&alg[1]) == OID_PRIME256V1 => {
                 let ec = read(f[2].content, 0)?;
                 if ec.tag != 0x30 || ec.end != f[2].content.len() {
                     return err("parse", "ECPrivateKey shape");

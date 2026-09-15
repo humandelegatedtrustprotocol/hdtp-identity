@@ -1,7 +1,7 @@
 //! PKCS #10 (RFC 2986) with an exact profile of its own: the host's key, one endpoint, proof of
 //! possession by the host's signature; the wallet's checks and the issuance (SPEC §9).
 use crate::address::address_guard;
-use crate::der::{self, children, read, read_oid};
+use crate::der::{self, children, read, read_oid_strict};
 use crate::keys::{PrivateKey, PublicKey};
 use crate::time::{DAY, HOUR};
 use crate::util::{err, Error, Result};
@@ -61,7 +61,7 @@ pub fn parse(bytes: &[u8]) -> Result<Csr> {
         return shape();
     }
     let attr = children(&attrs[0])?;
-    if attr.len() != 2 || read_oid(&attr[0]) != OID_EXTENSION_REQUEST || attr[1].tag != 0x31 {
+    if attr.len() != 2 || read_oid_strict(&attr[0])? != OID_EXTENSION_REQUEST || attr[1].tag != 0x31 {
         return shape();
     }
     let values = children(&attr[1])?;
@@ -73,7 +73,7 @@ pub fn parse(bytes: &[u8]) -> Result<Csr> {
         return shape();
     }
     let e = children(&exts[0])?;
-    if e.len() != 2 || read_oid(&e[0]) != OID_SAN || e[1].tag != 0x04 {
+    if e.len() != 2 || read_oid_strict(&e[0])? != OID_SAN || e[1].tag != 0x04 {
         return shape();
     }
     let san = read(e[1].content, 0)?;
@@ -102,7 +102,7 @@ pub fn parse(bytes: &[u8]) -> Result<Csr> {
         key,
         endpoint,
         dns_name,
-        sig_alg: read_oid(&alg[0]),
+        sig_alg: read_oid_strict(&alg[0])?,
         sig: top[2].content[1..].to_vec(),
     })
 }
@@ -117,7 +117,7 @@ fn x509_name(node: &der::Node<'_>) -> Result<String> {
         return shape();
     }
     let parts = children(&atvs[0])?;
-    if parts.len() != 2 || read_oid(&parts[0]) != x509::OID_CN || parts[1].tag != 0x0c {
+    if parts.len() != 2 || read_oid_strict(&parts[0])? != x509::OID_CN || parts[1].tag != 0x0c {
         return shape();
     }
     Ok(String::from_utf8_lossy(parts[1].content).into_owned())

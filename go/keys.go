@@ -127,7 +127,10 @@ func ParseSPKI(spki []byte) (*PublicKey, error) {
 		return nil, errors.New("SubjectPublicKeyInfo algorithm")
 	}
 	key := parts[1].content[1:]
-	oid := readOid(alg[0])
+	oid, err := readOidStrict(alg[0])
+	if err != nil {
+		return nil, err
+	}
 	out := &PublicKey{SPKI: append([]byte(nil), spki...), AlgOID: oid}
 	switch {
 	case oid == oidEd25519 && len(alg) == 1:
@@ -142,7 +145,7 @@ func ParseSPKI(spki []byte) (*PublicKey, error) {
 		}
 		out.Alg = AlgX25519
 		out.X = append([]byte(nil), key...)
-	case oid == oidEcPublicKey && len(alg) == 2 && alg[1].tag == 0x06 && readOid(alg[1]) == oidPrime256v1:
+	case oid == oidEcPublicKey && len(alg) == 2 && alg[1].tag == 0x06 && derOidMinimal(alg[1]) && readOid(alg[1]) == oidPrime256v1:
 		// RFC 5480 §2.2 allows a compressed point; the profile takes the uncompressed form only,
 		// so one key has one SubjectPublicKeyInfo and one fingerprint.
 		if len(key) != 65 || key[0] != 0x04 {
@@ -188,7 +191,10 @@ func ParsePKCS8(der []byte) (*PrivateKey, error) {
 	if len(alg) == 0 || alg[0].tag != 0x06 {
 		return nil, errors.New("PKCS #8 algorithm")
 	}
-	oid := readOid(alg[0])
+	oid, err := readOidStrict(alg[0])
+	if err != nil {
+		return nil, err
+	}
 	switch {
 	case oid == oidEd25519:
 		inner, err := derRead(f[2].content, 0)
@@ -202,7 +208,7 @@ func ParsePKCS8(der []byte) (*PrivateKey, error) {
 			return nil, errors.New("Ed25519 seed is not 32 bytes")
 		}
 		return newEd25519(ed25519.NewKeyFromSeed(inner.content))
-	case oid == oidEcPublicKey && len(alg) == 2 && alg[1].tag == 0x06 && readOid(alg[1]) == oidPrime256v1:
+	case oid == oidEcPublicKey && len(alg) == 2 && alg[1].tag == 0x06 && derOidMinimal(alg[1]) && readOid(alg[1]) == oidPrime256v1:
 		ec, err := derRead(f[2].content, 0)
 		if err != nil {
 			return nil, err
