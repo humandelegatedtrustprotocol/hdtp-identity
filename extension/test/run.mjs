@@ -10,9 +10,8 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 import puppeteer from 'puppeteer-core'
+import { EXT, here, chromePath, serve as serveFixture, walletWindow as openWallet, visible, textOf, waitScreen, ask, sleep } from './harness.mjs'
 
-const here = dirname(fileURLToPath(import.meta.url))
-const EXT = join(here, '..')
 const require = createRequire(import.meta.url)
 const core = require('../../js/pkg-node/pact_identity_wasm.js')
 const call = (name, args) => {
@@ -21,59 +20,12 @@ const call = (name, args) => {
   return out
 }
 
-function chromePath() {
-  if (process.env.PUPPETEER_EXECUTABLE_PATH) return process.env.PUPPETEER_EXECUTABLE_PATH
-  const base = join(homedir(), '.cache', 'puppeteer', 'chrome')
-  if (existsSync(base)) {
-    const versions = readdirSync(base).filter((d) => d.startsWith('mac_arm-') || d.startsWith('mac-') || d.startsWith('linux-')).sort()
-    for (const v of versions.reverse()) {
-      for (const rel of ['chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing', 'chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing', 'chrome-linux64/chrome']) {
-        const p = join(base, v, rel)
-        if (existsSync(p)) return p
-      }
-    }
-  }
-  for (const p of ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/usr/bin/google-chrome']) if (existsSync(p)) return p
-  throw new Error('no Chrome found; set PUPPETEER_EXECUTABLE_PATH')
-}
-
 const PASS = 'correct horse battery'
 const ENDPOINT_A = 'https://agent.alina.example/mcp'
 const ENDPOINT_B = 'https://alina.pact.contact/alina/mcp'
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-
 let browser, extId, servers = [], pageA, pageB, originA, originB, downloads
-
-function serve() {
-  const html = readFileSync(join(here, 'fixtures', 'page.html'))
-  return new Promise((resolve) => {
-    const s = createServer((req, res) => { res.setHeader('content-type', 'text/html; charset=utf-8'); res.end(html) })
-    s.listen(0, '127.0.0.1', () => { servers.push(s); resolve(`http://127.0.0.1:${s.address().port}`) })
-  })
-}
-
-async function walletWindow() {
-  const t = await browser.waitForTarget((t) => t.type() === 'page' && t.url().startsWith(`chrome-extension://${extId}/window.html`) && (t.__seen === undefined), { timeout: 15000 })
-  t.__seen = true
-  const p = await t.page()
-  await p.waitForSelector('#main', { timeout: 10000 })
-  return p
-}
-const visible = (p, sel) => p.evaluate((s) => { const el = document.querySelector(s); return !!el && !el.hidden && el.offsetParent !== null }, sel)
-async function waitScreen(p, id) {
-  await p.waitForFunction((s) => { const el = document.getElementById(s); return el && !el.hidden }, { timeout: 20000 }, id)
-}
-const textOf = (p, sel) => p.$eval(sel, (el) => el.textContent.trim())
-
-/** Starts a wallet call on a page and returns a handle to read its settled value later. */
-async function ask(page, expr) {
-  const key = 'k' + Math.random().toString(36).slice(2, 8)
-  await page.evaluate((k, e) => { window[k] = (0, eval)(e).then((r) => ({ ok: true, r }), (x) => ({ ok: false, code: x.code, message: x.message })) }, key, expr)
-  return {
-    settled: () => page.evaluate((k) => Promise.race([window[k], new Promise((r) => setTimeout(() => r(null), 50))]), key),
-    value: () => page.evaluate((k) => window[k], key),
-  }
-}
+const serve = () => serveFixture(servers)
+const walletWindow = () => openWallet(browser, extId)
 
 function newCsr(endpoint) {
   const host = call('generate_key', { alg: 'ed25519' })
