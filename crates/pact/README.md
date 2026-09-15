@@ -45,6 +45,12 @@ pact id issue --vault … --csr other.csr --move                # another addres
 Certificates and requests are read as DER or PEM (detected by `-----BEGIN`); leaves are written as
 PEM. Human-readable lines go to stderr so stdout stays a clean PEM for pipes.
 
+Nothing that would destroy a key is done quietly: `pact key new` refuses a path that is taken (the
+live leaf was issued to the key that is there) and takes `--force` to say otherwise, as `pact id
+backup` does; `pact id create --key-out` and `pact id restore` refuse outright. Every reason a
+command has to refuse is found before the passphrase is asked and before anything is written, so a
+refusal leaves nothing behind.
+
 `pact vectors check --spec pact-protocol/SPEC.md` proves Appendix B natively (85 checks: the four
 `v: 1` envelopes, the seven certificates rebuilt from their labelled seeds, every chain,
 newest-leaf and `certificate_renewed` case, every `v: 2` envelope opened and re-sealed from its
@@ -105,7 +111,7 @@ pact id create --name "Alina Rao" --vault ~/alina.pact-vault.json --piv 9c
 pact id create --name "Alina Rao" --alg p256 --vault ~/alina.pact-vault.json --key-out root.pem
 ykman piv keys import 9c root.pem
 ykman piv certificates generate --subject 'CN=Alina Rao' 9c root.pem
-pact card-attach --vault ~/alina.pact-vault.json --slot 9c
+pact card-attach --vault ~/alina.pact-vault.json --slot 9c   # asks for the PIN once: see below
 rm root.pem          # it is the root, in the clear, for as long as it exists
 
 pact card-status --vault ~/alina.pact-vault.json      # reader, card, slot, key, and which mode
@@ -117,6 +123,15 @@ the same one-live-leaf rule, the same endpoint, origin and dates shown before an
 and differ only in who makes the signature. The card is opened and checked against the identity's
 root *before* the question, so a card that is absent, or holds another key, is said then rather than
 after a person has agreed.
+
+**Attaching asks the card to sign.** A PIV slot keeps its certificate and its key in two separate
+objects and nothing makes them agree, so a slot can hold exactly the right certificate over a key
+that is not the root's — `ykman piv keys import` into a slot whose certificate was generated for an
+earlier key leaves a card there. Reading the certificate cannot tell. `pact card-attach` therefore
+has the card sign a fresh, domain-separated challenge and verifies it under the root the vault
+pins, which costs one PIN at a one-time operation and is the difference between a clear refusal now
+and an unexplained failure at every issuance later. Every issuance verifies the signature under the
+pinned root for the same reason, before the certificate is assembled.
 
 **The availability cost.** A renewal needs the card present. That is fine for something yearly and
 deliberate, and it is worth knowing before a leaf expires while the card is in another country.
