@@ -84,26 +84,78 @@ pub fn pem(label: &str, der: &[u8]) -> String {
     out
 }
 
+/// A name nothing else has: the temporary file a private write goes through. It has to be unique
+/// rather than derived from the target, because the mode a file is created with is the only mode
+/// this write controls — opening a name that already exists would inherit whatever permissions that
+/// file has, and a stale `.tmp` from a killed run, or one a neighbour left, is where the vault's
+/// bytes would then land.
+fn unique_tmp(path: &Path) -> PathBuf {
+    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
+    let mut name = path.file_name().map(|f| f.to_os_string()).unwrap_or_default();
+    name.push(format!(".{}.{n}.tmp", std::process::id()));
+    path.with_file_name(name)
+}
+
 /// Writes a file only its owner can read, atomically where a file already exists.
 pub fn write_private(path: &Path, bytes: &[u8]) -> Res<()> {
-    let tmp: PathBuf = path.with_extension(match path.extension().and_then(|e| e.to_str()) {
-        Some(e) => format!("{e}.tmp"),
-        None => "tmp".to_string(),
-    });
-    {
-        let mut opts = fs::OpenOptions::new();
-        opts.write(true).create(true).truncate(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            opts.mode(0o600);
-        }
-        let mut f = opts.open(&tmp).map_err(|e| Fail(format!("{}: {e}", tmp.display())))?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
+    let tmp = unique_tmp(path);
+    fill_new(&tmp, bytes).map_err(|e| Fail(format!("{}: {e}", tmp.display())))?;
+    if let Err(e) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return fail(format!("{}: {e}", path.display()));
     }
-    fs::rename(&tmp, path).map_err(|e| Fail(format!("{}: {e}", path.display())))?;
     Ok(())
+}
+
+/// Writes a file only its owner can read, and only where there is no file: the caller has decided
+/// that writing over this name would destroy something (a root key, a leaf key) and the decision
+/// has to hold at the moment of the write, not at the moment of the check before it.
+///
+/// Only a name that was already taken is reported as taken. A write that failed for any other
+/// reason says what that reason was and leaves nothing at the path — the alternative is a truncated
+/// key file that the next run refuses to replace, telling the person it is protecting a key that
+/// is not there.
+pub fn write_new_private(path: &Path, bytes: &[u8]) -> Res<()> {
+    fill_new(path, bytes).map_err(|e| match e.kind() {
+        io::ErrorKind::AlreadyExists => Fail(format!("{}: exists; nothing is written over it", path.display())),
+        _ => Fail(format!("{}: {e}", path.display())),
+    })
+}
+
+/// Creates a file and fills it, owner-only, and only where there is no file. `create_new` rather
+/// than `create` is what makes 0600 the file's real mode — an open that found an existing name
+/// would inherit that file's permissions instead — and it will not follow a symlink someone put in
+/// the way. Anything that goes wrong after the file exists takes the file with it.
+fn fill_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut f = opts.open(path)?;
+    if let Err(e) = f.write_all(bytes).and_then(|()| f.sync_all()) {
+        drop(f);
+        let _ = fs::remove_file(path);
+        return Err(e);
+    }
+    Ok(())
+}
+
+/// A path a command will write when it is done, checked before it does the thing it cannot undo.
+/// The directory has to exist now and the name must not already be one; `-` and stdout are not
+/// paths and have nothing to check.
+pub fn check_writable(path: Option<&str>) -> Res<()> {
+    let Some(p) = path.filter(|p| *p != "-") else { return Ok(()) };
+    let target = Path::new(p);
+    if target.is_dir() {
+        return fail(format!("{p} is a directory"));
+    }
+    match target.parent().filter(|d| !d.as_os_str().is_empty()) {
+        Some(d) if !d.is_dir() => fail(format!("{p}: there is no directory {}", d.display())),
+        _ => Ok(()),
+    }
 }
 
 pub fn write_output(path: Option<&str>, text: &str) -> Res<()> {
@@ -227,6 +279,37 @@ mod tests {
         write_private(&p, b"two").unwrap();
         assert_eq!(fs::read(&p).unwrap(), b"two");
         assert_eq!(fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
+        // A world-readable file left where the temporary one used to be named is not written into,
+        // and is not left behind either: the name a private write uses is one nothing else has.
+        let stale = dir.join("v.json.tmp");
+        fs::write(&stale, b"planted").unwrap();
+        fs::set_permissions(&stale, fs::Permissions::from_mode(0o666)).unwrap();
+        write_private(&p, b"three").unwrap();
+        assert_eq!(fs::read(&p).unwrap(), b"three");
+        assert_eq!(fs::read(&stale).unwrap(), b"planted", "the planted file is untouched");
+        assert_eq!(fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
+        let left: Vec<_> = fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).filter(|n| n.to_string_lossy().ends_with(".tmp") && n != "v.json.tmp").collect();
+        assert!(left.is_empty(), "no temporary files left behind: {left:?}");
+
+        // And the exclusive write refuses a name that is taken rather than destroying it.
+        let key = dir.join("host.key");
+        write_new_private(&key, b"a key").unwrap();
+        let e = write_new_private(&key, b"another key").unwrap_err();
+        assert!(e.0.contains("exists; nothing is written over it"), "{}", e.0);
+        // A failure that is not "the name is taken" is not reported as one, and leaves no file.
+        let missing = dir.join("nowhere/x.key");
+        let e = write_new_private(&missing, b"a key").unwrap_err();
+        assert!(!e.0.contains("exists"), "a directory that is not there is not a file that is: {}", e.0);
+        assert!(!missing.exists());
+        assert_eq!(fs::read(&key).unwrap(), b"a key");
+        assert_eq!(fs::metadata(&key).unwrap().permissions().mode() & 0o777, 0o600);
+
+        // A directory that is not there is said before anything is done, not after.
+        assert!(check_writable(Some(dir.join("nope/x.pem").to_str().unwrap())).is_err());
+        assert!(check_writable(Some(dir.to_str().unwrap())).is_err(), "a directory is not an output file");
+        assert!(check_writable(Some("plain.pem")).is_ok(), "a bare name has no directory to check");
+        assert!(check_writable(Some("-")).is_ok());
+        assert!(check_writable(None).is_ok());
         fs::remove_dir_all(&dir).unwrap();
     }
 }

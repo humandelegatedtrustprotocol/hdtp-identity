@@ -41,7 +41,7 @@ const ALG_ECC_P256: u8 = 0x11;
 /// What a card, real or fake, can be asked. Every rule above this trait is the wallet's and the
 /// core's; everything below it is APDUs.
 pub trait CardSigner {
-    /// Reader, serial, slot and algorithm — for `pact card status` and for the line a person reads
+    /// Reader, serial, slot and algorithm — for `pact card-status` and for the line a person reads
     /// before a signature.
     fn describe(&self) -> CardInfo;
     /// The slot's public key, read from the certificate the slot holds.
@@ -349,35 +349,112 @@ pub fn open(_reader: Option<&str>, _slot: &str) -> Res<Box<dyn CardSigner>> {
 pub mod fake {
     use super::*;
     use pact_identity::keys::{Alg, PrivateKey};
+    use std::cell::Cell;
 
     /// A card whose key is in this process. It answers exactly as the real one does — a DER ECDSA
     /// signature over a digest — so everything above the trait is exercised for real.
+    ///
+    /// It can also be hostile, because the two things a PIV slot holds are not made to agree by
+    /// anything: `public_key` reads the slot's **certificate**, `sign_digest` uses the slot's
+    /// **key**, and a card is free to hold a certificate for one key and sign with another, to
+    /// answer with one key and then another, or to leave the reader between two calls. Each of
+    /// those is a constructor here, because each of them must end in a refusal rather than in a
+    /// certificate nobody can validate.
     pub struct FakeCard {
+        /// The key that signs.
         pub key: Option<PrivateKey>,
+        /// What `public_key` answers, call by call — the slot's certificate, in other words. Empty
+        /// is the honest card: the signing key's own public key every time. A short list repeats
+        /// its last entry.
+        pub reports: Vec<PublicKey>,
+        /// After this many calls of any kind the card is gone from the reader.
+        pub gone_after: Option<u32>,
+        /// Calls of either kind so far, so a hostile card can change its answer partway.
+        pub calls: Cell<u32>,
         pub info: CardInfo,
         /// What the card refuses, if anything: the failure a test is about.
         pub refuses: Option<String>,
     }
 
+    fn card(key: Option<PrivateKey>, serial: &str, alg: &str, refuses: Option<String>) -> FakeCard {
+        FakeCard {
+            key,
+            reports: Vec::new(),
+            gone_after: None,
+            calls: Cell::new(0),
+            info: CardInfo { reader: "Fake Reader".into(), serial: Some(serial.into()), slot: "9c".into(), alg: alg.into() },
+            refuses,
+        }
+    }
+
     impl FakeCard {
         pub fn p256(serial: &str) -> FakeCard {
-            FakeCard {
-                key: Some(PrivateKey::generate(Alg::P256).expect("a P-256 key")),
-                info: CardInfo { reader: "Fake Reader".into(), serial: Some(serial.into()), slot: "9c".into(), alg: "p256".into() },
-                refuses: None,
-            }
+            card(Some(PrivateKey::generate(Alg::P256).expect("a P-256 key")), serial, "p256", None)
         }
         /// A slot holding a key this profile does not allow — an RSA one, as a card would say it.
         pub fn rsa() -> FakeCard {
-            FakeCard { key: None, info: CardInfo { reader: "Fake Reader".into(), serial: Some("1".into()), slot: "9c".into(), alg: "rsa2048".into() }, refuses: Some(status_meaning(0x6A80, "9c")) }
+            card(None, "1", "rsa2048", Some(status_meaning(0x6A80, "9c")))
         }
         pub fn empty_slot() -> FakeCard {
-            FakeCard { key: None, info: CardInfo { reader: "Fake Reader".into(), serial: Some("1".into()), slot: "9c".into(), alg: "p256".into() }, refuses: Some(status_meaning(0x6A82, "9c")) }
+            card(None, "1", "p256", Some(status_meaning(0x6A82, "9c")))
         }
-        pub fn wrong_pin() -> FakeCard {
-            let mut c = FakeCard::p256("1");
+        /// The card that holds `honest`'s root, with a PIN attempt gone wrong: every check that
+        /// reads the slot passes, and the signature is the thing refused — with the tries left,
+        /// which is what a person needs next.
+        pub fn wrong_pin_for(honest: &FakeCard) -> FakeCard {
+            let mut c = FakeCard::reporting(honest, "1");
             c.refuses = Some(status_meaning(0x63C2, "9c"));
             c
+        }
+
+        /// A card that answers every question with `honest`'s key — its certificate, in other
+        /// words — whatever its own key may be.
+        fn reporting(honest: &FakeCard, serial: &str) -> FakeCard {
+            let certificate_says = honest.key.as_ref().expect("an honest key").public();
+            let mut c = FakeCard::p256(serial);
+            c.reports = vec![certificate_says];
+            c
+        }
+
+        /// A card holding `honest`'s certificate over a different key: it answers with the key the
+        /// certificate names, every time, and signs with the other one. PIV does not prevent this
+        /// — `ykman piv keys import` into a slot whose certificate was generated for an earlier key
+        /// leaves a card exactly here — and no check that reads the certificate can tell. Only a
+        /// signature verified under the pinned root can.
+        pub fn signs_with_another_key(honest: &FakeCard, serial: &str) -> FakeCard {
+            FakeCard::reporting(honest, serial)
+        }
+
+        /// The honest card for `answers` calls and another card after: pulled and replaced between
+        /// the check and the signature, or the slot generated again in between. The check passes
+        /// and the signature is a stranger's, which is the whole reason a signature is verified
+        /// against the root a contact pinned rather than against whatever the card says now.
+        pub fn swapped_after(honest: &FakeCard, answers: u32) -> FakeCard {
+            let honest_pub = honest.key.as_ref().expect("an honest key").public();
+            let mut c = FakeCard::p256(honest.info.serial.as_deref().unwrap_or("1"));
+            let mut reports = vec![honest_pub; answers as usize];
+            reports.push(c.key.as_ref().expect("a key").public());
+            c.reports = reports;
+            c
+        }
+
+        /// A card that answers `answers` times and is then gone from the reader — taken out
+        /// between the check and the signature, which is the ordinary way this happens.
+        pub fn vanishes_after(answers: u32) -> FakeCard {
+            let mut c = FakeCard::p256("7777");
+            c.gone_after = Some(answers);
+            c
+        }
+
+        /// One call of either kind, and its 0-based number. A card that has left the reader says so
+        /// here, because that is where a real one says it: the next APDU, whichever it was.
+        fn tick(&self) -> Res<u32> {
+            let n = self.calls.get();
+            self.calls.set(n + 1);
+            if self.gone_after.is_some_and(|g| n >= g) {
+                return fail(format!("the card is no longer in {} (slot {}): nothing signed", self.info.reader, self.info.slot));
+            }
+            Ok(n)
         }
     }
 
@@ -386,14 +463,19 @@ pub mod fake {
             self.info.clone()
         }
         fn public_key(&self) -> Res<PublicKey> {
+            let n = self.tick()?;
             if let Some(why) = &self.refuses {
                 if self.key.is_none() {
                     return fail(format!("reading the slot: {why}"));
                 }
             }
+            if !self.reports.is_empty() {
+                return Ok(self.reports[(n as usize).min(self.reports.len() - 1)].clone());
+            }
             Ok(self.key.as_ref().expect("a key").public())
         }
         fn sign_digest(&self, digest: &[u8; 32]) -> Res<Vec<u8>> {
+            self.tick()?;
             if let Some(why) = &self.refuses {
                 return fail(format!("the signature: {why}"));
             }

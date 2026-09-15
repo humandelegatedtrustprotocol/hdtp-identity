@@ -146,6 +146,64 @@ fn a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates() {
     pact().env("PACT_PASSPHRASE_FILE", &pass).args(["id", "backup", "--force", "--vault"]).arg(&vault).arg("--to").arg(&occupied).assert().success().stderr(predicate::str::contains("the copy opens"));
 }
 
+/// Every reason a command has to refuse is found before it does the thing it cannot undo. These
+/// used to run the other way round: `id create --key-out` wrote the vault, made the identity, told
+/// the person it had succeeded, and only then noticed the key file was occupied and exited 1 — an
+/// identity on disk that the person had been told did not exist.
+#[test]
+fn nothing_is_made_before_the_reasons_to_refuse_are_found() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    let pass = passphrase_file(d, 0o600);
+    let vault = d.join("alina.pact-vault.json");
+    let key_out = d.join("root.key");
+    fs::write(&key_out, "something already here").unwrap();
+
+    // The occupied key path is the refusal, and the vault is not made.
+    pact().env("PACT_PASSPHRASE_FILE", &pass).args(["id", "create", "--name", "Alina Rao", "--vault"]).arg(&vault).arg("--key-out").arg(&key_out)
+        .assert().failure().stderr(predicate::str::contains("the key is not written over a file"));
+    assert!(!vault.exists(), "no identity is left behind by a command that refused");
+    assert_eq!(fs::read_to_string(&key_out).unwrap(), "something already here", "and nothing was written over");
+
+    // A directory that does not exist is the same: said first, and nothing made.
+    pact().env("PACT_PASSPHRASE_FILE", &pass).args(["id", "create", "--name", "Alina Rao", "--vault"]).arg(&vault).arg("--key-out").arg(d.join("nowhere/root.key"))
+        .assert().failure().stderr(predicate::str::contains("there is no directory"));
+    assert!(!vault.exists());
+
+    // With a free path it works, and the key it writes is owner-only.
+    fs::remove_file(&key_out).unwrap();
+    pact().env("PACT_PASSPHRASE_FILE", &pass).args(["id", "create", "--name", "Alina Rao", "--vault"]).arg(&vault).arg("--key-out").arg(&key_out)
+        .assert().success().stderr(predicate::str::contains("pact card-attach"));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(fs::metadata(&key_out).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+
+    // A host's leaf key is not written over either: the live leaf was issued to the key that is
+    // there, and a fresh one at the same name would strand the host.
+    let host = d.join("host.key");
+    let first = pact().args(["key", "new", "--out"]).arg(&host).assert().success();
+    let first_fp = String::from_utf8(first.get_output().stdout.clone()).unwrap();
+    let before = fs::read(&host).unwrap();
+    pact().args(["key", "new", "--out"]).arg(&host).assert().failure().stderr(predicate::str::contains("a live leaf was issued to the key that is there"));
+    assert_eq!(fs::read(&host).unwrap(), before, "the key that is there is the key that stays");
+    let replaced = pact().args(["key", "new", "--force", "--out"]).arg(&host).assert().success();
+    assert_ne!(String::from_utf8(replaced.get_output().stdout.clone()).unwrap(), first_fp, "--force says so and replaces it");
+
+    // And a leaf is not signed into the ledger for an output that was never going to land.
+    let csr = d.join("host.csr");
+    pact().args(["csr", "new", "--endpoint", "https://agent.alina.example/mcp", "--key"]).arg(&host).arg("--out").arg(&csr).assert().success();
+    pact().env("PACT_PASSPHRASE_FILE", &pass).args(["id", "issue", "--yes", "--csr"]).arg(&csr).arg("--vault").arg(&vault).arg("--chain-out").arg(d.join("nowhere/chain.pem"))
+        .assert().failure().stderr(predicate::str::contains("there is no directory"));
+    pact().env("PACT_PASSPHRASE_FILE", &pass).args(["id", "ledger", "--json", "--vault"]).arg(&vault).assert().success().stdout(predicate::str::contains("[]"));
+
+    // A restore never writes over a vault, and a backup needs --force to.
+    let copy = d.join("copy.json");
+    pact().env("PACT_PASSPHRASE_FILE", &pass).args(["id", "backup", "--vault"]).arg(&vault).arg("--to").arg(&copy).assert().success();
+    pact().env("PACT_PASSPHRASE_FILE", &pass).args(["id", "restore", "--from"]).arg(&copy).arg("--vault").arg(&vault).assert().failure().stderr(predicate::str::contains("exists"));
+}
+
 #[test]
 fn a_passphrase_file_others_can_read_is_refused() {
     let dir = tempfile::tempdir().unwrap();

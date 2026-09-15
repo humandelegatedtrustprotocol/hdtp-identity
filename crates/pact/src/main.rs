@@ -180,6 +180,9 @@ enum KeyCmd {
         alg: String,
         #[arg(long)]
         out: String,
+        /// Replace the key already at that path. The leaf issued to it stops working.
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -356,7 +359,7 @@ fn run(cli: Cli) -> Res<i32> {
             CsrCmd::Check { file, root_spki } => implementer::csr_check(&file, &root_spki),
         },
         Cmd::Key { cmd } => match cmd {
-            KeyCmd::New { alg, out } => implementer::key_new(&alg, &out),
+            KeyCmd::New { alg, out, force } => implementer::key_new(&alg, &out, force),
         },
         Cmd::Vectors { cmd } => match cmd {
             VectorsCmd::Gen { out } => vectors::gen(out.as_deref()),
@@ -420,5 +423,74 @@ mod tests {
         assert!(Cli::try_parse_from(["pact", "id", "renew", "--vault", "v", "--csr", "r", "--move"]).is_err());
         assert!(Cli::try_parse_from(["pact", "id", "export"]).is_err());
         assert!(Cli::try_parse_from(["pact", "chain", "check", "--chain", "b.pem", "--leaf", "l"]).is_err());
+    }
+
+    /// Every `pact …` this binary prints or documents is a command this binary has.
+    ///
+    /// A command named in a message is advice a person types next, and advice that does not run is
+    /// worse than none: it teaches a wrong name at the moment someone is stuck. Two had drifted —
+    /// the card commands were written as subcommands of `card`, which has only show and check,
+    /// where clap spells them `card-attach` and `card-status` — because nothing connected the
+    /// strings to the tree. This does.
+    #[test]
+    fn every_command_this_binary_names_is_one_it_has() {
+        let root = Cli::command();
+        let top: Vec<String> = root.get_subcommands().map(|c| c.get_name().to_string()).collect();
+        let sources = [
+            ("main.rs", include_str!("main.rs")),
+            ("wallet.rs", include_str!("wallet.rs")),
+            ("piv.rs", include_str!("piv.rs")),
+            ("io.rs", include_str!("io.rs")),
+            ("vectors.rs", include_str!("vectors.rs")),
+            ("implementer.rs", include_str!("implementer.rs")),
+            ("README.md", include_str!("../README.md")),
+        ];
+        let mut checked = 0;
+        for (where_, text) in sources {
+            for (line_no, line) in text.lines().enumerate() {
+                for (first, second) in mentions(line) {
+                    // Only a line that names a real top-level command is read as advice; prose that
+                    // happens to say "pact binary" is prose.
+                    if !top.contains(&first) {
+                        continue;
+                    }
+                    checked += 1;
+                    let cmd = root.get_subcommands().find(|c| c.get_name() == first).expect("the command");
+                    let subs: Vec<&str> = cmd.get_subcommands().map(|c| c.get_name()).collect();
+                    let Some(second) = second else { continue };
+                    if subs.is_empty() || second.starts_with('-') {
+                        continue;
+                    }
+                    assert!(
+                        subs.contains(&second.as_str()),
+                        "{where_}:{}: `pact {first} {second}` is not a command; `pact {first}` has {subs:?}\n  {}",
+                        line_no + 1,
+                        line.trim()
+                    );
+                }
+            }
+        }
+        assert!(checked > 5, "the scan found only {checked} command mentions, so it has stopped reading them");
+    }
+
+    /// `pact <word> [<word>]` where the mention is advice: inside backticks, or the indented line of
+    /// a printed hint, or a shell block. Anything looser reads prose as commands.
+    fn mentions(line: &str) -> Vec<(String, Option<String>)> {
+        let mut out = Vec::new();
+        for (i, _) in line.match_indices("pact ") {
+            let before = line[..i].chars().next_back();
+            let advice = matches!(before, Some('`') | Some(' ') | Some('(') | None) && !line[..i].ends_with("the ") && !line[..i].ends_with("this ");
+            if !advice {
+                continue;
+            }
+            let mut words = line[i + "pact ".len()..].split_whitespace();
+            let word = |w: Option<&str>| {
+                w.map(|w| w.trim_end_matches(['`', ',', '.', ';', ')', '"', '\'']).to_string()).filter(|w| !w.is_empty())
+            };
+            if let Some(first) = word(words.next()) {
+                out.push((first, word(words.next())));
+            }
+        }
+        out
     }
 }

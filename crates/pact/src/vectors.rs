@@ -461,11 +461,11 @@ pub fn intrude(against: &str, allow_insecure: bool, now: Option<&str>) -> Res<i3
     // receiver applies to a card's endpoint (§3, §14.2) applies to the target, so `--against` can
     // never be talked into reaching a loopback or a metadata address; a node on your own machine
     // is the one case worth an explicit flag.
+    // One guard, and its words are the answer. The core's `address_guard` applies the normal form
+    // of §14.1 as its own first rule, so asking `is_normal_https` first only took the refusal away
+    // from the guard that owns it — and gave two different sentences for one rule, which is how a
+    // guard and its message drift apart.
     if !allow_insecure {
-        let normal = core("is_normal_https", json!({ "url": &endpoint }))?;
-        if normal["normal"].as_bool() != Some(true) {
-            return fail(format!("{endpoint} is not an https endpoint in the normal form of §14.1 (pass --allow-insecure for a node on your own machine)"));
-        }
         let guard = core("address_guard", json!({ "endpoint": &endpoint, "guest": false }))?;
         if guard["ok"].as_bool() != Some(true) {
             return fail(format!("{endpoint}: {} (pass --allow-insecure for a node on your own machine)", guard["why"].as_str().unwrap_or("the address guard refuses this endpoint")));

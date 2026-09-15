@@ -1,7 +1,7 @@
 //! The wallet half: a root in a vault, leaves issued from it under SPEC §9's rules, the ledger, the
 //! contact book. The rules live in the core's `wallet_issue`; this file adds the terminal's
 //! discipline — the passphrase from a prompt, the vault owner-only, nothing a root key ever printed.
-use crate::io::{confirm, core, fail, instant, now_or, passphrase, pem, read_der, read_input, write_output, write_private, Fail, Res};
+use crate::io::{check_writable, confirm, core, fail, instant, now_or, passphrase, pem, read_der, read_input, write_new_private, write_output, write_private, Fail, Res};
 use crate::piv::{digest_of, CardSigner};
 use pact_identity::csr;
 use pact_identity::keys::{Alg, PrivateKey};
@@ -35,9 +35,20 @@ fn open_vault(path: &str, confirm_passphrase: bool) -> Res<Vault> {
     Ok(Vault { path: path.to_string(), passphrase, plaintext })
 }
 
-fn save_vault(v: &Vault) -> Res<()> {
+fn sealed_bytes(v: &Vault) -> Res<Vec<u8>> {
     let sealed = core("vault_seal", json!({ "passphrase": v.passphrase, "plaintext": v.plaintext }))?["vault"].take();
-    write_private(Path::new(&v.path), format!("{}\n", serde_json::to_string_pretty(&sealed)?).as_bytes())
+    Ok(format!("{}\n", serde_json::to_string_pretty(&sealed)?).into_bytes())
+}
+
+fn save_vault(v: &Vault) -> Res<()> {
+    write_private(Path::new(&v.path), &sealed_bytes(v)?)
+}
+
+/// The first write of a new identity's vault: exclusive, because `id create` refused a path that
+/// was taken and that refusal has to still be true at the moment the file appears. Every later save
+/// replaces the vault it opened, which is what `save_vault` is for.
+fn save_new_vault(v: &Vault) -> Res<()> {
+    write_new_private(Path::new(&v.path), &sealed_bytes(v)?)
 }
 
 fn roots(v: &Value) -> Vec<Value> {
@@ -90,6 +101,29 @@ fn match_root(root: &Value, card: &dyn CardSigner) -> Res<()> {
     Ok(())
 }
 
+/// A card proves it can *sign* under the key it shows, before a vault records it as this root's
+/// card. Reading the slot's certificate is not that proof: PIV keeps the certificate and the key in
+/// two separate objects and nothing makes them agree, so a slot can show exactly the right
+/// certificate over a key that is not this root's. An attach that believed the certificate would
+/// record a card that then fails at every issuance, burning a PIN try each time, for a reason
+/// nobody could see.
+///
+/// The challenge is domain-separated and carries fresh randomness, so this signature is not a
+/// certificate signature and no captured signature is this one: it begins with ASCII text, and a
+/// TBSCertificate begins with 0x30.
+fn card_proves_it_holds(card: &dyn CardSigner, key: &pact_identity::keys::PublicKey) -> Res<()> {
+    let nonce = x509::random_serial().map_err(|e| Fail(e.why))?;
+    let mut challenge = b"PACT card-attach proof v1\n".to_vec();
+    challenge.extend_from_slice(key.fingerprint().as_bytes());
+    challenge.push(b'\n');
+    challenge.extend_from_slice(&nonce);
+    let sig = card.sign_digest(&digest_of(&challenge))?;
+    if !key.verify(&challenge, &sig) {
+        return fail("the card's signature does not verify under this identity's root: the slot holds this root's certificate over a different key, so it could show the right key and sign with the wrong one. Nothing written.");
+    }
+    Ok(())
+}
+
 /// The root certificate a card's key signs for itself, through the seam: the core builds the bytes,
 /// the card signs them, the core assembles, and the signature is checked here before a vault is
 /// written — a card that signed with another key must not become an identity on disk.
@@ -129,14 +163,40 @@ fn live_leaf_refusal(mine: &[&Value], endpoint: &str, now: i64, moving: bool) ->
     None
 }
 
+/// The key this identity *is*: read out of the root certificate the vault holds, which is the
+/// certificate a contact pinned. Everything a card signs is checked against this and never against
+/// what the card says about itself, because the card is the thing that might be lying — or might
+/// simply have been swapped for another since the last question. The entry's own fingerprint is
+/// checked against its certificate on the way past: a vault whose two halves disagree is a vault
+/// that would issue under a root nobody has.
+fn root_key(root: &Value) -> Res<pact_identity::keys::PublicKey> {
+    let der = from_b64u(root["cert"].as_str().unwrap_or("")).map_err(|e| Fail(format!("this identity's root certificate: {}", e.why)))?;
+    let cert = x509::parse(&der).map_err(|e| Fail(format!("this identity's root certificate: {}", e.why)))?;
+    let fp = cert.public_key.fingerprint();
+    if root["fingerprint"].as_str() != Some(fp.as_str()) {
+        return fail(format!(
+            "this vault's entry says the root is {}, and the certificate it keeps is for {fp}: the vault has been edited, and nothing is signed under it",
+            root["fingerprint"].as_str().unwrap_or("nothing")
+        ));
+    }
+    Ok(cert.public_key)
+}
+
 /// A leaf signed by a card, through the core's seam: the core makes the bytes and checks the
-/// request, the card makes the signature, the core puts the certificate together.
+/// request, the card makes the signature, the core puts the certificate together — and the
+/// signature is verified under the pinned root before any of it is assembled. The verification is
+/// not a formality: a PIV slot's certificate and its key are not made to agree by anything, so a
+/// card can pass the check with one key and sign with another, and what would come back is a leaf
+/// naming this root as its issuer that no contact could ever validate.
 fn issue_on_card(card: &dyn CardSigner, root: &Value, csr_der: &[u8], now: i64, previous: Option<i64>, valid_days: i64) -> Res<Value> {
-    let spki = b64u(card.public_key()?.spki());
+    let pinned = root_key(root)?;
+    // The card in hand is this root's card. `id_issue` asked already; asking here too is what makes
+    // this function safe to call from anywhere, which is how the gap above it arrived.
+    match_root(root, card)?;
     let mut args = json!({
         "csr": b64u(csr_der),
         "root_cn": root["cn"].as_str().unwrap_or(""),
-        "root_spki": spki,
+        "root_spki": b64u(pinned.spki()),
         "now": instant(now),
         "valid_days": valid_days,
     });
@@ -146,6 +206,9 @@ fn issue_on_card(card: &dyn CardSigner, root: &Value, csr_der: &[u8], now: i64, 
     let u = core("issue_tbs_from_csr", args)?;
     let tbs = from_b64u(u["tbs"].as_str().unwrap_or("")).map_err(|e| Fail(e.why))?;
     let sig = card.sign_digest(&digest_of(&tbs))?;
+    if !pinned.verify(&tbs, &sig) {
+        return fail("the card's signature does not verify under this identity's root: the slot's certificate and its key are for different keys, or the card was changed mid-ceremony. Nothing signed, nothing written.");
+    }
     let der = core("assemble_leaf", json!({ "tbs": u["tbs"], "sig": b64u(&sig), "sig_alg": u["sig_alg"] }))?["der"].clone();
     Ok(json!({
         "der": der,
@@ -161,6 +224,7 @@ pub fn id_create_piv(name: &str, slot: &str, reader: Option<&str>, vault: &str) 
     if Path::new(vault).exists() {
         return fail(format!("{vault} exists; a second identity goes in with --vault pointing elsewhere, or is a decision for later"));
     }
+    check_writable(Some(vault))?;
     let card = crate::piv::open(reader, slot)?;
     let info = card.describe();
     eprintln!("reader      {}", info.reader);
@@ -182,7 +246,7 @@ pub fn id_create_piv(name: &str, slot: &str, reader: Option<&str>, vault: &str) 
         "ledger": [],
         "contacts": [],
     });
-    save_vault(&Vault { path: vault.to_string(), passphrase: pass, plaintext })?;
+    save_new_vault(&Vault { path: vault.to_string(), passphrase: pass, plaintext })?;
     println!("{}", key.fingerprint());
     eprintln!("wrote {vault} (mode 0600) — the certificate and the ledger; the key stays on the card");
     eprintln!("This card is the identity. The vault cannot hold the key and there is no export: lose the card and the identity is gone, exactly as a lost vault ends a software one. A second card is a second identity, not a copy.");
@@ -203,6 +267,9 @@ pub fn card_status(vault: Option<&str>, slot: &str, reader: Option<&str>) -> Res
     let matching = roots(&v.plaintext).into_iter().find(|r| r["fingerprint"].as_str() == Some(&key.fingerprint()));
     match matching {
         Some(r) => {
+            // The same question every signing path asks: is this entry and the certificate it keeps
+            // one key? A person asking "is this card my identity?" gets the whole answer or none.
+            root_key(&r)?;
             println!("identity    {} ({})", r["fingerprint"].as_str().unwrap_or(""), r["cn"].as_str().unwrap_or(""));
             println!("held        {}", match card_holder(&r).and_then(|h| h["mode"].as_str()) {
                 Some("generated") => "on this card, generated there: the vault has no key and there is no backup",
@@ -225,12 +292,16 @@ pub fn card_attach(vault: &str, slot: &str, reader: Option<&str>, root: Option<&
     let mut v = open_vault(vault, false)?;
     let chosen = pick_root(&v.plaintext, root)?;
     let fp = chosen["fingerprint"].as_str().unwrap_or("").to_string();
+    let pinned = root_key(&chosen)?;
     let card = crate::piv::open(reader, slot)?;
     let info = card.describe();
     let on_card = card.public_key()?.fingerprint();
     if on_card != fp {
         return fail(format!("the key in slot {slot} is {on_card}, and this identity's root is {fp}: import the right key, or attach the right identity"));
     }
+    // One signature now, and the PIN it costs, in exchange for never recording a card that cannot
+    // sign for this root.
+    card_proves_it_holds(card.as_ref(), &pinned)?;
     let roots = v.plaintext["roots"].as_array_mut().ok_or_else(|| Fail("vault roots".into()))?;
     let entry = roots.iter_mut().find(|r| r["fingerprint"].as_str() == Some(&fp)).ok_or_else(|| Fail("the root went missing".into()))?;
     entry["holder"] = json!({ "kind": "piv", "mode": "imported", "slot": info.slot, "serial": info.serial, "reader": info.reader });
@@ -241,9 +312,19 @@ pub fn card_attach(vault: &str, slot: &str, reader: Option<&str>, root: Option<&
 }
 
 pub fn id_create(name: &str, alg: &str, vault: &str, key_out: Option<&str>) -> Res<i32> {
+    // Every reason this command can refuse is found before a person is asked for a passphrase and
+    // before a vault exists on disk. The `--key-out` check used to sit after the vault was
+    // written, which left a made identity behind and told the person it had failed.
     if Path::new(vault).exists() {
         return fail(format!("{vault} exists; a second identity goes in with --vault pointing elsewhere, or is a decision for later"));
     }
+    if let Some(path) = key_out {
+        if Path::new(path).exists() {
+            return fail(format!("{path} exists: the key is not written over a file"));
+        }
+        check_writable(Some(path))?;
+    }
+    check_writable(Some(vault))?;
     let alg = Alg::parse(alg).map_err(|e| Fail(e.why))?;
     let pass = passphrase(true)?;
     let now = now_or(None)?;
@@ -256,20 +337,19 @@ pub fn id_create(name: &str, alg: &str, vault: &str, key_out: Option<&str>) -> R
         "ledger": [],
         "contacts": [],
     });
-    save_vault(&Vault { path: vault.to_string(), passphrase: pass, plaintext })?;
+    save_new_vault(&Vault { path: vault.to_string(), passphrase: pass, plaintext })?;
     println!("{fp}");
     eprintln!("wrote {vault} (mode 0600)");
     eprintln!("This vault is the identity. There is no recovery: a lost vault, or a forgotten passphrase, is a lost identity. Keep a copy somewhere else (pact id backup).");
     if let Some(path) = key_out {
-        if Path::new(path).exists() {
-            return fail(format!("{path} exists: the key is not written over a file"));
-        }
-        write_private(Path::new(path), pem("PRIVATE KEY", &key.to_pkcs8()).as_bytes())?;
+        // Exclusive, because the check above is a moment old by now: nothing else may have taken
+        // this name, and nothing that did will be written over or followed.
+        write_new_private(Path::new(path), pem("PRIVATE KEY", &key.to_pkcs8()).as_bytes())?;
         eprintln!();
         eprintln!("wrote {path} (mode 0600): this file IS the root key, in the clear.");
         eprintln!("  ykman piv keys import 9c {path}");
         eprintln!("  ykman piv certificates generate 9c --subject 'CN={name}'   # a certificate in the slot, so the key can be read back");
-        eprintln!("  pact card attach --vault {vault} --slot 9c");
+        eprintln!("  pact card-attach --vault {vault} --slot 9c");
         eprintln!("Destroy {path} once the card holds it. The vault keeps this key, which is what makes this arrangement recoverable and weaker than a root generated on the card.");
     }
     Ok(0)
@@ -297,6 +377,14 @@ pub fn id_issue(a: IssueArgs<'_>) -> Res<i32> {
     let now = now_or(a.now)?;
     let mut v = open_vault(a.vault, false)?;
     let root = pick_root(&v.plaintext, a.root)?;
+    // The entry and the certificate it keeps must be for the same key on either path, software or
+    // card: a vault edited between the two would issue under a root no contact has.
+    root_key(&root)?;
+    // And where the leaf is going is checked before it is signed. A leaf signed, written into the
+    // ledger, and then lost to a directory that does not exist would leave this identity's one live
+    // leaf spoken for by a certificate nobody has.
+    check_writable(a.out)?;
+    check_writable(a.chain_out)?;
     let fp = root["fingerprint"].as_str().unwrap_or("").to_string();
     let ledger: Vec<Value> = v.plaintext["ledger"].as_array().cloned().unwrap_or_default();
     let mine: Vec<&Value> = ledger.iter().filter(|l| l["root"].as_str() == Some(&fp)).collect();
@@ -430,6 +518,8 @@ pub fn id_ledger(vault: &str, root: Option<&str>, json: bool) -> Res<i32> {
 pub fn id_show(vault: &str, root: Option<&str>, out: Option<&str>) -> Res<i32> {
     let v = open_vault(vault, false)?;
     let r = pick_root(&v.plaintext, root)?;
+    // What is printed here is what a contact pins, so it is the entry's own key or nothing.
+    root_key(&r)?;
     let der = from_b64u(r["cert"].as_str().unwrap_or("")).map_err(|e| Fail(e.why))?;
     eprintln!("{}  {}  created {}", r["fingerprint"].as_str().unwrap_or(""), r["cn"].as_str().unwrap_or(""), r["created"].as_str().unwrap_or(""));
     write_output(out, &pem("CERTIFICATE", &der))?;
@@ -440,9 +530,15 @@ pub fn id_backup(vault: &str, to: &str, force: bool) -> Res<i32> {
     if Path::new(to).exists() && !force {
         return fail(format!("{to} exists: a backup never writes over a file (pass --force to replace it)"));
     }
+    check_writable(Some(to))?;
     let v = open_vault(vault, false)?;
     let raw = read_input(vault)?;
-    write_private(Path::new(to), &raw)?;
+    // Exclusive unless `--force` said otherwise: the check above is a moment old, and what is at
+    // that name might be the only copy of another identity.
+    match force {
+        false => write_new_private(Path::new(to), &raw)?,
+        true => write_private(Path::new(to), &raw)?,
+    }
     let back = read_input(to)?;
     let doc: Value = serde_json::from_slice(&back)?;
     core("vault_open", json!({ "passphrase": v.passphrase, "vault": doc }))?;
@@ -454,8 +550,9 @@ pub fn id_restore(from: &str, vault: &str) -> Res<i32> {
     if Path::new(vault).exists() {
         return fail(format!("{vault} exists: restore goes to a path that is empty"));
     }
+    check_writable(Some(vault))?;
     let v = open_vault(from, false)?;
-    write_private(Path::new(vault), &read_input(from)?)?;
+    write_new_private(Path::new(vault), &read_input(from)?)?;
     let doc: Value = serde_json::from_slice(&read_input(vault)?)?;
     core("vault_open", json!({ "passphrase": v.passphrase, "vault": doc }))?;
     eprintln!("restored {from} to {vault}: {} identities, {} leaves, {} contacts", roots(&v.plaintext).len(), v.plaintext["ledger"].as_array().map_or(0, |a| a.len()), v.plaintext["contacts"].as_array().map_or(0, |a| a.len()));
@@ -625,7 +722,8 @@ mod card_tests {
 
     #[test]
     fn a_card_that_refuses_says_which_refusal_it_was() {
-        let root = root_of(&FakeCard::p256("7777")).expect("a root").1;
+        let honest = FakeCard::p256("7777");
+        let root = root_of(&honest).expect("a root").1;
         let csr = a_request(ENDPOINT);
 
         // An empty slot cannot even be read.
@@ -638,7 +736,7 @@ mod card_tests {
         assert!(e.0.contains("P-256"), "{}", e.0);
 
         // A wrong PIN comes back with the tries left, because that is what a person needs next.
-        let e = issue_on_card(&FakeCard::wrong_pin(), &root, &csr, NOW, None, 365).unwrap_err();
+        let e = issue_on_card(&FakeCard::wrong_pin_for(&honest), &root, &csr, NOW, None, 365).unwrap_err();
         assert!(e.0.contains("wrong PIN") && e.0.contains("2 tries left"), "{}", e.0);
     }
 
@@ -693,5 +791,85 @@ mod card_tests {
         assert!(live_leaf_refusal(&mine, elsewhere, NOW + 10, true).is_none(), "--move allows it, as the core does");
         // A renewal at the same endpoint is never a second home.
         assert!(live_leaf_refusal(&mine, ENDPOINT, NOW + 10, false).is_none());
+    }
+
+    /// A card whose certificate names one key and whose slot holds another. Nothing it signs may
+    /// become a certificate: the leaf would carry the pinned root as its issuer and a stranger's
+    /// signature, and no contact could ever validate it.
+    #[test]
+    fn a_card_whose_certificate_and_key_disagree_gets_no_leaf() {
+        let honest = FakeCard::p256("7777");
+        let (_, root) = root_of(&honest).expect("a root");
+        let hostile = FakeCard::signs_with_another_key(&honest, "7777");
+        // Every check that reads the certificate passes: the certificate is this root's.
+        match_root(&root, &hostile).expect("the certificate in the slot is this identity's root");
+        // The signature is the only thing that tells, and it is checked before anything is built.
+        let e = issue_on_card(&hostile, &root, &a_request(ENDPOINT), NOW, None, 365).map(|_| ()).unwrap_err();
+        assert!(e.0.contains("does not verify"), "{}", e.0);
+    }
+
+    /// The check passes and the signature is a stranger's: the card was pulled and replaced, or the
+    /// slot was generated again, between the two. This is the one that ends in an artefact if the
+    /// signature is not verified — a leaf in the ledger that no contact can validate.
+    #[test]
+    fn a_card_that_swaps_its_key_after_the_check_signs_nothing_that_is_kept() {
+        let honest = FakeCard::p256("7777");
+        let (cert, root) = root_of(&honest).expect("a root");
+        let hostile = FakeCard::swapped_after(&honest, 1);
+        match issue_on_card(&hostile, &root, &a_request(ENDPOINT), NOW, None, 365) {
+            Err(e) => assert!(e.0.contains("does not verify"), "{}", e.0),
+            Ok(out) => {
+                // What was assembled, and what it is worth, before failing — the defect is the
+                // artefact, not the exit code.
+                let r = core("validate_chain", json!({ "chain": [out["der"].clone(), b64u(&cert)], "now": instant(NOW), "expected_root": root["fingerprint"] })).expect("an answer");
+                panic!("a leaf was assembled from a card that swapped its key after the check; against the pinned root it is {r}");
+            }
+        }
+    }
+
+    /// Taken out of the reader between the check and the signature: the refusal says so, and
+    /// nothing is assembled from a signature that never came.
+    #[test]
+    fn a_card_that_leaves_the_reader_mid_ceremony_says_so() {
+        let honest = FakeCard::p256("7777");
+        let (_, root) = root_of(&honest).expect("a root");
+        let gone = FakeCard::vanishes_after(1);
+        let e = issue_on_card(&gone, &root, &a_request(ENDPOINT), NOW, None, 365).map(|_| ()).unwrap_err();
+        assert!(e.0.contains("no longer in") || e.0.contains("a different card"), "{}", e.0);
+        // And a card gone before the first word is the same refusal, not a panic.
+        let e = root_from_card(&FakeCard::vanishes_after(0), "Alina Rao", NOW).map(|_| ()).unwrap_err();
+        assert!(e.0.contains("no longer in"), "{}", e.0);
+    }
+
+    /// Attaching a card records that every later signature comes from it, so the card proves it can
+    /// sign before that is written down. The certificate in the slot is not that proof: this is the
+    /// card `card-attach` used to wave through, and the failure would then have arrived at the
+    /// first issuance, one PIN try at a time.
+    #[test]
+    fn attaching_a_card_that_only_holds_the_certificate_is_refused() {
+        let honest = FakeCard::p256("7777");
+        let (_, root) = root_of(&honest).expect("a root");
+        let pinned = root_key(&root).expect("the pinned key");
+        card_proves_it_holds(&honest, &pinned).expect("the card that made this root can sign for it");
+        let e = card_proves_it_holds(&FakeCard::signs_with_another_key(&honest, "8888"), &pinned).map(|_| ()).unwrap_err();
+        assert!(e.0.contains("does not verify"), "{}", e.0);
+        let e = card_proves_it_holds(&FakeCard::vanishes_after(0), &pinned).map(|_| ()).unwrap_err();
+        assert!(e.0.contains("no longer in"), "{}", e.0);
+    }
+
+    /// A vault whose entry and whose certificate are for different keys is not an identity: it
+    /// would issue under a key no contact pinned, and print a certificate nobody can check against
+    /// the fingerprint they were given. Both halves are read together, everywhere.
+    #[test]
+    fn a_vault_entry_that_disagrees_with_its_own_certificate_signs_nothing() {
+        let honest = FakeCard::p256("7777");
+        let (_, root) = root_of(&honest).expect("a root");
+        let stranger = root_of(&FakeCard::p256("8888")).expect("another root").1;
+        let mut edited = root.clone();
+        edited["cert"] = stranger["cert"].clone();
+        let e = root_key(&edited).map(|_| ()).unwrap_err();
+        assert!(e.0.contains("the vault has been edited"), "{}", e.0);
+        let e = issue_on_card(&honest, &edited, &a_request(ENDPOINT), NOW, None, 365).map(|_| ()).unwrap_err();
+        assert!(e.0.contains("the vault has been edited"), "{}", e.0);
     }
 }

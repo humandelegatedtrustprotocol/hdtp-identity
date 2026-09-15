@@ -1,6 +1,6 @@
 //! The implementer's half: inspect a card, validate a chain, read a certificate, make and check a
 //! request, mint a key. Every verdict is the core's; the terminal only formats it.
-use crate::io::{core, fail, instant, now_or, pem, read_der, read_input, write_output, write_private, Res};
+use crate::io::{core, fail, instant, now_or, pem, read_der, read_input, write_new_private, write_output, write_private, Res};
 use pact_identity::keys::{Alg, PrivateKey, PublicKey};
 use pact_identity::util::{b64u, from_b64u};
 use pact_identity::x509;
@@ -148,10 +148,22 @@ pub fn csr_check(path: &str, root_spkis: &[String]) -> Res<i32> {
     }
 }
 
-pub fn key_new(alg: &str, out: &str) -> Res<i32> {
+pub fn key_new(alg: &str, out: &str, force: bool) -> Res<i32> {
+    // A host's leaf key is not written over. The leaf that is live was issued to *this* key, and a
+    // fresh one at the same name would leave the host unable to serve it and unable to get it back
+    // — the same rule `id create --key-out` has always had, on the command that makes keys.
     let alg = Alg::parse(alg).map_err(|e| crate::io::Fail(e.why))?;
+    if !force && Path::new(out).exists() {
+        return fail(format!("{out} exists: a live leaf was issued to the key that is there (pass --force to replace it)"));
+    }
+    crate::io::check_writable(Some(out))?;
     let k = PrivateKey::generate(alg).map_err(|e| crate::io::Fail(e.why))?;
-    write_private(Path::new(out), &k.to_pkcs8())?;
+    // Exclusive, because the check above is a moment old: the refusal has to still be true at the
+    // moment the file appears.
+    match force {
+        false => write_new_private(Path::new(out), &k.to_pkcs8())?,
+        true => write_private(Path::new(out), &k.to_pkcs8())?,
+    }
     println!("{}", k.public().fingerprint());
     eprintln!("wrote {out} (PKCS #8 DER, mode 0600)");
     Ok(0)
