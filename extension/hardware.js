@@ -22,6 +22,15 @@ import { b64u } from './core.js'
 
 const RP = { id: undefined, name: 'PACT wallet' } // rpId defaults to this extension's origin
 
+/** No authenticator present can hold a blob: guidance, not a fault of the person's. */
+export class NoBlob extends Error {
+  constructor(why) {
+    super(why)
+    this.code = 'no_blob'
+    this.why = why
+  }
+}
+
 export const hasWebAuthn = () => typeof PublicKeyCredential !== 'undefined' && !!navigator.credentials
 
 function challenge() { return crypto.getRandomValues(new Uint8Array(32)) }
@@ -144,18 +153,34 @@ async function writeBlob(credentialId, bytes) {
  * rebuilt from it hashes to the same fingerprint.
  */
 export async function backupTo(userName, roots) {
-  const cred = await navigator.credentials.create({
-    publicKey: {
-      rp: RP,
-      user: { id: crypto.getRandomValues(new Uint8Array(16)), name: `${userName || 'pact'} (backup)`, displayName: `PACT backup — ${userName || 'identity'}` },
-      challenge: challenge(),
-      pubKeyCredParams: [-8, -7, -257].map((alg) => ({ type: 'public-key', alg })),
-      // Required, both of them: a blob needs a discoverable credential, and a restore on a machine
-      // that has never seen this wallet has no credential id to ask for.
-      authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
-      extensions: { largeBlob: { support: 'required' } },
-    },
-  })
+  let cred
+  try {
+    cred = await navigator.credentials.create({
+      publicKey: {
+        rp: RP,
+        user: { id: crypto.getRandomValues(new Uint8Array(16)), name: `${userName || 'pact'} (backup)`, displayName: `PACT backup — ${userName || 'identity'}` },
+        challenge: challenge(),
+        pubKeyCredParams: [-8, -7, -257].map((alg) => ({ type: 'public-key', alg })),
+        // Required, both of them: a blob needs a discoverable credential, and a restore on a machine
+        // that has never seen this wallet has no credential id to ask for.
+        authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
+        extensions: { largeBlob: { support: 'required' } },
+      },
+    })
+  } catch (e) {
+    // Chrome answers "your device can't be used with this site" when nothing available can hold a
+    // blob, which tells a person nothing about what would. A blob is required here on purpose: a
+    // backup credential that holds nothing is not a backup. So say what this needs and what else
+    // works, rather than leaving the browser's sentence as the only explanation.
+    if (e && (e.name === 'NotSupportedError' || e.name === 'NotAllowedError' || e.name === 'ConstraintError')) {
+      throw new NoBlob(
+        'nothing here can hold a backup. This needs an authenticator that stores a large blob — a security key that supports it, such as a YubiKey 5 on recent firmware. '
+        + 'Chrome\'s own password manager does not store blobs, and 1Password cannot save a passkey for an extension at all, which is the "unable to save" it shows. '
+        + 'The vault FILE is the backup that works everywhere: download it and keep it in your password manager, which is exactly what one is for.',
+      )
+    }
+    throw e
+  }
   const ext = cred.getClientExtensionResults()
   const credentialId = b64u.encode(new Uint8Array(cred.rawId))
   if (!ext.largeBlob || !ext.largeBlob.supported) {
