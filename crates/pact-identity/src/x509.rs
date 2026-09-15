@@ -1,5 +1,5 @@
 //! The §14.1 profile as bytes, the exact-profile check, §14.2 chain validation and the §14.3 comparison.
-use crate::der::{self, children, read, read_oid, Node};
+use crate::der::{self, children, read, read_oid_strict, Node};
 use crate::keys::{fingerprint_of_id, Alg, PrivateKey, PublicKey, OID_ECDSA_SHA256, OID_ED25519};
 use crate::time::{self, DAY, FOREVER};
 use crate::util::{err, Result};
@@ -217,7 +217,7 @@ fn name_of(node: &Node<'_>) -> Result<String> {
         return err("parse", "RDN is not one attribute");
     }
     let parts = children(&atvs[0])?;
-    if parts.len() < 2 || read_oid(&parts[0]) != OID_CN || parts[1].tag != 0x0c {
+    if parts.len() < 2 || read_oid_strict(&parts[0])? != OID_CN || parts[1].tag != 0x0c {
         return err("parse", "name is not a UTF-8 commonName");
     }
     Ok(String::from_utf8_lossy(parts[1].content).into_owned())
@@ -262,7 +262,7 @@ pub fn parse(der_bytes: &[u8]) -> Result<Cert> {
     let mut out = Cert {
         der: der_bytes.to_vec(),
         tbs: tbs.raw.to_vec(),
-        sig_alg: read_oid(&alg_parts[0]),
+        sig_alg: read_oid_strict(&alg_parts[0])?,
         sig: sig.content[1..].to_vec(),
         serial: f[1].content.to_vec(),
         issuer: name_of(&f[3])?,
@@ -305,7 +305,7 @@ pub fn parse(der_bytes: &[u8]) -> Result<Cert> {
         } else {
             false
         };
-        let id = read_oid(&parts[0]);
+        let id = read_oid_strict(&parts[0])?;
         let octets = parts[parts.len() - 1].content;
         let value = read(octets, 0)?;
         if value.end != octets.len() {
@@ -337,24 +337,19 @@ pub fn parse(der_bytes: &[u8]) -> Result<Cert> {
             OID_KEY_USAGE => {
                 // BIT STRING: the first byte says how many trailing bits of the last byte are unused;
                 // every named bit of every byte counts, so a second byte (decipherOnly) is seen.
-                let unused = value.content.first().copied().unwrap_or(0) as usize;
-                let bits = &value.content[1.min(value.content.len())..];
-                if unused > 7 || (bits.is_empty() && unused != 0) {
+                if !der::named_bits_ok(value.content) {
                     return err("parse", "BIT STRING not in the DER form");
                 }
+                let unused = value.content.first().copied().unwrap_or(0) as usize;
+                let bits = &value.content[1.min(value.content.len())..];
                 let total = bits.len() * 8 - unused;
                 for i in 0..total {
                     if bits[i / 8] & (0x80 >> (i % 8)) != 0 {
                         out.key_usage.push(i as u8);
                     }
                 }
-                if let Some(last) = bits.last() {
-                    if unused > 0 && last & ((1u8 << unused) - 1) != 0 {
-                        return err("parse", "BIT STRING not in the DER form");
-                    }
-                }
             }
-            OID_EKU => out.eku = children(&value)?.iter().map(read_oid).collect(),
+            OID_EKU => out.eku = children(&value)?.iter().map(read_oid_strict).collect::<Result<Vec<_>>>()?,
             OID_SAN => {
                 for n in children(&value)? {
                     match n.tag {

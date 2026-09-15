@@ -255,7 +255,11 @@ func nameOf(n derNode) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if len(parts) < 2 || readOid(parts[0]) != OIDCommonName || parts[1].tag != 0x0c {
+	cnOid, err := readOidStrict(parts[0])
+	if err != nil {
+		return "", err
+	}
+	if len(parts) < 2 || cnOid != OIDCommonName || parts[1].tag != 0x0c {
 		return "", errors.New("name is not a UTF-8 commonName")
 	}
 	return string(parts[1].content), nil
@@ -325,8 +329,12 @@ func Parse(der []byte) (*Cert, error) {
 	if err != nil {
 		return nil, err
 	}
+	sigAlgOid, err := readOidStrict(algParts[0])
+	if err != nil {
+		return nil, err
+	}
 	out := &Cert{
-		DER: der, TBS: tbs.raw, SigAlg: readOid(algParts[0]), Sig: sig.content[1:],
+		DER: der, TBS: tbs.raw, SigAlg: sigAlgOid, Sig: sig.content[1:],
 		Serial: f[1].content, Issuer: issuer, Subject: subject,
 		NotBefore: notBefore, NotAfter: notAfter, TimeTags: [2]byte{validity[0].tag, validity[1].tag},
 		SPKI: f[6].raw, PublicKey: pub, KeyID: sha256Sum(f[6].raw),
@@ -350,6 +358,9 @@ func Parse(der []byte) (*Cert, error) {
 		if len(parts) < 2 || len(parts) > 3 || parts[0].tag != 0x06 || parts[len(parts)-1].tag != 0x04 {
 			return nil, errors.New("certificate shape")
 		}
+		if !derOidMinimal(parts[0]) {
+			return nil, errors.New("OID not in the DER form")
+		}
 		critical := false
 		if len(parts) == 3 {
 			if !derBoolTrue(parts[1]) {
@@ -357,7 +368,10 @@ func Parse(der []byte) (*Cert, error) {
 			}
 			critical = true
 		}
-		id := readOid(parts[0])
+		id, err := readOidStrict(parts[0])
+		if err != nil {
+			return nil, err
+		}
 		octets := parts[len(parts)-1].content
 		value, err := derRead(octets, 0)
 		if err != nil {
@@ -394,22 +408,16 @@ func Parse(der []byte) (*Cert, error) {
 		case OIDKeyUsage:
 			// BIT STRING: the first byte says how many trailing bits of the last byte are unused;
 			// every named bit of every byte counts, so a second byte (decipherOnly) is seen.
-			if len(value.content) < 1 {
+			if len(value.content) < 1 || !derNamedBitsOK(value.content) {
 				return nil, errors.New("BIT STRING not in the DER form")
 			}
 			unused := int(value.content[0])
 			bits := value.content[1:]
-			if unused > 7 || (len(bits) == 0 && unused != 0) {
-				return nil, errors.New("BIT STRING not in the DER form")
-			}
 			total := len(bits)*8 - unused
 			for i := 0; i < total; i++ {
 				if bits[i/8]&(0x80>>uint(i%8)) != 0 {
 					out.KeyUsage = append(out.KeyUsage, i)
 				}
-			}
-			if len(bits) > 0 && unused > 0 && bits[len(bits)-1]&(1<<uint(unused)-1) != 0 {
-				return nil, errors.New("BIT STRING not in the DER form")
 			}
 		case OIDExtKeyUsage:
 			c, err := derChildren(value)
@@ -417,7 +425,11 @@ func Parse(der []byte) (*Cert, error) {
 				return nil, err
 			}
 			for _, o := range c {
-				out.EKU = append(out.EKU, readOid(o))
+				eku, err := readOidStrict(o)
+				if err != nil {
+					return nil, err
+				}
+				out.EKU = append(out.EKU, eku)
 			}
 		case OIDSubjectAltName:
 			c, err := derChildren(value)

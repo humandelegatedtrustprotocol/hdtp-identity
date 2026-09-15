@@ -63,7 +63,7 @@ and on the `v: 1` vectors in SPEC.md Appendix B.
 | `build_leaf` | `{"cn", "root_cn", "root_pkcs8", "host_spki", "endpoint", "dns_name"?, "not_before", "not_after", "serial"?}` | `{"der"}` |
 | `leaf_tbs` / `assemble_leaf` | as `build_leaf` with `root_spki` in place of `root_pkcs8` → `{"tbs", "sig_alg"}`; `{"tbs", "sig", "sig_alg"?}` → `{"der"}` | the same seam for leaves, the same `sig_alg` |
 | `parse_certificate` | `{"der"}` | `{"kind": "root"\|"leaf"\|"other", "subject", "issuer", "serial", "not_before", "not_after", "alg", "spki", "fingerprint", "key_id", "ski", "aki", "ca", "path_len", "key_usage": [ints], "eku": [oids], "uris": [], "dns": [], "sig_alg": oid, "profile_error": null\|string, "bytes": int}` |
-| `profile_error` | `{"der", "kind": "root"\|"leaf"}` | `{"error": null\|string}` — the exact strings of `x509.mjs profileError`. Parsing itself refuses, with a `parse` error, what DER has one encoding for and the certificate spells another way: the AlgorithmIdentifier inside the TBS differing from the one outside (`signature algorithm inside and outside differ`), a BOOLEAN that is not `0xFF` or is an explicit FALSE, a non-minimal INTEGER, a BIT STRING with unused bits set, a validity of other than two times, an extension of other than two or three parts or whose OCTET STRING holds more than one TLV, a P-256 key that is not the uncompressed point |
+| `profile_error` | `{"der", "kind": "root"\|"leaf"}` | `{"error": null\|string}` — the exact strings of `x509.mjs profileError`. Parsing itself refuses, with a `parse` error, what DER has one encoding for and the certificate spells another way: the AlgorithmIdentifier inside the TBS differing from the one outside (`signature algorithm inside and outside differ`), a BOOLEAN that is not `0xFF` or is an explicit FALSE, a non-minimal INTEGER, an OBJECT IDENTIFIER with a padded subidentifier, a `keyUsage` BIT STRING whose unused bits are set or whose trailing zero bits are not removed, a validity of other than two times, an extension of other than two or three parts or whose OCTET STRING holds more than one TLV, a P-256 key that is not the uncompressed point. Every one of these is a scenario in `vectors/intrude.mjs`, which the seed and both ports answer alike — the seed's strictness and the ports' are one rule, proven rather than asserted |
 | `validate_chain` | `{"chain": [leaf, root], "now", "expected_root"?, "expected_endpoint"?}` | accept: `{"ok": true, "leaf_spki", "leaf_fingerprint", "root_fingerprint", "endpoint", "not_before", "not_after", "alg"}`; refuse: `{"ok": false, "rule": 1..5, "reason"}` |
 | `compare_leaves` | `{"pinned", "presented"}` | `{"order": "same"\|"newer"\|"superseded"\|"conflict"}` |
 | `is_normal_https` | `{"url"}` | `{"normal": bool}` |
@@ -190,9 +190,10 @@ host holding a 1.x pin of that leaf's key can upgrade the pin (Appendix C row 6)
 The `why` strings are the seed's, verbatim, so the intrusion suite reads both ports alike.
 
 Order, as `receive()` has it (freshness also refuses `exp − ts` over 30 days, §13.1, as `exp too far from ts`): decode `protected` → header members exactly `cty,exp,kid,msg_id,suite,ts,v`
+→ their types (`v`, `ts`, `exp` integers, the rest strings, else `header member types`)
 → `v` = 2 and a known suite → `kid` held (current, or superseded and not past `notAfter`), else a
 sibling's → `envelope_invalid`, a former → `certificate_renewed`, unknown → `envelope_invalid` → suite
-fits the held leaf's key → HPKE open → plaintext members exactly `chain,method,params` or
+fits the held leaf's key → `enc` is exactly the suite's `Npk`, 65 or 32 (`encapsulated key is not the suite's length`: `sig` covers the three members concatenated, so the length is what fixes the boundary) → HPKE open → plaintext members exactly `chain,method,params` or
 `leaf,method,params`, method `tools/call` or `tools/list` → **small form**: leaf fingerprint matched
 against pins not blocked, the held leaf within validity, `sig` verifies, else `chain_required` in every
 case; then freshness (`cty` is a call, `now < exp`, `|now − ts| ≤ 300 s`, non-empty `msg_id`, replay) →
@@ -200,7 +201,8 @@ tier by pin state → **full form**: `validate_chain` at `now` with no expectati
 with `chain rule N: reason`), `sig` under the chain's leaf key, freshness; root unpinned → tombstone
 within 30 days with a newer leaf → `pending_new_address` forced `ask`, else guest; guest binding: the
 method is `tools/call`, the tool `redeem_invite` or `request_contact`, `params.arguments.card`
-decodes, its certificate byte-equals the chain's leaf, `address_claim` names a pin at that endpoint
+decodes, its certificate byte-equals the chain's leaf, the endpoint is not this node's own
+(`guest endpoint is this node's own address`, §14.5), `address_claim` names a pin at that endpoint
 or a former endpoint within 30 days; root pinned and blocked → guest; superseded → guest; conflict →
 `envelope_invalid`; another endpoint → `ask` pending or `auto` re-pin with the former endpoint recorded
 and a `new_address` event; newer at the pinned endpoint → `pin_update` and a `renewal` event; then
