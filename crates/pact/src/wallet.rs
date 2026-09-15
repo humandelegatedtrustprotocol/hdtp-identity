@@ -2,6 +2,7 @@
 //! contact book. The rules live in the core's `wallet_issue`; this file adds the terminal's
 //! discipline — the passphrase from a prompt, the vault owner-only, nothing a root key ever printed.
 use crate::io::{confirm, core, fail, instant, now_or, passphrase, pem, read_der, read_input, write_output, write_private, Fail, Res};
+use crate::piv::{digest_of, CardSigner};
 use pact_identity::csr;
 use pact_identity::keys::{Alg, PrivateKey};
 use pact_identity::time::parse_rfc3339;
@@ -56,7 +57,190 @@ fn pick_root(v: &Value, wanted: Option<&str>) -> Res<Value> {
     }
 }
 
-pub fn id_create(name: &str, alg: &str, vault: &str) -> Res<i32> {
+/// How a root is held. A vault entry with a `pkcs8` is software; one with a `holder` is a card, and
+/// then the vault holds the certificate and the ledger and no key at all — there is nothing to hold,
+/// which is the whole point of the arrangement.
+pub fn card_holder(root: &Value) -> Option<&Value> {
+    root.get("holder").filter(|h| h["kind"].as_str() == Some("piv"))
+}
+
+/// The card a root names, opened and checked against the root it is supposed to be. A different
+/// card, or a slot regenerated since, is the one mistake that would otherwise produce certificates
+/// under a root nobody pinned.
+fn card_for(root: &Value, reader: Option<&str>) -> Res<Box<dyn CardSigner>> {
+    let holder = card_holder(root).ok_or_else(|| Fail("this root is not held on a card".into()))?;
+    let slot = holder["slot"].as_str().unwrap_or(crate::piv::DEFAULT_SLOT);
+    let card = crate::piv::open(reader.or_else(|| holder["reader"].as_str()), slot)?;
+    match_root(root, card.as_ref())?;
+    Ok(card)
+}
+
+/// The card in hand is the one this identity's root lives on — or nothing is signed. A different
+/// card, or a slot generated again since, would otherwise mint certificates under a root no
+/// contact has ever pinned.
+fn match_root(root: &Value, card: &dyn CardSigner) -> Res<()> {
+    let on_card = card.public_key()?.fingerprint();
+    let wanted = root["fingerprint"].as_str().unwrap_or("");
+    if on_card != wanted {
+        return fail(format!(
+            "the key in slot {} is {on_card}, and this identity's root is {wanted}: a different card, or that slot has been generated again. Nothing signed.",
+            card.describe().slot
+        ));
+    }
+    Ok(())
+}
+
+/// The root certificate a card's key signs for itself, through the seam: the core builds the bytes,
+/// the card signs them, the core assembles, and the signature is checked here before a vault is
+/// written — a card that signed with another key must not become an identity on disk.
+fn root_from_card(card: &dyn CardSigner, name: &str, now: i64) -> Res<(Vec<u8>, pact_identity::keys::PublicKey)> {
+    let key = card.public_key()?;
+    if key.alg().name() != "p256" {
+        return fail(format!(
+            "that slot holds a {} key; a card-held root is P-256 (SPEC §14.1 allows Ed25519 or P-256, and PIV's Ed25519 is too new to rely on)",
+            key.alg().name()
+        ));
+    }
+    let serial = x509::random_serial().map_err(|e| Fail(e.why))?;
+    let u = core("root_tbs", json!({ "cn": name, "spki": b64u(key.spki()), "not_before": instant(now), "serial": b64u(&serial) }))?;
+    let tbs = from_b64u(u["tbs"].as_str().unwrap_or("")).map_err(|e| Fail(e.why))?;
+    let sig = card.sign_digest(&digest_of(&tbs))?;
+    if !key.verify(&tbs, &sig) {
+        return fail("the card's signature does not verify under the slot's key: nothing written");
+    }
+    let cert = from_b64u(core("assemble_root", json!({ "tbs": u["tbs"], "sig": b64u(&sig), "sig_alg": u["sig_alg"] }))?["der"].as_str().unwrap_or("")).map_err(|e| Fail(e.why))?;
+    Ok((cert, key))
+}
+
+/// SPEC §9's one-live-leaf rule, which the core applies for a software root inside `wallet_issue`
+/// and which the card path must apply for itself — the core cannot, because there is no key to hand
+/// it. `live_leaf_refusal` and the core's rule are held to the same behaviour by a test that runs a
+/// software root and a card-held root through the same vault and expects the same refusal.
+fn live_leaf_refusal(mine: &[&Value], endpoint: &str, now: i64, moving: bool) -> Option<String> {
+    let newest = mine.iter().max_by_key(|l| l["not_before"].as_str().and_then(|t| parse_rfc3339(t).ok()).unwrap_or(0))?;
+    let live = newest["not_after"].as_str().and_then(|t| parse_rfc3339(t).ok()).is_some_and(|t| t > now);
+    let elsewhere = newest["endpoint"].as_str() != Some(endpoint);
+    if live && elsewhere && !moving {
+        return Some(format!(
+            "a leaf is live for {}: a second endpoint is a move, not a second home",
+            newest["endpoint"].as_str().unwrap_or("?")
+        ));
+    }
+    None
+}
+
+/// A leaf signed by a card, through the core's seam: the core makes the bytes and checks the
+/// request, the card makes the signature, the core puts the certificate together.
+fn issue_on_card(card: &dyn CardSigner, root: &Value, csr_der: &[u8], now: i64, previous: Option<i64>, valid_days: i64) -> Res<Value> {
+    let spki = b64u(card.public_key()?.spki());
+    let mut args = json!({
+        "csr": b64u(csr_der),
+        "root_cn": root["cn"].as_str().unwrap_or(""),
+        "root_spki": spki,
+        "now": instant(now),
+        "valid_days": valid_days,
+    });
+    if let Some(p) = previous {
+        args["previous_not_before"] = json!(instant(p));
+    }
+    let u = core("issue_tbs_from_csr", args)?;
+    let tbs = from_b64u(u["tbs"].as_str().unwrap_or("")).map_err(|e| Fail(e.why))?;
+    let sig = card.sign_digest(&digest_of(&tbs))?;
+    let der = core("assemble_leaf", json!({ "tbs": u["tbs"], "sig": b64u(&sig), "sig_alg": u["sig_alg"] }))?["der"].clone();
+    Ok(json!({
+        "der": der,
+        "endpoint": u["endpoint"],
+        "not_before": u["not_before"],
+        "not_after": u["not_after"],
+    }))
+}
+
+/// An identity whose root is a card: the certificate is built from the slot's public key and signed
+/// by the slot, so no private key exists anywhere but the card, including here.
+pub fn id_create_piv(name: &str, slot: &str, reader: Option<&str>, vault: &str) -> Res<i32> {
+    if Path::new(vault).exists() {
+        return fail(format!("{vault} exists; a second identity goes in with --vault pointing elsewhere, or is a decision for later"));
+    }
+    let card = crate::piv::open(reader, slot)?;
+    let info = card.describe();
+    eprintln!("reader      {}", info.reader);
+    eprintln!("card        {}", info.serial.clone().unwrap_or_else(|| "serial unknown".into()));
+    eprintln!("slot        {}", info.slot);
+    let pass = passphrase(true)?;
+    let now = now_or(None)?;
+    let (cert, key) = root_from_card(card.as_ref(), name, now)?;
+    eprintln!("root        {}", key.fingerprint());
+    let plaintext = json!({
+        "v": 1,
+        "roots": [{
+            "fingerprint": key.fingerprint(),
+            "cn": name,
+            "cert": b64u(&cert),
+            "created": instant(now),
+            "holder": { "kind": "piv", "mode": "generated", "slot": info.slot, "serial": info.serial, "reader": info.reader },
+        }],
+        "ledger": [],
+        "contacts": [],
+    });
+    save_vault(&Vault { path: vault.to_string(), passphrase: pass, plaintext })?;
+    println!("{}", key.fingerprint());
+    eprintln!("wrote {vault} (mode 0600) — the certificate and the ledger; the key stays on the card");
+    eprintln!("This card is the identity. The vault cannot hold the key and there is no export: lose the card and the identity is gone, exactly as a lost vault ends a software one. A second card is a second identity, not a copy.");
+    Ok(0)
+}
+
+pub fn card_status(vault: Option<&str>, slot: &str, reader: Option<&str>) -> Res<i32> {
+    let card = crate::piv::open(reader, slot)?;
+    let info = card.describe();
+    let key = card.public_key()?;
+    println!("reader      {}", info.reader);
+    println!("card        {}", info.serial.unwrap_or_else(|| "serial unknown".into()));
+    println!("slot        {}", info.slot);
+    println!("algorithm   {}", key.alg().name());
+    println!("key         {}", key.fingerprint());
+    let Some(path) = vault else { return Ok(0) };
+    let v = open_vault(path, false)?;
+    let matching = roots(&v.plaintext).into_iter().find(|r| r["fingerprint"].as_str() == Some(&key.fingerprint()));
+    match matching {
+        Some(r) => {
+            println!("identity    {} ({})", r["fingerprint"].as_str().unwrap_or(""), r["cn"].as_str().unwrap_or(""));
+            println!("held        {}", match card_holder(&r).and_then(|h| h["mode"].as_str()) {
+                Some("generated") => "on this card, generated there: the vault has no key and there is no backup",
+                Some("imported") => "on this card, imported: the vault keeps the key too, so a lost card is not a lost identity",
+                Some(_) | None => "as a key in the vault; this card signs nothing for it",
+            });
+            Ok(0)
+        }
+        None => {
+            println!("identity    none in {path} has this key");
+            Ok(1)
+        }
+    }
+}
+
+/// Hands a vault's own root over to a card that has been given a copy of its key. The card is
+/// proved to hold that very key before anything is written — an attach that recorded a card holding
+/// some other key would send every later signature somewhere nobody pinned.
+pub fn card_attach(vault: &str, slot: &str, reader: Option<&str>, root: Option<&str>) -> Res<i32> {
+    let mut v = open_vault(vault, false)?;
+    let chosen = pick_root(&v.plaintext, root)?;
+    let fp = chosen["fingerprint"].as_str().unwrap_or("").to_string();
+    let card = crate::piv::open(reader, slot)?;
+    let info = card.describe();
+    let on_card = card.public_key()?.fingerprint();
+    if on_card != fp {
+        return fail(format!("the key in slot {slot} is {on_card}, and this identity's root is {fp}: import the right key, or attach the right identity"));
+    }
+    let roots = v.plaintext["roots"].as_array_mut().ok_or_else(|| Fail("vault roots".into()))?;
+    let entry = roots.iter_mut().find(|r| r["fingerprint"].as_str() == Some(&fp)).ok_or_else(|| Fail("the root went missing".into()))?;
+    entry["holder"] = json!({ "kind": "piv", "mode": "imported", "slot": info.slot, "serial": info.serial, "reader": info.reader });
+    save_vault(&v)?;
+    eprintln!("{fp} now signs on card {} slot {}", info.serial.unwrap_or_else(|| "?".into()), info.slot);
+    eprintln!("The vault still holds this root's key, so this is a card that signs rather than a card that is the identity: a lost card is an inconvenience, and a copied vault is still a copied identity. `pact id create --piv` is the other arrangement.");
+    Ok(0)
+}
+
+pub fn id_create(name: &str, alg: &str, vault: &str, key_out: Option<&str>) -> Res<i32> {
     if Path::new(vault).exists() {
         return fail(format!("{vault} exists; a second identity goes in with --vault pointing elsewhere, or is a decision for later"));
     }
@@ -76,6 +260,18 @@ pub fn id_create(name: &str, alg: &str, vault: &str) -> Res<i32> {
     println!("{fp}");
     eprintln!("wrote {vault} (mode 0600)");
     eprintln!("This vault is the identity. There is no recovery: a lost vault, or a forgotten passphrase, is a lost identity. Keep a copy somewhere else (pact id backup).");
+    if let Some(path) = key_out {
+        if Path::new(path).exists() {
+            return fail(format!("{path} exists: the key is not written over a file"));
+        }
+        write_private(Path::new(path), pem("PRIVATE KEY", &key.to_pkcs8()).as_bytes())?;
+        eprintln!();
+        eprintln!("wrote {path} (mode 0600): this file IS the root key, in the clear.");
+        eprintln!("  ykman piv keys import 9c {path}");
+        eprintln!("  ykman piv certificates generate 9c --subject 'CN={name}'   # a certificate in the slot, so the key can be read back");
+        eprintln!("  pact card attach --vault {vault} --slot 9c");
+        eprintln!("Destroy {path} once the card holds it. The vault keeps this key, which is what makes this arrangement recoverable and weaker than a root generated on the card.");
+    }
     Ok(0)
 }
 
@@ -91,6 +287,8 @@ pub struct IssueArgs<'a> {
     pub out: Option<&'a str>,
     pub chain_out: Option<&'a str>,
     pub now: Option<&'a str>,
+    /// Which reader, when the root is held on a card and this machine has more than one.
+    pub reader: Option<&'a str>,
 }
 
 pub fn id_issue(a: IssueArgs<'_>) -> Res<i32> {
@@ -130,11 +328,42 @@ pub fn id_issue(a: IssueArgs<'_>) -> Res<i32> {
             return fail("the passphrase does not match: nothing signed");
         }
     }
+    // The card is opened before the question, not after: a card that is absent, or holds another
+    // key, is a thing to say now rather than after a person has agreed to a signature.
+    let card = match card_holder(&root) {
+        Some(h) => {
+            let c = card_for(&root, a.reader)?;
+            let i = c.describe();
+            eprintln!("held        on card {} slot {}{}", i.serial.clone().unwrap_or_else(|| "?".into()), i.slot, if h["serial"].as_str().is_some_and(|s| Some(s) != i.serial.as_deref()) { "  (a different card from the one this identity was made on)" } else { "" });
+            Some(c)
+        }
+        None => None,
+    };
     if !confirm("Sign this leaf?", a.yes)? {
         eprintln!("nothing signed");
         return Ok(1);
     }
-    let r = core("wallet_issue", json!({ "vault_plaintext": v.plaintext, "root_fingerprint": fp, "csr": b64u(&csr_der), "now": instant(now), "valid_days": a.valid_days, "move": a.moving }))?;
+    let r = match &card {
+        // A card-held root: the core checks the request and makes the bytes, the card signs them,
+        // the core assembles. The one rule `wallet_issue` would have applied and cannot here —
+        // one live leaf per identity — is applied just above, against the same ledger.
+        Some(c) => {
+            if let Some(why) = live_leaf_refusal(&mine, &request.endpoint, now, a.moving) {
+                return fail(format!("bad_request: {why}"));
+            }
+            let mut out = issue_on_card(c.as_ref(), &root, &csr_der, now, previous, a.valid_days)?;
+            out["ledger_entry"] = json!({
+                "root": fp,
+                "leaf": out["der"].clone(),
+                "endpoint": out["endpoint"].clone(),
+                "not_before": out["not_before"].clone(),
+                "not_after": out["not_after"].clone(),
+                "issued_at": instant(now),
+            });
+            out
+        }
+        None => core("wallet_issue", json!({ "vault_plaintext": v.plaintext, "root_fingerprint": fp, "csr": b64u(&csr_der), "now": instant(now), "valid_days": a.valid_days, "move": a.moving }))?,
+    };
     for w in r["warnings"].as_array().cloned().unwrap_or_default() {
         eprintln!("note        {}", w.as_str().unwrap_or(""));
     }
@@ -333,4 +562,136 @@ pub fn contacts_import(vault: &str, file: &str, yes: bool) -> Res<i32> {
     save_vault(&v)?;
     eprintln!("written");
     Ok(0)
+}
+
+#[cfg(test)]
+mod card_tests {
+    //! A card-held root, proven without a card: the fake signs a digest exactly as PIV's GENERAL
+    //! AUTHENTICATE does, so everything above the trait — the seam, the profile, the rules, the
+    //! refusals — is the real thing.
+    use super::*;
+    use crate::piv::fake::FakeCard;
+    use pact_identity::csr as csr_mod;
+    use pact_identity::keys::{Alg, PrivateKey};
+
+    const NOW: i64 = 1_789_000_000;
+    const ENDPOINT: &str = "https://agent.alina.example/mcp";
+
+    fn root_of(card: &FakeCard) -> Res<(Vec<u8>, Value)> {
+        let (cert, key) = root_from_card(card, "Alina Rao", NOW)?;
+        let root = json!({
+            "fingerprint": key.fingerprint(),
+            "cn": "Alina Rao",
+            "cert": b64u(&cert),
+            "created": instant(NOW),
+            "holder": { "kind": "piv", "mode": "generated", "slot": "9c", "serial": "1", "reader": "Fake Reader" },
+        });
+        Ok((cert, root))
+    }
+
+    fn a_request(endpoint: &str) -> Vec<u8> {
+        let host = PrivateKey::generate(Alg::Ed25519).expect("a host key");
+        csr_mod::csr_new("A Host", &host, endpoint, None).expect("a request")
+    }
+
+    #[test]
+    fn a_root_the_card_signed_is_a_root() {
+        let card = FakeCard::p256("7777");
+        let (cert, root) = root_of(&card).expect("a root");
+        // §14.2 rule 1 reads a single self-signed certificate as a 1.x proof, so a chain of it
+        // twice is what asks "is this a root of the profile?": rule 2 is where a bad one would die.
+        let r = core("validate_chain", json!({ "chain": [b64u(&cert), b64u(&cert)], "now": instant(NOW) })).expect("an answer");
+        assert_eq!(r["ok"], json!(false), "a root is not a chain");
+        assert_eq!(r["rule"], json!(1), "it fails for being one certificate, not for its profile: {r}");
+        let parsed = core("parse_certificate", json!({ "der": b64u(&cert) })).expect("parsed");
+        assert_eq!(parsed["kind"], json!("root"), "the profile accepts it: {parsed}");
+        assert_eq!(parsed["profile_error"], json!(null));
+        assert_eq!(parsed["fingerprint"].as_str(), root["fingerprint"].as_str());
+    }
+
+    #[test]
+    fn a_leaf_the_card_signed_validates_to_that_root_at_its_endpoint() {
+        let card = FakeCard::p256("7777");
+        let (cert, root) = root_of(&card).expect("a root");
+        let out = issue_on_card(&card, &root, &a_request(ENDPOINT), NOW, None, 365).expect("a leaf");
+        let r = core(
+            "validate_chain",
+            json!({ "chain": [out["der"].clone(), b64u(&cert)], "now": instant(NOW), "expected_root": root["fingerprint"], "expected_endpoint": ENDPOINT }),
+        )
+        .expect("an answer");
+        assert_eq!(r["ok"], json!(true), "the chain validates: {r}");
+        assert_eq!(r["endpoint"].as_str(), Some(ENDPOINT));
+    }
+
+    #[test]
+    fn a_card_that_refuses_says_which_refusal_it_was() {
+        let root = root_of(&FakeCard::p256("7777")).expect("a root").1;
+        let csr = a_request(ENDPOINT);
+
+        // An empty slot cannot even be read.
+        let e = root_from_card(&FakeCard::empty_slot(), "Alina Rao", NOW).map(|_| ()).unwrap_err();
+        assert!(e.0.contains("no certificate"), "{}", e.0);
+
+        // A slot holding an RSA key: the card refuses the parameters, and the message says the
+        // profile signs with P-256.
+        let e = root_from_card(&FakeCard::rsa(), "Alina Rao", NOW).map(|_| ()).unwrap_err();
+        assert!(e.0.contains("P-256"), "{}", e.0);
+
+        // A wrong PIN comes back with the tries left, because that is what a person needs next.
+        let e = issue_on_card(&FakeCard::wrong_pin(), &root, &csr, NOW, None, 365).unwrap_err();
+        assert!(e.0.contains("wrong PIN") && e.0.contains("2 tries left"), "{}", e.0);
+    }
+
+    #[test]
+    fn another_card_signs_nothing_for_this_identity() {
+        let root = root_of(&FakeCard::p256("7777")).expect("a root").1;
+        // A second card, or the same slot generated again: a different key, and the check is the
+        // fingerprint rather than the serial, which a card need not even report.
+        let e = match_root(&root, &FakeCard::p256("8888")).unwrap_err();
+        assert!(e.0.contains("a different card, or that slot has been generated again"), "{}", e.0);
+        assert!(match_root(&root, &FakeCard::p256("7777")).is_err(), "a fake card's key is fresh each time, so this too is a mismatch");
+    }
+
+    #[test]
+    fn a_card_held_identity_writes_no_key_into_the_vault() {
+        let card = FakeCard::p256("7777");
+        let (_, root) = root_of(&card).expect("a root");
+        let plaintext = json!({ "v": 1, "roots": [root.clone()], "ledger": [], "contacts": [] });
+        let text = serde_json::to_string(&plaintext).expect("json");
+        assert!(!text.contains("pkcs8"), "no key material anywhere in the vault: {text}");
+        assert_eq!(card_holder(&root).and_then(|h| h["mode"].as_str()), Some("generated"));
+        // And the thing it does keep is the certificate, which is public.
+        assert!(root["cert"].as_str().is_some());
+    }
+
+    #[test]
+    fn one_live_leaf_is_refused_the_same_way_on_both_paths() {
+        // The core applies this rule for a software root inside `wallet_issue`; the card path
+        // applies it in `live_leaf_refusal`, because there is no key to hand the core. The two must
+        // not drift, so here they are asked the same question about the same ledger.
+        let key = PrivateKey::generate(Alg::P256).expect("a key");
+        let cert = x509::build_root("Alina Rao", &key, NOW, &x509::serial_of("both-paths")).expect("a root");
+        let fp = key.public().fingerprint();
+        let software = json!({ "fingerprint": fp, "cn": "Alina Rao", "pkcs8": b64u(&key.to_pkcs8()), "cert": b64u(&cert), "created": instant(NOW) });
+        let first = core(
+            "wallet_issue",
+            json!({ "vault_plaintext": { "v": 1, "roots": [software.clone()], "ledger": [], "contacts": [] }, "root_fingerprint": fp, "csr": b64u(&a_request(ENDPOINT)), "now": instant(NOW), "valid_days": 365 }),
+        )
+        .expect("a first leaf");
+        let ledger = vec![first["ledger_entry"].clone()];
+        let mine: Vec<&Value> = ledger.iter().collect();
+
+        let elsewhere = "https://agent.alina.example/second/mcp";
+        let core_says = core(
+            "wallet_issue",
+            json!({ "vault_plaintext": { "v": 1, "roots": [software], "ledger": ledger.clone(), "contacts": [] }, "root_fingerprint": fp, "csr": b64u(&a_request(elsewhere)), "now": instant(NOW + 10), "valid_days": 365 }),
+        )
+        .unwrap_err();
+        let cli_says = live_leaf_refusal(&mine, elsewhere, NOW + 10, false).expect("the card path refuses too");
+        assert!(core_says.0.contains(&cli_says), "the same words on both paths:\n  core: {}\n  card: {cli_says}", core_says.0);
+        // And a move says so on both.
+        assert!(live_leaf_refusal(&mine, elsewhere, NOW + 10, true).is_none(), "--move allows it, as the core does");
+        // A renewal at the same endpoint is never a second home.
+        assert!(live_leaf_refusal(&mine, ENDPOINT, NOW + 10, false).is_none());
+    }
 }

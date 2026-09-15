@@ -4,6 +4,7 @@
 //! book). Every rule is the core's; this binary is the terminal.
 mod implementer;
 mod io;
+mod piv;
 mod vectors;
 mod wallet;
 
@@ -58,6 +59,33 @@ enum Cmd {
     Contacts {
         #[command(subcommand)]
         cmd: ContactsCmd,
+    },
+    /// A smartcard holding a root: the reader, the card, the slot, the key, and whose identity it is
+    CardStatus {
+        /// Check the key against the roots in this vault
+        #[arg(long)]
+        vault: Option<String>,
+        /// Which PIV key slot (9a, 9c, 9d, 9e, or a retired 82-95)
+        #[arg(long, default_value = piv::DEFAULT_SLOT)]
+        slot: String,
+        /// Which reader, when this machine has more than one
+        #[arg(long)]
+        reader: Option<String>,
+    },
+    /// Hand an identity already in a vault over to the card that now holds a copy of its key
+    CardAttach {
+        /// The vault holding the identity whose key the card now has a copy of
+        #[arg(long)]
+        vault: String,
+        /// Which PIV key slot the copy went into
+        #[arg(long, default_value = piv::DEFAULT_SLOT)]
+        slot: String,
+        /// Which reader, when this machine has more than one
+        #[arg(long)]
+        reader: Option<String>,
+        /// Which root, when the vault holds several
+        #[arg(long)]
+        root: Option<String>,
     },
 }
 
@@ -202,6 +230,9 @@ struct IssueCommon {
     /// Sign without asking (scripts and the harness)
     #[arg(long)]
     yes: bool,
+    /// Which reader, when the root is held on a card and this machine has more than one
+    #[arg(long)]
+    reader: Option<String>,
     /// Write the leaf PEM here instead of stdout
     #[arg(long)]
     out: Option<String>,
@@ -217,12 +248,29 @@ struct IssueCommon {
 enum IdCmd {
     /// A new identity: a root, in a new vault under a passphrase asked twice
     Create {
+        /// The name contacts see; it carries no authority (SPEC §3)
         #[arg(long)]
         name: String,
+        /// The root's algorithm, when the root is made here
         #[arg(long, default_value = "ed25519", value_parser = ["ed25519", "p256"])]
         alg: String,
+        /// Where the vault goes; it must not exist
         #[arg(long)]
         vault: String,
+        /// Hold the root on a smartcard in this PIV slot (9c by default) instead of in the vault.
+        /// The slot must already hold a P-256 key and a certificate; the key never leaves the card,
+        /// the vault keeps only the certificate and the ledger, and there is no export — lose the
+        /// card and the identity is gone.
+        #[arg(long, num_args = 0..=1, default_missing_value = piv::DEFAULT_SLOT)]
+        piv: Option<String>,
+        /// Which reader, when this machine has more than one
+        #[arg(long)]
+        reader: Option<String>,
+        /// Make the root here and write its key to this file, to be imported into a card with
+        /// `ykman piv keys import`. Weaker than --piv, because the key existed in software for as
+        /// long as that file does — and the vault keeps it, so a lost card is not a lost identity.
+        #[arg(long, conflicts_with = "piv")]
+        key_out: Option<String>,
     },
     /// Issue a leaf for a request, after showing what it names and asking
     Issue {
@@ -316,9 +364,12 @@ fn run(cli: Cli) -> Res<i32> {
             VectorsCmd::Intrude { against, allow_insecure, now } => vectors::intrude(&against, allow_insecure, now.as_deref()),
         },
         Cmd::Id { cmd } => match cmd {
-            IdCmd::Create { name, alg, vault } => wallet::id_create(&name, &alg, &vault),
-            IdCmd::Issue { common: c, moving } => wallet::id_issue(wallet::IssueArgs { vault: &c.vault, csr: &c.csr, valid_days: io::parse_valid(&c.valid)?, moving, renew_only: false, origin: c.origin.as_deref(), root: c.root.as_deref(), yes: c.yes, out: c.out.as_deref(), chain_out: c.chain_out.as_deref(), now: c.now.as_deref() }),
-            IdCmd::Renew { common: c } => wallet::id_issue(wallet::IssueArgs { vault: &c.vault, csr: &c.csr, valid_days: io::parse_valid(&c.valid)?, moving: false, renew_only: true, origin: c.origin.as_deref(), root: c.root.as_deref(), yes: c.yes, out: c.out.as_deref(), chain_out: c.chain_out.as_deref(), now: c.now.as_deref() }),
+            IdCmd::Create { name, alg, vault, piv, reader, key_out } => match piv {
+                Some(slot) => wallet::id_create_piv(&name, &slot, reader.as_deref(), &vault),
+                None => wallet::id_create(&name, &alg, &vault, key_out.as_deref()),
+            },
+            IdCmd::Issue { common: c, moving } => wallet::id_issue(wallet::IssueArgs { vault: &c.vault, csr: &c.csr, valid_days: io::parse_valid(&c.valid)?, moving, renew_only: false, origin: c.origin.as_deref(), root: c.root.as_deref(), yes: c.yes, out: c.out.as_deref(), chain_out: c.chain_out.as_deref(), now: c.now.as_deref(), reader: c.reader.as_deref() }),
+            IdCmd::Renew { common: c } => wallet::id_issue(wallet::IssueArgs { vault: &c.vault, csr: &c.csr, valid_days: io::parse_valid(&c.valid)?, moving: false, renew_only: true, origin: c.origin.as_deref(), root: c.root.as_deref(), yes: c.yes, out: c.out.as_deref(), chain_out: c.chain_out.as_deref(), now: c.now.as_deref(), reader: c.reader.as_deref() }),
             IdCmd::Ledger { vault, root, json } => wallet::id_ledger(&vault, root.as_deref(), json),
             IdCmd::Show { vault, root, out } => wallet::id_show(&vault, root.as_deref(), out.as_deref()),
             IdCmd::Backup { vault, to, force } => wallet::id_backup(&vault, &to, force),
@@ -328,6 +379,8 @@ fn run(cli: Cli) -> Res<i32> {
             ContactsCmd::Export { vault } => wallet::contacts_export(&vault),
             ContactsCmd::Import { vault, file, yes } => wallet::contacts_import(&vault, &file, yes),
         },
+        Cmd::CardStatus { vault, slot, reader } => wallet::card_status(vault.as_deref(), &slot, reader.as_deref()),
+        Cmd::CardAttach { vault, slot, reader, root } => wallet::card_attach(&vault, &slot, reader.as_deref(), root.as_deref()),
     }
 }
 

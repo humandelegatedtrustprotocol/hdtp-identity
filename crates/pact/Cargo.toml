@@ -18,8 +18,19 @@ serde_json = { version = "1", features = ["preserve_order"] }
 rpassword = "7"
 base64 = "0.22"
 ureq = { version = "3", default-features = false, features = ["rustls"] }
+pcsc = { version = "2", optional = true }
+
+[features]
+default = ["piv"]
+# The smartcard door. On by default because a wallet that cannot reach a card is not the wallet this
+# is for; `--no-default-features` builds without it where PC/SC headers are missing (a bare Linux
+# container, typically: `apt install libpcsclite-dev` puts them back).
+piv = ["dep:pcsc"]
 
 [dev-dependencies]
 assert_cmd = "2"
+# The fake card signs a digest as the real one does, which is the p256 crate's prehashed path.
+p256 = { version = "0.13", features = ["ecdsa"] }
+signature = { version = "2", features = ["digest"] }
 tempfile = "3"
 predicates = "3"
