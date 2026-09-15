@@ -81,7 +81,8 @@ func CSRCheck(der []byte, rootSPKIs [][]byte) CSRInfo {
 		return csrRefuse("request is not in the profile")
 	}
 	attr, err := derChildren(attrs[0])
-	if err != nil || len(attr) != 2 || readOid(attr[0]) != oidExtensionRequest || attr[1].tag != 0x31 {
+	attrOid, oidErr := readOidStrict(attr[0])
+	if err != nil || oidErr != nil || len(attr) != 2 || attrOid != oidExtensionRequest || attr[1].tag != 0x31 {
 		return csrRefuse("request is not in the profile")
 	}
 	values, err := derChildren(attr[1])
@@ -93,7 +94,8 @@ func CSRCheck(der []byte, rootSPKIs [][]byte) CSRInfo {
 		return csrRefuse("request is not in the profile")
 	}
 	ext, err := derChildren(exts[0])
-	if err != nil || len(ext) != 2 || readOid(ext[0]) != OIDSubjectAltName || ext[1].tag != 0x04 {
+	extOid, extOidErr := readOidStrict(ext[0])
+	if err != nil || extOidErr != nil || len(ext) != 2 || extOid != OIDSubjectAltName || ext[1].tag != 0x04 {
 		return csrRefuse("request is not in the profile")
 	}
 	san, err := derRead(ext[1].content, 0)
@@ -126,7 +128,8 @@ func CSRCheck(der []byte, rootSPKIs [][]byte) CSRInfo {
 	if pub.Alg == AlgEd25519 {
 		expected = OIDEd25519
 	}
-	if readOid(algParts[0]) != expected || !VerifyDetached(pub, info.raw, sig.content[1:]) {
+	csrAlgOid, csrAlgErr := readOidStrict(algParts[0])
+	if csrAlgErr != nil || csrAlgOid != expected || !VerifyDetached(pub, info.raw, sig.content[1:]) {
 		return csrRefuse("the request's signature does not verify: no proof of possession")
 	}
 	id := KeyID(pub.SPKI)
