@@ -4,10 +4,22 @@
 import * as hardware from './hardware.js'
 import * as drive from './drive.js'
 
-const port = chrome.runtime.connect({ name: 'window' })
+// MV3 stops the service worker about thirty seconds after it goes quiet, which disconnects every
+// port. A window outlives that easily — a person typing a name and a passphrase twice is already
+// past it — so a port captured once and kept is a port that is dead by the time they click, and
+// `postMessage` on it throws "Attempting to use a disconnected port object". The port is therefore
+// made on demand and remade when it has gone: connecting is also what wakes the worker.
+let port = null
 const waiting = new Map()
 let n = 0
-port.onMessage.addListener((m) => {
+function livePort() {
+  if (port) return port
+  port = chrome.runtime.connect({ name: 'window' })
+  port.onMessage.addListener(onMessage)
+  port.onDisconnect.addListener(onDisconnect)
+  return port
+}
+function onMessage(m) {
   if (m && typeof m.id === 'number' && waiting.has(m.id)) {
     const { resolve, reject } = waiting.get(m.id)
     waiting.delete(m.id)
@@ -16,24 +28,57 @@ port.onMessage.addListener((m) => {
     return
   }
   if (m && (m.type === 'locked' || m.type === 'changed' || m.type === 'unlocked')) refreshStatus()
-})
-// MV3 stops the service worker when it decides to. Every call still in flight would otherwise stay
-// pending for ever: the Sign button disabled, the pill still reading "unlocked", and no reason
-// shown. A disconnect refuses them all and says what happened.
-port.onDisconnect.addListener(() => {
-  const gone = Object.assign(new Error('the wallet was locked; reopen this window to carry on'), { code: 'disconnected' })
+}
+// A call already in flight when the worker stops is lost — it may or may not have been carried out,
+// so it is refused rather than retried. The next call reconnects, which is also what wakes the
+// worker again.
+//
+// Whether to SAY so depends on what died with it. A page's request and an unlocked vault both live
+// in the worker's memory: if this window was opened for a request, or the wallet was unlocked, the
+// person is looking at a screen that is no longer backed by anything and must be told. A window
+// making an identity with nothing pending has lost nothing — the form is here, the work has not
+// started — and an error there would be a lie about the state of their wallet.
+let unlockedHere = false
+function onDisconnect() {
+  port = null
+  const gone = Object.assign(new Error('the wallet locked itself while this window was open; check what it holds and try again'), { code: 'disconnected' })
+  const lost = waiting.size
   for (const { reject } of waiting.values()) reject(gone)
   waiting.clear()
   const note = document.getElementById('disconnected')
-  if (note) note.hidden = false
-})
+  if (note && (lost > 0 || reqId || unlockedHere)) note.hidden = false
+}
 
 function rpc(type, fields = {}) {
   const id = ++n
   return new Promise((resolve, reject) => {
     waiting.set(id, { resolve, reject })
-    port.postMessage({ id, type, ...fields })
+    // A send that throws never reached the worker, so sending it again on a fresh port cannot
+    // repeat anything. A reply lost after the send is the case above, which is refused, not retried.
+    try {
+      livePort().postMessage({ id, type, ...fields })
+    } catch {
+      port = null
+      try {
+        livePort().postMessage({ id, type, ...fields })
+      } catch (e) {
+        waiting.delete(id)
+        reject(e)
+      }
+    }
   })
+}
+
+// While this window is open the worker stays awake, so an unlocked vault is still there when the
+// person finally clicks. The idle lock is untouched by this: it measures the person, not the port.
+setInterval(() => { rpc('keepalive').catch(() => {}) }, 20_000)
+
+// What each mode actually gives, in the words the home screen shows. "enabled" alone would hide the
+// difference between a secret the authenticator holds and a key this profile holds for it.
+const HW_MODE = { // invariant: constant
+  prf: 'the key derives the secret',
+  'root-on-key': 'your identity is on the key',
+  gate: 'the key gates this device\'s copy',
 }
 
 const $ = (id) => document.getElementById(id)
@@ -53,7 +98,9 @@ let state = null
 let request = null
 
 async function refreshStatus() {
+  // Remembered so a disconnect knows whether an unlocked session died with the worker.
   state = await rpc('state')
+  if (!state.locked) unlockedHere = true
   text('status', state.locked ? 'locked' : `${state.roots.length} identit${state.roots.length === 1 ? 'y' : 'ies'} · unlocked`)
   $('status').className = 'pill ' + (state.locked ? 'locked' : 'open')
 }
@@ -125,13 +172,39 @@ $('b-unlock-hw').onclick = async () => {
   err('e-unlock')
   try {
     const hw = await rpc('hardware:get')
-    const prfKey = await hardware.evaluate(hw.credentialId, hw.salt)
-    await rpc('unlock:hardware', { prfKey })
+    const { key, asserted } = await hardware.unlockKey(hw)
+    await rpc('unlock:hardware', { key, asserted })
     await refreshStatus()
     route()
   } catch (x) { err('e-unlock', x) }
 }
 $('l-create').onclick = (e) => { e.preventDefault(); show('s-create') }
+// Two doors to the same screen: a fresh profile opens on "create an identity", and a profile that
+// has a vault opens on "unlock". A person restoring arrives at whichever of those they are looking
+// at, so the link is on both.
+const toRestore = (e) => { e.preventDefault(); err('e-restore'); show('s-restore') }
+$('l-restore-passkey').onclick = toRestore
+$('l-restore-passkey-2').onclick = toRestore
+$('l-restore-back').onclick = (e) => { e.preventDefault(); route() }
+// A restore is the one path that starts with no vault and ends with one: the passkey holds the root,
+// the passphrase seals it here, and the ordinary flow takes over from the next screen on.
+$('f-restore').onsubmit = async (e) => {
+  e.preventDefault()
+  err('e-restore')
+  const f = e.target.elements
+  if (f.passphrase.value !== f.again.value) return err('e-restore', 'the passphrases differ')
+  try {
+    if (!hardware.hasWebAuthn()) throw new Error('WebAuthn is not available here')
+    const { roots } = await hardware.restoreFrom()
+    const out = await rpc('restore:passkey', { roots, passphrase: f.passphrase.value })
+    e.target.reset()
+    await refreshStatus()
+    route()
+    err('e-home', out.rebuilt
+      ? 'Restored. The certificate was rebuilt from the key, which is the same identity. The ledger and your contacts were not in the backup.'
+      : 'Restored. The ledger and your contacts were not in the backup.')
+  } catch (x) { err('e-restore', x) }
+}
 $('l-import').onclick = (e) => { e.preventDefault(); show('s-import') }
 $('l-create-back').onclick = (e) => { e.preventDefault(); route() }
 $('l-import-back').onclick = (e) => { e.preventDefault(); route() }
@@ -150,19 +223,52 @@ $('f-create').onsubmit = async (e) => {
     show('s-hardware')
   } catch (x) { err('e-create', x) }
 }
-$('b-hw-skip').onclick = () => route()
-$('b-hw-enable').onclick = async () => {
+$('b-hw-skip').onclick = () => { $('hw-gate').hidden = true; route() }
+// Two doors, because "any authenticator" is how a password manager ends up holding a credential it
+// cannot derive from: cross-platform is a security key, platform is this device's own.
+const hwEnable = (attachment) => async () => {
   err('e-hardware')
+  $('hw-gate').hidden = true
   try {
-    await enableHardware()
+    await enableHardware(attachment)
     route()
-  } catch (x) { err('e-hardware', x) }
+  } catch (x) {
+    // A credential that can hold nothing is not a failure to report and forget: it is the case a
+    // password manager lands in, and the person can still use it as a gate — once they have been
+    // told, in the panel below, exactly what that is and is not.
+    if (x && x.code === 'no_secret') { offerGate(x) } else { err('e-hardware', x) }
+  }
 }
-async function enableHardware() {
+$('b-hw-enable').onclick = hwEnable('cross-platform')
+$('b-hw-device').onclick = hwEnable('platform')
+
+function offerGate(x) {
+  err('e-hardware', x)
+  $('hw-gate').hidden = false
+  $('b-hw-gate').onclick = async () => {
+    err('e-hardware')
+    $('hw-gate').hidden = true
+    try {
+      const { mode, credentialId, key } = await hardware.enrollGate(x.credentialId)
+      await rpc('hardware:enable', { mode, credentialId, key })
+      await refreshStatus()
+      route()
+    } catch (e) { err('e-hardware', e) }
+  }
+}
+
+async function enableHardware(attachment) {
   if (!hardware.hasWebAuthn()) throw new Error('WebAuthn is not available here')
   const root = state.roots[0]
-  const { credentialId, salt, prfKey } = await hardware.enroll(root ? root.cn : 'pact')
-  await rpc('hardware:enable', { credentialId, salt, prfKey })
+  // The roots travel to this window only so an authenticator that can hold them does. They are
+  // dropped the moment the write is done, and nothing else here keeps a reference.
+  let secrets = await rpc('hardware:secrets')
+  try {
+    const { mode, credentialId, salt, key } = await hardware.enroll(root ? root.cn : 'pact', attachment, secrets.roots)
+    await rpc('hardware:enable', { mode, credentialId, salt, key })
+  } finally {
+    secrets = null
+  }
   await refreshStatus()
 }
 
@@ -334,7 +440,14 @@ async function home() {
   if (!ledger.children.length) ledger.textContent = 'No certificate issued yet.'
   const { contacts } = await rpc('contacts:get')
   text('home-contacts', `${contacts.length} contact${contacts.length === 1 ? '' : 's'} in the wallet's own book.`)
-  text('home-hw', state.hardware.enabled ? (state.hardware.stale ? 'Security key: enabled, behind the vault until the next passphrase unlock.' : 'Security key: enabled on this device.') : 'Security key: not enabled.')
+  text('home-passkey', state.passkeyBackup
+    ? `Passkey backup: written ${when(state.passkeyBackup.at)}. It holds the root, not the ledger or your contacts.`
+    : 'Passkey backup: none on this identity yet.')
+  text('home-hw', !state.hardware.enabled
+    ? 'Security key: not enabled.'
+    : state.hardware.stale
+      ? `Security key: ${HW_MODE[state.hardware.mode] || state.hardware.mode}, behind the vault until the next passphrase unlock.`
+      : `Security key: ${HW_MODE[state.hardware.mode] || state.hardware.mode}, enabled on this device.`)
   $('f-refresh').hidden = !state.vaultStale
   $('b-backup-drive').hidden = !drive.driveEnabled()
   show('s-home')
@@ -345,6 +458,27 @@ $('b-backup-hw').onclick = async () => {
   err('e-home')
   try {
     if (state.hardware.enabled) { await rpc('hardware:disable') } else { await enableHardware() }
+    home()
+  } catch (x) {
+    // The offer to use a credential as a gate lives on the enrolment screen, with the paragraph
+    // that says what it costs; a person who started from home is taken there rather than handed
+    // the refusal on its own.
+    if (x && x.code === 'no_secret') { show('s-hardware'); offerGate(x) } else { err('e-home', x) }
+  }
+}
+$('b-backup-passkey').onclick = async () => {
+  err('e-home')
+  try {
+    if (!hardware.hasWebAuthn()) throw new Error('WebAuthn is not available here')
+    const root = state.roots[0]
+    // The roots reach this window for the moment of the write and no longer; a page cannot ask for
+    // them, and nothing here keeps a reference once the passkey has them.
+    let secrets = await rpc('hardware:secrets')
+    try {
+      const { roots } = await hardware.backupTo(root ? root.cn : 'pact', secrets.roots)
+      await rpc('passkey:noted', { count: roots.length })
+    } finally { secrets = null }
+    await refreshStatus()
     home()
   } catch (x) { err('e-home', x) }
 }

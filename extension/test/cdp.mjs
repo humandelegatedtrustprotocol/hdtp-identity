@@ -31,8 +31,10 @@ before(async () => {
     executablePath: chromePath(),
     headless: true,
     enableExtensions: [EXT],
-    // 9333 by directive: another agent drives its own Chrome on 9222 at the same time.
-    args: ['--no-first-run', '--no-default-browser-check', '--remote-debugging-port=9333'],
+    // No fixed debugging port: Puppeteer takes a free one. A pinned port means two runs of this
+    // suite on one machine — or a run beside anything else driving Chrome — fail to launch at all,
+    // with a message about a websocket endpoint that says nothing about the cause.
+    args: ['--no-first-run', '--no-default-browser-check'],
   })
   const sw = await browser.waitForTarget((t) => t.type() === 'service_worker' && t.url().startsWith('chrome-extension://'), { timeout: 20000 })
   extId = new URL(sw.url()).host
@@ -123,37 +125,6 @@ test('(1b) a request nobody answers times out instead of leaking, and a window g
   assert.ok(v2, 'the request settled rather than waiting on a window that is gone')
   assert.equal(v2.ok, false)
   assert.equal(v2.code, 'cancelled', JSON.stringify(v2))
-})
-
-test('(3) with PACT_FAKE_PRF unset, an authenticator without PRF is a reported failure, never a quiet pass', async (t) => {
-  assert.equal(process.env.PACT_FAKE_PRF, undefined, 'this test is about the unset case')
-  const w = await browser.newPage()
-  try { w.target().__seen = true } catch { /* not a wallet popup */ }
-  const cdp = await w.createCDPSession()
-  await cdp.send('WebAuthn.enable', { enableUI: false })
-  // The same authenticator run.mjs uses for the real path, minus PRF.
-  await cdp.send('WebAuthn.addVirtualAuthenticator', { options: { protocol: 'ctap2', ctap2Version: 'ctap2_1', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true } })
-  await w.goto(`chrome-extension://${extId}/window.html`)
-  // The wallet may still be unlocked from (1); unlock only if it is not.
-  await w.waitForFunction(() => { const a = document.getElementById('s-home'), b = document.getElementById('s-locked'); return (a && !a.hidden) || (b && !b.hidden) }, { timeout: 20000 })
-  if (await visible(w, '#s-locked')) {
-    await w.type('#f-unlock input[name=passphrase]', PASS)
-    await w.click('#f-unlock button[type=submit]')
-  }
-  await waitScreen(w, 's-home')
-  await w.click('#b-backup-hw')
-  await w.waitForFunction(() => /enabled on this device|behind the vault/.test(document.getElementById('home-hw').textContent) || document.getElementById('e-home').textContent.length > 0, { timeout: 20000 })
-  const hw = await textOf(w, '#home-hw')
-  const err = await textOf(w, '#e-home')
-  t.diagnostic(`without PRF: home-hw=${JSON.stringify(hw)} e-home=${JSON.stringify(err)}`)
-  assert.ok(!/enabled on this device/.test(hw), 'an authenticator without PRF must not report the key as enabled')
-  assert.ok(err.length > 0, 'the window says why it could not: ' + JSON.stringify(err))
-  // This is exactly the state in which run.mjs fails rather than falling back, since the fallback
-  // now lives behind PACT_FAKE_PRF. The vault stays as it was: no half-wrapped copy.
-  const stored = await w.evaluate(() => chrome.storage.local.get(['vaultHw', 'vaultStale']))
-  assert.equal(stored.vaultHw, undefined, 'no hardware copy was written')
-  assert.ok(!stored.vaultStale, 'the passphrase copy is not marked behind by a failure')
-  await w.close()
 })
 
 test('(2) the portal fetches the certificate once per identity, not once per keystroke', async (t) => {

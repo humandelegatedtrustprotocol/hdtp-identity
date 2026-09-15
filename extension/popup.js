@@ -1,24 +1,41 @@
 // The toolbar popup: status at a glance, a door to the window, and a lock.
-const port = chrome.runtime.connect({ name: 'popup' })
+// The worker sleeps when it is quiet and takes every port with it, so the port is made on demand
+// and remade when it has gone (window.js says more).
+let port = null
 const waiting = new Map()
 let n = 0
-port.onMessage.addListener((m) => {
+function livePort() {
+  if (port) return port
+  port = chrome.runtime.connect({ name: 'popup' })
+  port.onMessage.addListener(onMessage)
+  port.onDisconnect.addListener(onDisconnect)
+  return port
+}
+function onMessage(m) {
   if (m && typeof m.id === 'number' && waiting.has(m.id)) {
     const { resolve, reject } = waiting.get(m.id)
     waiting.delete(m.id)
     m.ok ? resolve(m.result) : reject(new Error(m.error.why || m.error.code))
   } else if (m && (m.type === 'locked' || m.type === 'changed' || m.type === 'unlocked')) render()
+}
+const rpc = (type, fields = {}) => new Promise((resolve, reject) => {
+  const id = ++n
+  waiting.set(id, { resolve, reject })
+  try {
+    livePort().postMessage({ id, type, ...fields })
+  } catch {
+    port = null
+    try { livePort().postMessage({ id, type, ...fields }) } catch (e) { waiting.delete(id); reject(e) }
+  }
 })
-const rpc = (type, fields = {}) => new Promise((resolve, reject) => { const id = ++n; waiting.set(id, { resolve, reject }); port.postMessage({ id, type, ...fields }) })
 
-// The service worker can be stopped at any moment; a call left pending would hang the popup.
-port.onDisconnect.addListener(() => {
+// A call in flight when the worker stops is lost; the next one reconnects.
+function onDisconnect() {
+  port = null
   const gone = Object.assign(new Error('the wallet was locked; open this popup again'), { code: 'disconnected' })
   for (const { reject } of waiting.values()) reject(gone)
   waiting.clear()
-  const status = document.getElementById('status')
-  if (status) { status.textContent = 'locked'; status.className = 'pill locked' }
-})
+}
 
 async function render() {
   const s = await rpc('state')

@@ -24,7 +24,25 @@
       <button type="button" id="b-unlock-hw" class="secondary" hidden>Unlock with security key</button>
       <p id="e-unlock" class="error" role="alert"></p>
     </form>
-    <p class="links"><a href="#" id="l-create">Create a new identity</a> · <a href="#" id="l-import">Import a vault file</a></p>
+    <p class="links"><a href="#" id="l-create">Create a new identity</a> · <a href="#" id="l-import">Import a vault file</a> · <a href="#" id="l-restore-passkey">Restore from a passkey</a></p>
+  </section>
+
+  <section id="s-restore" class="screen" hidden>
+    <h1>Restore from a passkey</h1>
+    <p class="muted">A passkey holding a backup carries the root itself, which is the whole
+      identity: the certificate is rebuilt from it if the passkey could not hold one, and every
+      contact's pin still matches, because what they pinned is the fingerprint of the public key.</p>
+    <p class="muted"><strong>What it does not carry.</strong> The ledger and the contact book were
+      not in the backup. This wallet will not know which certificates it has issued — the next one
+      takes a start date later than any it later sees — and it will not know who you know: the
+      contact book comes from an archive, or from your contacts' own next messages.</p>
+    <form id="f-restore" class="stack">
+      <label>A passphrase for this device (8+ characters) <input type="password" name="passphrase" autocomplete="new-password" minlength="8" required></label>
+      <label>Passphrase again <input type="password" name="again" autocomplete="new-password" minlength="8" required></label>
+      <button type="submit" class="primary">Find the passkey and restore</button>
+      <p id="e-restore" class="error" role="alert"></p>
+    </form>
+    <p class="links"><a href="#" id="l-restore-back">Back</a></p>
   </section>
 
   <section id="s-create" class="screen" hidden>
@@ -44,7 +62,7 @@
       <button type="submit" class="primary">Create and download the vault</button>
       <p id="e-create" class="error" role="alert"></p>
     </form>
-    <p class="links"><a href="#" id="l-create-back">Back</a></p>
+    <p class="links"><a href="#" id="l-create-back">Back</a> · <a href="#" id="l-restore-passkey-2">Restore from a passkey</a></p>
   </section>
 
   <section id="s-import" class="screen" hidden>
@@ -63,9 +81,26 @@
     <p class="muted">A passkey or security key can replace the passphrase on this device: the vault is re-sealed under a key only the authenticator can derive. Optional, and the passphrase still works.</p>
     <div class="row">
       <button id="b-hw-enable" class="primary">Use a security key</button>
+      <button id="b-hw-device" class="secondary">Use this device</button>
       <button id="b-hw-skip" class="secondary">Not now</button>
     </div>
+    <p class="muted">Which of three you get depends on what the authenticator supports, and the
+      first two differ in kind, not in strength. <strong>If it can store a blob</strong>, your root
+      goes on it: the passkey alone is then the identity — it restores on a new machine, and anyone
+      who can use that credential can be you. <strong>If it can only derive a secret</strong>, the
+      authenticator is one of two things needed, the vault file being the other, so losing one of
+      them loses nothing. Either way keep the vault file: an authenticator can be lost, and the
+      backup is what survives that.</p>
     <p id="e-hardware" class="error" role="alert"></p>
+    <div id="hw-gate" class="notice" hidden>
+      <strong>This passkey can only gate the vault.</strong> It cannot hold a secret, so the wallet
+      would keep the key itself in this browser profile and ask the passkey before using it. Anyone
+      with this profile could read that key without the passkey, so what protects the vault at rest
+      is the passphrase, as it was. The exported vault file is unchanged either way.
+      <div class="row">
+        <button id="b-hw-gate" class="secondary">Use it as a gate anyway</button>
+      </div>
+    </div>
   </section>
 
   <section id="s-pick" class="screen" hidden>
@@ -134,8 +169,15 @@
       <button id="b-backup-import" class="secondary">Import a vault file</button>
       <button id="b-backup-hw" class="secondary">Security key…</button>
       <button id="b-backup-drive" class="secondary" hidden>Google Drive…</button>
+      <button id="b-backup-passkey" class="secondary">Keep a copy on a passkey</button>
     </div>
     <p id="home-hw" class="muted"></p>
+    <p id="home-passkey" class="muted"></p>
+    <p class="muted">A passkey copy holds the root itself — enough to restore this identity on
+      another machine, and enough that whoever can use that passkey can become you. It does not hold
+      the ledger or your contacts: a wallet restored from it will not know which certificates it has
+      issued or who you know. If your passkey syncs, this copy syncs with it — Chrome's own password
+      manager does not sync large blobs today, so check rather than assume.</p>
     <form id="f-refresh" class="stack" hidden>
       <p class="muted">The passphrase copy of the vault is behind the security key's. Enter the passphrase once to refresh it.</p>
       <input type="password" name="passphrase" placeholder="Passphrase" autocomplete="current-password" required>
