@@ -237,14 +237,18 @@ func Open(id string, priv *PrivateKey, info, aad, enc, ct []byte) ([]byte, error
 	if !ok {
 		return nil, errors.New("unknown suite")
 	}
+	// Every way an open can fail is one answer. Which step failed — an `enc` of the wrong length, a
+	// point off the curve, a low-order point, the tag — is a fact about the recipient's key that an
+	// attacker gets to probe for free, and it is what the Rust core refuses to say. This port said
+	// all four, differently.
 	ss, err := decap(id, priv, enc)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("does not open")
 	}
 	key, nonce := keySchedule(s, ss, info)
 	c, err := aead(s, key)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("does not open")
 	}
 	pt, err := c.Open(nil, nonce, ct, aad)
 	if err != nil {

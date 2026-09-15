@@ -110,7 +110,7 @@ if (!v2) {
         ok(r.ok && d.verify(r.leafSpki, Buffer.concat([aad, enc, ct]), fromB64url(v.sig)), `${v.name}: signature under the chain's leaf key`);
       }
       // The port re-seals the same plaintext from the vector's ephemeral seed and lands on the same bytes.
-            const { createHash } = await import('node:crypto');
+      const { createHash } = await import('node:crypto');
       const eph = createHash('sha256').update('pact-2.0-vectors/ephemeral/' + v.name).digest();
       const sender = v2.leaf_keys_pkcs8_hex[v.sender_chain[0]];
       const again = port.call('seal_request', { recipient_leaf: b64url(der[v.recipient_chain[0]]), sender_pkcs8: b64url(Buffer.from(sender, 'hex')), form: v.form, sender_chain: v.sender_chain.map((n) => b64url(der[n])), method: body.method, params: body.params, msg_id: header.msg_id, ts: header.ts, exp: header.exp, ephemeral_seed: b64url(eph) });

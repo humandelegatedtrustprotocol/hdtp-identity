@@ -7,7 +7,6 @@ package pactidentity
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"time"
 )
 
@@ -52,58 +51,58 @@ func csrRefuse(why string) CSRInfo { return CSRInfo{Why: why} }
 func CSRCheck(der []byte, rootSPKIs [][]byte) CSRInfo {
 	top, err := derRead(der, 0)
 	if err != nil {
-		return csrRefuse("request does not parse: " + err.Error())
+		return csrRefuse(err.Error())
 	}
 	if top.tag != 0x30 || top.end != len(der) {
-		return csrRefuse("request does not parse: not one SEQUENCE")
+		return csrRefuse("request is not in the profile")
 	}
 	parts, err := derChildren(top)
 	if err != nil || len(parts) != 3 || parts[2].tag != 0x03 || len(parts[2].content) < 1 || parts[2].content[0] != 0 {
-		return csrRefuse("request does not parse: request shape")
+		return csrRefuse("request is not in the profile")
 	}
 	info, alg, sig := parts[0], parts[1], parts[2]
 	f, err := derChildren(info)
 	if err != nil || len(f) != 4 || f[0].tag != 0x02 || !bytes.Equal(f[0].content, []byte{0}) || f[3].tag != 0xa0 {
-		return csrRefuse("request does not parse: request info shape")
+		return csrRefuse("request is not in the profile")
 	}
 	cn, err := nameOf(f[1])
 	if err != nil {
-		return csrRefuse("request does not parse: " + err.Error())
+		return csrRefuse(err.Error())
 	}
 	pub, err := ParseSPKI(f[2].raw)
 	if err != nil {
-		return csrRefuse("request does not parse: " + err.Error())
+		return csrRefuse(err.Error())
 	}
 	if _, err := AlgorithmOf(pub); err != nil {
-		return csrRefuse("key algorithm not in the profile")
+		return csrRefuse("request key algorithm not in the profile")
 	}
 	attrs, err := derChildren(f[3])
 	if err != nil || len(attrs) != 1 {
-		return csrRefuse("request does not parse: one extensionRequest attribute expected")
+		return csrRefuse("request is not in the profile")
 	}
 	attr, err := derChildren(attrs[0])
 	if err != nil || len(attr) != 2 || readOid(attr[0]) != oidExtensionRequest || attr[1].tag != 0x31 {
-		return csrRefuse("request does not parse: one extensionRequest attribute expected")
+		return csrRefuse("request is not in the profile")
 	}
 	values, err := derChildren(attr[1])
 	if err != nil || len(values) != 1 {
-		return csrRefuse("request does not parse: one extensions value expected")
+		return csrRefuse("request is not in the profile")
 	}
 	exts, err := derChildren(values[0])
 	if err != nil || len(exts) != 1 {
-		return csrRefuse("request does not parse: one subjectAltName extension expected")
+		return csrRefuse("request is not in the profile")
 	}
 	ext, err := derChildren(exts[0])
 	if err != nil || len(ext) != 2 || readOid(ext[0]) != OIDSubjectAltName || ext[1].tag != 0x04 {
-		return csrRefuse("request does not parse: one subjectAltName extension expected")
+		return csrRefuse("request is not in the profile")
 	}
 	san, err := derRead(ext[1].content, 0)
 	if err != nil || san.tag != 0x30 || san.end != len(ext[1].content) {
-		return csrRefuse("request does not parse: subjectAltName shape")
+		return csrRefuse("request is not in the profile")
 	}
 	names, err := derChildren(san)
 	if err != nil {
-		return csrRefuse("request does not parse: subjectAltName shape")
+		return csrRefuse("request is not in the profile")
 	}
 	var uris, dns []string
 	for _, n := range names {
@@ -113,15 +112,15 @@ func CSRCheck(der []byte, rootSPKIs [][]byte) CSRInfo {
 		case 0x82:
 			dns = append(dns, string(n.content))
 		default:
-			return csrRefuse("subjectAltName carries a name type the profile does not")
+			return csrRefuse("request is not in the profile")
 		}
 	}
 	if len(uris) != 1 || len(dns) > 1 {
-		return csrRefuse(fmt.Sprintf("%d endpoints", len(uris)))
+		return csrRefuse("request is not in the profile")
 	}
 	algParts, err := derChildren(alg)
 	if err != nil || len(algParts) < 1 {
-		return csrRefuse("request does not parse: signature algorithm")
+		return csrRefuse("request is not in the profile")
 	}
 	expected := OIDEcdsaSHA256
 	if pub.Alg == AlgEd25519 {
@@ -130,8 +129,9 @@ func CSRCheck(der []byte, rootSPKIs [][]byte) CSRInfo {
 	if readOid(algParts[0]) != expected || !VerifyDetached(pub, info.raw, sig.content[1:]) {
 		return csrRefuse("the request's signature does not verify: no proof of possession")
 	}
+	id := KeyID(pub.SPKI)
 	for _, r := range rootSPKIs {
-		if bytes.Equal(r, pub.SPKI) {
+		if bytes.Equal(r, pub.SPKI) || bytes.Equal(sha256Sum(r), id) {
 			return csrRefuse("the request's key is a root")
 		}
 	}

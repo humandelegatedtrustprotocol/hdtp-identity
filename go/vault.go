@@ -7,6 +7,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -25,6 +26,44 @@ type KDF struct {
 
 // DefaultKDF is 64 MiB, three passes, one lane.
 var DefaultKDF = KDF{Name: "argon2id", MKiB: 65536, T: 3, P: 1}
+
+// UnmarshalJSON fills in what a `kdf` member leaves out. Every member of it is optional: a caller
+// who writes `{"m_kib": 8192, "t": 1, "p": 1}` — which is what a test or a small device writes — is
+// naming argon2id with those parameters, as the Rust core reads it. This port required the name and
+// refused the document as "not a pact-vault/1 document", which is a refusal about the wrong thing.
+func (k *KDF) UnmarshalJSON(p []byte) error {
+	raw := struct {
+		Name *string `json:"name"`
+		MKiB *uint32 `json:"m_kib"`
+		T    *uint32 `json:"t"`
+		P    *uint8  `json:"p"`
+	}{}
+	if err := json.Unmarshal(p, &raw); err != nil {
+		return parseError{"kdf does not read"}
+	}
+	*k = DefaultKDF
+	if raw.Name != nil {
+		if *raw.Name != "argon2id" {
+			return vaultError{"unknown kdf"}
+		}
+		k.Name = *raw.Name
+	}
+	if raw.MKiB != nil {
+		k.MKiB = *raw.MKiB
+	}
+	if raw.T != nil {
+		k.T = *raw.T
+	}
+	if raw.P != nil {
+		k.P = *raw.P
+	}
+	return nil
+}
+
+// vaultError is a refusal about the vault itself, answered as `vault` at the boundary.
+type vaultError struct{ why string }
+
+func (e vaultError) Error() string { return e.why }
 
 // Vault is the sealed document.
 type Vault struct {
@@ -53,11 +92,11 @@ func vaultDoc(v Vault) map[string]any {
 
 func vaultKey(passphrase string, v Vault) ([]byte, error) {
 	if v.Format != VaultFormat || v.KDF.Name != "argon2id" || v.KDF.MKiB < 8 || v.KDF.T < 1 || v.KDF.P < 1 {
-		return nil, errors.New("vault format not understood")
+		return nil, errors.New("not a pact-vault/1 document")
 	}
 	salt := FromB64url(v.Salt)
 	if len(salt) < 8 {
-		return nil, errors.New("vault format not understood")
+		return nil, errors.New("not a pact-vault/1 document")
 	}
 	return argon2.IDKey([]byte(passphrase), salt, v.KDF.T, v.KDF.MKiB, v.KDF.P, 32), nil
 }
@@ -81,7 +120,7 @@ func VaultSeal(passphrase string, plaintext []byte, kdf *KDF, salt, nonce []byte
 		}
 	}
 	if len(nonce) != 12 {
-		return nil, errors.New("nonce must be 12 bytes")
+		return nil, errors.New("nonce is 12 bytes")
 	}
 	v := Vault{Format: VaultFormat, KDF: *kdf, Salt: B64url(salt), Nonce: B64url(nonce)}
 	key, err := vaultKey(passphrase, v)

@@ -611,6 +611,14 @@ pub fn is_normal_https(s: &str) -> bool {
         if !host.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'.') {
             return false;
         }
+        // A label that is empty is not a label: a leading dot, a doubled dot, and the trailing dot of
+        // the fully-qualified spelling are all other ways to write the same host, and the normal form
+        // exists so that one address has one spelling. `https://localhost./mcp` reached the address
+        // guard here and was refused as a normal-form failure by the Go port — two ports disagreeing
+        // about what a name is.
+        if host.starts_with('.') || host.ends_with('.') || host.contains("..") {
+            return false;
+        }
         if ends_in_a_number(host) && !canonical_ipv4(host) {
             return false;
         }

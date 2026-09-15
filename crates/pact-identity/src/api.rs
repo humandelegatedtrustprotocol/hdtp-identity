@@ -13,14 +13,31 @@ use crate::x509::{self, ChainResult, Extra, LeafSpec};
 use serde_json::{json, Map, Value};
 use zeroize::Zeroizing;
 
+/// A required string member that carries an identifier: present, and not empty. §13's `msg_id` is
+/// what pairs a result with its request, so the empty string is not a value it can take — one port
+/// sealed an envelope with one, and the other refused.
+fn id<'a>(a: &'a Value, k: &str) -> Result<&'a str> {
+    let v = s(a, k)?;
+    if v.is_empty() {
+        return err("bad_request", format!("{k} is required"));
+    }
+    Ok(v)
+}
+
 fn s<'a>(a: &'a Value, k: &str) -> Result<&'a str> {
     a.get(k).and_then(|v| v.as_str()).ok_or_else(|| Error::new("bad_request", format!("{k} is required")))
 }
 fn opt_s<'a>(a: &'a Value, k: &str) -> Option<&'a str> {
     a.get(k).and_then(|v| v.as_str())
 }
+/// A required base64url member. Absent is a caller's mistake that names the member; present but not
+/// a base64url string is a decode failure, and both ports say so in the same words.
 fn bytes(a: &Value, k: &str) -> Result<Vec<u8>> {
-    from_b64u(s(a, k)?)
+    match a.get(k) {
+        None | Some(Value::Null) => err("bad_request", format!("{k} is required")),
+        Some(Value::String(v)) => from_b64u(v),
+        Some(_) => err("parse", "not base64url"),
+    }
 }
 fn opt_bytes(a: &Value, k: &str) -> Result<Option<Vec<u8>>> {
     match opt_s(a, k) {
@@ -57,7 +74,7 @@ fn opt_chain(a: &Value, k: &str) -> Result<Vec<Vec<u8>>> {
 }
 fn chain(a: &Value, k: &str) -> Result<Vec<Vec<u8>>> {
     let Some(items) = a.get(k).and_then(|v| v.as_array()) else { return err("bad_request", format!("{k} is required")) };
-    items.iter().map(|c| c.as_str().ok_or_else(|| Error::new("bad_request", "chain members are base64url")).and_then(from_b64u)).collect()
+    items.iter().map(|c| c.as_str().ok_or_else(|| Error::new("parse", "not base64url")).and_then(from_b64u)).collect()
 }
 fn private(a: &Value, k: &str) -> Result<PrivateKey> {
     PrivateKey::from_pkcs8(&Zeroizing::new(bytes(a, k)?))
@@ -111,6 +128,17 @@ fn leaf_spec<'a>(a: &'a Value, issuer: &'a PublicKey, host_key: &'a PublicKey, s
             .collect::<Result<Vec<_>>>()?,
         None => Vec::new(),
     };
+    let not_before = instant(a, "not_before")?;
+    let not_after = instant(a, "not_after")?;
+    // §14.1 at the boundary, where the Go port also puts it. Not in `x509::build_leaf`: the vector
+    // generator calls that directly to make certificates that are outside the profile on purpose,
+    // which is the whole point of a negative vector.
+    if not_after - not_before > 398 * 86400 {
+        return err("bad_request", "validity over 398 days");
+    }
+    if !uris.iter().all(|u| x509::is_normal_https(u)) {
+        return err("bad_request", "endpoint is not an https URL in normal form");
+    }
     Ok(LeafSpec {
         cn: s(a, "cn")?,
         root_cn: s(a, "root_cn")?,
@@ -118,8 +146,8 @@ fn leaf_spec<'a>(a: &'a Value, issuer: &'a PublicKey, host_key: &'a PublicKey, s
         host_key,
         uris,
         dns_name: opt_s(a, "dns_name").map(|d| d.to_string()),
-        not_before: instant(a, "not_before")?,
-        not_after: instant(a, "not_after")?,
+        not_before,
+        not_after,
         serial: serial_bytes,
         ca: boolean(a, "ca"),
         usage,
@@ -265,7 +293,7 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
                 sender_chain: sender_chain.as_deref(),
                 method: opt_s(a, "method").unwrap_or("tools/call").to_string(),
                 params: a.get("params").cloned().unwrap_or(json!({})),
-                msg_id: s(a, "msg_id")?.to_string(),
+                msg_id: id(a, "msg_id")?.to_string(),
                 ts: int(a, "ts")?,
                 exp: opt_int(a, "exp"),
                 cty: opt_s(a, "cty").map(|c| c.to_string()),
@@ -284,7 +312,7 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
                 sender_chain: sender_chain.as_deref(),
                 result: a.get("result").cloned(),
                 error: a.get("error").cloned(),
-                msg_id: s(a, "msg_id")?.to_string(),
+                msg_id: id(a, "msg_id")?.to_string(),
                 ts: int(a, "ts")?,
                 exp: opt_int(a, "exp"),
                 ephemeral_seed: seed32(a, "ephemeral_seed")?,
@@ -307,16 +335,34 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
         }
         "follow_renewed" => envelope::follow_renewed(a.get("answer").unwrap_or(&Value::Null), s(a, "pinned_root")?, &bytes(a, "pinned_leaf")?, s(a, "dialed")?, instant(a, "now")?),
         "decide" => {
-            let input: envelope::DecideInput = serde_json::from_value(a.clone()).map_err(|e| Error::new("bad_request", format!("decide input: {e}")))?;
+            // A missing `node` is not a decision against an empty node, and the member is named the
+            // way the caller wrote it rather than the way serde reports a missing field — the Go port
+            // cannot reproduce another library's wording, and CONTRACT §0 promises it will not have to.
+            for k in ["node", "envelope"] {
+                if a.get(k).is_none_or(Value::is_null) {
+                    return err("bad_request", format!("{k} is required"));
+                }
+            }
+            let input: envelope::DecideInput = serde_json::from_value(a.clone()).map_err(|_| Error::new("bad_request", "decide input does not read"))?;
             serde_json::to_value(envelope::decide(&input)?).map_err(|e| Error::new("internal", e.to_string()))?
         }
 
         // §6 vault
         "vault_seal" => {
             let kdf = a.get("kdf").map(|k| Kdf { m_kib: k.get("m_kib").and_then(|x| x.as_u64()).unwrap_or(65_536) as u32, t: k.get("t").and_then(|x| x.as_u64()).unwrap_or(3) as u32, p: k.get("p").and_then(|x| x.as_u64()).unwrap_or(1) as u32 });
-            json!({ "vault": vault::seal(s(a, "passphrase")?, a.get("plaintext").unwrap_or(&Value::Null), kdf, opt_bytes(a, "salt")?, opt_bytes(a, "nonce")?)? })
+            // Sealing an absent plaintext sealed the JSON literal `null` and handed back a
+            // well-formed vault with nothing in it — a file a person would keep, and restore from.
+            let Some(plaintext) = a.get("plaintext").filter(|v| !v.is_null()) else {
+                return err("bad_request", "plaintext is required");
+            };
+            json!({ "vault": vault::seal(s(a, "passphrase")?, plaintext, kdf, opt_bytes(a, "salt")?, opt_bytes(a, "nonce")?)? })
         }
-        "vault_open" => json!({ "plaintext": vault::open(s(a, "passphrase")?, a.get("vault").unwrap_or(&Value::Null))? }),
+        "vault_open" => {
+            let Some(doc) = a.get("vault").filter(|v| !v.is_null()) else {
+                return err("bad_request", "vault is required");
+            };
+            json!({ "plaintext": vault::open(s(a, "passphrase")?, doc)? })
+        }
         "wallet_issue" => vault::wallet_issue(a.get("vault_plaintext").unwrap_or(&Value::Null), s(a, "root_fingerprint")?, &bytes(a, "csr")?, instant(a, "now")?, opt_int(a, "valid_days").unwrap_or(365), boolean(a, "move"))?,
 
         "version" => json!({ "crate": env!("CARGO_PKG_VERSION"), "spec": "2.0.0-draft" }),
@@ -353,7 +399,12 @@ mod tests {
     #[test]
     fn the_boundary_never_throws() {
         assert!(call("nope", "{}").contains("no function named nope"));
-        assert!(call("verify", "[]").contains("args is a JSON object"));
+        // Every shape that is not an object, `null` included. `js/parity.mjs` cannot reach these:
+        // its port shim turns them into `{}` before either port sees them, so the two ports' own
+        // suites are where this one is held.
+        for args in ["[]", "null", "3", "\"x\"", "true"] {
+            assert!(call("verify", args).contains("args is a JSON object"), "verify({args})");
+        }
         assert!(call("verify", "{").contains("args:"));
         let k: Value = serde_json::from_str(&call("generate_key", r#"{"alg":"ed25519"}"#)).unwrap();
         assert_eq!(k["alg"], "ed25519");

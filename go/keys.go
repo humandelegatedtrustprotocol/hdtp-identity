@@ -20,12 +20,14 @@ import (
 const (
 	AlgEd25519 = "ed25519"
 	AlgP256    = "p256"
+	AlgX25519  = "x25519"
 )
 
 var (
 	p256N, _       = new(big.Int).SetString("FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551", 16)
 	p25519         = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 255), big.NewInt(19))
 	oidEd25519     = "1.3.101.112"
+	oidX25519      = "1.3.101.110"
 	oidEcPublicKey = "1.2.840.10045.2.1"
 	oidPrime256v1  = "1.2.840.10045.3.1.7"
 )
@@ -35,8 +37,18 @@ type PublicKey struct {
 	Alg  string
 	Ed   ed25519.PublicKey
 	EC   *ecdsa.PublicKey
+	X    []byte // an X25519 public key, which signs nothing and only seals (§13.1)
 	SPKI []byte
+	// AlgOID is the algorithm OID as written, kept even when the profile does not admit it, so a
+	// refusal can name the algorithm the way the Rust core names it.
+	AlgOID string
 }
+
+// unsupportedError is an algorithm the profile does not admit, answered as `unsupported` at the
+// boundary, where the Rust core answers the same.
+type unsupportedError struct{ why string }
+
+func (e unsupportedError) Error() string { return e.why }
 
 // PrivateKey pairs a private key with its public half.
 type PrivateKey struct {
@@ -101,57 +113,119 @@ func ParseSPKI(spki []byte) (*PublicKey, error) {
 		return nil, err
 	}
 	if n.tag != 0x30 || n.end != len(spki) {
-		return nil, errors.New("SPKI is not one SEQUENCE")
+		return nil, errors.New("SubjectPublicKeyInfo is not one SEQUENCE")
 	}
 	parts, err := derChildren(n)
 	if err != nil {
 		return nil, err
 	}
 	if len(parts) != 2 || parts[0].tag != 0x30 || parts[1].tag != 0x03 || len(parts[1].content) < 1 || parts[1].content[0] != 0 {
-		return nil, errors.New("SPKI shape")
+		return nil, errors.New("SubjectPublicKeyInfo shape")
 	}
 	alg, err := derChildren(parts[0])
 	if err != nil || len(alg) < 1 || alg[0].tag != 0x06 {
-		return nil, errors.New("SPKI algorithm")
+		return nil, errors.New("SubjectPublicKeyInfo algorithm")
 	}
 	key := parts[1].content[1:]
-	out := &PublicKey{SPKI: append([]byte(nil), spki...)}
-	switch readOid(alg[0]) {
-	case oidEd25519:
-		if len(alg) != 1 || len(key) != ed25519.PublicKeySize {
-			return nil, errors.New("Ed25519 key shape")
+	oid := readOid(alg[0])
+	out := &PublicKey{SPKI: append([]byte(nil), spki...), AlgOID: oid}
+	switch {
+	case oid == oidEd25519 && len(alg) == 1:
+		if len(key) != ed25519.PublicKeySize {
+			return nil, errors.New("Ed25519 key is not 32 bytes")
 		}
 		out.Alg = AlgEd25519
 		out.Ed = ed25519.PublicKey(append([]byte(nil), key...))
-	case oidEcPublicKey:
-		if len(alg) == 2 && alg[1].tag == 0x06 && readOid(alg[1]) == oidPrime256v1 {
-			pub, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), key)
-			if err != nil {
-				return nil, errors.New("P-256 point")
-			}
-			out.Alg = AlgP256
-			out.EC = pub
+	case oid == oidX25519 && len(alg) == 1:
+		if len(key) != 32 {
+			return nil, errors.New("X25519 key is not 32 bytes")
 		}
+		out.Alg = AlgX25519
+		out.X = append([]byte(nil), key...)
+	case oid == oidEcPublicKey && len(alg) == 2 && alg[1].tag == 0x06 && readOid(alg[1]) == oidPrime256v1:
+		// RFC 5480 §2.2 allows a compressed point; the profile takes the uncompressed form only,
+		// so one key has one SubjectPublicKeyInfo and one fingerprint.
+		if len(key) != 65 || key[0] != 0x04 {
+			return nil, errors.New("P-256 key is not the uncompressed point")
+		}
+		pub, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), key)
+		if err != nil {
+			return nil, errors.New("P-256 key is not a point")
+		}
+		out.Alg = AlgP256
+		out.EC = pub
 	}
+	// An algorithm outside the profile still parses, with Alg empty and the OID kept: a certificate
+	// carrying such a key must reach `profile_error`, which is what names it (§14.1). The boundary
+	// refuses it, in the Rust core's words, before a caller can use it as a key (see AlgorithmOf).
 	return out, nil
 }
 
 // ParsePKCS8 reads a PKCS #8 private key of either algorithm.
+// The structure is read here rather than handed to encoding/x509 so that a key which will not parse
+// is refused in the same words as the Rust core's reader: "PKCS #8 shape" is a different fact from
+// "Ed25519 seed is not 32 bytes", and a caller debugging a key deserves to be told which — in one
+// vocabulary, whichever port answers (CONTRACT §0).
 func ParsePKCS8(der []byte) (*PrivateKey, error) {
-	k, err := x509.ParsePKCS8PrivateKey(der)
+	node, err := derRead(der, 0)
 	if err != nil {
-		return nil, errors.New("PKCS #8 does not parse")
+		return nil, err
 	}
-	switch key := k.(type) {
-	case ed25519.PrivateKey:
-		return newEd25519(key)
-	case *ecdsa.PrivateKey:
-		if key.Curve != elliptic.P256() {
-			return nil, errors.New("unsupported key type")
+	if node.tag != 0x30 || node.end != len(der) {
+		return nil, errors.New("PKCS #8 is not one SEQUENCE")
+	}
+	f, err := derChildren(node)
+	if err != nil {
+		return nil, err
+	}
+	if len(f) < 3 || f[0].tag != 0x02 || f[1].tag != 0x30 || f[2].tag != 0x04 {
+		return nil, errors.New("PKCS #8 shape")
+	}
+	alg, err := derChildren(f[1])
+	if err != nil {
+		return nil, err
+	}
+	if len(alg) == 0 || alg[0].tag != 0x06 {
+		return nil, errors.New("PKCS #8 algorithm")
+	}
+	oid := readOid(alg[0])
+	switch {
+	case oid == oidEd25519:
+		inner, err := derRead(f[2].content, 0)
+		if err != nil {
+			return nil, err
 		}
-		return newP256(key)
+		if inner.tag != 0x04 || inner.end != len(f[2].content) {
+			return nil, errors.New("Ed25519 private key shape")
+		}
+		if len(inner.content) != 32 {
+			return nil, errors.New("Ed25519 seed is not 32 bytes")
+		}
+		return newEd25519(ed25519.NewKeyFromSeed(inner.content))
+	case oid == oidEcPublicKey && len(alg) == 2 && alg[1].tag == 0x06 && readOid(alg[1]) == oidPrime256v1:
+		ec, err := derRead(f[2].content, 0)
+		if err != nil {
+			return nil, err
+		}
+		if ec.tag != 0x30 || ec.end != len(f[2].content) {
+			return nil, errors.New("ECPrivateKey shape")
+		}
+		g, err := derChildren(ec)
+		if err != nil {
+			return nil, err
+		}
+		if len(g) < 2 || g[0].tag != 0x02 || g[1].tag != 0x04 || len(g[1].content) > 32 || len(g[1].content) == 0 {
+			return nil, errors.New("ECPrivateKey shape")
+		}
+		d := make([]byte, 32)
+		copy(d[32-len(g[1].content):], g[1].content)
+		priv, err := ecdsa.ParseRawPrivateKey(elliptic.P256(), d)
+		if err != nil {
+			return nil, errors.New("P-256 scalar out of range")
+		}
+		return newP256(priv)
 	}
-	return nil, errors.New("unsupported key type")
+	return nil, unsupportedError{"unsupported key type " + oid}
 }
 
 func newEd25519(key ed25519.PrivateKey) (*PrivateKey, error) {
@@ -199,14 +273,14 @@ func GenerateKey(alg string) (*PrivateKey, error) {
 		}
 		return newP256(priv)
 	}
-	return nil, errors.New("unsupported key type " + alg)
+	return nil, unsupportedError{"unsupported key type " + alg}
 }
 
 // KeyFromSeed is the vectors' derivation: an Ed25519 seed used directly; a P-256 scalar of seed mod n,
 // zero becoming one.
 func KeyFromSeed(alg string, seed []byte) (*PrivateKey, error) {
 	if len(seed) != 32 {
-		return nil, errors.New("seed is not 32 bytes")
+		return nil, errArg("seed is 32 bytes")
 	}
 	switch alg {
 	case AlgEd25519:
@@ -223,13 +297,16 @@ func KeyFromSeed(alg string, seed []byte) (*PrivateKey, error) {
 		}
 		return newP256(priv)
 	}
-	return nil, errors.New("unsupported key type " + alg)
+	return nil, unsupportedError{"unsupported key type " + alg}
 }
 
 // AlgorithmOf names the key's algorithm, or errors for one the profile does not admit.
 func AlgorithmOf(pub *PublicKey) (string, error) {
-	if pub == nil || pub.Alg == "" {
+	if pub == nil {
 		return "", errors.New("unsupported key type")
+	}
+	if pub.Alg == "" {
+		return "", unsupportedError{"unsupported key type " + pub.AlgOID}
 	}
 	return pub.Alg, nil
 }
