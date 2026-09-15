@@ -58,7 +58,18 @@ func derBool(v bool) []byte {
 
 // derInt encodes the big-endian magnitude bytes as a positive INTEGER (a leading zero added when the
 // high bit is set), exactly as the seed's int() does for a Buffer.
+// derInt writes a DER INTEGER: minimal two's-complement, always.
+//
+// Prepending 0x00 for a set top bit was only half the rule; a redundant leading 0x00 has to come
+// off. randomSerial hands eight random bytes straight here, so one serial in 256 began 0x00 and was
+// encoded non-minimally — and ParseCertificate, strict since the cryptographic review, then refused
+// a certificate this port had just issued.
 func derInt(v []byte) []byte {
+	at := 0
+	for at+1 < len(v) && v[at] == 0 && v[at+1]&0x80 == 0 {
+		at++
+	}
+	v = v[at:]
 	if len(v) == 0 || v[0]&0x80 != 0 {
 		return tlv(0x02, append([]byte{0}, v...))
 	}
