@@ -210,3 +210,53 @@ fn a_card_and_a_certificate_read_back() {
     fs::write(&bad, "BEGIN:VCARD\r\nVERSION:4.0\r\nFN:X\r\nX-PACT-VERSION:1\r\nEND:VCARD\r\n").unwrap();
     pact().args(["card", "check"]).arg(&bad).assert().code(1).stdout(predicate::str::contains("refused"));
 }
+
+/// The one thing a fake cannot prove: that a real card answers these APDUs the way the standard
+/// says. Needs hardware, so it asks for it by name rather than failing on a machine without one.
+///
+/// To set a card up (Yubico's tool, not this project's):
+///   ykman piv keys generate --algorithm ECCP256 9c /tmp/pub.pem
+///   ykman piv certificates generate --subject 'CN=PACT root' 9c /tmp/pub.pem
+/// then, with the PIN in a 0600 file:
+///   PACT_PIV_LIVE=1 PACT_PIN_FILE=/tmp/pin PACT_PASSPHRASE_FILE=/tmp/pass cargo test -p pact -- --ignored live_card
+#[test]
+#[ignore = "needs a smartcard: PACT_PIV_LIVE=1"]
+fn live_card_signs_a_root_and_a_leaf() {
+    if std::env::var("PACT_PIV_LIVE").is_err() {
+        eprintln!("skipped: set PACT_PIV_LIVE=1 with a PIV card in a reader");
+        return;
+    }
+    let dir = tempfile::tempdir().expect("a directory");
+    let vault = dir.path().join("card.pact-vault.json");
+    let out = Command::cargo_bin("pact")
+        .expect("the binary")
+        .args(["id", "create", "--name", "Live Card", "--vault", vault.to_str().unwrap(), "--piv", "9c"])
+        .output()
+        .expect("it ran");
+    assert!(out.status.success(), "create on the card: {}", String::from_utf8_lossy(&out.stderr));
+    let fingerprint = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    assert!(fingerprint.starts_with("sha256:"), "the root's fingerprint: {fingerprint}");
+
+    let key = dir.path().join("host.key");
+    let csr = dir.path().join("req.pem");
+    Command::cargo_bin("pact").unwrap().args(["key", "new", "--alg", "ed25519", "--out", key.to_str().unwrap()]).assert().success();
+    Command::cargo_bin("pact")
+        .unwrap()
+        .args(["csr", "new", "--key", key.to_str().unwrap(), "--endpoint", "https://live.example/mcp", "--out", csr.to_str().unwrap()])
+        .assert()
+        .success();
+    let chain = dir.path().join("chain.pem");
+    Command::cargo_bin("pact")
+        .unwrap()
+        .args(["id", "issue", "--vault", vault.to_str().unwrap(), "--csr", csr.to_str().unwrap(), "--yes", "--chain-out", chain.to_str().unwrap()])
+        .assert()
+        .success();
+    Command::cargo_bin("pact")
+        .unwrap()
+        .args(["chain", "check", "--chain", chain.to_str().unwrap(), "--expect-root", &fingerprint, "--expect-endpoint", "https://live.example/mcp"])
+        .assert()
+        .success();
+    // And the vault never held the key.
+    let text = std::fs::read_to_string(&vault).expect("the vault");
+    assert!(!text.contains("pkcs8"), "a card-held root leaves no key in the vault");
+}

@@ -57,6 +57,94 @@ forged signature, an unknown `kid`, a header member the version does not list, t
 an expired leaf, a chain of one, a sealed `tools/list` from a stranger, an envelope an hour old —
 and prints blocked / REPRODUCES per scenario. It writes nothing on the target.
 
+## A root on a smartcard
+
+Every other way of holding a root keeps it as bytes somewhere a person can copy. A PIV applet — a
+YubiKey's, typically — does not: the key is generated on the card, cannot be read off it, and signs
+certificates through the core's external-signing seam. "There is no export" becomes a property of
+the hardware rather than a promise this code makes.
+
+There are two ways onto a card, and they answer different questions about loss. **Choose on
+purpose:**
+
+| | `pact id create --piv 9c` | `--key-out`, then `pact card-attach` |
+|---|---|---|
+| Where the key was made | on the card | here, in software |
+| The vault holds | the certificate and the ledger, no key | the key, as it always has |
+| A lost card means | **the identity is gone** — a second card is a second identity, not a spare | an inconvenience: the vault still signs |
+| A copied vault means | nothing: there is no key in it | a copied identity, as with any software root |
+
+The first is the stronger arrangement and the one with no safety net. The second is weaker by
+exactly the window in which the key existed as a file, and recoverable for exactly the same reason.
+
+### The card must already hold a key and a certificate
+
+Generating keys on a card is the card vendor's job, not this tool's. With Yubico's `ykman`:
+
+```
+ykman piv keys generate --algorithm ECCP256 9c pub.pem
+ykman piv certificates generate --subject 'CN=PACT root' 9c pub.pem
+```
+
+The certificate matters: PIV has no command that reads a bare public key, so the slot's certificate
+is how `pact` learns which key is there. A slot with a key and no certificate answers "slot 9c holds
+no certificate".
+
+**P-256 only.** SPEC §14.1 allows an Ed25519 or a P-256 root; PIV's Ed25519 support is too new to
+rely on across cards, so a card-held root is P-256, and a slot holding anything else is refused by
+name. **Slot 9c** (Digital Signature) is the default because it is the slot that asks for the PIN on
+every signature — a root should not sign quietly.
+
+### The two routes
+
+```
+# The root is born on the card and never leaves it.
+pact id create --name "Alina Rao" --vault ~/alina.pact-vault.json --piv 9c
+
+# Or: made here, imported there, and the vault keeps a copy.
+pact id create --name "Alina Rao" --alg p256 --vault ~/alina.pact-vault.json --key-out root.pem
+ykman piv keys import 9c root.pem
+ykman piv certificates generate --subject 'CN=Alina Rao' 9c root.pem
+pact card-attach --vault ~/alina.pact-vault.json --slot 9c
+rm root.pem          # it is the root, in the clear, for as long as it exists
+
+pact card-status --vault ~/alina.pact-vault.json      # reader, card, slot, key, and which mode
+pact id issue --vault ~/alina.pact-vault.json --csr req.pem     # asks for the PIN, signs on the card
+```
+
+`pact id issue` and `pact id renew` behave exactly as they do for a software root — the same ledger,
+the same one-live-leaf rule, the same endpoint, origin and dates shown before anything is signed —
+and differ only in who makes the signature. The card is opened and checked against the identity's
+root *before* the question, so a card that is absent, or holds another key, is said then rather than
+after a person has agreed.
+
+**The availability cost.** A renewal needs the card present. That is fine for something yearly and
+deliberate, and it is worth knowing before a leaf expires while the card is in another country.
+
+**The PIN** comes from a prompt, or from `PACT_PIN_FILE` for a script — held to the same rule as the
+passphrase file: mode 0600, nobody else may read it.
+
+### Why this is a native binary and not the browser
+
+PIV lives on the card's CCID (smartcard) interface. WebHID carries HID devices and Chrome blocks
+FIDO HID from it outright; WebUSB cannot claim an interface a kernel driver already owns, and the
+CCID driver owns this one on macOS, Linux and Windows; `chrome.platformKeys` is ChromeOS
+enterprise-managed. PC/SC is the only door, and only a native binary can open it.
+
+So the wallet extension reaches a card-held root through **Chrome's native messaging**: the
+extension calls `chrome.runtime.connectNative("contact.pact.wallet")`, Chrome starts this binary,
+and the two speak length-prefixed JSON on stdio. That needs a host manifest — a small JSON file
+naming the binary's absolute path and the extension ids allowed to talk to it — installed in
+Chrome's `NativeMessagingHosts` directory beside the binary, which is why this arrangement arrives
+with an installer rather than with a store listing alone. The native-messaging host is not built
+yet; this section is here so that nobody tries WebHID again and concludes it is merely fiddly.
+
+### Building without a card reader
+
+The smartcard door is the `piv` feature, on by default. `cargo build --no-default-features -p pact`
+drops it for a machine with no PC/SC headers (a bare Linux container: `apt install libpcsclite-dev`
+puts them back), and the card commands then say so rather than failing obscurely.
+
 Build: `cargo build --release -p pact` → `target/release/pact`, about 1.8 MB, no runtime
 dependencies. Tests: `cargo test -p pact` (unit tests, and `tests/cli.rs` driving the binary).
 
