@@ -235,7 +235,15 @@ async function importVault({ vault, passphrase }) {
   await chrome.storage.local.remove(['hardware', 'passkeyBackup'])
   adoptSession(plaintext, passphrase)
   broadcast({ type: 'changed' })
-  return state()
+  // A vault made by a hosted wallet page carries `store: { id, mode }` — where that page keeps
+  // its own sealed copy. This wallet cannot reach it and should not pretend otherwise: a
+  // WebAuthn credential is bound to its RP ID, and this extension's is its own
+  // `chrome-extension://` origin (hardware.js), so the secret that opens a `prf` copy cannot be
+  // derived here at all. Two wallets, two copies, and the file is the bridge between them —
+  // which the window says out loud rather than leaving somebody to assume there is one wallet
+  // that both edit.
+  const hosted = plaintext.store && typeof plaintext.store.id === 'string' ? plaintext.store : null
+  return { ...(await state()), hosted: hosted ? { mode: hosted.mode || 'prf' } : null }
 }
 
 async function state() {
