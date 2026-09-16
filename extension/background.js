@@ -251,6 +251,11 @@ async function state() {
   const hw = await stored('hardware')
   return {
     locked: !session,
+    // When the idle alarm will fire, so the window can show it. The wallet has auto-locked for
+    // fifteen minutes since it was built and never said so — a person could not tell whether
+    // they had a moment or a quarter of an hour, which is the difference between finishing and
+    // starting again.
+    locksAt: session ? (await chrome.alarms.get('lock'))?.scheduledTime ?? null : null,
     hasVault: !!vault,
     vaultStale: await staleness(),
     passphraseKnown: !!(session && session.passphrase),
@@ -526,6 +531,21 @@ async function command(msg) {
     }
     // Only that one was made, and when: the passkey holds the backup, not this record.
     case 'passkey:noted': { await store({ passkeyBackup: { at: nowIso(), count: msg.count || 1 } }); return { ok: true } }
+    // Who is holding an identity right now, and taking it back.
+    //
+    // Grants have always lived in this map and never been visible: a person could not answer
+    // "which pages can act as me at this moment", which is the first question anybody asks of a
+    // wallet, and there was no way to say no to one short of locking. They are session-scoped
+    // already, so this adds a view and an undo rather than a new kind of state.
+    case 'grants:list': {
+      requireUnlocked()
+      return { grants: [...grants.entries()].map(([origin, root]) => ({ origin, root })) }
+    }
+    case 'grants:revoke': {
+      requireUnlocked()
+      grants.delete(String(msg.origin || ''))
+      return { ok: true }
+    }
     case 'hardware:get': { const hw = await stored('hardware'); return hw ? { mode: hw.mode || 'prf', credentialId: hw.credentialId, salt: hw.salt, stale: !!hw.stale } : null }
     // The root keys, handed to the wallet's own window for one purpose: writing them into an
     // authenticator that can hold them. No page can reach this — the bridge does not forward it —

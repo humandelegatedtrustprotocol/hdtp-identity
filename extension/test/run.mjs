@@ -374,9 +374,41 @@ test('(5) hardware wrap: a PRF credential re-seals the vault and unlocks it afte
   await w.close()
 })
 
+test('(5b) the window shows who holds a grant, and revoking one makes that page ask again', async () => {
+  // Grants lived in a map nobody could see. A person could not answer "which pages can act as
+  // me at this moment" — the first question anybody asks of a wallet — and the only way to say
+  // no to one was to lock the whole wallet.
+  //
+  // The grant is taken here rather than assumed: (5) locks, so there is none to inherit, and a
+  // test that leaned on one would be asserting the order of the file rather than the behaviour.
+  const h = await ask(pageA, 'window.pact.requestIdentity()')
+  const granting = await walletWindow()
+  await waitScreen(granting, 's-pick')
+  await granting.click('#f-pick button[type=submit]')
+  await waitScreen(granting, 's-done')
+  assert.equal((await h.value()).ok, true)
+  await granting.close()
+
+  const w = await browser.newPage()
+  await w.goto(`chrome-extension://${extId}/window.html`)
+  await waitScreen(w, 's-home')
+  await w.click('.tab[data-tab="t-sites"]')
+  const origin = new URL(pageA.url()).origin
+  await w.waitForFunction((o) => document.getElementById('home-sites').textContent.includes(o), { timeout: 10000 }, origin)
+  assert.ok(true, 'the connected pane names the page holding the grant')
+
+  await w.click('#home-sites button.secondary')
+  await w.waitForFunction(() => /No page is holding/.test(document.getElementById('home-sites').textContent), { timeout: 10000 })
+  const after = await pageA.evaluate(() => window.pact.listCertificates().then(() => 'ok', (e) => e.code))
+  assert.equal(after, 'not_granted', 'the revoked page has to ask again')
+  await w.close()
+})
+
 test('(6) lock clears the unlocked state: grants are gone and a page call is refused', async () => {
   const before = await pageA.evaluate(() => window.pact.listCertificates().then(() => 'ok', (e) => e.code))
-  assert.equal(before, 'not_granted', 'the locks in (5) dropped every grant')
+  // (5) locked, and (5b) revoked the grant it took afterwards — either way page A arrives here
+  // holding nothing, which is what this test needs to be true before it locks again.
+  assert.equal(before, 'not_granted', 'page A holds no grant coming into this test')
   const h = await ask(pageA, 'window.pact.requestIdentity()')
   const w = await walletWindow()
   await waitScreen(w, 's-pick')
