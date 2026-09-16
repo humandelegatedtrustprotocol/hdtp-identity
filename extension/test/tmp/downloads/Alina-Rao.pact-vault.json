@@ -1,0 +1,12 @@
+{
+  "ct": "25_Ev23np_QaRvehmktZN1QcPkTh_LT-3Av26LTlhV7PNzJwrS2Geeu2CqIAlPkGtR7PX9zzlufPOoBPAiM5CWs0O5lf_yjsFZpubDmXpGSUtCQqkAmKYvJSMAhm2thlh-v50VbcWm2U8ImtTcyV-1lxcraQSSzarAk0MdS5lHw0IPDPAmLLEyIg0NFUJplgY6tU-VKyEukCYEUPgeGefZQHlAVjKZnhYbt5K5JXgm6WQ6mhfgHgJca6ju0_bp2fZuSCmFrSaOAdzx9BY5xcaK7zobaXOweUnCTusKtOoqMEzixg5PXMKyed43UaEY07wIP6SaQ9mcG04RVML2sD5kuRBOR0c6dawvZpxU-Id845NksNmA9y0ISGCrLOcKv8FeaWR4S31vBfHCAosMcKe9sc1SA9ddSWFJAGTS5WbUF7Zg8fnvHFt7bfJ5HuIlOQs3O0HL5wn6_c8uP4rG4Ois3vn3EcRuOkZ9fyaiceQkhsXs3p1_1fE7DK2BWSOdYMTg1j9J4yq-y7i4aroAx1--Bv8clsQ_cc_xFKqPXJ12GAzbw4GK4Gv_2VBwbEIRJTGhsd3NBSDSzxhuWyGECrqz3YeGx3jSKBc3kDSw-TOawKlFpgY-pGIjNn0mRJTt-TDjcll9nVANGiCHCV3wxrAvbu-6gjZt9GVgWo1r0WQ76pwQ16SCG9H7mO_lTZl8Mh-ACmyWDd1-zAj_ejX5K2RZQHO-SrJcARcNVrpS2nddN2ZJF7uyTXuJV2pib1_pTuIggxIJBbY-iZ8jKf2CENY9JRXc_OXSfcXuo1dmxvNAoDMQcuiLOD_VfsbKSNQzhzXscDyTHt7lesWo13ySpqKX52IVHP75Xn1MYpxTA_6tqs9i4VswmgHtF5LYnQoA1P_U3028jwDHm6rjy0xXIEJNqY",
+  "format": "pact-vault/1",
+  "kdf": {
+    "m_kib": 65536,
+    "name": "argon2id",
+    "p": 1,
+    "t": 3
+  },
+  "nonce": "hOEupL5aNtt1zmcD",
+  "salt": "Z3_mi-zmU5PkDBG0qcP6vg"
+}
