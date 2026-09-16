@@ -30,6 +30,15 @@
   <p class="help">Create on the first device. Use <em>Use a passkey I already have</em> on the second,
     so the provider offers the one it synced.</p>
 
+  <details id="compare">
+    <summary>Compare with a previous run</summary>
+    <p class="help">Paste what the other profile or device showed. The page will say which of the
+      two very different things happened — because a different <em>credential</em> and a different
+      <em>secret for the same credential</em> look identical on screen and mean opposite things.</p>
+    <label>Fingerprint <input id="prev-fp" placeholder="sha256:…" autocomplete="off" spellcheck="false"></label>
+    <label>Credential <input id="prev-cred" placeholder="the Credential line from that run" autocomplete="off" spellcheck="false"></label>
+  </details>
+
   <p id="err" class="err" hidden role="alert"></p>
 
   <section id="out" hidden>

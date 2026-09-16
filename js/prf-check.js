@@ -111,6 +111,40 @@ async function deriveRoot(secret) {
   return root.fingerprint
 }
 
+/**
+ * What just happened, against what happened last time — because the two failures this page exists
+ * to tell apart look identical on screen and mean opposite things.
+ *
+ * A DIFFERENT CREDENTIAL producing a different identity is correct: it is a different key. That is
+ * the likely case in practice, and it showed up on the first real run of this page — a profile with
+ * more than one passkey for the origin, where `allowCredentials: []` lets the provider choose and it
+ * chose the other one. Reading that as "PRF is unstable" would condemn a provider for working.
+ *
+ * The SAME CREDENTIAL producing a different secret is the fatal one, and the only one that says
+ * anything about the provider.
+ */
+function verdict(fingerprint, credentialId) {
+  const prevFp = ($('prev-fp').value || '').trim()
+  const prevCred = ($('prev-cred').value || '').trim()
+  if (!prevFp && !prevCred) {
+    return 'Copy the fingerprint and the credential above, then open this page on the other device or profile, press "Use a passkey I already have", and paste both into "Compare with a previous run". Comparing by eye works too, but the credential is the line that decides what a difference means.'
+  }
+  const sameCred = prevCred && prevCred === credentialId
+  const sameFp = prevFp && prevFp === fingerprint
+  if (sameCred && sameFp) {
+    return 'SAME PASSKEY, SAME IDENTITY. This provider carried the PRF secret across, and a derived identity is safe on it — which is the answer the design needed.'
+  }
+  if (sameCred && !sameFp) {
+    return 'SAME PASSKEY, DIFFERENT IDENTITY. This is the fatal one: the provider gave a different PRF secret for the same credential, so a person would silently become somebody else. A derived identity is not safe on this provider.'
+  }
+  if (!sameCred && prevCred) {
+    return 'A DIFFERENT PASSKEY answered this time — look at the credential line. A different key is a different identity, so this says nothing about whether the provider carries PRF across. Run it again and pick the same passkey; if this profile holds more than one for this origin, that is the thing to fix rather than the provider.'
+  }
+  return sameFp
+    ? 'Same identity, and no previous credential to compare against. Paste the credential line too and the answer stops being ambiguous.'
+    : 'A different identity, and no previous credential to compare against — so this could be a different passkey (fine) or the same one giving a different secret (fatal). Paste the credential line from the other run to tell which.'
+}
+
 async function run(create) {
   $('err').hidden = true
   $('out').hidden = true
@@ -126,7 +160,7 @@ async function run(create) {
     $('prf').textContent = b64u(secret)
     $('cred').textContent = credentialId
     $('salt').textContent = b64u(salt)
-    $('verdict').textContent = 'Open this page on the other device or profile, press "Use a passkey I already have", and compare the fingerprint above. Identical means that provider carries the PRF secret across its sync and a derived identity is safe on it. Different means it does not, whatever else it supports.'
+    $('verdict').textContent = verdict(fingerprint, credentialId)
     $('out').hidden = false
   } catch (e) {
     fail(e && e.name === 'NotAllowedError'

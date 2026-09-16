@@ -45,6 +45,11 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 .err { color:var(--bad); background:color-mix(in srgb, var(--bad) 10%, transparent); padding:.7rem .9rem; border-radius:8px; margin:0 }
 .notice { border:1px solid var(--line); border-left:3px solid var(--good); border-radius:8px; padding:.7rem .9rem; margin:.4rem 0 0; font-size:.92rem }
 footer { margin-top:1.6rem; color:var(--muted); font-size:.82rem }
+details { border:1px solid var(--line); border-radius:10px; padding:.7rem .9rem; background:var(--card) }
+details[open] { padding-bottom:1rem }
+summary { cursor:pointer; font-weight:600; font-size:.94rem }
+details label { display:flex; flex-direction:column; gap:.25rem; margin-top:.7rem; font-size:.85rem; color:var(--muted) }
+details input { font:inherit; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.82rem; padding:.45rem .6rem; border:1px solid var(--line); border-radius:7px; background:var(--bg); color:var(--ink) }
 [hidden] { display:none !important }
 `.trim()
 
