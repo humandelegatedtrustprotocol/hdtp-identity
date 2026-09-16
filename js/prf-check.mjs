@@ -68,12 +68,31 @@ console.log(`prf-check: built ${out} (${Math.round(html.length / 1024)} KB, self
 
 if (buildOnly) process.exit(0)
 
-createServer((req, res) => {
+const server = createServer((req, res) => {
   res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
   res.end(html)
-}).listen(port, () => {
+})
+
+// A port already in use is the one failure that leaves somebody staring at "unreachable" with no
+// idea why — the process exits, the terminal scrolls, and the browser says the same thing it says
+// when nothing was ever started. Deliberately NOT auto-picking a free port: the whole test depends
+// on both profiles reaching the same origin, so a port that quietly changed would break the
+// measurement rather than the server.
+server.on('error', (e) => {
+  if (e.code === 'EADDRINUSE') {
+    console.error(`\nprf-check: port ${port} is already taken by something else.`)
+    console.error(`  Pick another and use the SAME one in both profiles:  node prf-check.mjs --port 8790\n`)
+    process.exit(1)
+  }
+  throw e
+})
+
+server.listen(port, () => {
   console.log('')
   console.log(`  http://localhost:${port}`)
+  console.log('')
+  console.log('  Leave this running — the page is served from here and nothing is written to disk')
+  console.log('  that a browser can open on its own. Ctrl-C ends it.')
   console.log('')
   console.log('  Open that in the FIRST profile and press "Create a passkey here".')
   console.log('  Open the SAME url in the second profile and press "Use a passkey I already have".')
