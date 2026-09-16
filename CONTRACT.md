@@ -214,7 +214,7 @@ A `pending_new_address` result is the host's to answer as SPEC §5.3 words it: t
 brought the new address answers `{"status": "pending"}`; every other call from that address, until the
 owner decides, answers `pending_approval`.
 
-## 6. Vault (SPEC §9; the format shared by the ceremony, the CLI and the extension)
+## 6. Vault (SPEC §9; the format shared by the wallet page and the CLI)
 
 A vault is one JSON document:
 
@@ -240,7 +240,7 @@ canonical JSON of the document without `ct`. The plaintext is:
 | `vault_open` | `{"passphrase", "vault": {…}}` | `{"plaintext": {…}}` or `{"error": "vault", "why"}` (a wrong passphrase and a tampered document are one message) |
 | `wallet_issue` | `{"vault_plaintext", "root_fingerprint", "csr", "now", "valid_days"?, "move"?}` | `{"der", "endpoint", "not_before", "not_after", "ledger_entry", "new_host": bool, "warnings": [...]}` — the wallet's rules: `csr_check` with the vault's roots as `root_spkis`; `new_host` true when no ledger entry names that endpoint's host, with the warning `new host: this endpoint's host has never been issued to`; the **live leaf is the newest one issued** (§14.3) and a second endpoint while it is unexpired is refused unless `move: true`, which instead warns `move: the live leaf at the previous endpoint is superseded once contacts see this one`; `not_before` monotonic over the ledger; `valid_days` absent means 365 and an explicit 0 is refused |
 
-Passphrases never appear in arguments of the CLI; the ceremony and the extension hold them in memory
+Passphrases never appear in arguments of the CLI; the wallet page holds them in memory
 only for the call, and an empty passphrase seals nothing (`bad_request`). What the core zeroizes
 when a call returns: every private key it decoded, the PKCS #8 bytes it decoded them from, the
 HPKE ephemeral, shared secret, key, nonce and the HMAC chaining buffers, the vault's derived key
@@ -282,4 +282,4 @@ material behind treats the strings it passes and receives as its own to clear.
      still compared. Narrowing a case to `['error']` to make a disagreement go away is not a fix: a
      differing `why` *is* the finding.
 5. `wasm-bindgen-test` in headless Chrome for the browser build; the gateway's vitest pool for the
-   Worker build (phase 2.0); `extension/ npm test` for the wallet that loads `pkg-web`.
+   Worker build (phase 2.0); `pact-cloud`'s `npm run test:ceremony` for the wallet page that loads `pkg-web`.
