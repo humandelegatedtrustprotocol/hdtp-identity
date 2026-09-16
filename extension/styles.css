@@ -69,3 +69,36 @@ code.small { font-size: 11px; color: var(--muted); }
 .list .item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); flex-wrap: wrap; }
 .list.small .item { font-size: 12.5px; padding: 6px 8px; }
 .cn { font-weight: 600; }
+
+/* ── the window, as a wallet rather than a settings page ──────────────────────────────────
+   Borrowed from open-source crypto wallets where the convention actually transfers: tabs
+   because a wallet is operated rather than read, an identicon because this product's whole
+   security model is comparing fingerprints and nobody compares base64 by eye, and a standing
+   backup state because "there is a button for that" is not the same as "you have one". */
+.tabs { display: flex; gap: 2px; margin: 0 0 14px; border-bottom: 1px solid var(--line); }
+.tab {
+  appearance: none; background: none; border: 0; border-bottom: 2px solid transparent;
+  padding: 8px 12px; margin-bottom: -1px; font: inherit; font-size: 13px; color: var(--muted);
+  cursor: pointer; border-radius: 6px 6px 0 0;
+}
+.tab:hover { color: var(--ink); background: var(--paper); }
+.tab.on { color: var(--ink); font-weight: 600; border-bottom-color: var(--accent); }
+.pane { display: flex; flex-direction: column; gap: 12px; }
+
+/* The fingerprint, as a shape. Deterministic from the fingerprint itself, so the same identity
+   is the same mark everywhere it appears — which is the point: a person recognises a picture
+   they have seen before long before they would read 44 characters of base64. */
+.ident { flex: 0 0 auto; width: 34px; height: 34px; border-radius: 8px; display: block; }
+.ident.sm { width: 22px; height: 22px; border-radius: 5px; }
+
+/* Backup health: a standing statement, not a button. Red while no copy has ever been proved,
+   quiet once one has — a nag that cannot be dismissed into silence while it is still true. */
+.health { border: 1px solid var(--line); border-left-width: 3px; border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-bottom: 14px; }
+.health.bad { border-left-color: var(--bad); background: var(--bad-bg); color: var(--bad); }
+.health.ok { border-left-color: var(--good); color: var(--muted); }
+.health b { display: block; color: inherit; }
+
+.small { font-size: 12px; }
+.lede { margin: 0 0 10px; font-size: 14.5px; }
+.grow { flex: 1 1 auto; min-width: 0; }
+.due { color: var(--warn); font-weight: 600; }
