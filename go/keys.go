@@ -14,7 +14,9 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"math/big"
+	"slices"
 )
 
 const (
@@ -391,4 +393,37 @@ func mustHex(s string) []byte {
 		out[i] = v
 	}
 	return out
+}
+
+// ── §2.1: a root derived from a passkey ──────────────────────────────────────────────────
+
+// PrfSalt is the fixed input handed to the authenticator's prf extension: SHA-256("pact/vault/1").
+//
+// Fixed, not per-credential, because a wallet arriving cold on a new device has to derive before it
+// can fetch anything — a per-credential salt would have to be fetched first, and there is nothing to
+// fetch it with. The secret is still per-credential, because the PRF is keyed by the credential. The
+// name is inherited and no longer describes anything; these are normative bytes.
+func PrfSalt() []byte {
+	h := sha256.Sum256([]byte("pact/vault/1"))
+	return h[:]
+}
+
+// DerivationInfos are the three info strings of SPEC §2.1, and the only ones DeriveSeed will derive
+// for. Refusing an unknown one is the point rather than a restriction: the failure this design has
+// to engineer against is silently deriving a DIFFERENT identity, and a mistyped domain separator is
+// the cheapest way to do it — it would succeed, return 32 perfectly good bytes, and produce a key
+// belonging to nobody. There is no fourth use, so there is no cost.
+var DerivationInfos = []string{"pact/root/1", "pact/store-key/1", "pact/store-id/1"}
+
+// DeriveSeed is SPEC §2.1: HKDF-SHA256(ikm = prf, salt = "", info, L = 32). HMAC pads any key
+// shorter than its block to zeros, so an empty salt and RFC 5869's "a string of HashLen zeros" are
+// the same extract.
+func DeriveSeed(prf []byte, info string) ([]byte, error) {
+	if len(prf) != 32 {
+		return nil, errArg(fmt.Sprintf("a prf output is 32 bytes, not %d", len(prf)))
+	}
+	if !slices.Contains(DerivationInfos, info) {
+		return nil, errArg(info + " is not one of the derivation info strings of SPEC §2.1")
+	}
+	return hkdfExpand(hmacSHA256(nil, prf), []byte(info), 32), nil
 }

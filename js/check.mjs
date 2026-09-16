@@ -118,6 +118,32 @@ if (!v2) {
     }
     console.log(`  ${v.name}: ${plaintext ? 'opened' : 'closed'}${v.form === 'leaf' ? ' (by reference)' : ''}`);
   }
+
+  // §2.1, through the boundary rather than through a library function: the port is asked for the
+  // salt and for each seed, so what passes is what a caller of the contract gets, not what the
+  // crate computes internally.
+  console.log('derivation (§2.1)');
+  const seen = new Map();
+  for (const x of v2.derivation ?? []) {
+    ok(port.call('prf_salt', {}).salt === x.salt, `${x.label}: the port's own salt is the vector's`);
+    const got = port.call('derive_seed', { prf: x.prf, info: x.info });
+    ok(got.seed === x.seed, `${x.label}: HKDF-SHA256(prf, empty salt, "${x.info}", 32)`);
+    if (x.alg) {
+      const key = port.call('key_from_seed', { alg: x.alg, seed: x.seed });
+      ok(key.spki === x.spki, `${x.label}: the key the seed makes`);
+      ok(key.fingerprint === x.fingerprint, `${x.label}: the identity that key is`);
+    }
+    ok(!seen.has(got.seed), `${x.label}: a different info gives a different seed`);
+    seen.set(got.seed, x.info);
+    console.log(`  ${x.label} (${x.info}): ${x.fingerprint ?? 'seed only'}`);
+  }
+  ok((v2.derivation ?? []).length >= 3, 'all three info strings are covered');
+  // The refusals are the point of specifying the info strings at all — a typo would otherwise
+  // succeed and hand back a key belonging to nobody.
+  for (const [why, args] of [
+    ['an info string that is not one of the three', { prf: v2.derivation[0].prf, info: 'pact/root/2' }],
+    ['the wrong case in a domain separator', { prf: v2.derivation[0].prf, info: 'pact/Root/1' }],
+  ]) ok(port.call('derive_seed', args).error === 'bad_request', `derive_seed refuses ${why}`);
 }
 
 console.log(`${checks - failures}/${checks} checks passed`);

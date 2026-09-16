@@ -5,7 +5,7 @@ use crate::card;
 use crate::csr;
 use crate::envelope::{self, CallerPin, Form, OpenResultArgs, SealRequest, SealResult, Wire};
 use crate::hpke::{self, Suite};
-use crate::keys::{Alg, PrivateKey, PublicKey};
+use crate::keys::{self, Alg, PrivateKey, PublicKey};
 use crate::time::{format_rfc3339, parse_rfc3339};
 use crate::util::{b64u, err, from_b64u, Error, Result};
 use crate::vault::{self, Kdf};
@@ -175,6 +175,11 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
             let seed = seed32(a, "seed")?.ok_or_else(|| Error::new("bad_request", "seed is required"))?;
             key_json(&PrivateKey::from_seed(Alg::parse(s(a, "alg")?)?, &seed)?)
         }
+        // §2.1. Two calls rather than one so a wallet never hardcodes the salt: the constant lives
+        // here, the vectors prove it, and a page that gets it wrong fails loudly instead of quietly
+        // becoming somebody else.
+        "prf_salt" => json!({ "salt": b64u(&keys::prf_salt()), "infos": keys::DERIVATION_INFOS }),
+        "derive_seed" => json!({ "seed": b64u(&keys::derive_seed(&bytes(a, "prf")?, s(a, "info")?)?) }),
         "public_key" => {
             let k = private(a, "pkcs8")?;
             let p = k.public();
