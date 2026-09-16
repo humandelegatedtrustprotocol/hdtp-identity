@@ -3,7 +3,7 @@
 //! opened and re-sealed from its ephemeral seed, and `decide` on the vector envelopes.
 use pact_identity::envelope::{self, DecideInput, Form, SealRequest};
 use pact_identity::hpke::{self, suite_for, Suite};
-use pact_identity::keys::{Alg, PrivateKey, PublicKey};
+use pact_identity::keys::{self, Alg, PrivateKey, PublicKey};
 use pact_identity::time::parse_rfc3339;
 use pact_identity::util::{b64u, from_b64u, from_hex, hex, seed};
 use pact_identity::x509::{self, compare_leaves, fingerprint_of, parse, serial_of, validate_chain, ChainResult, LeafSpec};
@@ -398,4 +398,41 @@ fn a_result_seals_back_and_opens_on_the_caller_side() {
     let out = envelope::open_result(envelope::OpenResultArgs { envelope: &small, my_key: alina, msg_id: "m-3", now: ts, pins: &pins, expected_root: Some(&root_b), expected_endpoint: Some(ENDPOINT_B) }).unwrap();
     assert_eq!(out["form"], "leaf");
     assert_eq!(out["error"]["code"], "permission_denied");
+}
+
+/// §2.1, recomputed from the published `prf` alone — so what passes is what a third implementation
+/// reading Appendix B would have to reproduce, not what this crate happened to write.
+#[test]
+fn derivation_vectors() {
+    let v = appendix_b_blocks().remove(1);
+    let entries = v["derivation"].as_array().expect("derivation block").clone();
+    assert!(entries.len() >= 3, "all three info strings are covered");
+    let mut seen: Vec<String> = Vec::new();
+    for d in &entries {
+        let info = d["info"].as_str().unwrap();
+        assert_eq!(d["salt"].as_str().unwrap(), b64u(&keys::prf_salt()), "{info}: the salt is SHA-256(\"pact/vault/1\")");
+        let seed = keys::derive_seed(&from_b64u(d["prf"].as_str().unwrap()).unwrap(), info).unwrap();
+        assert_eq!(b64u(&seed), d["seed"].as_str().unwrap(), "{info}: HKDF-SHA256 over an empty salt");
+        if let Some(alg) = d["alg"].as_str() {
+            assert_eq!(alg, "ed25519", "a derived root is Ed25519");
+            let k = PrivateKey::from_seed(Alg::Ed25519, &seed).unwrap();
+            assert_eq!(b64u(k.public().spki()), d["spki"].as_str().unwrap(), "{info}: the key the seed makes");
+            assert_eq!(k.public().fingerprint(), d["fingerprint"].as_str().unwrap(), "{info}: the identity that key is");
+        }
+        // The property the info strings exist for: one credential, three unrelated secrets. A port
+        // that dropped `info` from the expand step passes everything above and fails here.
+        assert!(!seen.contains(&b64u(&seed)), "{info}: a different info gives a different seed");
+        seen.push(b64u(&seed));
+    }
+}
+
+/// The two refusals §2.1 leans on. A mistyped domain separator would otherwise return 32 perfectly
+/// good bytes belonging to nobody, which is this design's whole failure mode.
+#[test]
+fn derivation_refuses_what_would_silently_differ() {
+    let prf = [7u8; 32];
+    assert!(keys::derive_seed(&prf, "pact/root/2").is_err(), "an info string that is not one of the three");
+    assert!(keys::derive_seed(&prf, "pact/Root/1").is_err(), "case matters in a domain separator");
+    assert!(keys::derive_seed(&prf[..31], "pact/root/1").is_err(), "a prf output is 32 bytes");
+    assert!(keys::derive_seed(&prf, "pact/root/1").is_ok());
 }

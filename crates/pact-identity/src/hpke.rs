@@ -93,6 +93,14 @@ fn expand(prk: &[u8], info: &[u8], l: usize) -> Vec<u8> {
     okm.to_vec()
 }
 
+/// RFC 5869 HKDF-SHA256, plain — not the labelled form the rest of this module composes. §2.1
+/// derives a wallet's keys with it, over an EMPTY salt: `HMAC` pads any key shorter than the block
+/// to zeros, so an empty salt and RFC 5869's "a string of HashLen zeros" are the same extract, and
+/// Node's `hkdfSync` with a zero-length salt agrees byte for byte. The vectors prove it.
+pub(crate) fn hkdf_sha256(ikm: &[u8], salt: &[u8], info: &[u8], l: usize) -> Vec<u8> {
+    expand(&hmac(salt, ikm), info, l)
+}
+
 const V: &[u8] = b"HPKE-v1";
 
 fn labeled_extract(id: &[u8], salt: &[u8], label: &str, ikm: &[u8]) -> Zeroizing<Vec<u8>> {

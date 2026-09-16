@@ -33,6 +33,9 @@ type vectorFile struct {
 	NewestLeafCases []struct {
 		Pinned, Presented, Expect string
 	} `json:"newest_leaf_cases"`
+	Derivation []struct {
+		Label, Info, Alg, Prf, Salt, Seed, Spki, Fingerprint string
+	} `json:"derivation"`
 	RenewedCases []struct {
 		Name       string `json:"name"`
 		PinnedLeaf string `json:"pinned_leaf"`
@@ -464,5 +467,74 @@ func TestDecideOnVectors(t *testing.T) {
 	_ = json.Unmarshal(out, &r)
 	if r.Result["code"] != "ok" || r.Result["replayed"] != true {
 		t.Errorf("replay through Call: %s", out)
+	}
+}
+
+// §2.1, recomputed from the published prf alone — so what passes is what a third implementation
+// reading Appendix B would have to reproduce, not what this port happened to write.
+func TestDerivationVectors(t *testing.T) {
+	v, _ := loadVectors(t)
+	if len(v.Derivation) < 3 {
+		t.Fatal("Appendix B should cover all three derivation info strings")
+	}
+	seen := map[string]string{}
+	for _, d := range v.Derivation {
+		if got := B64url(PrfSalt()); got != d.Salt {
+			t.Errorf("%s: salt is SHA-256(\"pact/vault/1\"): got %s want %s", d.Info, got, d.Salt)
+		}
+		prf, err := decodeB64url(d.Prf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seed, err := DeriveSeed(prf, d.Info)
+		if err != nil {
+			t.Fatalf("%s: %v", d.Info, err)
+		}
+		if got := B64url(seed); got != d.Seed {
+			t.Errorf("%s: HKDF-SHA256 over an empty salt: got %s want %s", d.Info, got, d.Seed)
+		}
+		if d.Alg != "" {
+			if d.Alg != "ed25519" {
+				t.Errorf("a derived root is Ed25519, not %s", d.Alg)
+			}
+			k, err := KeyFromSeed(d.Alg, seed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := B64url(k.Public.SPKI); got != d.Spki {
+				t.Errorf("%s: the key the seed makes: got %s want %s", d.Info, got, d.Spki)
+			}
+			if got := Fingerprint(k.Public.SPKI); got != d.Fingerprint {
+				t.Errorf("%s: the identity that key is: got %s want %s", d.Info, got, d.Fingerprint)
+			}
+		}
+		// The property the info strings exist for: one credential, three unrelated secrets. A port
+		// that dropped info from the expand step passes everything above and fails here.
+		if prev, dup := seen[B64url(seed)]; dup {
+			t.Errorf("%s and %s derive the same seed", d.Info, prev)
+		}
+		seen[B64url(seed)] = d.Info
+	}
+}
+
+// The two refusals §2.1 leans on. A mistyped domain separator would otherwise return 32 perfectly
+// good bytes belonging to nobody, which is this design's whole failure mode.
+func TestDerivationRefusesWhatWouldSilentlyDiffer(t *testing.T) {
+	prf := bytes.Repeat([]byte{7}, 32)
+	for _, c := range []struct {
+		why  string
+		prf  []byte
+		info string
+	}{
+		{"an info string that is not one of the three", prf, "pact/root/2"},
+		{"case matters in a domain separator", prf, "pact/Root/1"},
+		{"a prf output is 32 bytes", prf[:31], "pact/root/1"},
+	} {
+		if _, err := DeriveSeed(c.prf, c.info); err == nil {
+			t.Errorf("expected a refusal: %s", c.why)
+		}
+	}
+	if _, err := DeriveSeed(prf, "pact/root/1"); err != nil {
+		t.Errorf("the ordinary case must work: %v", err)
 	}
 }

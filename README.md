@@ -38,7 +38,7 @@ the profile is exact, and every byte is under this crate's control.
 
 ## The Wasm build
 
-`pact_identity_wasm_bg.wasm` is **622,843 bytes** (release: `opt-level = "z"`, LTO, one codegen unit,
+`pact_identity_wasm_bg.wasm` is **639,118 bytes** (`js/manifest.json` is the authority; this line is prose and drifted from it once) (release: `opt-level = "z"`, LTO, one codegen unit,
 `panic = "abort"`, no `wasm-opt` — binaryen is not installed here; `WASM_OPT= sh js/build.sh` runs it
 when it is, and typically takes 15–25 % off). Argon2id and the P-256 field arithmetic are most of it.
 

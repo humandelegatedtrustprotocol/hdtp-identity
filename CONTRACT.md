@@ -45,7 +45,9 @@ and on the `v: 1` vectors in SPEC.md Appendix B.
 | Function | Input | Output |
 |---|---|---|
 | `generate_key` | `{"alg": "ed25519"\|"p256"}` | `{"alg", "pkcs8", "spki", "fingerprint"}` |
-| `key_from_seed` (vectors and tests only) | `{"alg", "seed": b64url(32)}` | as above; Ed25519 seed used directly, P-256 scalar = seed mod n, 0 → 1 (seed `keys.mjs`) |
+| `key_from_seed` | `{"alg", "seed": b64url(32)}` | as above; Ed25519 seed used directly, P-256 scalar = seed mod n, 0 → 1 (seed `keys.mjs`). Written for the vectors, and production API since SPEC §2.1: it is how a wallet turns a derived seed into its root |
+| `prf_salt` | `{}` | `{"salt": b64url(32), "infos": [3 strings]}` — SPEC §2.1's fixed PRF input, `SHA-256("pact/vault/1")`, and the three `info` strings. A call rather than a constant a caller copies, so the bytes live in one place and the vectors prove them |
+| `derive_seed` | `{"prf": b64url(32), "info"}` | `{"seed": b64url(32)}` — `HKDF-SHA256(ikm = prf, salt = "", info, L = 32)`. **Refuses an `info` outside the three, and a `prf` that is not 32 bytes.** Both refusals are the point rather than hygiene: a mistyped domain separator would otherwise return 32 perfectly good bytes and silently derive an identity belonging to nobody, which is the one failure the derived-root design exists to prevent |
 | `public_key` | `{"pkcs8"}` | `{"alg", "spki", "fingerprint"}` |
 | `key_info` | `{"spki"}` | `{"alg", "fingerprint", "key_id": b64url}` |
 | `sign` | `{"pkcs8", "data": b64url}` | `{"sig"}` — Ed25519 pure, or ECDSA P-256/SHA-256 in ASN.1 DER |

@@ -123,6 +123,16 @@ add('generate_key of a P-256 key', 'generate_key', { alg: 'p256' }, keyShape);
 add('generate_key with no algorithm', 'generate_key', {});
 add('generate_key with an algorithm nobody has', 'generate_key', { alg: 'rsa' });
 add('key_from_seed with a short seed', 'key_from_seed', { alg: 'ed25519', seed: b64url(new Uint8Array(8)) });
+// §2.1's two refusals. Both matter more than an ordinary argument check: a port that accepted them
+// would return 32 perfectly good bytes belonging to nobody, and the caller would become a different
+// identity without an error anywhere.
+add('derive_seed with an info string that is not one of the three', 'derive_seed', { prf: b64url(new Uint8Array(32)), info: 'pact/root/2' });
+add('derive_seed with the wrong case in the domain separator', 'derive_seed', { prf: b64url(new Uint8Array(32)), info: 'pact/Root/1' });
+add('derive_seed with a short prf', 'derive_seed', { prf: b64url(new Uint8Array(31)), info: 'pact/root/1' });
+add('derive_seed with no info', 'derive_seed', { prf: b64url(new Uint8Array(32)) });
+add('derive_seed with no prf', 'derive_seed', { info: 'pact/root/1' });
+add('derive_seed with prf as null', 'derive_seed', { prf: null, info: 'pact/root/1' });
+add('derive_seed with prf that is not base64url', 'derive_seed', { prf: '!!!', info: 'pact/root/1' });
 add('key_from_seed with an unknown algorithm', 'key_from_seed', { alg: 'rsa', seed: b64url(new Uint8Array(32)) });
 add('public_key of a key that is not one', 'public_key', { pkcs8: b64url(new Uint8Array(16)) });
 add('public_key with no argument', 'public_key', {});
@@ -315,6 +325,10 @@ add('validate_chain with chain as null', 'validate_chain', { chain: null, now })
 // success compares the members a caller actually reads, which is where a member goes missing.
 const SEED32 = b64url(new Uint8Array(32).fill(11));
 add('key_from_seed', 'key_from_seed', { alg: 'ed25519', seed: SEED32 });
+add('prf_salt', 'prf_salt', {});
+for (const info of ['pact/root/1', 'pact/store-key/1', 'pact/store-id/1']) {
+  add(`derive_seed for ${info}`, 'derive_seed', { prf: SEED32, info });
+}
 add('key_from_seed of a P-256 key', 'key_from_seed', { alg: 'p256', seed: SEED32 });
 add('public_key', 'public_key', { pkcs8: hostPkcs8 });
 add('public_key of a P-256 key', 'public_key', { pkcs8: p256Pkcs8 });
