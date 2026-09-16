@@ -286,10 +286,22 @@ $('f-import').onsubmit = async (e) => {
   const f = e.target.elements
   try {
     const vault = JSON.parse(await f.file.files[0].text())
-    await rpc('import', { vault, passphrase: f.passphrase.value })
+    const out = await rpc('import', { vault, passphrase: f.passphrase.value })
     e.target.reset()
     await refreshStatus()
     route()
+    // A vault made by a hosted wallet page names where that page keeps its own sealed copy. This
+    // wallet cannot reach it — a WebAuthn credential is bound to its RP ID and this extension's
+    // is its own `chrome-extension://` origin, so a `prf` copy's secret cannot be derived here at
+    // all — and the honest thing is to say so at the moment somebody would otherwise assume the
+    // two are one wallet that both edit. The file is the bridge; it is not a sync.
+    if (out && out.hosted) {
+      err('e-home', {
+        why: out.hosted.mode === 'prf'
+          ? 'Imported. The copy PACT Cloud keeps is sealed to a passkey on their site, so this wallet cannot read or change it — from here on these are two separate wallets, and a vault file is how you move between them.'
+          : 'Imported. PACT Cloud also keeps a copy of this vault, opened by the same passphrase. This wallet keeps its own and will not change theirs; a vault file is how you move between them.',
+      })
+    }
   } catch (x) { err('e-import', x) }
 }
 
