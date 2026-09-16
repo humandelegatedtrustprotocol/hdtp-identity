@@ -4,12 +4,12 @@
   "wasm_pack": "wasm-pack 0.15.0",
   "files": {
     "pkg-web/pact_identity_wasm_bg.wasm": {
-      "sha256": "e7760d3e74152a2a6032863775307ccfed127d7919d381f1f09d6e876590a209",
-      "bytes": 636638
+      "sha256": "4e8262fcf02b04208250386913fc360e8b9e1e039bceed60356467a939a405cd",
+      "bytes": 636654
     },
     "pkg-node/pact_identity_wasm_bg.wasm": {
-      "sha256": "e7760d3e74152a2a6032863775307ccfed127d7919d381f1f09d6e876590a209",
-      "bytes": 636638
+      "sha256": "4e8262fcf02b04208250386913fc360e8b9e1e039bceed60356467a939a405cd",
+      "bytes": 636654
     }
   }
 }

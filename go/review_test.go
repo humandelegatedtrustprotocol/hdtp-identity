@@ -312,6 +312,10 @@ func TestIntegersAreMinimalAndSerialsStaySixtyFourBits(t *testing.T) {
 		{[]byte{0x80, 0x11}, []byte{0x02, 0x03, 0x00, 0x80, 0x11}},
 		{[]byte{0x00, 0x80, 0x11}, []byte{0x02, 0x03, 0x00, 0x80, 0x11}},
 		{[]byte{0x00}, []byte{0x02, 0x01, 0x00}},
+		// The empty slice means zero and encodes as one byte. This port already did the right
+		// thing while the seed and the Rust port wrote `02 00`, which is not a DER INTEGER at
+		// all — a three-way disagreement no gate could see, because nothing passes empty.
+		{[]byte{}, []byte{0x02, 0x01, 0x00}},
 	} {
 		if got := derInt(c.in); !bytes.Equal(got, c.want) {
 			t.Errorf("derInt(%x) = %x, want %x", c.in, got, c.want)
