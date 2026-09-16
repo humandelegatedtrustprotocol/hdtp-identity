@@ -105,6 +105,11 @@ async function refreshStatus() {
   unlockedHere = !state.locked
   text('status', state.locked ? 'locked' : `${state.roots.length} identit${state.roots.length === 1 ? 'y' : 'ies'} · unlocked`)
   $('status').className = 'pill ' + (state.locked ? 'locked' : 'open')
+  // The countdown the wallet never showed. It locks after fifteen idle minutes and said nothing,
+  // so a person could not tell whether they had a moment or a quarter of an hour.
+  const left = state.locksAt ? Math.round((state.locksAt - Date.now()) / 60000) : null
+  $('locks-in').hidden = left === null || left < 0
+  if (left !== null && left >= 0) $('locks-in').textContent = left <= 1 ? 'locks in under a minute' : `locks in ${left} min`
 }
 
 function download(name, obj) {
@@ -340,6 +345,15 @@ function issueScreen() {
   const r = request
   const purpose = r.op || r.purpose || 'issue'
   text('issue-title', { signup: 'Issue the first certificate', renew: 'Renew the certificate', move: 'Move to a new address', upgrade: 'Upgrade this identity to 2.0' }[purpose] || 'Issue a certificate')
+  // What agreeing to the facts below actually means, in the words somebody would use. The
+  // facts were complete and the sentence was missing, which is a different kind of gap: a
+  // person can read every row and still not know what they are about to hand over.
+  text('issue-plain', {
+    signup: `You are about to let ${r.endpoint} answer for you. It gets a certificate your identity signs — not your identity itself, which never leaves this wallet.`,
+    renew: `You are about to give ${r.endpoint} a fresh certificate for another year. Nothing else changes.`,
+    move: `You are about to move to ${r.endpoint}. Your contacts follow you there as they see this certificate, and the old address stops being you.`,
+    upgrade: `You are about to take ownership of ${r.endpoint}'s existing key — it keeps the key, your identity vouches for it from now on.`,
+  }[purpose] || `You are about to sign a certificate for ${r.endpoint}.`)
   text('issue-origin', r.origin)
   text('issue-endpoint', r.endpoint)
   $('issue-newhost').hidden = !r.new_host
@@ -428,36 +442,147 @@ async function syncScreen() {
   show('s-sync')
 }
 
+
+// ── a fingerprint, as a shape ─────────────────────────────────────────────────────────────
+//
+// This product's security model is that people compare fingerprints, and nobody compares 44
+// characters of base64 by eye. An identicon is the convention crypto wallets settled on for
+// exactly that problem, and it is the one that transfers here unchanged: deterministic from the
+// fingerprint, so the same identity is the same mark on every screen it appears on, and a
+// changed identity is a changed picture before it is a changed string.
+//
+// Drawn rather than fetched — a wallet loads nothing from anywhere — and from the fingerprint's
+// own bytes, so there is no hash to keep in step with anything.
+function identicon(fingerprint, small = false) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  el.setAttribute('viewBox', '0 0 5 5')
+  el.setAttribute('class', 'ident' + (small ? ' sm' : ''))
+  el.setAttribute('aria-hidden', 'true')
+  let h = 2166136261
+  for (let i = 0; i < fingerprint.length; i++) { h ^= fingerprint.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0 }
+  const hue = h % 360
+  const bg = document.createElementNS(el.namespaceURI, 'rect')
+  bg.setAttribute('width', '5'); bg.setAttribute('height', '5')
+  bg.setAttribute('fill', `hsl(${hue} 32% 92%)`)
+  el.appendChild(bg)
+  // Mirrored down the middle, which is what makes these read as a face rather than as noise.
+  for (let x = 0; x < 3; x++) {
+    for (let y = 0; y < 5; y++) {
+      h = Math.imul(h ^ (x * 5 + y), 16777619) >>> 0
+      if ((h >>> 28) % 2) continue
+      for (const col of x === 2 ? [2] : [x, 4 - x]) {
+        const r = document.createElementNS(el.namespaceURI, 'rect')
+        r.setAttribute('x', String(col)); r.setAttribute('y', String(y))
+        r.setAttribute('width', '1'); r.setAttribute('height', '1')
+        r.setAttribute('fill', `hsl(${hue} 46% 42%)`)
+        el.appendChild(r)
+      }
+    }
+  }
+  return el
+}
+
+/** Days until an expiry, or null when there is not one. */
+function daysUntil(iso) {
+  const t = Date.parse(iso || '')
+  return Number.isFinite(t) ? Math.ceil((t - Date.now()) / 86400000) : null
+}
+
+// ── tabs ──────────────────────────────────────────────────────────────────────────────────
+for (const tab of document.querySelectorAll('.tab')) {
+  tab.addEventListener('click', () => {
+    for (const t of document.querySelectorAll('.tab')) t.classList.toggle('on', t === tab)
+    for (const p of document.querySelectorAll('.pane')) p.hidden = p.id !== tab.dataset.tab
+  })
+}
+
 // ── home ──────────────────────────────────────────────────────────────────────────────────────
 async function home() {
   await refreshStatus()
+
+  // ── identities ────────────────────────────────────────────────────────────────────────
   const roots = $('home-roots')
   roots.innerHTML = ''
   for (const r of state.roots) {
     const div = document.createElement('div')
     div.className = 'item'
-    div.innerHTML = `<span class="cn"></span> <code class="small"></code> <span class="muted"></span>`
-    div.querySelector('.cn').textContent = r.cn
-    div.querySelector('code').textContent = r.fingerprint
-    div.querySelector('.muted').textContent = `${r.alg || ''} · since ${when(r.created)}`
+    div.appendChild(identicon(r.fingerprint))
+    const text = document.createElement('div')
+    text.className = 'grow'
+    text.innerHTML = '<div class="cn"></div><code class="small"></code><div class="muted small"></div>'
+    text.querySelector('.cn').textContent = r.cn
+    text.querySelector('code').textContent = r.fingerprint
+    text.querySelector('.muted').textContent = `${r.alg || ''} · since ${when(r.created)}`
+    div.appendChild(text)
+    const copy = document.createElement('button')
+    copy.className = 'secondary'
+    copy.textContent = 'Copy'
+    copy.title = 'Copy this fingerprint'
+    copy.onclick = () => { navigator.clipboard.writeText(r.fingerprint).catch(() => {}); copy.textContent = 'Copied'; setTimeout(() => { copy.textContent = 'Copy' }, 1200) }
+    div.appendChild(copy)
     roots.appendChild(div)
   }
+
+  // ── activity: the ledger, and what it means for the next few weeks ────────────────────
+  //
+  // Renewal is the one recurring obligation this wallet has, and the old screen mentioned it
+  // nowhere — a certificate simply stopped working one day. The soonest expiry is surfaced
+  // here and in the health line above, because a renewal is cheap and an expiry is not.
   const ledger = $('home-ledger')
   ledger.innerHTML = ''
+  let soonest = null
   for (const r of state.roots) {
     const { entries } = await rpc('ledger', { root: r.fingerprint })
     for (const l of entries) {
+      const left = daysUntil(l.not_after)
+      const live = !l.superseded_at && left !== null && left > 0
+      if (live && (soonest === null || left < soonest)) soonest = left
       const div = document.createElement('div')
       div.className = 'item'
-      const live = !l.superseded_at && Date.parse(l.not_after) > Date.now()
-      div.innerHTML = `<span class="tag ${live ? 'live' : 'past'}"></span> <code></code> <span class="muted"></span>`
-      div.querySelector('.tag').textContent = live ? 'live' : l.superseded_at ? 'superseded' : 'expired'
-      div.querySelector('code').textContent = l.endpoint
-      div.querySelector('.muted').textContent = `${when(l.not_before)} → ${when(l.not_after)}${l.origin ? ' · asked by ' + l.origin : ''}`
+      div.appendChild(identicon(r.fingerprint, true))
+      const tag = document.createElement('span')
+      tag.className = 'tag ' + (live ? (left <= 30 ? 'warn' : 'live') : 'past')
+      tag.textContent = live ? (left <= 30 ? `${left}d left` : 'live') : l.superseded_at ? 'superseded' : 'expired'
+      div.appendChild(tag)
+      const text = document.createElement('div')
+      text.className = 'grow'
+      text.innerHTML = '<code></code><div class="muted small"></div>'
+      text.querySelector('code').textContent = l.endpoint
+      text.querySelector('.muted').textContent = `${when(l.not_before)} → ${when(l.not_after)}${l.origin ? ' · asked by ' + l.origin : ''}`
+      div.appendChild(text)
       ledger.appendChild(div)
     }
   }
   if (!ledger.children.length) ledger.textContent = 'No certificate issued yet.'
+
+  // ── connected: who holds a grant right now ────────────────────────────────────────────
+  //
+  // Grants were an in-memory map nobody could see. A person could not answer "which pages can
+  // act as me at this moment", which is the first question anybody asks of a wallet.
+  const sites = $('home-sites')
+  sites.innerHTML = ''
+  const { grants } = await rpc('grants:list')
+  for (const g of grants) {
+    const root = state.roots.find((r) => r.fingerprint === g.root)
+    const div = document.createElement('div')
+    div.className = 'item'
+    div.appendChild(identicon(g.root, true))
+    const text = document.createElement('div')
+    text.className = 'grow'
+    text.innerHTML = '<div class="origin"></div><div class="muted small"></div>'
+    text.querySelector('.origin').textContent = g.origin
+    text.querySelector('.muted').textContent = `acting as ${root ? root.cn : short(g.root)}`
+    div.appendChild(text)
+    const off = document.createElement('button')
+    off.className = 'secondary'
+    off.textContent = 'Revoke'
+    off.onclick = async () => { await rpc('grants:revoke', { origin: g.origin }); home() }
+    div.appendChild(off)
+    sites.appendChild(div)
+  }
+  if (!sites.children.length) sites.textContent = 'No page is holding an identity right now.'
+
+  // ── backups: a state, not a row of buttons ────────────────────────────────────────────
   const { contacts } = await rpc('contacts:get')
   text('home-contacts', `${contacts.length} contact${contacts.length === 1 ? '' : 's'} in the wallet's own book.`)
   text('home-passkey', state.passkeyBackup
@@ -468,10 +593,33 @@ async function home() {
     : state.hardware.stale
       ? `Security key: ${HW_MODE[state.hardware.mode] || state.hardware.mode}, behind the vault until the next passphrase unlock.`
       : `Security key: ${HW_MODE[state.hardware.mode] || state.hardware.mode}, enabled on this device.`)
+
+  // The nag, and it says the true thing rather than a count of buttons. A vault file that was
+  // downloaded is not evidence of anything — the person may never have found it again — so the
+  // only copies this claims are the ones the wallet itself can see: a passkey blob and a
+  // security key. Everything else is "you may have a file, and we cannot tell".
+  const kept = []
+  if (state.passkeyBackup) kept.push('a passkey')
+  if (state.hardware.enabled) kept.push('a security key')
+  const health = $('backup-health')
+  health.hidden = false
+  health.className = 'health ' + (kept.length ? 'ok' : 'bad')
+  health.innerHTML = '<b></b><span></span>'
+  if (kept.length) {
+    health.querySelector('b').textContent = `Backed up on ${kept.join(' and ')}.`
+    health.querySelector('span').textContent = soonest !== null && soonest <= 30
+      ? `A certificate expires in ${soonest} days — renew it from the site that holds it.`
+      : 'Keep a vault file too: an authenticator can be lost, and the file is what survives that.'
+  } else {
+    health.querySelector('b').textContent = 'No backup this wallet can see.'
+    health.querySelector('span').textContent = 'If this browser profile goes, so does this identity — unless you still have a vault file. Download one now, or put a copy on a passkey.'
+  }
+
   $('f-refresh').hidden = !state.vaultStale
   $('b-backup-drive').hidden = !drive.driveEnabled()
   show('s-home')
 }
+
 // Export refuses while the passphrase copy is behind the security key's, and this was the one home
 // button that did not say so — it rejected into nothing and looked like a button that does not work.
 $('b-backup-file').onclick = async () => {

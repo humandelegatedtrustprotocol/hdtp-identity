@@ -9,6 +9,7 @@
 <body class="window">
 <header class="bar">
   <span class="brand">PACT wallet</span>
+  <span id="locks-in" class="muted small" hidden></span>
   <span id="status" class="pill">…</span>
 </header>
 <main id="main">
@@ -38,7 +39,7 @@
       contact book comes from an archive, or from your contacts' own next messages.</p>
     <form id="f-restore" class="stack">
       <label>A passphrase for this device (8+ characters) <input type="password" name="passphrase" autocomplete="new-password" minlength="8" required></label>
-      <label>Passphrase again <input type="password" name="again" autocomplete="new-password" minlength="8" required></label>
+      <label>Passphrase again <input type="password" name="again" autocomplete="new-password" minlength="12" required></label>
       <button type="submit" class="primary">Find the passkey and restore</button>
       <p id="e-restore" class="error" role="alert"></p>
     </form>
@@ -51,8 +52,8 @@
     <form id="f-create" class="stack">
       <label>Your name (shown to contacts; carries no authority) <input name="name" required maxlength="64"></label>
       <label>Key algorithm <select name="alg"><option value="ed25519">Ed25519 (recommended)</option><option value="p256">P-256</option></select></label>
-      <label>Passphrase (8+ characters) <input type="password" name="passphrase" autocomplete="new-password" minlength="8" required></label>
-      <label>Passphrase again <input type="password" name="again" autocomplete="new-password" minlength="8" required></label>
+      <label>Passphrase (twelve characters or more) <input type="password" name="passphrase" autocomplete="new-password" minlength="12" required></label>
+      <label>Passphrase again <input type="password" name="again" autocomplete="new-password" minlength="12" required></label>
       <div id="notice" class="notice">
         <strong>Read once.</strong> Your identity is this root and the backups you keep of it. There is no
         recovery: losing every copy of the vault ends the identity, and the people who know you will need
@@ -117,6 +118,9 @@
 
   <section id="s-issue" class="screen" hidden>
     <h1 id="issue-title">Issue a certificate</h1>
+    <!-- The facts below are complete and were always here; what was missing is the sentence
+         that says what agreeing to them MEANS, in the words somebody would use themselves. -->
+    <p id="issue-plain" class="lede"></p>
     <dl class="facts">
       <dt>Asked by</dt><dd><span class="origin" id="issue-origin"></span></dd>
       <dt>For the address</dt><dd><code id="issue-endpoint"></code> <span id="issue-newhost" class="tag warn" hidden>new host</span> <span id="issue-newendpoint" class="tag" hidden>new address</span></dd>
@@ -157,37 +161,59 @@
   </section>
 
   <section id="s-home" class="screen" hidden>
-    <h1>Identities</h1>
-    <div id="home-roots" class="list"></div>
-    <h2>Certificates issued</h2>
-    <div id="home-ledger" class="list small"></div>
-    <h2>Contacts</h2>
-    <p id="home-contacts" class="muted"></p>
-    <h2>Backups</h2>
-    <div class="row wrap">
-      <button id="b-backup-file" class="secondary">Download the vault file</button>
-      <button id="b-backup-import" class="secondary">Import a vault file</button>
-      <button id="b-backup-hw" class="secondary">Security key…</button>
-      <button id="b-backup-drive" class="secondary" hidden>Google Drive…</button>
-      <button id="b-backup-passkey" class="secondary">Keep a copy on a passkey</button>
-      <span class="muted">needs a key that stores a blob</span>
+    <!-- Four tabs, because a wallet is operated rather than read: what you are, what you have
+         done, who you are sharing with, and whether you could get any of it back. That last
+         one is the reason this is not a scrolling stack any more — "Backups" was a row of
+         buttons at the bottom that never said whether any of them had ever been used. -->
+    <nav class="tabs" role="tablist">
+      <button type="button" class="tab on" data-tab="t-ids" role="tab">Identities</button>
+      <button type="button" class="tab" data-tab="t-activity" role="tab">Activity</button>
+      <button type="button" class="tab" data-tab="t-sites" role="tab">Connected</button>
+      <button type="button" class="tab" data-tab="t-backups" role="tab">Backups</button>
+    </nav>
+
+    <div id="backup-health" class="health" hidden></div>
+
+    <div id="t-ids" class="pane">
+      <div id="home-roots" class="list"></div>
+      <div class="row wrap">
+        <button id="b-new-identity" class="secondary">Create another identity</button>
+        <button id="b-lock" class="secondary">Lock now</button>
+      </div>
     </div>
-    <p id="home-hw" class="muted"></p>
-    <p id="home-passkey" class="muted"></p>
-    <p class="muted">A passkey copy holds the root itself — enough to restore this identity on
-      another machine, and enough that whoever can use that passkey can become you. It does not hold
-      the ledger or your contacts: a wallet restored from it will not know which certificates it has
-      issued or who you know. If your passkey syncs, this copy syncs with it — Chrome's own password
-      manager does not sync large blobs today, so check rather than assume.</p>
-    <form id="f-refresh" class="stack" hidden>
-      <p class="muted">The passphrase copy of the vault is behind the security key's. Enter the passphrase once to refresh it.</p>
-      <input type="password" name="passphrase" placeholder="Passphrase" autocomplete="current-password" required>
-      <button type="submit" class="primary">Refresh the passphrase copy</button>
-      <p id="e-refresh" class="error" role="alert"></p>
-    </form>
-    <div class="row wrap">
-      <button id="b-new-identity" class="secondary">Create another identity</button>
-      <button id="b-lock" class="secondary">Lock</button>
+
+    <div id="t-activity" class="pane" hidden>
+      <div id="home-ledger" class="list small"></div>
+    </div>
+
+    <div id="t-sites" class="pane" hidden>
+      <p class="muted">Pages this wallet is sharing an identity with right now. Grants last until
+        the wallet locks; revoking one means the next request from that page has to ask again.</p>
+      <div id="home-sites" class="list small"></div>
+    </div>
+
+    <div id="t-backups" class="pane">
+      <p id="home-contacts" class="muted"></p>
+      <div class="row wrap">
+        <button id="b-backup-file" class="secondary">Download the vault file</button>
+        <button id="b-backup-import" class="secondary">Import a vault file</button>
+        <button id="b-backup-hw" class="secondary">Security key…</button>
+        <button id="b-backup-drive" class="secondary" hidden>Google Drive…</button>
+        <button id="b-backup-passkey" class="secondary">Keep a copy on a passkey</button>
+      </div>
+      <p id="home-hw" class="muted"></p>
+      <p id="home-passkey" class="muted"></p>
+      <p class="muted">A passkey copy holds the root itself — enough to restore this identity on
+        another machine, and enough that whoever can use that passkey can become you. It does not hold
+        the ledger or your contacts: a wallet restored from it will not know which certificates it has
+        issued or who you know. If your passkey syncs, this copy syncs with it — Chrome's own password
+        manager does not sync large blobs today, so check rather than assume.</p>
+      <form id="f-refresh" class="stack" hidden>
+        <p class="muted">The passphrase copy of the vault is behind the security key\'s. Enter the passphrase once to refresh it.</p>
+        <input type="password" name="passphrase" placeholder="Passphrase" autocomplete="current-password" required>
+        <button type="submit" class="primary">Refresh the passphrase copy</button>
+        <p id="e-refresh" class="error" role="alert"></p>
+      </form>
     </div>
     <p id="e-home" class="error" role="alert"></p>
   </section>
