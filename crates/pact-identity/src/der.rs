@@ -65,6 +65,13 @@ pub fn null() -> Vec<u8> {
 /// 0x00 and was encoded non-minimally — and `parse_certificate`, strict since the cryptographic
 /// review, then refused a certificate this core had just issued.
 pub fn int_bytes(v: &[u8]) -> Vec<u8> {
+    // Zero, and the empty input that means it, are one content byte — never none. `02 00` is not
+    // a DER INTEGER, and this and the seed both wrote it for an empty slice while the Go port
+    // wrote `02 01 00`: a three-way disagreement no gate could see, because nothing passes an
+    // empty value. Fixed toward Go, which was right.
+    if v.is_empty() {
+        return tlv(0x02, &[0u8]);
+    }
     let mut at = 0;
     while at + 1 < v.len() && v[at] == 0 && v[at + 1] & 0x80 == 0 {
         at += 1;
@@ -258,8 +265,12 @@ mod tests {
         // A necessary one goes on, and is not then stripped again.
         assert_eq!(int_bytes(&[0x80, 0x11]), vec![0x02, 0x03, 0x00, 0x80, 0x11]);
         assert_eq!(int_bytes(&[0x00, 0x80, 0x11]), vec![0x02, 0x03, 0x00, 0x80, 0x11]);
-        // Zero is one byte, not none.
+        // Zero is one byte, not none — and so is the empty slice that means zero. `02 00` is not
+        // a DER INTEGER, and this port and the seed both wrote it while Go wrote `02 01 00`: a
+        // three-way disagreement all four cross-port gates missed, because nothing passes an
+        // empty value. Asserted in every port now so it cannot drift back.
         assert_eq!(int_bytes(&[0x00]), vec![0x02, 0x01, 0x00]);
+        assert_eq!(int_bytes(&[]), vec![0x02, 0x01, 0x00]);
         // And every one of them reads back as minimal.
         for v in [vec![0x00, 0x11, 0x22], vec![0x00], vec![0x80, 0x11], vec![0x00, 0x00, 0x01]] {
             let encoded = int_bytes(&v);
