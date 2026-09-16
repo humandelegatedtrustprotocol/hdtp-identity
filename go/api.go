@@ -307,6 +307,33 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 		}
 		return ok(o)
 	},
+	// §2.1. Two calls rather than one so a wallet never hardcodes the salt: the constant lives here,
+	// the vectors prove it, and a caller that gets it wrong fails loudly instead of quietly becoming
+	// somebody else.
+	"prf_salt": func(args json.RawMessage) json.RawMessage {
+		return ok(map[string]any{"salt": B64(PrfSalt()), "infos": DerivationInfos})
+	},
+	"derive_seed": func(args json.RawMessage) json.RawMessage {
+		var a struct {
+			Prf  B64     `json:"prf"`
+			Info *string `json:"info"`
+		}
+		if err := decodeArgs(args, &a); err != nil {
+			return failErr(codeFor(err, codeArgs), err)
+		}
+		if err := need(a.Prf, "prf"); err != nil {
+			return failErr(codeArgs, err)
+		}
+		info, err := needStr(a.Info, "info")
+		if err != nil {
+			return failErr(codeArgs, err)
+		}
+		seed, err := DeriveSeed(a.Prf, info)
+		if err != nil {
+			return failErr(codeArgs, err)
+		}
+		return ok(map[string]any{"seed": B64(seed)})
+	},
 	"key_from_seed": func(args json.RawMessage) json.RawMessage {
 		var a struct {
 			Alg  *string `json:"alg"`

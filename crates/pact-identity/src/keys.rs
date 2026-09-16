@@ -4,7 +4,7 @@ use crate::der::{self, children, read, read_oid, read_oid_strict};
 use crate::util::{b64u, err, sha256, Error, Result};
 use p256::ecdsa::signature::{Signer, Verifier};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
-use sha2::{Digest, Sha512};
+use sha2::{Digest, Sha256, Sha512};
 use zeroize::Zeroizing;
 
 pub const OID_ED25519: &str = "1.3.101.112";
@@ -353,4 +353,38 @@ mod tests {
         let pk = x25519_dalek::PublicKey::from(&k.x25519().unwrap());
         assert_eq!(pk.to_bytes(), k.public().x25519().unwrap());
     }
+}
+
+// ── §2.1: a root derived from a passkey ──────────────────────────────────────────────────
+
+/// The fixed input handed to the authenticator's `prf` extension: `SHA-256("pact/vault/1")`.
+///
+/// Fixed, not per-credential, because a wallet arriving cold on a new device has to derive before
+/// it can fetch anything — a per-credential salt would have to be fetched first, and there is
+/// nothing to fetch it with. The secret is still per-credential, because the PRF is keyed by the
+/// credential. The name is inherited and no longer describes anything; these are normative bytes.
+pub fn prf_salt() -> [u8; 32] {
+    Sha256::digest(b"pact/vault/1").into()
+}
+
+/// The three `info` strings §2.1 defines, and the only ones this will derive for.
+///
+/// Refusing an unknown `info` is the point rather than a restriction. The failure this whole
+/// design has to engineer against is *silently deriving a different identity*, and a mistyped
+/// domain separator is the cheapest way to do that — it would succeed, return 32 perfectly good
+/// bytes, and produce a key belonging to nobody. There is no fourth use, so there is no cost.
+pub const DERIVATION_INFOS: [&str; 3] = ["pact/root/1", "pact/store-key/1", "pact/store-id/1"];
+
+/// §2.1: `HKDF-SHA256(ikm = prf, salt = "", info, L = 32)`.
+pub fn derive_seed(prf: &[u8], info: &str) -> Result<[u8; 32]> {
+    if prf.len() != 32 {
+        return err("bad_request", format!("a prf output is 32 bytes, not {}", prf.len()));
+    }
+    if !DERIVATION_INFOS.contains(&info) {
+        return err("bad_request", format!("{info} is not one of the derivation info strings of SPEC \u{a7}2.1"));
+    }
+    let okm = crate::hpke::hkdf_sha256(prf, &[], info.as_bytes(), 32);
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&okm);
+    Ok(out)
 }

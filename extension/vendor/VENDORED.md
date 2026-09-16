@@ -1,3 +1,3 @@
-Vendored from ../js/pkg-web (wasm-pack --target web) on 2026-09-15.
+Vendored from ../js/pkg-web (wasm-pack --target web) on 2026-09-16.
 
-pact_identity_wasm_bg.wasm: sha256 39450178056bb50397877bb0e45fb7d560c34b43a8f6d4cc46395eee07edcb4e, 636249 bytes — must equal ../js/manifest.json.
+pact_identity_wasm_bg.wasm: sha256 78a62973a2efb8d995c0f9ad8cead611f47a39d919295f5b35593063794d23ec, 639118 bytes — must equal ../js/manifest.json.
