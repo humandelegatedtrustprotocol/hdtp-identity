@@ -100,7 +100,7 @@ func sha256Sum(b []byte) []byte { h := sha256.Sum256(b); return h[:] }
 // Seed derives every secret in the vectors from a label, so the generator is reproducible.
 func Seed(label string) []byte { return sha256Sum([]byte("pact-2.0-vectors/" + label)) }
 
-// Fingerprint is "sha256:" + base64url(SHA-256(SPKI)), the 1.x form applied to any key.
+// Fingerprint is "sha256:" + base64url(SHA-256(SPKI)), applied to any key.
 func Fingerprint(spki []byte) string { return "sha256:" + B64url(sha256Sum(spki)) }
 
 // KeyID is the 32 raw bytes of the fingerprint's hash: subjectKeyIdentifier and authorityKeyIdentifier.

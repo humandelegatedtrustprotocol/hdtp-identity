@@ -52,29 +52,6 @@ pub fn encode(fn_: &str, cert: &[u8], seal: Option<&str>, extra: &[String]) -> S
     assemble(lines)
 }
 
-/// Appendix C: a `X-PACT-VERSION:1` card toward a peer known to be 1.x, the leaf's endpoint and key
-/// spelled out as 1.x did, the certificate carried as an extra a 2.0 peer recognises.
-pub fn encode_compat(fn_: &str, cert: &[u8], seal: Option<&str>) -> Result<String> {
-    let leaf = x509::parse(cert)?;
-    if leaf.uris.len() != 1 {
-        return err("bad_request", format!("{} endpoints", leaf.uris.len()));
-    }
-    let mut lines = vec![
-        "BEGIN:VCARD".to_string(),
-        "VERSION:4.0".to_string(),
-        format!("FN:{fn_}"),
-        "X-PACT-VERSION:1".to_string(),
-        format!("X-PACT-ENDPOINT:{}", leaf.uris[0]),
-        format!("X-PACT-KEY:{}", leaf.public_key.fingerprint()),
-        format!("X-PACT-CERT:{}", b64u(cert)),
-    ];
-    if let Some(s) = seal.filter(|s| !s.is_empty()) {
-        lines.push(format!("X-PACT-SEAL:{s}"));
-    }
-    lines.push("END:VCARD".to_string());
-    Ok(assemble(lines))
-}
-
 pub struct Card {
     pub fn_: String,
     pub seal: String,

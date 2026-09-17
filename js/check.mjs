@@ -1,4 +1,4 @@
-// Proves Appendix B through a port (the Wasm bindings by default): opens the v1 vectors, and checks
+// Proves Appendix B through a port (the Wasm bindings by default): checks that
 // every 2.0 vector does what the spec says. Reads the vectors from SPEC.md itself, as the seed's
 // check.mjs does, so the bytes in the document are the bytes proven — by a second implementation.
 import { readFileSync, existsSync } from 'node:fs';
@@ -14,27 +14,14 @@ console.log(`port: ${port.kind} ${JSON.stringify(port.call('version', {}))}`);
 
 const specPath = new URL('../../pact-protocol/SPEC.md', import.meta.url);
 const spec = readFileSync(specPath, 'utf8');
-const appendixB = spec.slice(spec.indexOf('## Appendix B'), spec.indexOf('## Appendix C'));
+const appendixB = spec.slice(spec.indexOf('## Appendix B'), spec.indexOf('*End of PACT'));
 const blocks = [...appendixB.matchAll(/```json\n([\s\S]*?)\n```/g)].map((m) => JSON.parse(m[1]));
 if (blocks.length < 1) throw new Error('Appendix B has no vector blocks');
-const [v1, v2] = blocks;
+const [v2] = blocks;
 
 let failures = 0, checks = 0;
 const ok = (cond, what) => { checks++; if (!cond) { failures++; console.log('  FAIL ' + what); } };
 const spkiOfPkcs8 = (hexKey) => fromB64url(port.call('public_key', { pkcs8: b64url(Buffer.from(hexKey, 'hex')) }).spki);
-
-console.log('v1 envelopes');
-for (const v of v1) {
-  const recipientPriv = createPrivateKey({ key: Buffer.from(v.recipient_key_pkcs8_hex, 'hex'), format: 'der', type: 'pkcs8' });
-  const aad = fromB64url(v.protected), enc = fromB64url(v.enc), ct = fromB64url(v.ct);
-  let plaintext = null;
-  try { plaintext = d.open(v.suite, recipientPriv, null, Buffer.from('PACT-SEAL-v1'), aad, enc, ct); } catch (e) { ok(false, `${v.name}: open threw ${e.message}`); }
-  ok(plaintext && plaintext.toString('hex') === v.plaintext_hex, `${v.name}: plaintext`);
-  ok(d.verify(spkiOfPkcs8(v.sender_key_pkcs8_hex), Buffer.concat([aad, enc, ct]), fromB64url(v.sig)), `${v.name}: signature`);
-  let asV2 = false; try { d.open(v.suite, recipientPriv, null, Buffer.from('PACT-SEAL-v2'), aad, enc, ct); asV2 = true; } catch { }
-  ok(!asV2, `${v.name}: never opens as 2.0`);
-  console.log(`  ${v.name}: ${plaintext ? 'opened' : 'closed'}`);
-}
 
 if (!v2) {
   console.log('no 2.0 block in Appendix B yet');

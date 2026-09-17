@@ -175,10 +175,10 @@ pub fn gen(out: Option<&str>) -> Res<i32> {
     Ok(0)
 }
 
-/// The JSON blocks of a document's Appendix B: the `v: 1` vectors first, the 2.0 vectors second.
+/// The JSON blocks of a document's Appendix B.
 fn appendix_b(spec: &str) -> Res<Vec<Value>> {
     let start = spec.find("## Appendix B").ok_or_else(|| Fail("no Appendix B in the document".into()))?;
-    let end = spec[start..].find("## Appendix C").map(|i| start + i).unwrap_or(spec.len());
+    let end = spec[start..].find("*End of PACT").map(|i| start + i).unwrap_or(spec.len());
     let b = &spec[start..end];
     let mut out = Vec::new();
     let mut rest = b;
@@ -207,17 +207,16 @@ impl Tally {
 }
 
 pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
-    let (v1, v2): (Option<Value>, Value) = match (spec, file) {
+    let v2: Value = match (spec, file) {
         (Some(s), _) => {
             let text = String::from_utf8(read_input(s)?).map_err(|_| Fail("the document is not UTF-8".into()))?;
             let mut blocks = appendix_b(&text)?;
             if blocks.is_empty() {
                 return fail("Appendix B has no vector blocks");
             }
-            let v2 = if blocks.len() > 1 { blocks.remove(1) } else { return fail("Appendix B has no 2.0 block") };
-            (Some(blocks.remove(0)), v2)
+            blocks.remove(0)
         }
-        (None, Some(f)) => (None, serde_json::from_slice(&read_input(f)?).map_err(|e| Fail(format!("{f}: {e}")))?),
+        (None, Some(f)) => serde_json::from_slice(&read_input(f)?).map_err(|e| Fail(format!("{f}: {e}")))?,
         (None, None) => {
             let candidates = [std::env::var("PACT_SPEC").unwrap_or_default(), "pact-protocol/SPEC.md".into(), "SPEC.md".into()];
             match candidates.iter().find(|p| !p.is_empty() && std::path::Path::new(p).exists()) {
@@ -227,33 +226,6 @@ pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
         }
     };
     let mut t = Tally { checks: 0, failures: 0 };
-
-    if let Some(v1) = &v1 {
-        println!("v1 envelopes");
-        for v in v1.as_array().cloned().unwrap_or_default() {
-            let name = v["name"].as_str().unwrap_or("?");
-            let mut go = || -> Result<(), String> {
-                let suite = Suite::parse(v["suite"].as_str().unwrap_or("")).ok_or("suite")?;
-                let recipient = PrivateKey::from_pkcs8(&from_hex(v["recipient_key_pkcs8_hex"].as_str().unwrap_or("")).map_err(|e| e.why)?).map_err(|e| e.why)?;
-                let sender = PrivateKey::from_pkcs8(&from_hex(v["sender_key_pkcs8_hex"].as_str().unwrap_or("")).map_err(|e| e.why)?).map_err(|e| e.why)?;
-                let aad = from_b64u(v["protected"].as_str().unwrap_or("")).map_err(|e| e.why)?;
-                let enc = from_b64u(v["enc"].as_str().unwrap_or("")).map_err(|e| e.why)?;
-                let ct = from_b64u(v["ct"].as_str().unwrap_or("")).map_err(|e| e.why)?;
-                let pt = hpke::open(suite, &recipient, b"PACT-SEAL-v1", &aad, &enc, &ct).map_err(|e| e.why)?;
-                t.ok(hex(&pt) == v["plaintext_hex"].as_str().unwrap_or(""), format!("{name}: plaintext"));
-                let mut signed = aad.clone();
-                signed.extend_from_slice(&enc);
-                signed.extend_from_slice(&ct);
-                t.ok(sender.public().verify(&signed, &from_b64u(v["sig"].as_str().unwrap_or("")).map_err(|e| e.why)?), format!("{name}: signature"));
-                t.ok(hpke::open(suite, &recipient, b"PACT-SEAL-v2", &aad, &enc, &ct).is_err(), format!("{name}: never opens as 2.0"));
-                Ok(())
-            };
-            match go() {
-                Ok(()) => println!("  {name}: opened"),
-                Err(e) => t.ok(false, format!("{name}: {e}")),
-            }
-        }
-    }
 
     let der: BTreeMap<String, Vec<u8>> = v2["certificates"].as_object().map(|o| o.iter().filter_map(|(k, c)| from_hex(c["der_hex"].as_str()?).ok().map(|d| (k.clone(), d))).collect()).unwrap_or_default();
     let get = |n: &str| der.get(n).cloned().unwrap_or_default();

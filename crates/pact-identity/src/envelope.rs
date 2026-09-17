@@ -600,8 +600,8 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
 
     let as_guest = |why: &str| -> DecideOutput {
         if method != "tools/call" || !tool_ref.map(|t| GUEST_TOOLS.contains(&t)).unwrap_or(false) {
-            // Refused as a guest — with the root and the leaf named, so a host holding a 1.x pin of
-            // this leaf's key can upgrade it (Appendix C row 6) and decide again.
+            // Refused as a guest — with the root and the leaf named, so a host holding an older pin of
+            // this leaf's key learns the root above it and decides again.
             let mut d = invalid("guest may only redeem or request");
             d.result["root"] = json!(root);
             d.result["leaf"] = json!(b64u(&chain[0]));

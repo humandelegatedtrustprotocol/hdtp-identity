@@ -473,7 +473,7 @@ func Decide(now time.Time, env Envelope, node NodeState) Decision {
 	asGuest := func(why string) Decision {
 		if method != "tools/call" || !guestTools[tool] {
 			// Refused as a guest — with the root and the leaf named, so a host
-			// holding a 1.x pin of this leaf's key can upgrade it (Appendix C
+			// holding an older pin of this leaf's key learns the root above it (§14.3
 			// row 6) and decide again.
 			d := invalid("guest may only redeem or request")
 			d.Result["root"], d.Result["leaf"] = root, B64url(chain[0])

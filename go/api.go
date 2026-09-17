@@ -788,29 +788,6 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 		// no vector looks at, so nothing noticed.
 		return ok(map[string]any{"fn": c.FN, "version": 2, "seal": c.Seal, "cert": B64url(c.Cert), "root": c.Root, "endpoint": c.Endpoint, "expired": c.Expired, "ignored": ignored, "bytes": c.Bytes, "leaf": certOut(c.Leaf)})
 	},
-	"card_compat_encode": func(args json.RawMessage) json.RawMessage {
-		var a struct {
-			FN   *string `json:"fn"`
-			Cert B64     `json:"cert"`
-			Seal string  `json:"seal"`
-		}
-		if err := decodeArgs(args, &a); err != nil {
-			return failErr(codeFor(err, codeArgs), err)
-		}
-		fn, err := needStr(a.FN, "fn")
-		if err != nil {
-			return failErr(codeArgs, err)
-		}
-		if err := need(a.Cert, "cert"); err != nil {
-			return failErr(codeArgs, err)
-		}
-		v, err := EncodeCompatCard(fn, a.Cert, a.Seal)
-		if err != nil {
-			return failErr("parse", err)
-		}
-		return ok(map[string]any{"vcard": v})
-	},
-
 	// §5 envelopes
 	"suite_for": func(args json.RawMessage) json.RawMessage {
 		var a struct {
