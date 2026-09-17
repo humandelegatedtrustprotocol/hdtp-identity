@@ -103,7 +103,6 @@ Strict DER, nothing trailing.
 |---|---|---|
 | `card_encode` | `{"fn", "cert", "seal"?: "none"\|"optional"\|"required", "extra"?: [lines]}` | `{"vcard"}` — folded per RFC 6350 at 75 octets, CRLF, exactly as `card.mjs` |
 | `card_decode` | `{"vcard", "now"}` | `{"fn", "version": 2, "seal", "cert", "root", "endpoint", "expired": bool, "ignored": [names], "bytes": int, "leaf": the certificate read back, as `parse_certificate` answers it}` or `{"error": "bad_request", "why"}` with the exact `why` strings of `card.mjs` |
-| `card_compat_encode` (Appendix C) | `{"fn", "cert", "seal"?, "gateway"?}` | a `X-PACT-VERSION:1` card carrying `X-PACT-ENDPOINT` and `X-PACT-KEY` from the leaf, for a peer known to be 1.x |
 
 `card_decode` is intake: it refuses no version, a version it does not implement, zero or several
 certificates, a certificate that does not parse, no issuer key identifier, no endpoint or several, or a
@@ -115,7 +114,7 @@ the host makes with its own endpoint in hand.
 Suites: `PACT-SEAL-P256` (DHKEM(P-256, HKDF-SHA256), HKDF-SHA256, AES-128-GCM) for a P-256 recipient,
 `PACT-SEAL-X25519` (DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, ChaCha20-Poly1305) for an Ed25519
 recipient converted by the RFC 7748 §4.1 and RFC 8032 §5.1.5 maps. HPKE Base mode, single shot,
-`info` = `PACT-SEAL-v2` (`PACT-SEAL-v1` for a `v: 1` header). All-zero DH output refused. The
+`info` = `PACT-SEAL-v2`. All-zero DH output refused. The
 header is the AAD, canonicalised per RFC 8785; the signature is over `protected ‖ enc ‖ ct`.
 
 | Function | Input | Output |
@@ -187,7 +186,7 @@ Output:
 
 The other results, each with an empty `effects` list unless stated: `{"code": "envelope_invalid",
 "why"}` — and when `why` is `guest may only redeem or request` it also carries `root` and `leaf`, so a
-host holding a 1.x pin of that leaf's key can upgrade the pin (Appendix C row 6) and decide again; `{"code": "chain_required"}`; `{"code": "certificate_renewed", "data": {"chain": [...]}}`;
+host holding an older pin of that leaf's key learns the root above it (§14.3) and decides again; `{"code": "chain_required"}`; `{"code": "certificate_renewed", "data": {"chain": [...]}}`;
 `{"code": "pending_approval"}`; and `{"code": "ok", "replayed": true}` for a seen `msg_id`.
 The `why` strings are the seed's, verbatim, so the intrusion suite reads both ports alike.
 

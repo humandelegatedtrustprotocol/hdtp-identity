@@ -238,7 +238,6 @@ add('card_decode of a 1.x card', 'card_decode', { vcard: 'BEGIN:VCARD\r\nVERSION
 add('card_decode of a card with two certificates', 'card_decode', { vcard: card.replace('END:VCARD', `X-PACT-CERT:${leafDer}\r\nEND:VCARD`), now });
 add('card_decode of a card whose certificate is not one', 'card_decode', { vcard: 'BEGIN:VCARD\r\nVERSION:4.0\r\nX-PACT-VERSION:2\r\nX-PACT-CERT:AAAA\r\nEND:VCARD\r\n', now });
 add('card_decode after the leaf expired', 'card_decode', { vcard: card, now: '2028-01-01T00:00:00Z' });
-add('card_compat_encode', 'card_compat_encode', { fn: 'Alina Rao', cert: leafDer, seal: 'required' });
 
 // §5 envelopes
 add('suite_for an Ed25519 key', 'suite_for', { spki: hostSpki });
@@ -308,7 +307,7 @@ for (const [fn, args] of [
   ['address_guard', {}], ['ip_is_private', {}], ['csr_new', {}], ['csr_check', {}],
   ['validate_chain', { now }], ['generate_key', {}], ['key_from_seed', {}],
   ['build_root', { cn: 'A', not_before: now }], ['assemble_root', {}], ['assemble_leaf', {}],
-  ['card_encode', {}], ['card_decode', { now }], ['card_compat_encode', {}],
+  ['card_encode', {}], ['card_decode', { now }],
   ['hpke_seal', {}], ['hpke_open', {}], ['seal_request', {}], ['seal_result', {}],
   ['open_result', {}], ['follow_renewed', {}], ['decide', { now }],
   ['vault_seal', { passphrase: 'a passphrase' }], ['vault_open', { passphrase: 'x' }], ['wallet_issue', {}],

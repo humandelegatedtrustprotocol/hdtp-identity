@@ -63,18 +63,6 @@ type vectorFile struct {
 	} `json:"envelopes"`
 }
 
-type v1Vector struct {
-	Name           string `json:"name"`
-	Suite          string `json:"suite"`
-	SenderKeyPKCS8 string `json:"sender_key_pkcs8_hex"`
-	RecipientPKCS8 string `json:"recipient_key_pkcs8_hex"`
-	PlaintextHex   string `json:"plaintext_hex"`
-	Protected      string `json:"protected"`
-	Enc            string `json:"enc"`
-	Ct             string `json:"ct"`
-	Sig            string `json:"sig"`
-}
-
 func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -82,7 +70,7 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
-func loadVectors(t *testing.T) (vectorFile, []v1Vector) {
+func loadVectors(t *testing.T) vectorFile {
 	t.Helper()
 	raw, err := os.ReadFile(envOr("PACT_VECTORS", "../../pact-protocol/vectors/pact-2.0-vectors.json"))
 	if err != nil {
@@ -97,24 +85,20 @@ func loadVectors(t *testing.T) (vectorFile, []v1Vector) {
 		t.Skip("SPEC.md not found: " + err.Error())
 	}
 	s := string(spec)
-	appendixB := s[strings.Index(s, "## Appendix B"):strings.Index(s, "## Appendix C")]
+	appendixB := s[strings.Index(s, "## Appendix B"):strings.Index(s, "*End of PACT")]
 	blocks := regexp.MustCompile("(?s)```json\n(.*?)\n```").FindAllStringSubmatch(appendixB, -1)
-	if len(blocks) < 2 {
-		t.Fatal("Appendix B lacks its two vector blocks")
-	}
-	var v1 []v1Vector
-	if err := json.Unmarshal([]byte(blocks[0][1]), &v1); err != nil {
-		t.Fatal(err)
+	if len(blocks) < 1 {
+		t.Fatal("Appendix B lacks its vector block")
 	}
 	var inSpec, inFile any
-	_ = json.Unmarshal([]byte(blocks[1][1]), &inSpec)
+	_ = json.Unmarshal([]byte(blocks[0][1]), &inSpec)
 	_ = json.Unmarshal(raw, &inFile)
 	a, _ := json.Marshal(inSpec)
 	b, _ := json.Marshal(inFile)
 	if !bytes.Equal(a, b) {
 		t.Error("SPEC.md does not carry the generated vectors unchanged")
 	}
-	return v, v1
+	return v
 }
 
 func mustTime(t *testing.T, s string) time.Time {
@@ -191,7 +175,7 @@ func rebuild(t *testing.T, c cast) map[string][]byte {
 }
 
 func TestCertificatesReproduce(t *testing.T) {
-	v, _ := loadVectors(t)
+	v := loadVectors(t)
 	c := theCast(t)
 	built := rebuild(t, c)
 	for name, cert := range v.Certificates {
@@ -252,37 +236,8 @@ func TestCertificatesReproduce(t *testing.T) {
 	}
 }
 
-func TestV1Envelopes(t *testing.T) {
-	_, v1 := loadVectors(t)
-	if len(v1) != 4 {
-		t.Fatalf("expected four v1 vectors, got %d", len(v1))
-	}
-	for _, e := range v1 {
-		recipient, err := ParsePKCS8(hexBytes(t, e.RecipientPKCS8))
-		if err != nil {
-			t.Fatal(err)
-		}
-		sender, err := ParsePKCS8(hexBytes(t, e.SenderKeyPKCS8))
-		if err != nil {
-			t.Fatal(err)
-		}
-		aad, enc, ct := FromB64url(e.Protected), FromB64url(e.Enc), FromB64url(e.Ct)
-		pt, err := Open(e.Suite, recipient, []byte(InfoV1), aad, enc, ct)
-		if err != nil {
-			t.Errorf("%s: open: %v", e.Name, err)
-			continue
-		}
-		if hex.EncodeToString(pt) != e.PlaintextHex {
-			t.Errorf("%s: plaintext differs", e.Name)
-		}
-		if !VerifyDetached(sender.Public, concat(aad, enc, ct), FromB64url(e.Sig)) {
-			t.Errorf("%s: signature", e.Name)
-		}
-	}
-}
-
 func TestChainCases(t *testing.T) {
-	v, _ := loadVectors(t)
+	v := loadVectors(t)
 	der := func(n string) []byte { return hexBytes(t, v.Certificates[n].DerHex) }
 	for _, c := range v.ChainCases {
 		chain := make([][]byte, 0, len(c.Chain))
@@ -327,7 +282,7 @@ func mustJSON(v any) json.RawMessage {
 }
 
 func TestV2Envelopes(t *testing.T) {
-	v, _ := loadVectors(t)
+	v := loadVectors(t)
 	der := func(n string) []byte { return hexBytes(t, v.Certificates[n].DerHex) }
 	now := mustTime(t, v.Now)
 	for _, e := range v.Envelopes {
@@ -427,7 +382,7 @@ func bharatNode(t *testing.T, v vectorFile, pins []Pin) NodeState {
 }
 
 func TestDecideOnVectors(t *testing.T) {
-	v, _ := loadVectors(t)
+	v := loadVectors(t)
 	now := mustTime(t, v.Now)
 	rootA, _ := Parse(hexBytes(t, v.Certificates["root_a"].DerHex))
 	pinA := Pin{Root: FingerprintOf(rootA), Endpoint: endpointA, Leaf: B64url(hexBytes(t, v.Certificates["leaf_a"].DerHex)), State: "active"}
@@ -473,7 +428,7 @@ func TestDecideOnVectors(t *testing.T) {
 // §2.1, recomputed from the published prf alone — so what passes is what a third implementation
 // reading Appendix B would have to reproduce, not what this port happened to write.
 func TestDerivationVectors(t *testing.T) {
-	v, _ := loadVectors(t)
+	v := loadVectors(t)
 	if len(v.Derivation) < 3 {
 		t.Fatal("Appendix B should cover all three derivation info strings")
 	}

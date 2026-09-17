@@ -695,7 +695,7 @@ mod card_tests {
     fn a_root_the_card_signed_is_a_root() {
         let card = FakeCard::p256("7777");
         let (cert, root) = root_of(&card).expect("a root");
-        // §14.2 rule 1 reads a single self-signed certificate as a 1.x proof, so a chain of it
+        // §14.2 rule 1 refuses a single self-signed certificate as a chain, so a chain of it
         // twice is what asks "is this a root of the profile?": rule 2 is where a bad one would die.
         let r = core("validate_chain", json!({ "chain": [b64u(&cert), b64u(&cert)], "now": instant(NOW) })).expect("an answer");
         assert_eq!(r["ok"], json!(false), "a root is not a chain");
