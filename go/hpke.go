@@ -20,7 +20,6 @@ const (
 	SuiteP256   = "PACT-SEAL-P256"
 	SuiteX25519 = "PACT-SEAL-X25519"
 	InfoV2      = "PACT-SEAL-v2"
-	InfoV1      = "PACT-SEAL-v1"
 )
 
 type suite struct {

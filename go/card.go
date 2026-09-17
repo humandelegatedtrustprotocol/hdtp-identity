@@ -24,31 +24,6 @@ func EncodeCard(fn string, cert []byte, seal string, extra []string) string {
 	return strings.Join(lines, "\r\n") + "\r\n"
 }
 
-// EncodeCompatCard is Appendix C: a 1.x card toward a peer known to be 1.x, the leaf carried as an extra.
-func EncodeCompatCard(fn string, cert []byte, seal string) (string, error) {
-	leaf, err := Parse(cert)
-	if err != nil {
-		return "", err
-	}
-	if len(leaf.URIs) != 1 {
-		return "", fmt.Errorf("%d endpoints", len(leaf.URIs))
-	}
-	lines := []string{"BEGIN:VCARD", "VERSION:4.0", "FN:" + fn, "X-PACT-VERSION:1", "X-PACT-ENDPOINT:" + leaf.URIs[0], "X-PACT-KEY:" + FingerprintOf(leaf), "X-PACT-CERT:" + B64url(cert)}
-	if seal != "" {
-		lines = append(lines, "X-PACT-SEAL:"+seal)
-	}
-	lines = append(lines, "END:VCARD")
-	for i, l := range lines {
-		lines[i] = fold(l)
-	}
-	return strings.Join(lines, "\r\n") + "\r\n", nil
-}
-
-// fold breaks a line with one-space continuations, counted in UTF-16 code units — what the seed
-// library counts, and so the definition every port follows (CONTRACT §0). Counting octets (as this
-// once did) or code points makes three implementations that agree only on ASCII. Where a break
-// would fall between the halves of a surrogate pair it moves one unit earlier, so the pair stays
-// whole; the seed emits a lone surrogate there, which UTF-8 cannot carry.
 func fold(line string) string {
 	units := utf16.Encode([]rune(line))
 	if len(units) <= 75 {

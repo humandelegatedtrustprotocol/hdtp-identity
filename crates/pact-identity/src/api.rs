@@ -273,7 +273,6 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
             let c = card::decode(text, now)?;
             json!({ "fn": c.fn_, "version": 2, "seal": c.seal, "cert": b64u(&c.cert), "root": c.root, "endpoint": c.endpoint, "expired": c.expired, "ignored": c.ignored, "bytes": text.len(), "leaf": cert_json(&c.leaf) })
         }
-        "card_compat_encode" => json!({ "vcard": card::encode_compat(s(a, "fn")?, &bytes(a, "cert")?, opt_s(a, "seal"))? }),
 
         // §5 envelopes
         "suite_for" => json!({ "suite": envelope::suite_name(&bytes(a, "spki")?)? }),

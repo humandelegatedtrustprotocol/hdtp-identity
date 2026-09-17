@@ -25,11 +25,11 @@ fn spec() -> String {
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
-/// The JSON blocks of Appendix B: the `v: 1` vectors first, the 2.0 vectors second.
+/// The JSON blocks of Appendix B.
 fn appendix_b_blocks() -> Vec<Value> {
     let s = spec();
     let start = s.find("## Appendix B").expect("Appendix B");
-    let end = s.find("## Appendix C").expect("Appendix C");
+    let end = s.find("*End of PACT").expect("the end marker");
     let b = &s[start..end];
     let mut out = Vec::new();
     let mut rest = b;
@@ -131,33 +131,10 @@ fn the_seven_certificates_reproduce() {
 }
 
 #[test]
-fn the_v1_vectors_open() {
-    let blocks = appendix_b_blocks();
-    let v1 = blocks[0].as_array().expect("v1 block");
-    assert_eq!(v1.len(), 4);
-    for v in v1 {
-        let name = v["name"].as_str().unwrap();
-        let suite = Suite::parse(v["suite"].as_str().unwrap()).unwrap();
-        let recipient = PrivateKey::from_pkcs8(&from_hex(v["recipient_key_pkcs8_hex"].as_str().unwrap()).unwrap()).unwrap();
-        let sender = PrivateKey::from_pkcs8(&from_hex(v["sender_key_pkcs8_hex"].as_str().unwrap()).unwrap()).unwrap();
-        let aad = from_b64u(v["protected"].as_str().unwrap()).unwrap();
-        let enc = from_b64u(v["enc"].as_str().unwrap()).unwrap();
-        let ct = from_b64u(v["ct"].as_str().unwrap()).unwrap();
-        let pt = hpke::open(suite, &recipient, b"PACT-SEAL-v1", &aad, &enc, &ct).unwrap_or_else(|e| panic!("{name}: {e}"));
-        assert_eq!(hex(&pt), v["plaintext_hex"].as_str().unwrap(), "{name}: plaintext");
-        let mut signed = aad.clone();
-        signed.extend_from_slice(&enc);
-        signed.extend_from_slice(&ct);
-        assert!(sender.public().verify(&signed, &from_b64u(v["sig"].as_str().unwrap()).unwrap()), "{name}: signature");
-        assert!(hpke::open(suite, &recipient, b"PACT-SEAL-v2", &aad, &enc, &ct).is_err(), "{name}: never opens as 2.0");
-    }
-}
-
-#[test]
 fn spec_carries_the_generated_vectors_unchanged() {
     let blocks = appendix_b_blocks();
-    assert!(blocks.len() >= 2, "Appendix B has the 2.0 block");
-    assert_eq!(blocks[1].to_string(), vectors().to_string());
+    assert!(!blocks.is_empty(), "Appendix B has the 2.0 block");
+    assert_eq!(blocks[0].to_string(), vectors().to_string());
 }
 
 #[test]
@@ -404,7 +381,7 @@ fn a_result_seals_back_and_opens_on_the_caller_side() {
 /// reading Appendix B would have to reproduce, not what this crate happened to write.
 #[test]
 fn derivation_vectors() {
-    let v = appendix_b_blocks().remove(1);
+    let v = appendix_b_blocks().remove(0);
     let entries = v["derivation"].as_array().expect("derivation block").clone();
     assert!(entries.len() >= 3, "all three info strings are covered");
     let mut seen: Vec<String> = Vec::new();

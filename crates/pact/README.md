@@ -51,8 +51,7 @@ backup` does; `pact id create --key-out` and `pact id restore` refuse outright. 
 command has to refuse is found before the passphrase is asked and before anything is written, so a
 refusal leaves nothing behind.
 
-`pact vectors check --spec pact-protocol/SPEC.md` proves Appendix B natively (85 checks: the four
-`v: 1` envelopes, the seven certificates rebuilt from their labelled seeds, every chain,
+`pact vectors check --spec pact-protocol/SPEC.md` proves Appendix B natively (the seven certificates rebuilt from their labelled seeds, every chain,
 newest-leaf and `certificate_renewed` case, every `v: 2` envelope opened and re-sealed from its
 ephemeral seed). `pact vectors gen` writes the same document from the seeds; Ed25519 certificates
 and signatures reproduce byte for byte, ECDSA signatures are one valid signature per run, and the

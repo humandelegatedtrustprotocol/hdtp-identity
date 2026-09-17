@@ -248,7 +248,7 @@ func TestCardFoldsOnUTF16CodeUnits(t *testing.T) {
 }
 
 func TestCardRoundTrip(t *testing.T) {
-	v, _ := loadVectors(t)
+	v := loadVectors(t)
 	leaf := hexBytes(t, v.Certificates["leaf_a"].DerHex)
 	card := EncodeCard("Alina Rao", leaf, "required", nil)
 	for _, line := range strings.Split(card, "\r\n") {
@@ -271,14 +271,10 @@ func TestCardRoundTrip(t *testing.T) {
 	if err != nil || !c.Expired || c.Seal != "none" {
 		t.Errorf("expired card: %v %+v", err, c)
 	}
-	compat, err := EncodeCompatCard("Alina Rao", leaf, "optional")
-	if err != nil || !strings.Contains(compat, "X-PACT-VERSION:1\r\n") || !strings.Contains(compat, "X-PACT-ENDPOINT:"+endpointA) {
-		t.Errorf("compat: %v %s", err, compat)
-	}
 }
 
 func TestSealAndOpenResult(t *testing.T) {
-	v, _ := loadVectors(t)
+	v := loadVectors(t)
 	c := theCast(t)
 	der := func(n string) []byte { return hexBytes(t, v.Certificates[n].DerHex) }
 	now := mustTime(t, v.Now)
