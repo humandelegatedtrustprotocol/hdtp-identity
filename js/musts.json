@@ -157,7 +157,7 @@
     "hash": "3dae9651562b",
     "text": "**Moving** is the person issuing a leaf to the new host, the data carried across as an archive — contacts, mes",
     "elsewhere": "node",
-    "why": "a host importing an archive refuses key material: pact-gateway's backup restore -data-only, and pact-cloud's leave.mjs selftest, which asserts no key in the file",
+    "why": "a host importing an archive refuses key material: pact-gateway's backup restore -data-only, and pact-cloud's src/leave/selftest.ts, which `leave.mjs --selftest` builds and runs in check:fast, and which asserts no key in the file",
     "elsewhere_names": [
       "gateway:TestRestoreRefusesAnotherHostsKeysUnlessDataOnly",
       "cloud:gateway/src/leave/selftest.ts"
@@ -177,7 +177,7 @@
     "hash": "9d2a2b8b2d6c",
     "text": "A host that exports an identity toward a destination that cannot carry its chain MUST say so before the export",
     "elsewhere": "node",
-    "why": "an export warning is a host's UI; pact-cloud's leave path states it and pact-gateway's SPEC §9 carries the rule",
+    "why": "an export warning is a host's UI; pact-cloud's leave path states it in src/leave/convert.ts, which refuses to carry a 2.0 identity toward a host that cannot hold a chain and says why. The pact-gateway half is prose in its own SPEC §9 and names no test — a declaration, not a proof",
     "elsewhere_names": [
       "cloud:gateway/src/leave/convert.ts"
     ]
