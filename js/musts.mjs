@@ -14,7 +14,17 @@
 // An entry may say the MUST is not this library's to hold — a wallet's, a host's, a
 // node's — but it must then say WHO and WHY, and the run prints the count. A silent
 // allowlist is the thing this replaces.
-import { readFileSync, readdirSync } from 'node:fs';
+//
+// An "elsewhere" entry names its holder in `elsewhere_names`, and those are checked
+// too whenever the sibling repository is on disk. They were prose for exactly one
+// revision, and in that revision two of eleven were wrong: 3.#1 named a
+// `TestDisplayNameCollision` that has never existed, and 9.#2 credited
+// `check-slug-rules.mjs`, which compares the portal's reserved-name list to the
+// server's and has nothing to do with holding a vacated address. A citation nothing
+// checks is the defect this file was written to find, so it may not live in this
+// file either. CI checks out neither sibling; there the count of unverified names is
+// printed rather than assumed to be zero.
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -95,19 +105,66 @@ function knownNames() {
   return names;
 }
 
+const walkTree = (dir, out = []) => {
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    if (e.name === '.git' || e.name === 'node_modules' || e.name === 'target' || e.name === 'dist') continue;
+    const p = join(dir, e.name);
+    if (e.isDirectory()) walkTree(p, out);
+    else out.push(p);
+  }
+  return out;
+};
+
+/**
+ * The holders that live in a sibling repository, checked when that repository is on
+ * disk. `gateway:Name` is a Go test function anywhere in pact-gateway; `cloud:path`
+ * is a file under pact-cloud, relative to its root.
+ *
+ * Returns the names it could confirm plus the roots it actually looked in, so a run
+ * with no siblings reports what it could not check instead of passing quietly.
+ */
+function siblingNames() {
+  const names = new Set();
+  const looked = [];
+  const gateway = join(here, '../../pact-gateway');
+  if (existsSync(gateway)) {
+    looked.push('gateway');
+    for (const f of walkTree(gateway)) {
+      if (!f.endsWith('_test.go')) continue;
+      for (const m of readFileSync(f, 'utf8').matchAll(/func\s+(Test[A-Za-z0-9_]*)\s*\(/g)) names.add('gateway:' + m[1]);
+    }
+  }
+  const cloud = join(here, '../../pact-cloud');
+  if (existsSync(cloud)) {
+    looked.push('cloud');
+    for (const f of walkTree(cloud)) {
+      if (f.startsWith(cloud + '/')) names.add('cloud:' + f.slice(cloud.length + 1));
+    }
+  }
+  return { names, looked };
+}
+
 const musts = extract(readFileSync(specPath, 'utf8'));
 const manifest = JSON.parse(readFileSync(join(here, 'musts.json'), 'utf8'));
 const names = knownNames();
+const sibling = siblingNames();
 const byId = new Map(musts.map((m) => [m.id, m]));
 
 const problems = [];
-let held = 0, elsewhere = 0;
+let held = 0, elsewhere = 0, unverified = 0;
 for (const m of musts) {
   const e = manifest[m.id];
   if (!e) { problems.push(`MISSING  ${m.id}  ${m.text.slice(0, 96)}`); continue; }
   if (e.hash !== m.hash) { problems.push(`DRIFTED  ${m.id}  the sentence changed (${e.hash} → ${m.hash}); re-read it and update the entry`); continue; }
   const by = e.held_by ?? [];
   for (const n of by) if (!names.has(n)) problems.push(`DANGLING ${m.id}  names ${n}, which does not exist`);
+  // The sibling half. A name whose repository is absent is counted, not assumed:
+  // this run proved less than a run with the siblings on disk, and says so.
+  for (const n of e.elsewhere_names ?? []) {
+    const repo = n.split(':')[0];
+    if (!sibling.looked.includes(repo)) { unverified++; continue; }
+    if (!sibling.names.has(n)) problems.push(`DANGLING ${m.id}  names ${n}, which does not exist in the ${repo} repository`);
+  }
   if (by.length) held++;
   else if (e.elsewhere && e.why) elsewhere++;
   else problems.push(`MISSING  ${m.id}  an entry with neither a test nor an "elsewhere" + "why"`);
@@ -122,6 +179,10 @@ console.log(`  ${elsewhere} held elsewhere by declaration (a wallet's, a host's,
 for (const [id, e] of Object.entries(manifest)) {
   if (!e.held_by?.length && e.elsewhere) console.log(`      ${id.padEnd(9)} ${e.elsewhere.padEnd(8)} ${e.why}`);
 }
+const crossRepo = Object.values(manifest).reduce((n, e) => n + (e.elsewhere_names?.length ?? 0), 0);
+console.log(`  ${crossRepo - unverified} of ${crossRepo} cross-repo holders confirmed on disk` +
+  (sibling.looked.length ? ` (looked in: ${sibling.looked.join(', ')})` : '') +
+  (unverified ? ` — ${unverified} unverified, that repository is not checked out here` : ''));
 if (problems.length) {
   console.log(`\n${problems.length} problem(s):`);
   for (const p of problems) console.log('  ' + p);
