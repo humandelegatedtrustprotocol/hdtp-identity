@@ -408,25 +408,62 @@ pub fn answer_code(text: &str) -> String {
     format!("unknown:{}", v.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>().join(",")).unwrap_or_default())
 }
 
-fn post(endpoint: &str, body: &str) -> Res<String> {
-    let mut resp = ureq::post(endpoint)
+fn post(endpoint: &str, body: &str, session: Option<&str>) -> Res<(String, Option<String>)> {
+    let mut req = ureq::post(endpoint)
         .header("content-type", "application/json")
-        .header("accept", "application/json, text/event-stream")
+        .header("accept", "application/json, text/event-stream");
+    if let Some(id) = session {
+        req = req.header("mcp-session-id", id);
+    }
+    let mut resp = req
         .config()
         .http_status_as_error(false)
         .timeout_global(Some(std::time::Duration::from_secs(20)))
         .build()
         .send(body)
         .map_err(|e| Fail(format!("{endpoint}: {e}")))?;
-    resp.body_mut().read_to_string().map_err(|e| Fail(format!("{endpoint}: {e}")))
+    let given = resp.headers().get("mcp-session-id").and_then(|v| v.to_str().ok()).map(|s| s.to_string());
+    let text = resp.body_mut().read_to_string().map_err(|e| Fail(format!("{endpoint}: {e}")))?;
+    Ok((text, given))
 }
 
-fn sealed_call(endpoint: &str, wire: &Value, id: u32) -> Res<String> {
+/// The MCP handshake, before any scenario.
+///
+/// Without it this whole battery measured nothing. A receiver that keeps sessions answers
+/// `tools/call` with `method "tools/call" is invalid during session initialization` — a JSON-RPC
+/// error whose code is the NUMBER 0, which `answer_code` reads as `unknown:jsonrpc,id,error`, and
+/// which every scenario then reports as a REPRODUCTION. Eight scenarios said the reference node was
+/// vulnerable to eight things it had never been asked about. A security instrument that answers
+/// "vulnerable" when it never reached the code under test is worse than one that refuses to run.
+///
+/// A stateless receiver hands back no session id, and then this changes nothing: the scenarios post
+/// exactly as they did before.
+fn initialize(endpoint: &str) -> Res<Option<String>> {
+    let body = json!({ "jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": { "name": "pact vectors intrude", "version": env!("CARGO_PKG_VERSION") },
+    }});
+    let (text, session) = post(endpoint, &body.to_string(), None)?;
+    if session.is_none() && !text.contains("\"result\"") {
+        return fail(format!("{endpoint}: initialize was refused, so no scenario could be posted: {}", text.chars().take(200).collect::<String>()));
+    }
+    if session.is_some() {
+        // The notification the protocol requires before any call; a receiver that gates on it
+        // answers everything else with the same session error the scenarios used to collect.
+        let note = json!({ "jsonrpc": "2.0", "method": "notifications/initialized" });
+        let _ = post(endpoint, &note.to_string(), session.as_deref())?;
+    }
+    Ok(session)
+}
+
+fn sealed_call(endpoint: &str, wire: &Value, id: u32, session: Option<&str>) -> Res<String> {
     let body = json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call", "params": { "name": "sealed_call", "arguments": wire } });
-    Ok(answer_code(&post(endpoint, &body.to_string())?))
+    let (text, _) = post(endpoint, &body.to_string(), session)?;
+    Ok(answer_code(&text))
 }
 
-pub fn intrude(against: &str, allow_insecure: bool, now: Option<&str>) -> Res<i32> {
+pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now: Option<&str>) -> Res<i32> {
     let now = now_or(now)?;
     let endpoint = against.trim_end_matches('/').to_string();
     // This command dials what it is given and posts sealed envelopes there. The same guard a
@@ -443,10 +480,19 @@ pub fn intrude(against: &str, allow_insecure: bool, now: Option<&str>) -> Res<i3
             return fail(format!("{endpoint}: {} (pass --allow-insecure for a node on your own machine)", guard["why"].as_str().unwrap_or("the address guard refuses this endpoint")));
         }
     }
-    let card_text = ureq::get(format!("{endpoint}/card.vcf"))
-        .call()
-        .and_then(|mut r| r.body_mut().read_to_string())
-        .map_err(|e| Fail(format!("{endpoint}/card.vcf: {e}")))?;
+    // The card comes from a file when one is given, and from `<endpoint>/card.vcf` otherwise.
+    // That URL is NOT something a target must serve: SPEC §9 puts the card on the invite landing
+    // page, and the reference node serves exactly three public routes — `/a/{slug}/mcp`,
+    // `/i/{token}` and `/mcp`. Aimed at one with no `--card`, this command used to stop at a 404
+    // with nothing to say about what to do instead, which is how the battery came to be something
+    // only the hosted platform could be measured with.
+    let card_text = match card_file {
+        Some(path) => std::fs::read_to_string(path).map_err(|e| Fail(format!("{path}: {e}")))?,
+        None => ureq::get(format!("{endpoint}/card.vcf"))
+            .call()
+            .and_then(|mut r| r.body_mut().read_to_string())
+            .map_err(|e| Fail(format!("{endpoint}/card.vcf: {e} — a host need not serve a card at a URL of its own (SPEC §9 puts it on the invite landing page); save the target's card and pass --card <file>")))?,
+    };
     let card = match core("card_decode", json!({ "vcard": card_text, "now": instant(now) })) {
         Ok(c) => c,
         Err(e) => {
@@ -480,11 +526,19 @@ pub fn intrude(against: &str, allow_insecure: bool, now: Option<&str>) -> Res<i3
     let message = json!({ "name": "send_message", "arguments": { "msg_id": "m", "text": "hello" } });
     let listing = json!({});
 
+    // The handshake first: a receiver that keeps MCP sessions refuses every `tools/call` before it,
+    // and the refusal looks nothing like a security answer.
+    let session = initialize(&endpoint)?;
+    match session.as_deref() {
+        Some(id) => println!("session     {id}"),
+        None => println!("session     none (the receiver is stateless)"),
+    }
+
     let mut results: Vec<(String, String, bool)> = Vec::new();
     let mut posted = 0u32;
     let mut run = |name: &str, wire: Value, expect: &[&str]| -> Res<()> {
         posted += 1;
-        let got = sealed_call(&endpoint, &wire, posted)?;
+        let got = sealed_call(&endpoint, &wire, posted, session.as_deref())?;
         let blocked = expect.contains(&got.as_str());
         println!("  {:<10} {name}: {got}", if blocked { "blocked" } else { "REPRODUCES" });
         results.push((name.into(), got, blocked));
@@ -516,7 +570,31 @@ pub fn intrude(against: &str, allow_insecure: bool, now: Option<&str>) -> Res<i3
     wrong_suite["protected"] = json!(b64u(pact_identity::canonical::canonical(&h4).as_bytes()));
     run("a suite that is not the one the recipient key takes", wrong_suite, &["envelope_invalid"])?;
     run("an expired leaf in the chain", seal(Form::Chain, &[leaf_m_expired.clone(), root_m_der.clone()], message.clone())?, &["envelope_invalid"])?;
-    run("a chain of one certificate", seal(Form::Chain, std::slice::from_ref(&leaf_m), message.clone())?, &["envelope_invalid"])?;
+    // A chain of ONE certificate, hand-rolled.
+    //
+    // `seal_request` refuses to build this — "sender_chain must be the leaf and the root" — which is
+    // right for a sender and, when the refusal came back as an error from this command, took the
+    // whole battery down with it: every scenario after it went unrun. An intrusion harness is the
+    // one caller that has to produce what an honest sealer will not, so it assembles the envelope
+    // from the same public parts `seal_body` uses: the canonical header as AAD, one HPKE seal to the
+    // recipient's leaf key, and a signature over protected||enc||ct.
+    {
+        let suite = suite_for(&recipient.public_key);
+        let msg_id = format!("intrude-{now}-onecert");
+        let exp = ts + 600;
+        let header = json!({ "v": 2, "suite": suite.id(), "kid": recipient.public_key.fingerprint(),
+            "msg_id": &msg_id, "ts": ts, "exp": exp, "cty": "application/pact-call+json" });
+        let aad = pact_identity::canonical::canonical(&header).into_bytes();
+        let body = json!({ "method": "tools/call", "params": message.clone(), "chain": [b64u(&leaf_m)] });
+        let plaintext = serde_json::to_vec(&body).map_err(|e| Fail(e.to_string()))?;
+        let (enc, ct) = hpke::seal(suite, &recipient.public_key, envelope::INFO_V2, &aad, &plaintext, None).map_err(|e| Fail(e.why))?;
+        let mut signed = aad.clone();
+        signed.extend_from_slice(&enc);
+        signed.extend_from_slice(&ct);
+        let sig = host_m.sign(&signed);
+        let wire = json!({ "protected": b64u(&aad), "enc": b64u(&enc), "ct": b64u(&ct), "sig": b64u(&sig) });
+        run("a chain of one certificate", wire, &["envelope_invalid"])?;
+    }
     run("a sealed tools/list from a stranger (no card to bind)", seal(Form::Chain, &chain_m, listing)?, &["envelope_invalid"])?;
     let stale = envelope::seal_request(SealRequest { recipient: &recipient.public_key, sender: &host_m, form: Form::Chain, sender_chain: Some(&chain_m), method: "tools/call".into(), params: message.clone(), msg_id: "intrude-stale".into(), ts: ts - 3600, exp: Some(ts - 3000), cty: None, ephemeral_seed: None }).map_err(|e| Fail(e.why))?;
     run("an envelope an hour old", serde_json::to_value(stale)?, &["envelope_invalid"])?;
