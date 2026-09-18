@@ -8,7 +8,7 @@
 // scenario (a contact request with a matching card) leaves a pending request behind on the
 // target, because that is what it proves; aim it at a test identity.
 import { spawnSync } from 'node:child_process';
-import { seed, ed25519FromSeed, b64url } from '../../pact-protocol/vectors/lib/keys.mjs';
+import { seed, ed25519FromSeed, b64url, fromB64url } from '../../pact-protocol/vectors/lib/keys.mjs';
 import { buildRoot, buildLeaf } from '../../pact-protocol/vectors/lib/x509.mjs';
 import { encodeCard, decodeCard } from '../../pact-protocol/vectors/lib/card.mjs';
 import { sealEnvelope } from '../../pact-protocol/vectors/lib/envelope.mjs';
@@ -52,6 +52,15 @@ export function scenarios({ endpoint, targetLeaf, now = Date.now() }) {
   const message = (o = {}) => env({ params: { name: 'send_message', arguments: { msg_id: 'm', text: 'hello' } }, ...o });
   const request = (o = {}) => env({ params: { name: 'request_contact', arguments: { card, note: 'hi' } }, ...o });
   const tamper = (e) => ({ ...e, sig: b64url(Buffer.from([1, 2, 3])) });
+  // `sig` covers `protected ‖ enc ‖ ct` with nothing between them, so a byte moved
+  // across the enc/ct boundary leaves the signed bytes identical: what refuses it is
+  // `enc` being the suite's own length (§13.1).
+  const slid = (e) => { const enc = fromB64url(e.enc), ct = fromB64url(e.ct); return { ...e, enc: b64url(enc.subarray(0, enc.length - 1)), ct: b64url(Buffer.concat([enc.subarray(enc.length - 1), ct])) }; };
+  // Certificates the receiver must refuse: a CA-signed intermediate in the root slot
+  // (there is no authority above the person), and leaves outside their validity.
+  const INTER_M = buildLeaf({ cn: 'Mallory', rootCn: 'Mallory', root: rootM, hostKey: rootM, endpoint: E_M, notBefore: new Date(now - D), notAfter: new Date(now + 365 * D), cA: true, usage: [5], label: 'live/inter_m' });
+  const FUTURE_M = buildLeaf({ cn: 'Mallory', rootCn: 'Mallory', root: rootM, hostKey: hostM, endpoint: E_M, notBefore: new Date(now + H), notAfter: new Date(now + 300 * D), label: 'live/future_m' });
+  const EXPIRED_M = buildLeaf({ cn: 'Mallory', rootCn: 'Mallory', root: rootM, hostKey: hostM, endpoint: E_M, notBefore: new Date(now - 400 * D), notAfter: new Date(now - D), label: 'live/expired_m' });
   const replayed = message({ reference: true });
   return [
     { name: 'a stranger in the small form, naming a leaf nobody holds', envelope: message({ reference: true }), expect: 'chain_required' },
@@ -64,6 +73,31 @@ export function scenarios({ endpoint, targetLeaf, now = Date.now() }) {
     { name: 'a leaf presented as the root', envelope: message({ chainInside: [LEAF_M, LEAF_M] }), expect: 'envelope_invalid' },
     { name: 'a stranger asking for contact with a card that is her leaf', envelope: request(), expect: 'sealed', note: 'leaves a contact request on the target' },
     { name: 'the same small-form envelope replayed', envelope: replayed, twice: true, expect: 'chain_required' },
+
+    // Chain confusion, over the wire. The offline battery proves the library
+    // refuses these shapes; these prove the DEPLOYED node runs that library on
+    // the path a stranger actually reaches, past its edge and its router.
+    { name: 'a chain of one certificate, live', envelope: message({ chainInside: [LEAF_M] }), expect: 'envelope_invalid' },
+    { name: 'an empty chain, live', envelope: message({ chainInside: [] }), expect: 'envelope_invalid' },
+    { name: 'the chain in reverse order, live', envelope: message({ chainInside: [ROOT_M, LEAF_M] }), expect: 'envelope_invalid' },
+    { name: 'the root presented as its own leaf, live', envelope: message({ chainInside: [ROOT_M, ROOT_M] }), expect: 'envelope_invalid' },
+    { name: 'an intermediate posing as the root, live', envelope: message({ chainInside: [LEAF_M, INTER_M] }), expect: 'envelope_invalid' },
+
+    // Time, at the edges the receiver is supposed to hold.
+    { name: 'a not-yet-valid leaf, live', envelope: message({ chainInside: [FUTURE_M, ROOT_M] }), expect: 'envelope_invalid' },
+    { name: 'an expired leaf, live', envelope: message({ chainInside: [EXPIRED_M, ROOT_M] }), expect: 'envelope_invalid' },
+    { name: 'an envelope 301 seconds old, live', envelope: message({ ts: nowS - 301, exp: nowS + 300 }), expect: 'envelope_invalid' },
+    { name: 'an envelope 301 seconds in the future, live', envelope: message({ ts: nowS + 301, exp: nowS + 900 }), expect: 'envelope_invalid' },
+    { name: 'an envelope asking to be remembered for a year, live', envelope: message({ ts: nowS, exp: nowS + 365 * 86400 }), expect: 'envelope_invalid' },
+
+    // The retired generation, refused by a node that no longer implements it.
+    { name: 'a v: 1 header, live', envelope: message({ header: { v: 1 } }), expect: 'envelope_invalid' },
+    { name: 'a header claiming a version that does not exist yet, live', envelope: message({ header: { v: 3 } }), expect: 'envelope_invalid' },
+    { name: 'a header whose ts and exp are strings, live', envelope: message({ header: { ts: String(nowS), exp: String(nowS + 600) } }), expect: 'envelope_invalid' },
+    { name: 'an empty msg_id, live', envelope: message({ msgId: '' }), expect: 'envelope_invalid' },
+    { name: 'a result envelope dispatched as a request, live', envelope: message({ cty: 'application/pact-result+json' }), expect: 'envelope_invalid' },
+    { name: 'a sealed tools/list from a stranger, live', envelope: env({ method: 'tools/list', params: {} }), expect: 'envelope_invalid' },
+    { name: 'a byte moved from the encapsulated key into the ciphertext, live', envelope: slid(message()), expect: 'envelope_invalid' },
   ].map((s) => ({ ...s, endpoint }));
 }
 

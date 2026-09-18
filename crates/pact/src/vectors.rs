@@ -570,34 +570,103 @@ pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now
     wrong_suite["protected"] = json!(b64u(pact_identity::canonical::canonical(&h4).as_bytes()));
     run("a suite that is not the one the recipient key takes", wrong_suite, &["envelope_invalid"])?;
     run("an expired leaf in the chain", seal(Form::Chain, &[leaf_m_expired.clone(), root_m_der.clone()], message.clone())?, &["envelope_invalid"])?;
-    // A chain of ONE certificate, hand-rolled.
+    // Chains and headers an honest sealer will not build, hand-rolled.
     //
-    // `seal_request` refuses to build this — "sender_chain must be the leaf and the root" — which is
-    // right for a sender and, when the refusal came back as an error from this command, took the
-    // whole battery down with it: every scenario after it went unrun. An intrusion harness is the
-    // one caller that has to produce what an honest sealer will not, so it assembles the envelope
-    // from the same public parts `seal_body` uses: the canonical header as AAD, one HPKE seal to the
-    // recipient's leaf key, and a signature over protected||enc||ct.
-    {
+    // `seal_request` refuses a chain that is not exactly a leaf and a root — right for a
+    // sender and, when that refusal came back as an error from this command, it took the
+    // whole battery down with it: every scenario after it went unrun. An intrusion harness
+    // is the one caller that has to produce what an honest sealer will not, so it assembles
+    // the envelope from the same public parts `seal_body` uses: the canonical header as
+    // AAD, one HPKE seal to the recipient's leaf key, and a signature over
+    // protected||enc||ct. Rewriting the header AFTER sealing would prove nothing — the AAD
+    // would no longer match and every such envelope would fail for that reason alone — so
+    // the forged header is the one that is sealed under.
+    let mut forged = 0u32;
+    let mut forge = |chain: Vec<Vec<u8>>, ver: i64, cty: &str, msg_id_empty: bool, string_times: bool, params: Value| -> Res<Value> {
+        forged += 1;
         let suite = suite_for(&recipient.public_key);
-        let msg_id = format!("intrude-{now}-onecert");
-        let exp = ts + 600;
-        let header = json!({ "v": 2, "suite": suite.id(), "kid": recipient.public_key.fingerprint(),
-            "msg_id": &msg_id, "ts": ts, "exp": exp, "cty": "application/pact-call+json" });
+        let msg_id = if msg_id_empty { String::new() } else { format!("intrude-{now}-forge{forged}") };
+        let header = if string_times {
+            json!({ "v": ver, "suite": suite.id(), "kid": recipient.public_key.fingerprint(),
+                "msg_id": &msg_id, "ts": ts.to_string(), "exp": (ts + 600).to_string(), "cty": cty })
+        } else {
+            json!({ "v": ver, "suite": suite.id(), "kid": recipient.public_key.fingerprint(),
+                "msg_id": &msg_id, "ts": ts, "exp": ts + 600, "cty": cty })
+        };
         let aad = pact_identity::canonical::canonical(&header).into_bytes();
-        let body = json!({ "method": "tools/call", "params": message.clone(), "chain": [b64u(&leaf_m)] });
+        let chain_b64: Vec<Value> = chain.iter().map(|c| json!(b64u(c))).collect();
+        let body = json!({ "method": "tools/call", "params": params, "chain": chain_b64 });
         let plaintext = serde_json::to_vec(&body).map_err(|e| Fail(e.to_string()))?;
         let (enc, ct) = hpke::seal(suite, &recipient.public_key, envelope::INFO_V2, &aad, &plaintext, None).map_err(|e| Fail(e.why))?;
         let mut signed = aad.clone();
         signed.extend_from_slice(&enc);
         signed.extend_from_slice(&ct);
         let sig = host_m.sign(&signed);
-        let wire = json!({ "protected": b64u(&aad), "enc": b64u(&enc), "ct": b64u(&ct), "sig": b64u(&sig) });
-        run("a chain of one certificate", wire, &["envelope_invalid"])?;
-    }
+        Ok(json!({ "protected": b64u(&aad), "enc": b64u(&enc), "ct": b64u(&ct), "sig": b64u(&sig) }))
+    };
+    const CALL: &str = "application/pact-call+json";
+
+    // §14.2 takes exactly two certificates, in one order, the second self-signed. Every
+    // shape below is a path a general X.509 verifier would happily walk.
+    let one = forge(vec![leaf_m.clone()], 2, CALL, false, false, message.clone())?;
+    run("a chain of one certificate", one, &["envelope_invalid"])?;
+    let none = forge(Vec::new(), 2, CALL, false, false, message.clone())?;
+    run("an empty chain", none, &["envelope_invalid"])?;
+    let three = forge(vec![leaf_m.clone(), root_m_der.clone(), root_m_der.clone()], 2, CALL, false, false, message.clone())?;
+    run("a chain of three certificates", three, &["envelope_invalid"])?;
+    let reversed = forge(vec![root_m_der.clone(), leaf_m.clone()], 2, CALL, false, false, message.clone())?;
+    run("the chain in reverse order", reversed, &["envelope_invalid"])?;
+    let root_twice = forge(vec![root_m_der.clone(), root_m_der.clone()], 2, CALL, false, false, message.clone())?;
+    run("the root presented as its own leaf", root_twice, &["envelope_invalid"])?;
+    let leaf_twice = forge(vec![leaf_m.clone(), leaf_m.clone()], 2, CALL, false, false, message.clone())?;
+    run("the leaf presented as its own root", leaf_twice, &["envelope_invalid"])?;
+    // A CA-signed intermediate in the root slot is WebPKI asking to be let in: accept it and
+    // any public CA could mint an identity. Rule 2 wants the root self-signed, so there is no
+    // hierarchy to climb and no authority above the person.
+    let intermediate = {
+        let mut ispec = LeafSpec { cn: "Alina Rao", root_cn: "Alina Rao", issuer: &issuer, host_key: &issuer, uris: vec!["https://mallory.example/mcp".into()], dns_name: None, not_before: now - 3600, not_after: now + 365 * 86_400, serial: x509::random_serial().map_err(|e| Fail(e.why))?, ca: true, usage: Some(vec![5]), aki: None, extra: Vec::new(), alg_oid: None };
+        ispec.ca = true;
+        x509::build_leaf(&ispec, &root_m).map_err(|e| Fail(e.why))?
+    };
+    let inter = forge(vec![leaf_m.clone(), intermediate], 2, CALL, false, false, message.clone())?;
+    run("an intermediate posing as the root", inter, &["envelope_invalid"])?;
+
+    // The retired generation, refused by a node that no longer implements it, and a version
+    // that does not exist yet. Both are sealed under the forged header, so what refuses them
+    // is the version check and not a broken AAD.
+    let v1 = forge(chain_m.clone(), 1, CALL, false, false, message.clone())?;
+    run("a v: 1 header, the retired generation", v1, &["envelope_invalid"])?;
+    let v3 = forge(chain_m.clone(), 3, CALL, false, false, message.clone())?;
+    run("a header claiming a version that does not exist yet", v3, &["envelope_invalid"])?;
+    // `cty` is what binds direction: a result envelope is never dispatched (§13.2).
+    let as_result = forge(chain_m.clone(), 2, "application/pact-result+json", false, false, message.clone())?;
+    run("a result envelope dispatched as a request", as_result, &["envelope_invalid"])?;
+    // Idempotency keyed on an empty string protects nothing (§13.1).
+    let no_id = forge(chain_m.clone(), 2, CALL, true, false, message.clone())?;
+    run("an empty msg_id", no_id, &["envelope_invalid"])?;
+    // A `ts` of "1757000000" is not the same bytes as one of 1757000000 (§13.1).
+    let strings = forge(chain_m.clone(), 2, CALL, false, true, message.clone())?;
+    run("a header whose ts and exp are strings", strings, &["envelope_invalid"])?;
+
     run("a sealed tools/list from a stranger (no card to bind)", seal(Form::Chain, &chain_m, listing)?, &["envelope_invalid"])?;
     let stale = envelope::seal_request(SealRequest { recipient: &recipient.public_key, sender: &host_m, form: Form::Chain, sender_chain: Some(&chain_m), method: "tools/call".into(), params: message.clone(), msg_id: "intrude-stale".into(), ts: ts - 3600, exp: Some(ts - 3000), cty: None, ephemeral_seed: None }).map_err(|e| Fail(e.why))?;
     run("an envelope an hour old", serde_json::to_value(stale)?, &["envelope_invalid"])?;
+    // §13.3's skew window is 300 seconds either way. A boundary nothing tests drifts.
+    let skewed = envelope::seal_request(SealRequest { recipient: &recipient.public_key, sender: &host_m, form: Form::Chain, sender_chain: Some(&chain_m), method: "tools/call".into(), params: message.clone(), msg_id: format!("intrude-{now}-skew"), ts: ts - 301, exp: Some(ts + 300), cty: None, ephemeral_seed: None }).map_err(|e| Fail(e.why))?;
+    run("an envelope 301 seconds old", serde_json::to_value(skewed)?, &["envelope_invalid"])?;
+    let ahead = envelope::seal_request(SealRequest { recipient: &recipient.public_key, sender: &host_m, form: Form::Chain, sender_chain: Some(&chain_m), method: "tools/call".into(), params: message.clone(), msg_id: format!("intrude-{now}-ahead"), ts: ts + 301, exp: Some(ts + 900), cty: None, ephemeral_seed: None }).map_err(|e| Fail(e.why))?;
+    run("an envelope 301 seconds in the future", serde_json::to_value(ahead)?, &["envelope_invalid"])?;
+    // `exp - ts` bounds how long every receiver must remember a msg_id (§13.3).
+    let forever = envelope::seal_request(SealRequest { recipient: &recipient.public_key, sender: &host_m, form: Form::Chain, sender_chain: Some(&chain_m), method: "tools/call".into(), params: message.clone(), msg_id: format!("intrude-{now}-forever"), ts, exp: Some(ts + 365 * 86_400), cty: None, ephemeral_seed: None }).map_err(|e| Fail(e.why))?;
+    run("an envelope asking to be remembered for a year", serde_json::to_value(forever)?, &["envelope_invalid"])?;
+    // Rule 4 checks the leaf's dates and only the leaf's: a leaf not valid yet is refused
+    // exactly as an expired one is.
+    let leaf_m_future = {
+        let mut fspec = LeafSpec { cn: "Alina Rao", root_cn: "Alina Rao", issuer: &issuer, host_key: &host_pub, uris: vec!["https://mallory.example/mcp".into()], dns_name: None, not_before: now + 3600, not_after: now + 300 * 86_400, serial: x509::random_serial().map_err(|e| Fail(e.why))?, ca: false, usage: None, aki: None, extra: Vec::new(), alg_oid: None };
+        fspec.not_before = now + 3600;
+        x509::build_leaf(&fspec, &root_m).map_err(|e| Fail(e.why))?
+    };
+    run("a leaf that is not valid yet", seal(Form::Chain, &[leaf_m_future, root_m_der.clone()], message.clone())?, &["envelope_invalid"])?;
 
     let bad = results.iter().filter(|(_, _, ok)| !ok).count();
     println!("{} scenarios: {} blocked, {} reproduce", results.len(), results.len() - bad, bad);
