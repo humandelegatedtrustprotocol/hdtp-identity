@@ -24,6 +24,13 @@
 // checks is the defect this file was written to find, so it may not live in this
 // file either. CI checks out neither sibling; there the count of unverified names is
 // printed rather than assumed to be zero.
+//
+// What this proves and what it does not. A token is checked for EXISTENCE — that the Go
+// test or the file is really there. It is not checked for RELEVANCE, which no mechanical
+// check here can do: `check-slug-rules.mjs` exists, and existing was never the problem
+// with citing it. So the 3.#1 shape (a name nobody can find) is now mechanical, and the
+// 9.#2 shape (a real file that holds something else) still rests on a person having read
+// the cited file. Half a guard, named as half.
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
