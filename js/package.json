@@ -16,6 +16,8 @@
     "intrude:go": "node intrude.mjs --port go",
     "parity": "node parity.mjs",
     "musts": "node musts.mjs",
+    "record": "node record.mjs",
+    "record:check": "node record.mjs --check",
     "live": "node --test live.test.mjs"
   },
   "engines": { "node": ">=20" }
