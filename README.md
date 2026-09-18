@@ -17,15 +17,17 @@ port presents: bytes in, JSON out, no state.
 ## Build and prove
 
 ```sh
-cargo test                      # 16 unit tests + 9 vector tests: the seven Appendix B certificates rebuilt byte for byte,
-                                # the four v1 envelopes opened, every chain / newest-leaf / certificate_renewed case,
-                                # every v2 envelope opened and re-sealed from its ephemeral seed
+cargo test                      # unit + vector tests: the Appendix B certificates rebuilt byte for byte, every chain /
+                                # newest-leaf / certificate_renewed case, and every v2 envelope opened and re-sealed
+                                # from its ephemeral seed
 sh js/build.sh                  # wasm-pack: js/pkg-web (browser, Workers) and js/pkg-node (Node), then js/manifest.json
 node js/verify.mjs              # recomputes the SHA-256 of both .wasm files against the manifest
 node js/check.mjs               # Appendix B through the Wasm bindings, vectors read from SPEC.md: 107/107
-node js/intrude.mjs             # the 79 intrusion scenarios with the Wasm core as the defender, compared verdict by
-                                # verdict with the seed's run: 75 blocked, 4 residual by decision, 0 reproduce
+node js/intrude.mjs             # the 115 intrusion scenarios with the Wasm core as the defender, compared verdict by
+                                # verdict with the seed's run: 111 blocked, 4 residual by decision, 0 reproduce
 node js/intrude.mjs --port go   # the same against go/bin/pact-identity-go
+node js/musts.mjs               # every MUST in pact-protocol/SPEC.md names something that holds it, or says who does
+                                # and why: 44 MUSTs, 33 held here, 11 declared elsewhere
 ```
 
 Toolchain: Rust 1.92, `wasm-pack` 0.15 (installs a matching `wasm-bindgen`), the
