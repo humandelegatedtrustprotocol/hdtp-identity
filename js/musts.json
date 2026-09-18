@@ -374,5 +374,15 @@
     "held_by": [
       "scenario:a root whose notBefore is years away is not a refusal"
     ]
+  },
+  "14.3#1": {
+    "hash": "779255f76f26",
+    "text": "A verifier MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact, or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request.",
+    "held_by": [],
+    "elsewhere": "node",
+    "elsewhere_names": [
+      "gateway:TestAnUnansweredConfirmationChangesNoPin"
+    ],
+    "why": "confirming a pin is a verifier's act and this library holds none; the half that can be proven is the negative one, and pact-gateway holds it — a confirmation driven at a closed port leaves the root, the endpoint, the leaf, its key, the root certificate and the card byte-identical, and is audited rather than acted on (TestAnUnansweredConfirmationChangesNoPin). ValidateChain here is what the answer to a confirmation gets judged by"
   }
 }

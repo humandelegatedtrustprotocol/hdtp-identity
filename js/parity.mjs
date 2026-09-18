@@ -449,6 +449,31 @@ if (problems.length && !only) {
   for (const p of problems) console.log(`    ${p}`);
 }
 
+// ── the manifest ───────────────────────────────────────────────────────────────────────────────
+//
+// `--manifest <path>` writes what was just compared, so the record of these checks is generated
+// from the run rather than transcribed from it. It is emitted AFTER the comparison and the gate, so
+// a manifest only ever describes checks that actually agreed: a file claiming 270 passing cases
+// cannot be produced by a run in which they did not.
+const manifestAt = process.argv[process.argv.indexOf('--manifest') + 1];
+if (process.argv.includes('--manifest') && manifestAt && !only) {
+  const byFn = new Map();
+  for (const [name, fn] of cases) {
+    if (!byFn.has(fn)) byFn.set(fn, []);
+    byFn.get(fn).push(name);
+  }
+  const { writeFileSync } = await import('node:fs');
+  writeFileSync(manifestAt, JSON.stringify({
+    generated_by: 'js/parity.mjs --manifest',
+    cases: cases.length,
+    functions: surface.size,
+    compared_whole: [...surface].filter((f) => whole.has(f)).length,
+    disagreements: bad,
+    by_function: [...byFn.entries()].sort(([a], [b]) => (a < b ? -1 : 1))
+      .map(([fn, names]) => ({ fn, in_surface: surface.has(fn), compared_whole: whole.has(fn), cases: names })),
+  }, null, 2) + '\n');
+}
+
 const total = only ? ran : cases.length;
 const wholeInSurface = [...surface].filter((f) => whole.has(f)).length;
 console.log(`\n${total - bad}/${total} boundary answers agree between the ports${only ? ` (filtered by ${JSON.stringify(only)})` : `; ${surface.size} functions guarded, ${wholeInSurface} of them compared whole`}`);
