@@ -205,6 +205,11 @@ enum VectorsCmd {
         /// The endpoint, https://host/slug
         #[arg(long)]
         against: String,
+        /// The target's card, from a file. Needed for a host that serves no card at a URL of its
+        /// own: SPEC §9 puts the card on the invite landing page, so `<endpoint>/card.vcf` is one
+        /// deployment's convenience and not something a target must offer.
+        #[arg(long)]
+        card: Option<String>,
         /// Allow a target the address guard refuses — a node on your own machine, and nothing else
         #[arg(long)]
         allow_insecure: bool,
@@ -364,7 +369,7 @@ fn run(cli: Cli) -> Res<i32> {
         Cmd::Vectors { cmd } => match cmd {
             VectorsCmd::Gen { out } => vectors::gen(out.as_deref()),
             VectorsCmd::Check { spec, file } => vectors::check(spec.as_deref(), file.as_deref()),
-            VectorsCmd::Intrude { against, allow_insecure, now } => vectors::intrude(&against, allow_insecure, now.as_deref()),
+            VectorsCmd::Intrude { against, card, allow_insecure, now } => vectors::intrude(&against, card.as_deref(), allow_insecure, now.as_deref()),
         },
         Cmd::Id { cmd } => match cmd {
             IdCmd::Create { name, alg, vault, piv, reader, key_out } => match piv {
