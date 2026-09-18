@@ -34,7 +34,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -151,6 +151,12 @@ function siblingNames() {
   return { names, looked };
 }
 
+// `extract` is exported, so it has to be importable: everything below runs only when
+// this file is the program. Without the guard an importer got the whole check, including
+// its `process.exit(1)`, which made the export a decoration.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();
+
+function main() {
 const musts = extract(readFileSync(specPath, 'utf8'));
 const manifest = JSON.parse(readFileSync(join(here, 'musts.json'), 'utf8'));
 const names = knownNames();
@@ -196,3 +202,4 @@ if (problems.length) {
   process.exit(1);
 }
 console.log('\nevery MUST names something.');
+}
