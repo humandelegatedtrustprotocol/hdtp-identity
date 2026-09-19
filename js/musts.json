@@ -154,13 +154,15 @@
     ]
   },
   "9.#1": {
-    "hash": "3dae9651562b",
+    "hash": "a5ac9ce177ba",
     "text": "**Moving** is the person issuing a leaf to the new host, the data carried across as an archive — contacts, mes",
     "elsewhere": "node",
-    "why": "a host importing an archive refuses key material: pact-gateway's backup restore -data-only, and pact-cloud's src/leave/selftest.ts, which `leave.mjs --selftest` builds and runs in check:fast, and which asserts no key in the file",
+    "why": "both halves are a host's. The host that MAKES an archive puts no leaf key in it: pact-gateway strips the snapshot and rebuilds the file, and its test reads the archived database's raw bytes, not only its columns (TestABackupBundleCarriesNoLeafKey); pact-cloud's object export is asserted to carry the key in neither its rows nor its sealed bytes (export.test.ts, \"the object's export carries no private key\"). The host that IMPORTS one refuses key material: pact-gateway's backup restore -data-only, and pact-cloud's src/leave/selftest.ts, which `leave.mjs --selftest` builds and runs in check:fast, and which asserts no key in the file",
     "elsewhere_names": [
+      "gateway:TestABackupBundleCarriesNoLeafKey",
       "gateway:TestRestoreRefusesAnotherHostsKeysUnlessDataOnly",
-      "cloud:gateway/src/leave/selftest.ts"
+      "cloud:gateway/src/leave/selftest.ts",
+      "cloud:gateway/test/export.test.ts"
     ]
   },
   "9.#2": {
