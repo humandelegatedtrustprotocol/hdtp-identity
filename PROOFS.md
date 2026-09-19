@@ -140,7 +140,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 
 | # | The sentence | Held by |
 |---|---|---|
-| `14.3#1` | A verifier MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact, or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
+| `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
 ## The 270 cross-port parity cases
 
