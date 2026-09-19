@@ -48,7 +48,13 @@ GOT="$( (sha256sum "$WORK/wasm-pack.tar.gz" 2>/dev/null || shasum -a 256 "$WORK/
 
 # The source goes in read-only and is copied, so the build cannot touch this checkout, and the
 # path it builds under is the container's and not this machine's.
-docker run --rm --platform "$PLATFORM" -v "$(pwd)":/src:ro -v "$WORK":/work -e WP="$WP" "$IMAGE" sh -euc '
+#
+# The container runs as root and writes into a directory this script then cleans up. On Docker
+# Desktop that is this user's file; on a Linux host it is root's, and the clean-up is refused — the
+# first run on a hosted runner rebuilt the pinned bytes exactly and then failed for that. So what
+# the container leaves behind is handed back to whoever ran this, whether or not the build worked.
+docker run --rm --platform "$PLATFORM" -v "$(pwd)":/src:ro -v "$WORK":/work -e WP="$WP" -e OWNER="$(id -u):$(id -g)" "$IMAGE" sh -euc '
+  trap "chown -R \"$OWNER\" /work" EXIT
   mkdir -p /build && cd /src
   tar -c --exclude=./target --exclude="./js/pkg-*" --exclude=./js/node_modules --exclude=./go/bin --exclude=./extension . | tar -x -C /build
   tar -xzf /work/wasm-pack.tar.gz -C /usr/local/bin --strip-components=1 "$WP/wasm-pack"
