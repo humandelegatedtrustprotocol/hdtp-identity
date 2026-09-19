@@ -7,8 +7,13 @@
 // pinned core turned out to predate the 1.x removal by two days — it still contained the 1.x
 // compat-card encoder the source had deleted — and nothing had noticed, because this check only
 // ran where somebody had just rebuilt. So the first thing to ask is whether `crates/` changed
-// since `manifest.json` did (`git log -1 -- crates js/manifest.json`); if it did, rebuild with
-// `sh js/build.sh`, commit the manifest, and vendor the bytes wherever they are copied.
+// since `manifest.json` did (`git log -1 -- crates js/manifest.json`); if it did, pin again with
+// `sh js/reproduce.sh --pin`, commit the manifest, and vendor the bytes wherever they are copied.
+//
+// **The other ordinary cause is that the bytes were built HERE.** The pin is the build one
+// container makes (js/reproduce.sh), because cargo lays the same code out differently on every
+// host. `sh js/build.sh` on a developer's machine gives a core that behaves identically and
+// hashes differently; checking js/pkg-* in place after one is expected to fail, and says so.
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
@@ -32,9 +37,13 @@ if (file) {
 }
 if (failures) {
   console.log('');
-  console.log('  The built bytes are not the pinned ones. Most often the source changed after the pin:');
+  console.log('  These bytes are not the pinned ones. The pin is what ONE container builds:');
+  console.log(`    ${manifest.builder?.image ?? '(no builder recorded)'} on ${manifest.builder?.platform ?? '?'}`);
+  console.log('  If they were built on this machine with `sh js/build.sh`, that is why: cargo lays the same');
+  console.log('  code out differently per host. `sh js/reproduce.sh` rebuilds in the container and compares.');
+  console.log('  If the container\'s bytes differ too, the source changed after the pin:');
   console.log('    git log -1 --format=%ad -- crates ; git log -1 --format=%ad -- js/manifest.json');
-  console.log('  If crates/ is newer, run `sh js/build.sh`, commit js/manifest.json, and re-vendor.');
-  console.log('  If it is not, somebody shipped bytes nobody recorded — which is what this guards.');
+  console.log('  Then `sh js/reproduce.sh --pin`, commit js/manifest.json, and re-vendor into pact-cloud.');
+  console.log('  If crates/ is NOT newer, somebody shipped bytes nobody recorded — which is what this guards.');
 }
 process.exit(failures ? 1 : 0);

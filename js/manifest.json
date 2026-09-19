@@ -2,14 +2,20 @@
   "crate_version": "0.1.0",
   "rustc": "rustc 1.92.0 (ded5c06cf 2025-12-08)",
   "wasm_pack": "wasm-pack 0.15.0",
+  "builder": {
+    "image": "rust:1.92.0-slim-bookworm@sha256:f1f73538ebe623fd3673a35aff3df358ae1084c64c55646516e5b17b321b6c9b",
+    "platform": "linux/arm64",
+    "wasm_pack_sha256": "e17ef0806381c3a0acb9c9ddad643a49facaa5a2ecf657a421d4d8f3357a24b7",
+    "how": "sh js/reproduce.sh"
+  },
   "files": {
     "pkg-web/pact_identity_wasm_bg.wasm": {
-      "sha256": "8694b166a39c6d336091b0ea6d468c0a6162d5fbeb69b4abc340b7cf95985865",
-      "bytes": 635480
+      "sha256": "3f24edf8130ceeb4b21aee18413c82b89da380526ec03699c544d37146f873e3",
+      "bytes": 636486
     },
     "pkg-node/pact_identity_wasm_bg.wasm": {
-      "sha256": "8694b166a39c6d336091b0ea6d468c0a6162d5fbeb69b4abc340b7cf95985865",
-      "bytes": 635480
+      "sha256": "3f24edf8130ceeb4b21aee18413c82b89da380526ec03699c544d37146f873e3",
+      "bytes": 636486
     }
   }
 }
