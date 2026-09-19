@@ -165,15 +165,16 @@
     ]
   },
   "9.#2": {
-    "hash": "a5ac9ce177ba",
+    "hash": "874aaad41c95",
     "text": "**Moving** is the person issuing a leaf to the new host, the data carried across as an archive — contacts, mes",
     "elsewhere": "node",
-    "why": "both halves are a host's. The host that MAKES an archive puts no leaf key in it: pact-gateway strips the snapshot and rebuilds the file, and its test reads the archived database's raw bytes, not only its columns (TestABackupBundleCarriesNoLeafKey); pact-cloud's object export is asserted to carry the key in neither its rows nor its sealed bytes (export.test.ts, \"the object's export carries no private key\"). The host that IMPORTS one refuses key material: pact-gateway's backup restore -data-only, and pact-cloud's src/leave/selftest.ts, which `leave.mjs --selftest` builds and runs in check:fast, and which asserts no key in the file",
+    "why": "both halves are a host's. The host that MAKES an archive writes a person's contacts and conversations and nothing else, and no key of any kind: pact-gateway's export is written through its Store interface, so it holds what it asks for, and the test searches the archive's BYTES for a planted leaf key, ledger key, setting, token, invite and integration endpoint (TestAnExportCarriesContactsAndChatsAndNothingElse); pact-cloud's builder selects from an allow-list of tables and columns and its export is searched the same way (leave-20.test.ts). The host that IMPORTS one refuses key material and everything else it does not recognise — a member, a kind of line, a single field — before a write: pact-gateway (TestAnImportRefusesAnythingAnExportDoesNotCarry), pact-cloud (import-20.test.ts). And the two formats are proven against each other: the node's suite runs the cloud's converter and imports the file it wrote (TestTheCloudsLeaveFileImports)",
     "elsewhere_names": [
-      "gateway:TestABackupBundleCarriesNoLeafKey",
-      "gateway:TestRestoreRefusesAnotherHostsKeysUnlessDataOnly",
-      "cloud:gateway/src/leave/selftest.ts",
-      "cloud:gateway/test/export.test.ts"
+      "gateway:TestAnExportCarriesContactsAndChatsAndNothingElse",
+      "gateway:TestAnImportRefusesAnythingAnExportDoesNotCarry",
+      "gateway:TestTheCloudsLeaveFileImports",
+      "cloud:gateway/test/leave-20.test.ts",
+      "cloud:gateway/test/import-20.test.ts"
     ]
   },
   "9.#3": {
