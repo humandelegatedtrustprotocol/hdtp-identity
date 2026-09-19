@@ -25,7 +25,13 @@ const map = JSON.parse(readFileSync(join(here, 'musts.json'), 'utf8'));
 
 // The parity manifest is produced by running the harness, not read from a committed file:
 // a committed one could be stale, and the whole point is that the record describes a run.
+//
+// A failing parity run throws here (execFileSync does, on a non-zero exit), so nothing is written.
+// The manifest is removed FIRST as well: this file outlives a run that dies between the two lines
+// below, and a parity that exited 0 without writing one — it skips the manifest under `--only` —
+// would otherwise hand this script the last run's numbers to record as today's.
 const tmp = join(here, '.parity-manifest.json');
+rmSync(tmp, { force: true });
 execFileSync(process.execPath, [join(here, 'parity.mjs'), '--manifest', tmp], { stdio: 'pipe' });
 const parity = JSON.parse(readFileSync(tmp, 'utf8'));
 rmSync(tmp, { force: true });
