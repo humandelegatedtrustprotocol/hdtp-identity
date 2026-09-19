@@ -27,7 +27,7 @@ node js/intrude.mjs             # the 115 intrusion scenarios with the Wasm core
                                 # verdict with the seed's run: 111 blocked, 4 residual by decision, 0 reproduce
 node js/intrude.mjs --port go   # the same against go/bin/pact-identity-go
 node js/musts.mjs               # every MUST in pact-protocol/SPEC.md names something that holds it, or says who does
-node js/record.mjs             # regenerate PROOFS.md: all 45 MUSTs with their holders, all 270 parity cases
+node js/record.mjs             # regenerate PROOFS.md: every MUST with its holder, every parity case (it prints both counts)
 node js/record.mjs --check     # ...and fail if it is stale (what CI runs)
                                 # and why: 44 MUSTs, 33 held here, 11 declared elsewhere
 ```
