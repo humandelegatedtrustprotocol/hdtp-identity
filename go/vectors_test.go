@@ -493,3 +493,22 @@ func TestDerivationRefusesWhatWouldSilentlyDiffer(t *testing.T) {
 		t.Errorf("the ordinary case must work: %v", err)
 	}
 }
+
+// SpecVersion is a claim about a document, and it read "2.0.0-draft" for days after that draft
+// shipped as 2.0.0 and then as 2.1.0, because a constant has nothing to fail against. SPEC.md is
+// already read here for the vectors; its own version line is what the constant must equal.
+func TestSpecVersionIsTheDocumentsOwn(t *testing.T) {
+	spec, err := os.ReadFile(envOr("PACT_SPEC", "../../pact-protocol/SPEC.md"))
+	if err != nil {
+		t.Skip("SPEC.md not found: " + err.Error())
+	}
+	for _, line := range strings.Split(string(spec), "\n") {
+		if rest, ok := strings.CutPrefix(line, "**Version "); ok {
+			if got := strings.Fields(rest)[0]; got != SpecVersion {
+				t.Fatalf("this port says it implements %s and SPEC.md is %s", SpecVersion, got)
+			}
+			return
+		}
+	}
+	t.Fatal("SPEC.md has no version line")
+}

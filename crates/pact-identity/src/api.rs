@@ -13,6 +13,13 @@ use crate::x509::{self, ChainResult, Extra, LeafSpec};
 use serde_json::{json, Map, Value};
 use zeroize::Zeroizing;
 
+/// The version of `pact-protocol/SPEC.md` this core implements.
+///
+/// It read `2.0.0-draft` for days after the draft shipped as 2.0.0, and through 2.1.0, because a
+/// literal in a dispatch arm has nothing to fail against. `tests/vectors.rs` now compares it with
+/// the version line of the document the vectors are read from, so the two cannot part quietly.
+pub const SPEC_VERSION: &str = "2.1.0";
+
 /// A required string member that carries an identifier: present, and not empty. §13's `msg_id` is
 /// what pairs a result with its request, so the empty string is not a value it can take — one port
 /// sealed an envelope with one, and the other refused.
@@ -369,7 +376,7 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
         }
         "wallet_issue" => vault::wallet_issue(a.get("vault_plaintext").unwrap_or(&Value::Null), s(a, "root_fingerprint")?, &bytes(a, "csr")?, instant(a, "now")?, opt_int(a, "valid_days").unwrap_or(365), boolean(a, "move"))?,
 
-        "version" => json!({ "crate": env!("CARGO_PKG_VERSION"), "spec": "2.0.0-draft" }),
+        "version" => json!({ "crate": env!("CARGO_PKG_VERSION"), "spec": SPEC_VERSION }),
         other => return err("unsupported", format!("no function named {other}")),
     })
 }
@@ -413,6 +420,6 @@ mod tests {
         let k: Value = serde_json::from_str(&call("generate_key", r#"{"alg":"ed25519"}"#)).unwrap();
         assert_eq!(k["alg"], "ed25519");
         let v: Value = serde_json::from_str(&call("version", "{}")).unwrap();
-        assert_eq!(v["spec"], "2.0.0-draft");
+        assert_eq!(v["spec"], SPEC_VERSION);
     }
 }
