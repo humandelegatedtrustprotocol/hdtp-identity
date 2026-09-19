@@ -11,7 +11,7 @@ port presents: bytes in, JSON out, no state.
 |---|---|
 | `crates/pact-identity` | the core (`der`, `keys`, `canonical`, `hpke`, `x509`, `address`, `csr`, `card`, `envelope`, `vault`, `api`) |
 | `crates/pact-identity-wasm` | the `wasm-bindgen` boundary: `call(name, args) -> json` |
-| `js/` | loaders (`index.mjs` for Node and the browser, `worker.mjs` for Workers), `build.sh`, `manifest.json` + `verify.mjs`, and the Node proofs `check.mjs` and `intrude.mjs` |
+| `js/` | loaders (`index.mjs` for Node and the browser, `worker.mjs` for Workers), `build.sh`, `reproduce.sh` (the canonical, containerised build), `manifest.json` + `verify.mjs`, and the Node proofs `check.mjs` and `intrude.mjs` |
 | `go/` | the Go port and its `pact-identity-go` adapter binary (built by the Go side) |
 
 ## Build and prove
@@ -20,8 +20,11 @@ port presents: bytes in, JSON out, no state.
 cargo test                      # unit + vector tests: the Appendix B certificates rebuilt byte for byte, every chain /
                                 # newest-leaf / certificate_renewed case, and every v2 envelope opened and re-sealed
                                 # from its ephemeral seed
-sh js/build.sh                  # wasm-pack: js/pkg-web (browser, Workers) and js/pkg-node (Node), then js/manifest.json
-node js/verify.mjs              # recomputes the SHA-256 of both .wasm files against the manifest
+sh js/build.sh                  # wasm-pack: js/pkg-web (browser, Workers) and js/pkg-node (Node), built on THIS machine
+sh js/reproduce.sh              # the canonical build, in a container named by digest, compared with js/manifest.json;
+                                # `--pin` writes the manifest and installs those bytes (after crates/ changes)
+node js/verify.mjs              # recomputes the SHA-256 of js/pkg-* against the manifest: passes after a --pin,
+                                # and not after a build.sh, whose bytes are this machine's (see below)
 node js/check.mjs               # Appendix B through the Wasm bindings, vectors read from SPEC.md: 107/107
 node js/intrude.mjs             # the 115 intrusion scenarios with the Wasm core as the defender, compared verdict by
                                 # verdict with the seed's run: 111 blocked, 4 residual by decision, 0 reproduce
@@ -42,9 +45,22 @@ the profile is exact, and every byte is under this crate's control.
 
 ## The Wasm build
 
-`pact_identity_wasm_bg.wasm` is **639,118 bytes** (`js/manifest.json` is the authority; this line is prose and drifted from it once) (release: `opt-level = "z"`, LTO, one codegen unit,
-`panic = "abort"`, no `wasm-opt` — binaryen is not installed here; `WASM_OPT= sh js/build.sh` runs it
-when it is, and typically takes 15–25 % off). Argon2id and the P-256 field arithmetic are most of it.
+`js/manifest.json` is the authority on the size and the hash of `pact_identity_wasm_bg.wasm`; about
+620 KiB, most of it Argon2id and the P-256 field arithmetic (release: `opt-level = "z"`, LTO, one
+codegen unit, `panic = "abort"`, no `wasm-opt`; `WASM_OPT= sh js/build.sh` runs it where binaryen
+is installed, and typically takes 15–25 % off — the pinned build does not).
+
+**The pinned bytes are one container's.** A pin is worth something only if somebody else can make
+the bytes again, and cargo does not make that easy: it gives each crate a different metadata hash
+on a different host, and that hash is part of every symbol's name, so one commit built on a Mac and
+in a Linux container differed by a thousand bytes of layout, and a toolchain that has the std sources installed writes their local path — host triple
+included — into panic locations where one without them writes `/rustc/<commit>/…`. The second is
+fixed in `js/build.sh` by remapping. The first is fixed the usual way, by pinning the build
+platform: `js/reproduce.sh` runs `js/build.sh` in `rust:1.92.0` named BY DIGEST
+on `linux/arm64`, with wasm-pack fetched from its release and checked against a hash, and
+`js/manifest.json` records that builder beside the hash. CI rebuilds it on every push, on a hosted
+runner that is not the machine the pin was written on, and fails if a byte differs.
+`rust-toolchain.toml` pins the compiler for everything else.
 
 **In CI.** `.github/workflows/pact-identity.yml` runs the same list. It cannot use
 `actions/checkout`'s `submodules: true`, because every repository here is private and a runner's

@@ -1,0 +1,7 @@
+# The toolchain the Wasm core is built with. js/manifest.json pins the SHA-256 of the built bytes,
+# and those bytes are a function of the compiler: without this file a `rustup update` on anybody's
+# machine silently produced a different core under the same source. js/reproduce.sh builds with the
+# same version in a container; keep the two, and the image tag there, in step.
+[toolchain]
+channel = "1.92.0"
+targets = ["wasm32-unknown-unknown"]
