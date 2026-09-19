@@ -5,6 +5,13 @@
 set -eu
 cd "$(dirname "$0")/.."
 CRATE=crates/pact-identity-wasm
+# The bytes must not depend on where they were built. Without remapping, rustc embeds the absolute
+# path of every dependency's source file in panic locations: the core pinned on 2026-09-16 carried
+# its builder's home directory 76 times — a leak in an artifact every browser downloads, and the
+# reason two checkouts of one commit could never agree on a hash. rustc applies the LAST matching
+# remap, so the general prefix goes first and the specific ones after it.
+CARGO_HOME_DIR="${CARGO_HOME:-$HOME/.cargo}"
+export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$HOME=/home --remap-path-prefix=$(pwd)=/pact-identity --remap-path-prefix=$CARGO_HOME_DIR=/cargo"
 for target in web nodejs; do
   dir=js/pkg-$( [ "$target" = nodejs ] && echo node || echo web )
   wasm-pack build "$CRATE" --release --target "$target" --out-dir "../../$dir" --out-name pact_identity_wasm --no-pack ${WASM_OPT:---no-opt} 2>&1 | grep -v '^\[INFO\]' || true

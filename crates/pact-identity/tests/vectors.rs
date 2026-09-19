@@ -131,6 +131,17 @@ fn the_seven_certificates_reproduce() {
 }
 
 #[test]
+fn the_core_reports_the_version_of_the_document_it_is_proven_against() {
+    // The first `**Version X` of SPEC.md is the document's own number; the core's constant is a
+    // claim about it, and a claim nothing checks is how `2.0.0-draft` outlived the draft by two
+    // releases.
+    let text = spec();
+    let line = text.lines().find(|l| l.starts_with("**Version ")).expect("SPEC.md has a version line");
+    let version = line.trim_start_matches("**Version ").split_whitespace().next().unwrap();
+    assert_eq!(pact_identity::api::SPEC_VERSION, version, "the core says one spec version and SPEC.md another");
+}
+
+#[test]
 fn spec_carries_the_generated_vectors_unchanged() {
     let blocks = appendix_b_blocks();
     assert!(!blocks.is_empty(), "Appendix B has the 2.0 block");

@@ -15,7 +15,7 @@ import (
 // track the Rust core; the module version is this port's.
 const (
 	ModuleVersion = "0.1.0"
-	SpecVersion   = "2.0.0-draft"
+	SpecVersion   = "2.1.0"
 )
 
 type apiError struct {
