@@ -452,11 +452,16 @@ if (problems.length && !only) {
 // ── the manifest ───────────────────────────────────────────────────────────────────────────────
 //
 // `--manifest <path>` writes what was just compared, so the record of these checks is generated
-// from the run rather than transcribed from it. It is emitted AFTER the comparison and the gate, so
-// a manifest only ever describes checks that actually agreed: a file claiming 270 passing cases
-// cannot be produced by a run in which they did not.
+// from the run rather than transcribed from it. It is written ONLY when every case agreed and the
+// gate is satisfied, so a manifest describes checks that actually held: a file claiming 270 passing
+// cases cannot be produced by a run in which they did not.
+//
+// That last sentence was here before the condition was. The manifest was written on every run,
+// disagreements and all, a few lines above the exit code that says the run failed; `record.mjs`
+// was safe only because a non-zero exit throws before it reads the file.
 const manifestAt = process.argv[process.argv.indexOf('--manifest') + 1];
-if (process.argv.includes('--manifest') && manifestAt && !only) {
+const agreed = bad === 0 && problems.length === 0;
+if (process.argv.includes('--manifest') && manifestAt && !only && agreed) {
   const byFn = new Map();
   for (const [name, fn] of cases) {
     if (!byFn.has(fn)) byFn.set(fn, []);
