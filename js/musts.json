@@ -154,6 +154,17 @@
     ]
   },
   "9.#1": {
+    "hash": "63b8673a7797",
+    "text": "A leaf's key does not outlive its leaf: a host MUST stop using the key of a leaf that has expired and MUST destr",
+    "elsewhere": "node",
+    "why": "holding and destroying a leaf's key is the host's act. pact-gateway stops offering the key on the read path from notAfter and destroys both copies — the ledger row's and the account's — at start, on the hourly sweep and on adoption, stops serving the account, and audits it (TestAnExpiredCurrentLeafLosesItsKeyInBothPlaces, TestALeafThatRunsOutStopsBeingServedAndLosesItsKey); pact-cloud does the same on the first request past the date, answers `unavailable` rather than signing with anything, and a renewal still installs (leaf-expiry.test.ts). Until 2026-09-19 both retired superseded leaves only, so the key of a leaf nobody renewed was held and used for as long as the process lived",
+    "elsewhere_names": [
+      "gateway:TestAnExpiredCurrentLeafLosesItsKeyInBothPlaces",
+      "gateway:TestALeafThatRunsOutStopsBeingServedAndLosesItsKey",
+      "cloud:gateway/test/leaf-expiry.test.ts"
+    ]
+  },
+  "9.#2": {
     "hash": "a5ac9ce177ba",
     "text": "**Moving** is the person issuing a leaf to the new host, the data carried across as an archive — contacts, mes",
     "elsewhere": "node",
@@ -165,7 +176,7 @@
       "cloud:gateway/test/export.test.ts"
     ]
   },
-  "9.#2": {
+  "9.#3": {
     "hash": "6fd3ca8f5633",
     "text": "An address an identity has vacated MUST NOT be assigned to another identity until the last leaf issued for it ",
     "elsewhere": "node",
@@ -175,7 +186,7 @@
       "cloud:gateway/test/leave-20.test.ts"
     ]
   },
-  "9.#3": {
+  "9.#4": {
     "hash": "9d2a2b8b2d6c",
     "text": "A host that exports an identity toward a destination that cannot carry its chain MUST say so before the export",
     "elsewhere": "node",
@@ -184,7 +195,7 @@
       "cloud:gateway/src/leave/convert.ts"
     ]
   },
-  "9.#4": {
+  "9.#5": {
     "hash": "f287941a9ea7",
     "text": "It issues one live leaf per identity at a time — a second endpoint is a move, not a second home, because conta",
     "held_by": [
