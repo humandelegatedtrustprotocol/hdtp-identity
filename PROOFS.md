@@ -7,12 +7,12 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed here that did not pass.
 
-Specification: **2.1.0**. **45** normative sentences, **270** cross-port parity cases over **38** guarded functions.
+Specification: **2.1.0**. **46** normative sentences, **270** cross-port parity cases over **38** guarded functions.
 
-## The 45 normative sentences of the specification
+## The 46 normative sentences of the specification
 
 A sentence carrying MUST, MUST NOT or REQUIRED, one row each, in document order. **33** are
-held by a test or an intrusion scenario in this repository; **12** belong to a wallet, a host
+held by a test or an intrusion scenario in this repository; **13** belong to a wallet, a host
 or a node, and name the artefact that holds them there — checked against the sibling repository
 whenever it is on disk. A row with nothing in its last column would fail `js/musts.mjs`.
 
@@ -74,10 +74,11 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 
 | # | The sentence | Held by |
 |---|---|---|
-| `9.#1` | **Moving** is the person issuing a leaf to the new host, the data carried across as an archive — contacts, messages, media, invites, settings; the archive's format is each host's own, a host that makes one MUST NOT put a leaf's private key in it, and a host that imports one MUST refuse any key material in it — and the new host reaching every contact by §5.3, *before* the person tells the old host to leave, so that no contact meets a gap. | `gateway:TestABackupBundleCarriesNoLeafKey`, `gateway:TestRestoreRefusesAnotherHostsKeysUnlessDataOnly`, `cloud:gateway/src/leave/selftest.ts`, `cloud:gateway/test/export.test.ts` |
-| `9.#2` | An address an identity has vacated MUST NOT be assigned to another identity until the last leaf issued for it has expired, so a contact that missed the move never reaches a stranger where it expects a friend. | `cloud:gateway/test/move-20.test.ts`, `cloud:gateway/test/leave-20.test.ts` |
-| `9.#3` | A host that exports an identity toward a destination that cannot carry its chain MUST say so before the export; the remedy is a destination that can. | `cloud:gateway/src/leave/convert.ts` |
-| `9.#4` | It issues one live leaf per identity at a time — a second endpoint is a move, not a second home, because contacts keep one pin and the newest leaf wins — and MUST NOT issue a second while one is live except as its replacement. | `rust:issues_from_the_vault`, `go:TestWalletIssue`, `go:TestVaultRulesMirrorTheCore` |
+| `9.#1` | A leaf's key does not outlive its leaf: a host MUST stop using the key of a leaf that has expired and MUST destroy it, keeping the key id so that an envelope still sealed to it is answered `certificate_renewed` (§14.4) — past its date every verifier refuses the leaf (§14.2 rule 4), so the key can do nothing legitimate, and a renewal has never needed it. | `gateway:TestAnExpiredCurrentLeafLosesItsKeyInBothPlaces`, `gateway:TestALeafThatRunsOutStopsBeingServedAndLosesItsKey`, `cloud:gateway/test/leaf-expiry.test.ts` |
+| `9.#2` | **Moving** is the person issuing a leaf to the new host, the data carried across as an archive — contacts, messages, media, invites, settings; the archive's format is each host's own, a host that makes one MUST NOT put a leaf's private key in it, and a host that imports one MUST refuse any key material in it — and the new host reaching every contact by §5.3, *before* the person tells the old host to leave, so that no contact meets a gap. | `gateway:TestABackupBundleCarriesNoLeafKey`, `gateway:TestRestoreRefusesAnotherHostsKeysUnlessDataOnly`, `cloud:gateway/src/leave/selftest.ts`, `cloud:gateway/test/export.test.ts` |
+| `9.#3` | An address an identity has vacated MUST NOT be assigned to another identity until the last leaf issued for it has expired, so a contact that missed the move never reaches a stranger where it expects a friend. | `cloud:gateway/test/move-20.test.ts`, `cloud:gateway/test/leave-20.test.ts` |
+| `9.#4` | A host that exports an identity toward a destination that cannot carry its chain MUST say so before the export; the remedy is a destination that can. | `cloud:gateway/src/leave/convert.ts` |
+| `9.#5` | It issues one live leaf per identity at a time — a second endpoint is a move, not a second home, because contacts keep one pin and the newest leaf wins — and MUST NOT issue a second while one is live except as its replacement. | `rust:issues_from_the_vault`, `go:TestWalletIssue`, `go:TestVaultRulesMirrorTheCore` |
 
 ### 13.1 Format
 
