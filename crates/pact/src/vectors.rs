@@ -517,13 +517,27 @@ pub fn answer_code(text: &str) -> String {
     format!("unknown:{}", v.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>().join(",")).unwrap_or_default())
 }
 
-fn post(endpoint: &str, body: &str, session: Option<&str>) -> Res<(String, Option<String>)> {
+/// How the target is dialled. `--allow-insecure` means BOTH things a node on your own machine
+/// needs: the address guard stands aside, and so does WebPKI.
+///
+/// It used to mean only the first. A node in direct mode serves TLS under its own chain — a root
+/// no public authority signed — so the flag that promised "a node on your own machine" got past
+/// the guard and stopped at `invalid peer certificate: UnknownIssuer`, having posted nothing. On
+/// 2026-09-18 nobody noticed, because the rig this was aimed at sat behind Cloudflare, whose
+/// certificates WebPKI does accept. What the battery measures does not rest on the transport: every
+/// envelope is sealed to the key in the target's CARD, which no carrier can open or answer for.
+fn tls(insecure: bool) -> ureq::tls::TlsConfig {
+    ureq::tls::TlsConfig::builder().disable_verification(insecure).build()
+}
+
+fn post(endpoint: &str, body: &str, session: Option<&str>, insecure: bool) -> Res<(String, Option<String>)> {
     let mut req = ureq::post(endpoint).header("content-type", "application/json").header("accept", "application/json, text/event-stream");
     if let Some(id) = session {
         req = req.header("mcp-session-id", id);
     }
     let mut resp = req
         .config()
+        .tls_config(tls(insecure))
         .http_status_as_error(false)
         .timeout_global(Some(std::time::Duration::from_secs(20)))
         .build()
@@ -545,13 +559,13 @@ fn post(endpoint: &str, body: &str, session: Option<&str>) -> Res<(String, Optio
 ///
 /// A stateless receiver hands back no session id, and then this changes nothing: the scenarios post
 /// exactly as they did before.
-fn initialize(endpoint: &str) -> Res<Option<String>> {
+fn initialize(endpoint: &str, insecure: bool) -> Res<Option<String>> {
     let body = json!({ "jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {
         "protocolVersion": "2025-06-18",
         "capabilities": {},
         "clientInfo": { "name": "pact vectors intrude", "version": env!("CARGO_PKG_VERSION") },
     }});
-    let (text, session) = post(endpoint, &body.to_string(), None)?;
+    let (text, session) = post(endpoint, &body.to_string(), None, insecure)?;
     if session.is_none() && !text.contains("\"result\"") {
         return fail(format!(
             "{endpoint}: initialize was refused, so no scenario could be posted: {}",
@@ -562,14 +576,14 @@ fn initialize(endpoint: &str) -> Res<Option<String>> {
         // The notification the protocol requires before any call; a receiver that gates on it
         // answers everything else with the same session error the scenarios used to collect.
         let note = json!({ "jsonrpc": "2.0", "method": "notifications/initialized" });
-        let _ = post(endpoint, &note.to_string(), session.as_deref())?;
+        let _ = post(endpoint, &note.to_string(), session.as_deref(), insecure)?;
     }
     Ok(session)
 }
 
-fn sealed_call(endpoint: &str, wire: &Value, id: u32, session: Option<&str>) -> Res<String> {
+fn sealed_call(endpoint: &str, wire: &Value, id: u32, session: Option<&str>, insecure: bool) -> Res<String> {
     let body = json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call", "params": { "name": "sealed_call", "arguments": wire } });
-    let (text, _) = post(endpoint, &body.to_string(), session)?;
+    let (text, _) = post(endpoint, &body.to_string(), session, insecure)?;
     Ok(answer_code(&text))
 }
 
@@ -602,6 +616,9 @@ pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now
     let card_text = match card_file {
         Some(path) => std::fs::read_to_string(path).map_err(|e| Fail(format!("{path}: {e}")))?,
         None => ureq::get(format!("{endpoint}/card.vcf"))
+            .config()
+            .tls_config(tls(allow_insecure))
+            .build()
             .call()
             .and_then(|mut r| r.body_mut().read_to_string())
             .map_err(|e| Fail(format!("{endpoint}/card.vcf: {e} — a host need not serve a card at a URL of its own (SPEC §9 puts it on the invite landing page); save the target's card and pass --card <file>")))?,
@@ -671,83 +688,65 @@ pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now
         serde_json::to_value(wire).map_err(|e| Fail(e.to_string()))
     };
     let message = json!({ "name": "send_message", "arguments": { "msg_id": "m", "text": "hello" } });
-    let listing = json!({});
 
     // The handshake first: a receiver that keeps MCP sessions refuses every `tools/call` before it,
     // and the refusal looks nothing like a security answer.
-    let session = initialize(&endpoint)?;
+    let session = initialize(&endpoint, allow_insecure)?;
     match session.as_deref() {
         Some(id) => println!("session     {id}"),
         None => println!("session     none (the receiver is stateless)"),
     }
 
-    let mut results: Vec<(String, String, bool)> = Vec::new();
+    // An answer that is no PACT answer at all — a transport error, a body that is not JSON — means
+    // the scenario never reached the layer it tests. That is a failure of the RUN, and calling it
+    // an intrusion that reproduces is how the JS driver once reported 27 of 27 against the
+    // reference node, every one an `http_400` from a missing handshake.
+    let mut results: Vec<(String, String, &'static str)> = Vec::new();
     let mut posted = 0u32;
-    let mut run = |name: &str, wire: Value, expect: &[&str]| -> Res<()> {
+    let mut run = |name: &str, wire: Value, expect: &str| -> Res<()> {
         posted += 1;
-        let got = sealed_call(&endpoint, &wire, posted, session.as_deref())?;
-        let blocked = expect.contains(&got.as_str());
-        println!("  {:<10} {name}: {got}", if blocked { "blocked" } else { "REPRODUCES" });
-        results.push((name.into(), got, blocked));
+        let got = sealed_call(&endpoint, &wire, posted, session.as_deref(), allow_insecure)?;
+        let verdict = if got == expect {
+            "blocked"
+        } else if got.starts_with("unknown") || got.starts_with("http_") {
+            "UNREACHED"
+        } else {
+            "REPRODUCES"
+        };
+        println!("  {verdict:<10} {name}: {got}");
+        results.push((name.into(), got, verdict));
         Ok(())
     };
 
-    println!("scenarios (judged by the answer's code only)");
-    let small = seal(Form::Leaf, &chain_m, message.clone())?;
-    run("a stranger in the small form", small.clone(), &["chain_required"])?;
-    run("the same small envelope again (a replay proves nothing)", small, &["chain_required"])?;
-    run("a stranger with a chain calling send_message", seal(Form::Chain, &chain_m, message.clone())?, &["envelope_invalid"])?;
-    let mut tampered = seal(Form::Chain, &chain_m, message.clone())?;
-    tampered["sig"] = json!(b64u(&[0u8; 64]));
-    run("a chain envelope with a forged signature", tampered, &["envelope_invalid"])?;
-    let mut unknown_kid = seal(Form::Chain, &chain_m, message.clone())?;
-    let header: Value = serde_json::from_slice(&from_b64u(unknown_kid["protected"].as_str().unwrap_or("")).map_err(|e| Fail(e.why))?)
-        .map_err(|e| Fail(e.to_string()))?;
-    let mut h2 = header.clone();
-    h2["kid"] = json!(host_pub.fingerprint());
-    unknown_kid["protected"] = json!(b64u(pact_identity::canonical::canonical(&h2).as_bytes()));
-    run("an envelope sealed to a key the endpoint never held", unknown_kid, &["envelope_invalid"])?;
-    let mut with_from = seal(Form::Chain, &chain_m, message.clone())?;
-    let mut h3 = header.clone();
-    h3["from"] = json!(host_pub.fingerprint());
-    with_from["protected"] = json!(b64u(pact_identity::canonical::canonical(&h3).as_bytes()));
-    run("a header carrying a member the version does not list", with_from, &["envelope_invalid"])?;
-    let mut wrong_suite = seal(Form::Chain, &chain_m, message.clone())?;
-    let mut h4 = header.clone();
-    h4["suite"] = json!(if header["suite"] == "PACT-SEAL-X25519" { "PACT-SEAL-P256" } else { "PACT-SEAL-X25519" });
-    wrong_suite["protected"] = json!(b64u(pact_identity::canonical::canonical(&h4).as_bytes()));
-    run("a suite that is not the one the recipient key takes", wrong_suite, &["envelope_invalid"])?;
-    run(
-        "an expired leaf in the chain",
-        seal(Form::Chain, &[leaf_m_expired.clone(), root_m_der.clone()], message.clone())?,
-        &["envelope_invalid"],
-    )?;
-    // Chains and headers an honest sealer will not build, hand-rolled.
+    // Everything an honest sealer will not build, hand-rolled — and SEALED UNDER what it forges.
     //
-    // `seal_request` refuses a chain that is not exactly a leaf and a root — right for a
-    // sender and, when that refusal came back as an error from this command, it took the
-    // whole battery down with it: every scenario after it went unrun. An intrusion harness
-    // is the one caller that has to produce what an honest sealer will not, so it assembles
-    // the envelope from the same public parts `seal_body` uses: the canonical header as
-    // AAD, one HPKE seal to the recipient's leaf key, and a signature over
-    // protected||enc||ct. Rewriting the header AFTER sealing would prove nothing — the AAD
-    // would no longer match and every such envelope would fail for that reason alone — so
-    // the forged header is the one that is sealed under.
+    // `seal_request` refuses a chain that is not exactly a leaf and a root, a version it does not
+    // speak, a header member it does not know: right for a sender, useless for an intruder. So this
+    // assembles the envelope from the same public parts `seal_body` uses — the canonical header as
+    // AAD, one HPKE seal to the recipient's leaf key, a signature over protected||enc||ct — with
+    // `patch` laid over the honest header BEFORE any of it is computed.
+    //
+    // Rewriting `protected` after sealing proves nothing: the AAD stops matching, and the envelope
+    // is refused for that alone whatever the header says. Three scenarios here did exactly that
+    // until 2026-09-20 (an unknown `kid`, an unlisted member, the wrong suite) and so could not
+    // fail: a receiver that never checked the suite would still have answered `envelope_invalid`,
+    // for the broken AAD, and been scored as blocking it.
+    const CALL: &str = "application/pact-call+json";
+    const INVALID: &str = "envelope_invalid";
     let mut forged = 0u32;
-    let mut forge = |chain: Vec<Vec<u8>>, ver: i64, cty: &str, msg_id_empty: bool, string_times: bool, params: Value| -> Res<Value> {
+    let mut forge = |chain: &[Vec<u8>], patch: Value, method: &str, params: Value| -> Res<Value> {
         forged += 1;
         let suite = suite_for(&recipient.public_key);
-        let msg_id = if msg_id_empty { String::new() } else { format!("intrude-{now}-forge{forged}") };
-        let header = if string_times {
-            json!({ "v": ver, "suite": suite.id(), "kid": recipient.public_key.fingerprint(),
-                "msg_id": &msg_id, "ts": ts.to_string(), "exp": (ts + 600).to_string(), "cty": cty })
-        } else {
-            json!({ "v": ver, "suite": suite.id(), "kid": recipient.public_key.fingerprint(),
-                "msg_id": &msg_id, "ts": ts, "exp": ts + 600, "cty": cty })
-        };
+        let mut header = json!({ "v": 2, "suite": suite.id(), "kid": recipient.public_key.fingerprint(),
+            "msg_id": format!("intrude-{now}-forge{forged}"), "ts": ts, "exp": ts + 600, "cty": CALL });
+        if let (Some(h), Some(p)) = (header.as_object_mut(), patch.as_object()) {
+            for (k, v) in p {
+                h.insert(k.clone(), v.clone());
+            }
+        }
         let aad = pact_identity::canonical::canonical(&header).into_bytes();
         let chain_b64: Vec<Value> = chain.iter().map(|c| json!(b64u(c))).collect();
-        let body = json!({ "method": "tools/call", "params": params, "chain": chain_b64 });
+        let body = json!({ "method": method, "params": params, "chain": chain_b64 });
         let plaintext = serde_json::to_vec(&body).map_err(|e| Fail(e.to_string()))?;
         let (enc, ct) = hpke::seal(suite, &recipient.public_key, envelope::INFO_V2, &aad, &plaintext, None).map_err(|e| Fail(e.why))?;
         let mut signed = aad.clone();
@@ -756,22 +755,41 @@ pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now
         let sig = host_m.sign(&signed);
         Ok(json!({ "protected": b64u(&aad), "enc": b64u(&enc), "ct": b64u(&ct), "sig": b64u(&sig) }))
     };
-    const CALL: &str = "application/pact-call+json";
+
+    // The scenarios, in an order that matters; their names are js/live.mjs's too, and
+    // js/live.test.mjs holds the two lists to each other.
+    println!("scenarios (judged by the answer's code only)");
+    let small = seal(Form::Leaf, &chain_m, message.clone())?;
+    run("a stranger in the small form, naming a leaf nobody holds", small.clone(), "chain_required")?;
+    run("the same small-form envelope replayed", small, "chain_required")?;
+    run("a stranger in the full form calling a contact tool", seal(Form::Chain, &chain_m, message.clone())?, INVALID)?;
+    let mut tampered = seal(Form::Chain, &chain_m, message.clone())?;
+    tampered["sig"] = json!(b64u(&[0u8; 64]));
+    run("a full-form envelope whose signature was tampered", tampered, INVALID)?;
+
+    // Headers no honest sealer writes.
+    let unknown_kid = forge(&chain_m, json!({ "kid": host_pub.fingerprint() }), "tools/call", message.clone())?;
+    run("an envelope sealed to a key this endpoint never held", unknown_kid, INVALID)?;
+    let with_from = forge(&chain_m, json!({ "from": host_pub.fingerprint() }), "tools/call", message.clone())?;
+    run("a header carrying a member the protocol does not list", with_from, INVALID)?;
+    let other = if suite_for(&recipient.public_key).id() == "PACT-SEAL-X25519" { "PACT-SEAL-P256" } else { "PACT-SEAL-X25519" };
+    let wrong_suite = forge(&chain_m, json!({ "suite": other }), "tools/call", message.clone())?;
+    run("a suite that is not the one the recipient key takes", wrong_suite, INVALID)?;
 
     // §14.2 takes exactly two certificates, in one order, the second self-signed. Every
     // shape below is a path a general X.509 verifier would happily walk.
-    let one = forge(vec![leaf_m.clone()], 2, CALL, false, false, message.clone())?;
-    run("a chain of one certificate", one, &["envelope_invalid"])?;
-    let none = forge(Vec::new(), 2, CALL, false, false, message.clone())?;
-    run("an empty chain", none, &["envelope_invalid"])?;
-    let three = forge(vec![leaf_m.clone(), root_m_der.clone(), root_m_der.clone()], 2, CALL, false, false, message.clone())?;
-    run("a chain of three certificates", three, &["envelope_invalid"])?;
-    let reversed = forge(vec![root_m_der.clone(), leaf_m.clone()], 2, CALL, false, false, message.clone())?;
-    run("the chain in reverse order", reversed, &["envelope_invalid"])?;
-    let root_twice = forge(vec![root_m_der.clone(), root_m_der.clone()], 2, CALL, false, false, message.clone())?;
-    run("the root presented as its own leaf", root_twice, &["envelope_invalid"])?;
-    let leaf_twice = forge(vec![leaf_m.clone(), leaf_m.clone()], 2, CALL, false, false, message.clone())?;
-    run("the leaf presented as its own root", leaf_twice, &["envelope_invalid"])?;
+    run("a chain of one certificate", forge(std::slice::from_ref(&leaf_m), json!({}), "tools/call", message.clone())?, INVALID)?;
+    run("an empty chain", forge(&[], json!({}), "tools/call", message.clone())?, INVALID)?;
+    let three = [leaf_m.clone(), root_m_der.clone(), root_m_der.clone()];
+    run("a chain of three certificates", forge(&three, json!({}), "tools/call", message.clone())?, INVALID)?;
+    run("the chain in reverse order", forge(&[root_m_der.clone(), leaf_m.clone()], json!({}), "tools/call", message.clone())?, INVALID)?;
+    let root_twice = [root_m_der.clone(), root_m_der.clone()];
+    run("the root presented as its own leaf", forge(&root_twice, json!({}), "tools/call", message.clone())?, INVALID)?;
+    run(
+        "the leaf presented as its own root",
+        forge(&[leaf_m.clone(), leaf_m.clone()], json!({}), "tools/call", message.clone())?,
+        INVALID,
+    )?;
     // A CA-signed intermediate in the root slot is WebPKI asking to be let in: accept it and
     // any public CA could mint an identity. Rule 2 wants the root self-signed, so there is no
     // hierarchy to climb and no authority above the person.
@@ -795,91 +813,10 @@ pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now
         ispec.ca = true;
         x509::build_leaf(&ispec, &root_m).map_err(|e| Fail(e.why))?
     };
-    let inter = forge(vec![leaf_m.clone(), intermediate], 2, CALL, false, false, message.clone())?;
-    run("an intermediate posing as the root", inter, &["envelope_invalid"])?;
+    run("an intermediate posing as the root", forge(&[leaf_m.clone(), intermediate], json!({}), "tools/call", message.clone())?, INVALID)?;
 
-    // The retired generation, refused by a node that no longer implements it, and a version
-    // that does not exist yet. Both are sealed under the forged header, so what refuses them
-    // is the version check and not a broken AAD.
-    let v1 = forge(chain_m.clone(), 1, CALL, false, false, message.clone())?;
-    run("a v: 1 header, the retired generation", v1, &["envelope_invalid"])?;
-    let v3 = forge(chain_m.clone(), 3, CALL, false, false, message.clone())?;
-    run("a header claiming a version that does not exist yet", v3, &["envelope_invalid"])?;
-    // `cty` is what binds direction: a result envelope is never dispatched (§13.2).
-    let as_result = forge(chain_m.clone(), 2, "application/pact-result+json", false, false, message.clone())?;
-    run("a result envelope dispatched as a request", as_result, &["envelope_invalid"])?;
-    // Idempotency keyed on an empty string protects nothing (§13.1).
-    let no_id = forge(chain_m.clone(), 2, CALL, true, false, message.clone())?;
-    run("an empty msg_id", no_id, &["envelope_invalid"])?;
-    // A `ts` of "1757000000" is not the same bytes as one of 1757000000 (§13.1).
-    let strings = forge(chain_m.clone(), 2, CALL, false, true, message.clone())?;
-    run("a header whose ts and exp are strings", strings, &["envelope_invalid"])?;
-
-    run("a sealed tools/list from a stranger (no card to bind)", seal(Form::Chain, &chain_m, listing)?, &["envelope_invalid"])?;
-    let stale = envelope::seal_request(SealRequest {
-        recipient: &recipient.public_key,
-        sender: &host_m,
-        form: Form::Chain,
-        sender_chain: Some(&chain_m),
-        method: "tools/call".into(),
-        params: message.clone(),
-        msg_id: "intrude-stale".into(),
-        ts: ts - 3600,
-        exp: Some(ts - 3000),
-        cty: None,
-        ephemeral_seed: None,
-    })
-    .map_err(|e| Fail(e.why))?;
-    run("an envelope an hour old", serde_json::to_value(stale)?, &["envelope_invalid"])?;
-    // §13.3's skew window is 300 seconds either way. A boundary nothing tests drifts.
-    let skewed = envelope::seal_request(SealRequest {
-        recipient: &recipient.public_key,
-        sender: &host_m,
-        form: Form::Chain,
-        sender_chain: Some(&chain_m),
-        method: "tools/call".into(),
-        params: message.clone(),
-        msg_id: format!("intrude-{now}-skew"),
-        ts: ts - 301,
-        exp: Some(ts + 300),
-        cty: None,
-        ephemeral_seed: None,
-    })
-    .map_err(|e| Fail(e.why))?;
-    run("an envelope 301 seconds old", serde_json::to_value(skewed)?, &["envelope_invalid"])?;
-    let ahead = envelope::seal_request(SealRequest {
-        recipient: &recipient.public_key,
-        sender: &host_m,
-        form: Form::Chain,
-        sender_chain: Some(&chain_m),
-        method: "tools/call".into(),
-        params: message.clone(),
-        msg_id: format!("intrude-{now}-ahead"),
-        ts: ts + 301,
-        exp: Some(ts + 900),
-        cty: None,
-        ephemeral_seed: None,
-    })
-    .map_err(|e| Fail(e.why))?;
-    run("an envelope 301 seconds in the future", serde_json::to_value(ahead)?, &["envelope_invalid"])?;
-    // `exp - ts` bounds how long every receiver must remember a msg_id (§13.3).
-    let forever = envelope::seal_request(SealRequest {
-        recipient: &recipient.public_key,
-        sender: &host_m,
-        form: Form::Chain,
-        sender_chain: Some(&chain_m),
-        method: "tools/call".into(),
-        params: message.clone(),
-        msg_id: format!("intrude-{now}-forever"),
-        ts,
-        exp: Some(ts + 365 * 86_400),
-        cty: None,
-        ephemeral_seed: None,
-    })
-    .map_err(|e| Fail(e.why))?;
-    run("an envelope asking to be remembered for a year", serde_json::to_value(forever)?, &["envelope_invalid"])?;
-    // Rule 4 checks the leaf's dates and only the leaf's: a leaf not valid yet is refused
-    // exactly as an expired one is.
+    // Time, WELL outside the edges the receiver holds. Rule 4 checks the leaf's dates and only
+    // the leaf's: a leaf not valid yet is refused exactly as an expired one is.
     let leaf_m_future = {
         let mut fspec = LeafSpec {
             cn: "Alina Rao",
@@ -900,11 +837,78 @@ pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now
         fspec.not_before = now + 3600;
         x509::build_leaf(&fspec, &root_m).map_err(|e| Fail(e.why))?
     };
-    run("a leaf that is not valid yet", seal(Form::Chain, &[leaf_m_future, root_m_der.clone()], message.clone())?, &["envelope_invalid"])?;
+    run("a leaf that is not valid yet", seal(Form::Chain, &[leaf_m_future, root_m_der.clone()], message.clone())?, INVALID)?;
+    run("an expired leaf", seal(Form::Chain, &[leaf_m_expired.clone(), root_m_der.clone()], message.clone())?, INVALID)?;
+    run("an envelope an hour old", forge(&chain_m, json!({ "ts": ts - 3600, "exp": ts - 3000 }), "tools/call", message.clone())?, INVALID)?;
+    // §13.3's window is 300 seconds either way, and the EXACT boundary — 300 in, 301 out — is the
+    // offline suite's, where there is no transit and one clock. These said 301 until 2026-09-20.
+    // Over a network that is a coin toss: an envelope sealed 301 seconds ahead and posted two
+    // seconds later is 299 ahead and inside the window, and a receiver that accepts it is right
+    // (the JS driver reported exactly that as an intrusion). A live run can honestly claim "well
+    // outside the window is refused", so the margin is thirty seconds.
+    const WINDOW: i64 = 300;
+    const MARGIN: i64 = 30;
+    let old = forge(&chain_m, json!({ "ts": ts - WINDOW - MARGIN, "exp": ts + 300 }), "tools/call", message.clone())?;
+    run(&format!("an envelope {} seconds old", WINDOW + MARGIN), old, INVALID)?;
+    let ahead = forge(&chain_m, json!({ "ts": ts + WINDOW + MARGIN, "exp": ts + 900 }), "tools/call", message.clone())?;
+    run(&format!("an envelope {} seconds in the future", WINDOW + MARGIN), ahead, INVALID)?;
+    // §13.3 caps a lifetime at thirty days, because `exp` is how long a receiver must remember.
+    let forever = forge(&chain_m, json!({ "exp": ts + 365 * 86_400 }), "tools/call", message.clone())?;
+    run("an envelope asking to be remembered for a year", forever, INVALID)?;
 
-    let bad = results.iter().filter(|(_, _, ok)| !ok).count();
-    println!("{} scenarios: {} blocked, {} reproduce", results.len(), results.len() - bad, bad);
-    Ok(if bad > 0 { 1 } else { 0 })
+    // The retired generation, refused by a node that no longer implements it, and a version
+    // that does not exist yet.
+    run("a v: 1 header, the retired generation", forge(&chain_m, json!({ "v": 1 }), "tools/call", message.clone())?, INVALID)?;
+    run(
+        "a header claiming a version that does not exist yet",
+        forge(&chain_m, json!({ "v": 3 }), "tools/call", message.clone())?,
+        INVALID,
+    )?;
+    // A `ts` of "1757000000" is not the same bytes as one of 1757000000 (§13.1).
+    let strings = forge(&chain_m, json!({ "ts": ts.to_string(), "exp": (ts + 600).to_string() }), "tools/call", message.clone())?;
+    run("a header whose ts and exp are strings", strings, INVALID)?;
+    // Idempotency keyed on an empty string protects nothing (§13.1).
+    run("an empty msg_id", forge(&chain_m, json!({ "msg_id": "" }), "tools/call", message.clone())?, INVALID)?;
+    // `cty` is what binds direction: a result envelope is never dispatched (§13.2).
+    let as_result = forge(&chain_m, json!({ "cty": "application/pact-result+json" }), "tools/call", message.clone())?;
+    run("a result envelope dispatched as a request", as_result, INVALID)?;
+    // A real `tools/list`. Until 2026-09-20 this scenario sealed a `tools/call` with EMPTY params
+    // and was named for a tools/list: refused, as any call with no tool name is, for a reason
+    // that had nothing to do with listing.
+    run("a sealed tools/list from a stranger", forge(&chain_m, json!({}), "tools/list", json!({}))?, INVALID)?;
+    // `sig` covers protected||enc||ct with nothing between them, so a byte moved across the
+    // enc/ct boundary leaves the signed bytes identical: what refuses it is `enc` being the
+    // suite's own length (§13.1).
+    let mut slid = seal(Form::Chain, &chain_m, message.clone())?;
+    let mut enc = from_b64u(slid["enc"].as_str().unwrap_or("")).map_err(|e| Fail(e.why))?;
+    let mut ct = from_b64u(slid["ct"].as_str().unwrap_or("")).map_err(|e| Fail(e.why))?;
+    if let Some(last) = enc.pop() {
+        ct.insert(0, last);
+    }
+    slid["enc"] = json!(b64u(&enc));
+    slid["ct"] = json!(b64u(&ct));
+    run("a byte moved from the encapsulated key into the ciphertext", slid, INVALID)?;
+
+    // THE CONTROL, and it is last on purpose. Twenty-seven refusals are also what a receiver that
+    // refuses EVERYTHING gives, and until 2026-09-20 this battery had no scenario such a receiver
+    // would fail. This is the one well-formed call from a stranger that must get through the same
+    // door: sealed, by the target, to her key. It leaves a pending request behind — after it
+    // Mallory is no stranger — which is why nothing may come after it, and why her keys are new
+    // every run.
+    let card_m = pact_identity::card::encode("Mallory", &leaf_m, Some("required"), &[]);
+    let request = json!({ "name": "request_contact", "arguments": { "card": card_m, "note": "hi" } });
+    run("CONTROL: a stranger asking for contact with a card that is her leaf", seal(Form::Chain, &chain_m, request)?, "sealed")?;
+
+    let reproduce = results.iter().filter(|(_, _, v)| *v == "REPRODUCES").count();
+    let unreached = results.iter().filter(|(_, _, v)| *v == "UNREACHED").count();
+    println!(
+        "{} scenarios: {} blocked, {} reproduce, {} never reached a PACT answer",
+        results.len(),
+        results.len() - reproduce - unreached,
+        reproduce,
+        unreached
+    );
+    Ok(if reproduce + unreached > 0 { 1 } else { 0 })
 }
 
 #[cfg(test)]

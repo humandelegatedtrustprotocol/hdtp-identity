@@ -32,6 +32,11 @@ node js/check.mjs               # Appendix B through the Wasm bindings, vectors 
 node js/intrude.mjs             # the 115 intrusion scenarios with the Wasm core as the defender, compared verdict by
                                 # verdict with the seed's run: 111 blocked, 4 residual by decision, 0 reproduce
 node js/intrude.mjs --port go   # the same against go/bin/pact-identity-go
+node js/live.mjs --endpoint https://host/slug [--card card.vcf] [--insecure]
+                                # the 28 black-box scenarios aimed at a LIVE endpoint, judged by the answer's code;
+                                # `pact vectors intrude --against … [--card …] [--allow-insecure]` is the same 28 from
+                                # the Rust CLI, and js/live.test.mjs holds the two lists to each other. The last
+                                # scenario is a control that must get THROUGH; it leaves a pending request behind
 node js/musts.mjs               # every MUST in pact-protocol/SPEC.md names something that holds it, or says who does
 node js/record.mjs             # regenerate PROOFS.md: every MUST with its holder, every parity case (it prints both counts)
 node js/record.mjs --check     # ...and fail if it is stale (what gate.sh runs)

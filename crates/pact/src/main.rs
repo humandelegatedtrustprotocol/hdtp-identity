@@ -210,7 +210,8 @@ enum VectorsCmd {
         /// deployment's convenience and not something a target must offer.
         #[arg(long)]
         card: Option<String>,
-        /// Allow a target the address guard refuses — a node on your own machine, and nothing else
+        /// A node on your own machine, and nothing else: the address guard stands aside, and so does
+        /// WebPKI, because a node in direct mode serves TLS under its own chain
         #[arg(long)]
         allow_insecure: bool,
         #[arg(long)]
