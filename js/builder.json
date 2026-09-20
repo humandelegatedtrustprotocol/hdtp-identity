@@ -1,0 +1,6 @@
+{
+  "image": "rust:1.92.0-slim-bookworm@sha256:f1f73538ebe623fd3673a35aff3df358ae1084c64c55646516e5b17b321b6c9b",
+  "platform": "linux/arm64",
+  "wasm_pack": "wasm-pack-v0.15.0-aarch64-unknown-linux-musl",
+  "wasm_pack_sha256": "e17ef0806381c3a0acb9c9ddad643a49facaa5a2ecf657a421d4d8f3357a24b7"
+}

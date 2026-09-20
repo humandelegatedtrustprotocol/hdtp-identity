@@ -8,7 +8,7 @@ use crate::hpke::{self, Suite};
 use crate::keys::{self, Alg, PrivateKey, PublicKey};
 use crate::time::{format_rfc3339, parse_rfc3339};
 use crate::util::{b64u, err, from_b64u, Error, Result};
-use crate::vault::{self, Kdf};
+use crate::vault::{self};
 use crate::x509::{self, ChainResult, Extra, LeafSpec};
 use serde_json::{json, Map, Value};
 use zeroize::Zeroizing;
@@ -410,11 +410,14 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
 
         // §6 vault
         "vault_seal" => {
-            let kdf = a.get("kdf").map(|k| Kdf {
-                m_kib: k.get("m_kib").and_then(|x| x.as_u64()).unwrap_or(65_536) as u32,
-                t: k.get("t").and_then(|x| x.as_u64()).unwrap_or(3) as u32,
-                p: k.get("p").and_then(|x| x.as_u64()).unwrap_or(1) as u32,
-            });
+            // ONE parser, shared with `vault_open`, so the bounds cannot diverge between sealing and
+            // opening and `name` is checked on both. This built the struct inline: it never looked at
+            // `name` (so `{"name":"scrypt"}` sealed with Argon2id and said nothing, while `vault_open`
+            // refused that name), it had no floor, and it cast with `as`.
+            let kdf = match a.get("kdf") {
+                None | Some(Value::Null) => None,
+                Some(_) => Some(vault::kdf_from_args(a.get("kdf"))?),
+            };
             // Sealing an absent plaintext sealed the JSON literal `null` and handed back a
             // well-formed vault with nothing in it — a file a person would keep, and restore from.
             let Some(plaintext) = a.get("plaintext").filter(|v| !v.is_null()) else {
@@ -469,7 +472,7 @@ pub fn call(name: &str, args: &str) -> String {
 mod tests {
     use super::*;
     #[test]
-    fn the_boundary_never_throws() {
+    fn unknown_names_and_non_object_args_answer_rather_than_throw() {
         assert!(call("nope", "{}").contains("no function named nope"));
         // Every shape that is not an object, `null` included. `js/parity.mjs` cannot reach these:
         // its port shim turns them into `{}` before either port sees them, so the two ports' own
@@ -482,5 +485,56 @@ mod tests {
         assert_eq!(k["alg"], "ed25519");
         let v: Value = serde_json::from_str(&call("version", "{}")).unwrap();
         assert_eq!(v["spec"], SPEC_VERSION);
+    }
+
+    /// The name above used to be `the_boundary_never_throws`, which claimed a property of wasm32 while
+    /// testing six ordinary `Err` returns on x86_64 — where `call` has a `catch_unwind` backstop that
+    /// wasm32 does not compile at all, and where `panic = "abort"` makes unwinding impossible anyway.
+    /// So the guarantee rests on no panic EXISTING, and these are the three inputs that produced one
+    /// (or would have): six bytes of DER whose 4-octet length wrapped a 32-bit `usize`; a vault header
+    /// whose Argon2id parameters were unbounded; and a `ts` that wrapped the skew window. Each is
+    /// refused here before any allocation or derivation, which is why asserting the catastrophic
+    /// numbers costs nothing.
+    #[test]
+    fn the_inputs_that_panicked_or_ran_away_are_refused_by_name() {
+        // `30 84 FF FF FF FF`: on wasm32 this trapped with `RuntimeError: unreachable`.
+        for name in ["parse_certificate", "key_info", "card_decode"] {
+            let args = match name {
+                "key_info" => r#"{"spki":"MIT_____"}"#.to_string(),
+                "card_decode" => r#"{"vcard":"BEGIN:VCARD
+VERSION:4.0
+X-PACT-VERSION:2
+X-PACT-CERT:MIT_____
+END:VCARD
+","now":0}"#
+                    .to_string(),
+                _ => r#"{"der":"MIT_____"}"#.to_string(),
+            };
+            let out: Value = serde_json::from_str(&call(name, &args)).unwrap();
+            assert!(out.get("error").is_some() || out.get("cert").is_some(), "{name} answered {out}");
+        }
+        // The vault's parameters, at both extremes, refused before Argon2id is asked for anything.
+        for kdf in [
+            r#"{"name":"argon2id","m_kib":268435455,"t":3,"p":1}"#,
+            r#"{"name":"argon2id","m_kib":65536,"t":4000000000,"p":1}"#,
+            r#"{"name":"argon2id","m_kib":8,"t":1,"p":1}"#,
+            r#"{"name":"argon2id","m_kib":4294967304,"t":3,"p":1}"#,
+            r#"{"name":"scrypt","m_kib":65536,"t":3,"p":1}"#,
+        ] {
+            let args = format!(r#"{{"passphrase":"x","plaintext":{{"v":1}},"kdf":{kdf}}}"#);
+            let out: Value = serde_json::from_str(&call("vault_seal", &args)).unwrap();
+            assert_eq!(out["error"], "vault", "vault_seal with {kdf} answered {out}");
+            let doc = format!(
+                r#"{{"passphrase":"x","vault":{{"format":"pact-vault/1","kdf":{kdf},"salt":"AAAAAAAAAAA","nonce":"AAAAAAAAAAAAAAAA","ct":"AAAA"}}}}"#
+            );
+            let out: Value = serde_json::from_str(&call("vault_open", &doc)).unwrap();
+            assert_eq!(out["error"], "vault", "vault_open with {kdf} answered {out}");
+        }
+        // A `ts` of `i64::MIN + now`: `(now - ts).abs()` wrapped to `i64::MIN`, which is <= 300, so the
+        // skew window and the thirty-day cap both passed. `decide` needs a whole node to reach, so the
+        // band is asserted through the function that reads the same header members.
+        let out: Value =
+            serde_json::from_str(&call("decide", r#"{"now":0,"envelope":{"protected":"","enc":"","ct":"","sig":""}}"#)).unwrap();
+        assert!(out.get("error").is_some() || out["result"]["code"] == "envelope_invalid", "decide answered {out}");
     }
 }
