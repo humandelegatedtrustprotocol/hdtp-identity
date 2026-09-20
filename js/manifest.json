@@ -5,12 +5,13 @@
   "builder": {
     "image": "rust:1.92.0-slim-bookworm@sha256:f1f73538ebe623fd3673a35aff3df358ae1084c64c55646516e5b17b321b6c9b",
     "platform": "linux/arm64",
+    "wasm_pack": "wasm-pack-v0.15.0-aarch64-unknown-linux-musl",
     "wasm_pack_sha256": "e17ef0806381c3a0acb9c9ddad643a49facaa5a2ecf657a421d4d8f3357a24b7",
     "how": "sh js/reproduce.sh"
   },
   "source": {
-    "inputs_sha256": "4afdcbb25ce5e0ef9edfad48c766a78b89f5bcc419184e30f906cb96c02cc5f9",
-    "files": 24,
+    "inputs_sha256": "c8cb1e54de6535b8825b3e4f6cd37e19a96b05b4d67e65a085db24c5bca36a55",
+    "files": 25,
     "paths": [
       "crates/pact-identity",
       "crates/pact-identity-wasm",
@@ -18,18 +19,59 @@
       "Cargo.lock",
       "rust-toolchain.toml",
       ".cargo/config.toml",
-      "js/build.sh"
+      "js/build.sh",
+      "js/builder.json"
     ],
     "how": "node js/inputs.mjs"
   },
   "files": {
+    "pkg-web/.gitignore": {
+      "sha256": "684888c0ebb17f374298b65ee2807526c066094c701bcc7ebbe1c1095f494fc1",
+      "bytes": 1
+    },
+    "pkg-web/package.json": {
+      "sha256": "1239d4d885dcad42201a27ed9324f8f0f760b78700d8db9ced39a511cffe7eae",
+      "bytes": 18
+    },
+    "pkg-web/pact_identity_wasm.d.ts": {
+      "sha256": "c50ff2c0694b0285bf77984aaab3599be3eb07f6a2b2616893f0e8b6badea270",
+      "bytes": 1712
+    },
+    "pkg-web/pact_identity_wasm.js": {
+      "sha256": "b740c43940a43c3eb08f66d042bfbd19e08237a51e869d883c0c1d365f152067",
+      "bytes": 13413
+    },
     "pkg-web/pact_identity_wasm_bg.wasm": {
-      "sha256": "fd62a2c3a19660c92204c4b10692a18fbd5ce652b8125a65e6de7c0624c07eb0",
-      "bytes": 636478
+      "sha256": "9cd0a5636730a88233f36a7d3fb7db1dddda199aefb0d254d0cb7e920a14c47e",
+      "bytes": 637337
+    },
+    "pkg-web/pact_identity_wasm_bg.wasm.d.ts": {
+      "sha256": "73433108b7f9e722ba01bba916f3b5a2294d42ce7ab53ae1fa7630186df89bf2",
+      "bytes": 564
+    },
+    "pkg-node/.gitignore": {
+      "sha256": "684888c0ebb17f374298b65ee2807526c066094c701bcc7ebbe1c1095f494fc1",
+      "bytes": 1
+    },
+    "pkg-node/package.json": {
+      "sha256": "dbf8353f77358bc12169b7bb7301e1978d5b503e002ee927229a8993672818fc",
+      "bytes": 20
+    },
+    "pkg-node/pact_identity_wasm.d.ts": {
+      "sha256": "21d9499d7471b1f693c4e3930d89db0fa0fbc05c1a805d043dc7684bac0485c5",
+      "bytes": 205
+    },
+    "pkg-node/pact_identity_wasm.js": {
+      "sha256": "26463f16c4a82d7a311b03959daca126ba710536a5cc46aff94d852e0fa9fbb6",
+      "bytes": 10102
     },
     "pkg-node/pact_identity_wasm_bg.wasm": {
-      "sha256": "fd62a2c3a19660c92204c4b10692a18fbd5ce652b8125a65e6de7c0624c07eb0",
-      "bytes": 636478
+      "sha256": "9cd0a5636730a88233f36a7d3fb7db1dddda199aefb0d254d0cb7e920a14c47e",
+      "bytes": 637337
+    },
+    "pkg-node/pact_identity_wasm_bg.wasm.d.ts": {
+      "sha256": "73433108b7f9e722ba01bba916f3b5a2294d42ce7ab53ae1fa7630186df89bf2",
+      "bytes": 564
     }
   }
 }
