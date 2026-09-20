@@ -145,13 +145,11 @@ FIDO HID from it outright; WebUSB cannot claim an interface a kernel driver alre
 CCID driver owns this one on macOS, Linux and Windows; `chrome.platformKeys` is ChromeOS
 enterprise-managed. PC/SC is the only door, and only a native binary can open it.
 
-So the wallet extension reaches a card-held root through **Chrome's native messaging**: the
-extension calls `chrome.runtime.connectNative("contact.pact.wallet")`, Chrome starts this binary,
-and the two speak length-prefixed JSON on stdio. That needs a host manifest — a small JSON file
-naming the binary's absolute path and the extension ids allowed to talk to it — installed in
-Chrome's `NativeMessagingHosts` directory beside the binary, which is why this arrangement arrives
-with an installer rather than with a store listing alone. The native-messaging host is not built
-yet; this section is here so that nobody tries WebHID again and concludes it is merely fiddly.
+So a card-held root is used from this command line, and from nowhere in a browser: the wallet page
+derives its root from a passkey (SPEC §2.1) and never sees a card. There was once a plan for a
+browser extension to reach the card through Chrome's native messaging with this binary as the
+host; the extension was removed on 2026-09-16 and that host was never built. This section stays so
+that nobody tries WebHID again and concludes it is merely fiddly.
 
 ### Building without a card reader
 
