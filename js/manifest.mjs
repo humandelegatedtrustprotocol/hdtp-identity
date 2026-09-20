@@ -13,8 +13,8 @@ if (!toolchainFile) {
 }
 // Copied verbatim from the file both this and reproduce.sh read, so `verify.mjs` can hold a later
 // tree's builder to the one the pin was made by.
-const builder = JSON.parse(readFileSync(new URL('builder.json', here), 'utf8'));
 const here = new URL('./', import.meta.url);
+const builder = JSON.parse(readFileSync(new URL('builder.json', here), 'utf8'));
 const cargo = readFileSync(new URL('../Cargo.toml', here), 'utf8');
 const crate_version = /^version\s*=\s*"([^"]+)"/m.exec(cargo)?.[1] ?? 'unknown';
 const toolchain = JSON.parse(readFileSync(toolchainFile, 'utf8'));
