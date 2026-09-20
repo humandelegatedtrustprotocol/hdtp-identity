@@ -8,14 +8,28 @@
     "wasm_pack_sha256": "e17ef0806381c3a0acb9c9ddad643a49facaa5a2ecf657a421d4d8f3357a24b7",
     "how": "sh js/reproduce.sh"
   },
+  "source": {
+    "inputs_sha256": "4afdcbb25ce5e0ef9edfad48c766a78b89f5bcc419184e30f906cb96c02cc5f9",
+    "files": 24,
+    "paths": [
+      "crates/pact-identity",
+      "crates/pact-identity-wasm",
+      "Cargo.toml",
+      "Cargo.lock",
+      "rust-toolchain.toml",
+      ".cargo/config.toml",
+      "js/build.sh"
+    ],
+    "how": "node js/inputs.mjs"
+  },
   "files": {
     "pkg-web/pact_identity_wasm_bg.wasm": {
-      "sha256": "3f24edf8130ceeb4b21aee18413c82b89da380526ec03699c544d37146f873e3",
-      "bytes": 636486
+      "sha256": "fd62a2c3a19660c92204c4b10692a18fbd5ce652b8125a65e6de7c0624c07eb0",
+      "bytes": 636478
     },
     "pkg-node/pact_identity_wasm_bg.wasm": {
-      "sha256": "3f24edf8130ceeb4b21aee18413c82b89da380526ec03699c544d37146f873e3",
-      "bytes": 636486
+      "sha256": "fd62a2c3a19660c92204c4b10692a18fbd5ce652b8125a65e6de7c0624c07eb0",
+      "bytes": 636478
     }
   }
 }
