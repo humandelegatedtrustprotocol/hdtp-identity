@@ -25,6 +25,17 @@ cd "$(dirname "$0")"
 
 step() { printf '\n── %s\n' "$1"; }
 
+# The gate does not BUILD the Wasm (see the header), and `js/pkg-*` is gitignored — so on a fresh
+# clone, a new worktree or a second machine, `node js/verify.mjs` below used to die with an ENOENT
+# traceback naming a file, and never naming the command that makes it.
+[ -f js/pkg-web/pact_identity_wasm_bg.wasm ] && [ -f js/pkg-node/pact_identity_wasm_bg.wasm ] || {
+  echo "gate: js/pkg-web and js/pkg-node are not built, and this gate does not build them." >&2
+  echo "      Run 'sh js/reproduce.sh' for the pinned container build (what the pin is OF), or" >&2
+  echo "      'sh js/build.sh' for a local one — after which js/verify.mjs will refuse the bytes," >&2
+  echo "      correctly, because a local build is this machine's and the pin is the container's." >&2
+  exit 2
+}
+
 step "Rust core, CLI and Wasm crate: style, clippy, tests"
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings

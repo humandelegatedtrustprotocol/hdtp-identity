@@ -169,9 +169,20 @@ scenario('certificate', 'a root whose notBefore is years away is not a refusal',
   rule([LEAF_A, buildRoot({ cn: 'Alina Rao', key: rootA, notBefore: at('2030-01-01T00:00:00Z'), label: 'i/root_a' })]));
 
 // ── Secrets ─────────────────────────────────────────────────────────────────────
-const openTo = (h, e, pub = h.sign.pub) => { try { open('PACT-SEAL-X25519', h.sign.priv, pub, Buffer.from('PACT-SEAL-v2'), fromB64url(e.protected), fromB64url(e.enc), fromB64url(e.ct)); return 'opened'; } catch { return 'closed'; } };
+// The REASON, not just the fact. This returned 'closed' for every exception — and 'closed' is what
+// the rekey scenario below expects, so a `bad_request` for a malformed argument, a suite typo, or a
+// port that had stopped dispatching `hpke_open` all scored as blocked while nothing was measured.
+// The `pub` parameter was dead too: `defender.open` ignores its third argument.
+const openTo = (h, e) => {
+  try {
+    open('PACT-SEAL-X25519', h.sign.priv, h.sign.pub, Buffer.from('PACT-SEAL-v2'), fromB64url(e.protected), fromB64url(e.enc), fromB64url(e.ct));
+    return 'opened';
+  } catch (err) {
+    return `closed: ${err.message}`;
+  }
+};
 scenario('secrets', 'a stolen leaf key opens traffic recorded while it was current', residual('opened'), () => openTo(hostA, message(hostB, chainB, LEAF_A)));
-scenario('secrets', 'after a rekey, new traffic is closed to the old key', 'closed', () => openTo(hostA, message(hostB, chainB, fresh(hostA2, E_A)), hostA2.sign.pub));
+scenario('secrets', 'after a rekey, new traffic is closed to the old key', blockedIf((got) => /^closed: .*does not open/.test(got)), () => openTo(hostA, message(hostB, chainB, fresh(hostA2, E_A))));
 scenario('secrets', 'the wrong suite for the recipient\'s key', 'suite does not fit the leaf', () => receive(bharat(), message(hostA, chainA, LEAF_B, { suite: 'PACT-SEAL-X25519', recipientPub: hostA.sign.pub })).why);
 scenario('secrets', 'a flipped ciphertext byte', 'does not open', () => { const e = message(hostA, chainA, LEAF_B); const ct = fromB64url(e.ct); ct[3] ^= 1; return receive(bharat(), { ...e, ct: b64url(ct) }).why; });
 scenario('secrets', 'a flipped byte of the encapsulated key', 'does not open', () => { const e = message(hostA, chainA, LEAF_B); const enc = fromB64url(e.enc); enc[3] ^= 1; return receive(bharat(), { ...e, enc: b64url(enc) }).why; });
@@ -210,9 +221,19 @@ scenario('secrets', 'HPKE ephemeral reuse leaks the XOR of two plaintexts; produ
   const d1 = seal('PACT-SEAL-X25519', hostA.sign.pub, info, aad, p1, seed('same')), d2 = seal('PACT-SEAL-X25519', hostA.sign.pub, info, aad, p1, seed('same'));
   return leaks && !d1.enc.equals(d2.enc) && !d1.enc.equals(c1.enc) ? 'leaks with a fixed seed, differs without' : 'unexpected';
 });
-scenario('secrets', 'a low-order X25519 recipient point', blockedIf((got) => /threw/.test(got)), () => {
-  const zero = createPublicKey({ key: Buffer.concat([Buffer.from('302a300506032b656e032100', 'hex'), Buffer.alloc(32)]), format: 'der', type: 'spki' });
-  seal('PACT-SEAL-X25519', zero, Buffer.from('PACT-SEAL-v2'), Buffer.alloc(0), Buffer.from('x'));
+// The all-zero X25519 SPKI is built HERE, outside the scenario, so a Node release that refuses this
+// hand-assembled DER — or one wrong byte in the hex prefix — fails loudly instead of scoring the
+// scenario `blocked` for an exception that never reached the low-order-point check. The old
+// assertion was `/threw/`, which matched any exception from either of the two throw sites.
+const zeroX25519 = createPublicKey({ key: Buffer.concat([Buffer.from('302a300506032b656e032100', 'hex'), Buffer.alloc(32)]), format: 'der', type: 'spki' });
+// The two ports refuse this at DIFFERENT LAYERS, which tightening the assertion is what revealed:
+// the Rust core accepts a raw X25519 recipient SPKI and then refuses the all-zero shared secret,
+// while the Go port refuses the recipient key itself ("suite does not fit the key", because
+// `recipientPublic` wants an Ed25519 key to convert). Both refuse, and neither refuses for an
+// unrelated reason — so both wordings are named here rather than matching any exception, and the
+// divergence in `why` is recorded for the cross-port pass rather than hidden by a loose regex.
+scenario('secrets', 'a low-order X25519 recipient point', blockedIf((got) => /^threw: .*(low order|all-zero|shared secret|identity|suite does not fit)/i.test(got)), () => {
+  seal('PACT-SEAL-X25519', zeroX25519, Buffer.from('PACT-SEAL-v2'), Buffer.alloc(0), Buffer.from('x'));
   return 'sealed';
 });
 scenario('secrets', 'the root private keys are not in the spec', 'absent', () => {

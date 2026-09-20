@@ -512,4 +512,6 @@ if (process.argv.includes('--manifest') && manifestAt && !only && agreed) {
 const total = only ? ran : cases.length;
 const wholeInSurface = [...surface].filter((f) => whole.has(f)).length;
 console.log(`\n${total - bad}/${total} boundary answers agree between the ports${only ? ` (filtered by ${JSON.stringify(only)})` : `; ${surface.size} functions guarded, ${wholeInSurface} of them compared whole`}`);
-process.exit(bad || (problems.length && !only) ? 1 : 0);
+// `bad` is a COUNT, and process.exit truncates mod 256: with 276 cases, exactly 256 disagreements
+// would have exited 0.
+process.exit(bad > 0 || (problems.length && !only) ? 1 : 0);
