@@ -12,6 +12,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"errors"
+	"math/big"
 
 	"golang.org/x/crypto/chacha20poly1305"
 )
@@ -266,7 +267,63 @@ func SignDetached(priv *PrivateKey, data []byte) ([]byte, error) {
 		return ed25519.Sign(priv.Ed, data), nil
 	}
 	h := sha256.Sum256(data)
-	return ecdsa.SignASN1(rand.Reader, priv.EC, h[:])
+	sig, err := ecdsa.SignASN1(rand.Reader, priv.EC, h[:])
+	if err != nil {
+		return nil, err
+	}
+	// The low-S twin, always (SPEC 14.1): crypto/ecdsa returns either, and a certificate carrying
+	// the high one is outside the profile.
+	return EcdsaLowS(sig)
+}
+
+// p256HalfN is the floor half of the P-256 group order (p256N, keys.go): the low-S bound.
+var p256HalfN = new(big.Int).Rsh(p256N, 1)
+
+// ecdsaSigParts reads a DER ECDSA-Sig-Value strictly: SEQUENCE { INTEGER r, INTEGER s }, both
+// minimal, nothing after. ok is false when the bytes are not one.
+func ecdsaSigParts(sig []byte) (r, s *big.Int, ok bool) {
+	outer, err := derRead(sig, 0)
+	if err != nil || outer.tag != 0x30 || outer.end != len(sig) {
+		return nil, nil, false
+	}
+	parts, err := derChildren(outer)
+	if err != nil || len(parts) != 2 {
+		return nil, nil, false
+	}
+	for _, p := range parts {
+		if p.tag != 0x02 || !derIntMinimal(p.content) {
+			return nil, nil, false
+		}
+	}
+	return new(big.Int).SetBytes(parts[0].content), new(big.Int).SetBytes(parts[1].content), true
+}
+
+// EcdsaIsLowS reports whether a DER ECDSA signature over P-256 is the low-S twin. isSig is false
+// when the bytes are not an ECDSA value at all — which is not a refusal: a certificate declaring
+// ECDSA over such bytes cannot verify under any key, and rule 3 refuses it for that.
+//
+// An ECDSA signature (r, s) has a twin (r, n - s) that verifies under the same key over the same
+// bytes, and anybody can compute it. On a CERTIFICATE that is a second byte string for one leaf,
+// which CompareLeaves reads as a conflict — so a card altered in transit pins a leaf the real host
+// can never match. SPEC 14.1 admits one twin.
+func EcdsaIsLowS(sig []byte) (low, isSig bool) {
+	_, s, ok := ecdsaSigParts(sig)
+	if !ok {
+		return false, false
+	}
+	return s.Cmp(p256HalfN) <= 0, true
+}
+
+// EcdsaLowS is the same signature as its low-S twin: unchanged if it already is one.
+func EcdsaLowS(sig []byte) ([]byte, error) {
+	r, s, ok := ecdsaSigParts(sig)
+	if !ok {
+		return nil, errors.New("sig is not a DER ECDSA signature")
+	}
+	if s.Cmp(p256HalfN) <= 0 {
+		return sig, nil
+	}
+	return seq(derInt(r.Bytes()), derInt(new(big.Int).Sub(p256N, s).Bytes())), nil
 }
 
 // VerifyDetached checks a detached signature under the key's own algorithm.

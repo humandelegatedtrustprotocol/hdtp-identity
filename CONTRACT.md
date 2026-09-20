@@ -50,7 +50,7 @@ and on the `v: 1` vectors in SPEC.md Appendix B.
 | `derive_seed` | `{"prf": b64url(32), "info"}` | `{"seed": b64url(32)}` — `HKDF-SHA256(ikm = prf, salt = "", info, L = 32)`. **Refuses an `info` outside the three, and a `prf` that is not 32 bytes.** Both refusals are the point rather than hygiene: a mistyped domain separator would otherwise return 32 perfectly good bytes and silently derive an identity belonging to nobody, which is the one failure the derived-root design exists to prevent |
 | `public_key` | `{"pkcs8"}` | `{"alg", "spki", "fingerprint"}` |
 | `key_info` | `{"spki"}` | `{"alg", "fingerprint", "key_id": b64url}` |
-| `sign` | `{"pkcs8", "data": b64url}` | `{"sig"}` — Ed25519 pure, or ECDSA P-256/SHA-256 in ASN.1 DER |
+| `sign` | `{"pkcs8", "data": b64url}` | `{"sig"}` — Ed25519 pure, or ECDSA P-256/SHA-256 in ASN.1 DER, **always the low-S twin** (`s ≤ n/2`, SPEC §14.1): a library returns either twin of an ECDSA signature, and a port returns one |
 | `verify` | `{"spki", "data", "sig"}` | `{"valid": bool}` |
 
 `sign` is the leaf key's one signing primitive; a host signs exactly four structures with it
@@ -61,7 +61,7 @@ and on the `v: 1` vectors in SPEC.md Appendix B.
 | Function | Input | Output |
 |---|---|---|
 | `build_root` | `{"cn", "pkcs8", "not_before", "serial"?: b64url(8..20 bytes)}` | `{"der", "fingerprint"}` |
-| `root_tbs` / `assemble_root` | `{"cn", "spki", "not_before", "serial"?}` → `{"tbs", "sig_alg"}`; `{"tbs", "sig", "sig_alg"?}` → `{"der"}` | the external-signing seam: a root in a passkey or security key signs `tbs` in the host, the core assembles. `sig_alg` is the AlgorithmIdentifier as base64url DER — the TBS's own third field; `assemble_*` reads it from the TBS and, when one is handed back, requires it to be equal, so the algorithm outside a certificate can never differ from the one inside |
+| `root_tbs` / `assemble_root` | `{"cn", "spki", "not_before", "serial"?}` → `{"tbs", "sig_alg"}`; `{"tbs", "sig", "sig_alg"?}` → `{"der"}` | the external-signing seam: a root in a passkey or security key signs `tbs` in the host, the core assembles. `sig_alg` is the AlgorithmIdentifier as base64url DER — the TBS's own third field; `assemble_*` reads it from the TBS and, when one is handed back, requires it to be equal, so the algorithm outside a certificate can never differ from the one inside **`assemble_*` normalises an ECDSA `sig` to its low-S twin** before assembling: what arrives at the seam was made by a token or a KMS that has never heard of §14.1, and swapping a signature for its twin needs no key. Anything that is not an ECDSA value passes through untouched. |
 | `build_leaf` | `{"cn", "root_cn", "root_pkcs8", "host_spki", "endpoint", "dns_name"?, "not_before", "not_after", "serial"?}` | `{"der"}` |
 | `leaf_tbs` / `assemble_leaf` | as `build_leaf` with `root_spki` in place of `root_pkcs8` → `{"tbs", "sig_alg"}`; `{"tbs", "sig", "sig_alg"?}` → `{"der"}` | the same seam for leaves, the same `sig_alg` |
 | `parse_certificate` | `{"der"}` | `{"kind": "root"\|"leaf"\|"other", "subject", "issuer", "serial", "not_before", "not_after", "alg", "spki", "fingerprint", "key_id", "ski", "aki", "ca", "path_len", "key_usage": [ints], "eku": [oids], "uris": [], "dns": [], "sig_alg": oid, "profile_error": null\|string, "bytes": int}` |
@@ -247,6 +247,8 @@ and its decrypted bytes. What it does not: the JSON argument and answer strings 
 `pkcs8` member and a vault's decoded plaintext as a JSON value — and wasm-bindgen's copies of
 those strings in linear memory, which are freed but not cleared. A host that must not leave key
 material behind treats the strings it passes and receives as its own to clear.
+
+**The KDF's range, at both ends, on both paths.** `m_kib` 8192–2097152 (8 MiB–2 GiB), `t` 1–16, `p` 1–16, `name` `argon2id`; anything else is `{"error": "vault", "why": "kdf parameters out of range"}` (or `"unknown kdf"`), from `vault_seal` and `vault_open` alike, through one parser. The parameters are read out of the document **before the passphrase is tested**, so an unbounded reader hands an attacker's file a 256 GiB allocation or a derivation that never returns, and an unbounded writer seals the person's root behind a KDF a laptop brute-forces. A value that does not fit in 32 bits is out of range, never truncated.
 
 ## 7. Gates
 

@@ -13,6 +13,7 @@
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ed25519FromSeed, b64url, fromB64url } from '../../pact-protocol/vectors/lib/keys.mjs';
 import { buildRoot, buildLeaf } from '../../pact-protocol/vectors/lib/x509.mjs';
 import { encodeCard, decodeCard } from '../../pact-protocol/vectors/lib/card.mjs';
@@ -27,7 +28,7 @@ const H = 3_600_000, D = 86_400_000;
  * count.
  */
 export function seedScenarioCount() {
-  const run = spawnSync(process.execPath, [new URL('../../pact-protocol/vectors/intrude.mjs', import.meta.url).pathname], { encoding: 'utf8' });
+  const run = spawnSync(process.execPath, [fileURLToPath(new URL('../../pact-protocol/vectors/intrude.mjs', import.meta.url))], { encoding: 'utf8' });
   const m = /^(\d+) scenarios:/m.exec(run.stdout || '');
   if (!m) throw new Error('the seed suite did not report a scenario count');
   return Number(m[1]);
@@ -62,7 +63,9 @@ export function answerCode(body) {
   for (const item of body?.result?.content ?? []) {
     if (typeof item?.text !== 'string') continue;
     let r; try { r = JSON.parse(item.text); } catch { continue; }
-    if (r && typeof r.protected === 'string' && typeof r.ct === 'string') return 'sealed';
+    // All FOUR members, each a non-empty string — as the Rust driver requires. Two string members,
+    // possibly empty, scored the CONTROL as passed: `{"protected":"","ct":""}` was "sealed".
+    if (r && ['protected', 'enc', 'ct', 'sig'].every((k) => typeof r[k] === 'string' && r[k] !== '')) return 'sealed';
     if (r && typeof r.code === 'string') return r.code;
     if (r && r.error) return typeof r.error.code === 'string' ? r.error.code : `unknown:jsonrpc-${r.error.code ?? 'error'}`;
   }
@@ -240,29 +243,44 @@ export async function runLive({ endpoint, card = null, fetchImpl = fetch, now = 
     const first = await post(dial, s.envelope, fetchImpl, session);
     let got = first.code;
     if (s.twice) { const second = await post(dial, s.envelope, fetchImpl, session); got = second.code === first.code ? first.code : `${first.code} then ${second.code}`; }
-    const verdict = got === s.expect ? 'blocked' : unreached(got) ? 'UNREACHED' : 'REPRODUCES';
+    // A refused CONTROL is the opposite of an intrusion: the one call that must get through was
+    // blocked, which is what a receiver refusing everything does. It was scored `REPRODUCES` —
+    // "something got in" — here, after the Rust driver had been given its own verdict for it.
+    const verdict = got === s.expect ? 'blocked' : unreached(got) ? 'UNREACHED' : s.expect === 'sealed' ? 'CONTROL REFUSED' : 'REPRODUCES';
     results.push({ name: s.name, expect: s.expect, got, verdict });
     log(`  ${verdict.padEnd(10)} ${s.name} → ${got}${s.note ? ` (${s.note})` : ''}`);
   }
   const reproduces = results.filter((r) => r.verdict === 'REPRODUCES').length;
   const unreachedCount = results.filter((r) => r.verdict === 'UNREACHED').length;
+  const controlRefused = results.filter((r) => r.verdict === 'CONTROL REFUSED').length;
   const total = seedScenarioCount();
-  log(`\n${results.length} scenarios against ${target.endpoint}: ${results.length - reproduces - unreachedCount} blocked, ${reproduces} reproduce, ${unreachedCount} never reached a PACT answer; ${Math.max(0, total - results.length)} of the seed's ${total} were not run here`);
-  return { results, reproduces, unreached: unreachedCount, skipped: total - results.length, seedScenarios: total };
+  log(`\n${results.length} scenarios against ${target.endpoint}: ${results.length - reproduces - unreachedCount - controlRefused} blocked, ${reproduces} reproduce, ${unreachedCount} never reached a PACT answer${controlRefused ? ', and the CONTROL was refused: this receiver refuses a legitimate call too' : ''}; ${Math.max(0, total - results.length)} of the seed's ${total} were not run here`);
+  return { results, reproduces, unreached: unreachedCount, controlRefused, skipped: total - results.length, seedScenarios: total };
 }
+
+const readCard = (file) => (file ? readFileSync(file, 'utf8') : null);
 
 /** The one command-line entry, for `node js/live.mjs …` and for `intrude.mjs --port live …` alike. */
 export async function cli(argv) {
   const arg = (name) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : null; };
   const endpoint = arg('--endpoint');
   if (!endpoint) { console.error('usage: --endpoint https://host/slug [--card file.vcf] [--insecure]'); return 2; }
-  // A node on your own machine serves TLS under its own chain, which no public authority signed.
-  // Every envelope is sealed to the key in the target's CARD, so what is measured does not rest on
-  // the transport; the flag is named for what it is.
-  if (argv.includes('--insecure')) process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
   const cardFile = arg('--card');
-  const { reproduces, unreached: missed } = await runLive({ endpoint, card: cardFile ? readFileSync(cardFile, 'utf8') : null });
-  return reproduces || missed ? 1 : 0;
+  // A node on your own machine serves TLS under its own chain, which no public authority signed.
+  // With the card from a FILE, what is measured does not rest on the transport: every envelope is
+  // sealed to the key in that card. WITHOUT one the card is fetched over the very channel this flag
+  // stops authenticating, so whoever answers supplies the key all 28 envelopes are sealed to, and a
+  // clean "28 blocked" says nothing about the target. The Rust driver was given this refusal on
+  // 2026-09-20 and this one was not — the same defect, fixed in one of two copies.
+  if (argv.includes('--insecure')) {
+    if (!cardFile) { console.error('--insecure turns off certificate verification, so the card must come from a file: pass --card <file>'); return 2; }
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  }
+  const { reproduces, unreached: missed, controlRefused } = await runLive({ endpoint, card: readCard(cardFile) });
+  return reproduces || missed || controlRefused ? 1 : 0;
 }
 
-if (process.argv[1] && new URL(import.meta.url).pathname === process.argv[1]) process.exit(await cli(process.argv));
+// `pathToFileURL`, not `URL#pathname`: a pathname is percent-encoded and argv is not, so from a
+// checkout under "my repo/" the comparison failed, the module did nothing, and node exited 0 — which
+// for a security battery reads as "no intrusions reproduce".
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) process.exit(await cli(process.argv));

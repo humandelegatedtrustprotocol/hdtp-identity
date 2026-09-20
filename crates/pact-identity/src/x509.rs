@@ -88,7 +88,17 @@ pub fn assemble(tbs: &[u8], sig_alg_oid: &str, sig: &[u8]) -> Vec<u8> {
 }
 /// Assemble with the AlgorithmIdentifier as DER bytes — the TBS's own third field.
 pub fn assemble_raw(tbs: &[u8], alg_der: &[u8], sig: &[u8]) -> Vec<u8> {
-    der::seq(&[tbs.to_vec(), alg_der.to_vec(), der::bitstr(sig, 0)])
+    // The seam NORMALISES an ECDSA signature (SPEC 14.1). What arrives here was made outside this
+    // library — a PIV token, a KMS — and none of them returns the low-S twin on purpose, so half the
+    // certificates assembled from a card were outside the profile the moment it gained the rule.
+    // Swapping a signature for its twin needs no key, which is the whole problem, and here it is the
+    // fix. Anything that is not an ECDSA value passes through untouched: an Ed25519 signature, or
+    // bytes a later check refuses for what they are.
+    let sig = match crate::keys::ecdsa_is_low_s(sig) {
+        Some(false) => crate::keys::ecdsa_low_s(sig).unwrap_or_else(|_| sig.to_vec()),
+        _ => sig.to_vec(),
+    };
+    der::seq(&[tbs.to_vec(), alg_der.to_vec(), der::bitstr(&sig, 0)])
 }
 
 pub fn root_tbs(cn: &str, key: &PublicKey, not_before: i64, serial: &[u8]) -> Result<Unsigned> {
@@ -403,6 +413,11 @@ pub fn profile_error(c: &Cert, kind: &str) -> Option<String> {
     }
     if c.sig_alg != OID_ED25519 && c.sig_alg != OID_ECDSA_SHA256 {
         return Some("signature algorithm not in the profile".into());
+    }
+    // SPEC 14.1: of an ECDSA signature's two twins, only the low-S one is a PACT certificate. Judged
+    // only where the bits ARE an ECDSA value (see `keys::ecdsa_is_low_s`).
+    if c.sig_alg == OID_ECDSA_SHA256 && crate::keys::ecdsa_is_low_s(&c.sig) == Some(false) {
+        return Some("ECDSA signature not in the low-S form".into());
     }
     if c.public_key.alg() == Alg::X25519 {
         return Some("key algorithm not in the profile".into());

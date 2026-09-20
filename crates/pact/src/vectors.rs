@@ -324,6 +324,18 @@ pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
     let c = cast()?;
     let mine: BTreeMap<&str, Vec<u8>> = certificates(&c)?.into_iter().map(|(n, d, _)| (n, d)).collect();
     for (name, bytes) in &der {
+        // A certificate the appendix marks `refused` exists to be refused (SPEC 14.1): it must not
+        // come out of parse and the profile check clean. It is not one the generator rebuilds, and
+        // it is not "in the profile as a leaf" — asserting either of those about it is the mistake
+        // this branch is here to avoid.
+        if v2["certificates"][name.as_str()]["refused"].as_bool() == Some(true) {
+            let why = match parse(bytes) {
+                Ok(cert) => x509::profile_error(&cert, "leaf"),
+                Err(e) => Some(e.why),
+            };
+            t.ok(why.is_some(), format!("{name}: marked refused, and parse + profile let it through"));
+            continue;
+        }
         match parse(bytes) {
             Ok(cert) => {
                 let kind = if name.starts_with("root") { "root" } else { "leaf" };
