@@ -120,8 +120,16 @@ pub fn read_der_time(tag: u8, content: &[u8]) -> Result<i64> {
         return err("parse", "time not in the DER form");
     }
     let n = |a: usize, z: usize| full[a..z].parse::<i64>().unwrap_or(0);
-    // Date.UTC normalises an out-of-range day the way the seed does; the profile builder never emits one.
-    Ok(from_civil(n(0, 4), n(4, 6), n(6, 8), n(8, 10), n(10, 12), n(12, 14)))
+    // A DER time is a DATE. This handed the digits straight to `from_civil`, which rolls an
+    // out-of-range field over — `20260230120000Z` read as 2 March — and the comment that stood here
+    // defended that by what the profile BUILDER emits, while this function is the READER of attacker
+    // bytes. The Go port refused the same certificate; the seed normalised it as this did, and has
+    // been corrected with this. `valid` is the check `parse_rfc3339` always applied.
+    let (y, mo, d, h, mi, sec) = (n(0, 4), n(4, 6), n(6, 8), n(8, 10), n(10, 12), n(12, 14));
+    if !valid(y, mo, d, h, mi, sec) {
+        return err("parse", "time not in the DER form");
+    }
+    Ok(from_civil(y, mo, d, h, mi, sec))
 }
 
 #[cfg(test)]

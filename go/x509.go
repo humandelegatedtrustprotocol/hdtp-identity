@@ -108,7 +108,19 @@ func RootTBS(cn string, pub *PublicKey, notBefore time.Time, serial []byte) (tbs
 }
 
 // Assemble puts a signed TBS together with its algorithm and signature into a certificate.
-func Assemble(tbs, alg, sig []byte) []byte { return seq(tbs, alg, bitstr(sig, 0)) }
+//
+// The seam NORMALISES an ECDSA signature (SPEC 14.1): what arrives here was made outside this
+// library — a PIV token, a KMS — and none of them returns the low-S twin on purpose. Swapping a
+// signature for its twin needs no key, which is the whole problem, and here it is the fix. Anything
+// that is not an ECDSA value passes through untouched.
+func Assemble(tbs, alg, sig []byte) []byte {
+	if low, isSig := EcdsaIsLowS(sig); isSig && !low {
+		if twin, err := EcdsaLowS(sig); err == nil {
+			sig = twin
+		}
+	}
+	return seq(tbs, alg, bitstr(sig, 0))
+}
 
 // BuildRoot signs a root with its own key.
 func BuildRoot(o RootOpts) ([]byte, error) {
@@ -529,6 +541,13 @@ func ProfileError(c *Cert, kind string) string {
 	}
 	if c.SigAlg != OIDEd25519 && c.SigAlg != OIDEcdsaSHA256 {
 		return "signature algorithm not in the profile"
+	}
+	// SPEC 14.1: of an ECDSA signature's two twins, only the low-S one is a PACT certificate. Judged
+	// only where the bits ARE an ECDSA value (see EcdsaIsLowS).
+	if c.SigAlg == OIDEcdsaSHA256 {
+		if low, isSig := EcdsaIsLowS(c.Sig); isSig && !low {
+			return "ECDSA signature not in the low-S form"
+		}
 	}
 	// The ADMITTED set, not the excluded one. This asked `AlgorithmOf`, which errors only on an
 	// EMPTY `Alg` — and `ParseSPKI` sets `Alg = AlgX25519` for OID 1.3.101.110, so an X25519-keyed

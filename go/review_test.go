@@ -345,3 +345,27 @@ func TestIntegersAreMinimalAndSerialsStaySixtyFourBits(t *testing.T) {
 		}
 	}
 }
+
+// crypto/ecdsa returns either twin of a signature; this port returns the low-S one, every time
+// (SPEC 14.1). Half of these were high before the rule, so forty in a row is not luck.
+func TestEveryP256SignatureIsTheLowSTwin(t *testing.T) {
+	priv, err := GenerateKey(AlgP256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 40; i++ {
+		sig, err := SignDetached(priv, []byte{byte(i)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if low, isSig := EcdsaIsLowS(sig); !isSig || !low {
+			t.Fatalf("signature %d: low=%v isSig=%v", i, low, isSig)
+		}
+		if !VerifyDetached(priv.Public, []byte{byte(i)}, sig) {
+			t.Fatalf("signature %d does not verify", i)
+		}
+	}
+	if _, isSig := EcdsaIsLowS([]byte{1, 2, 3}); isSig {
+		t.Error("bytes that are not an ECDSA value were judged as one")
+	}
+}

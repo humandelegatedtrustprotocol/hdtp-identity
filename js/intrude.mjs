@@ -6,6 +6,7 @@
 //   residual   — the attack succeeds, and §14.5 already says so and bounds it
 //   REPRODUCES — the attack succeeds and nothing in the spec stops it: a finding
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { createPublicKey } from 'node:crypto';
 import { seed, ed25519FromSeed, p256FromSeed, pkcs8Of, b64url, fromB64url } from '../../pact-protocol/vectors/lib/keys.mjs';
@@ -139,6 +140,15 @@ scenario('certificate', 'a padded DER length', 'rule 1', () => { const t = Buffe
 // the minimal-length check first), and 64-bit hosts compute the guard correctly, so nothing but the
 // wasm port could ever have failed this — and the wasm port is what the wallet page runs.
 scenario('certificate', 'a four-octet DER length that overruns the buffer', 'rule 1', () => rule([Buffer.from([0x30, 0x84, 0xff, 0xff, 0xff, 0xff]), ROOT_A]));
+// An ECDSA signature has a twin, (r, n − s), that anybody can compute and that VERIFIES. On a leaf it
+// mints a second byte string for one certificate — same key, same fingerprint, same address, same
+// notBefore — which §14.3 reads as a conflict, so a card altered in transit pins a leaf the real host
+// can never match, and reading the fingerprint aloud (§3) finds nothing wrong. §14.1 admits only the
+// low-S twin; this is the other one, built honestly and then swapped.
+scenario('certificate', 'a P-256 leaf whose signature was swapped for its twin', 'rule 1', () => rule([leafOf(rootB, 'Bharat Mehta', hostB, E_B, { misencode: { sigTwin: true } }), ROOT_B]));
+// A notBefore of 30 February. A reader that normalises dates takes it for 2 March and accepts; the
+// leaf IS the TLS certificate, and no TLS stack reads that date at all.
+scenario('certificate', 'a validity field that is not a date', 'rule 1', () => rule([leafOf(rootA, 'Alina Rao', hostA, E_A, { misencode: { notBefore: '260230120000Z' } }), ROOT_A]));
 scenario('certificate', 'exactly 398 days is accepted', 'accepted', () => rule([leafOf(rootA, 'Alina Rao', hostA, E_A, { notBefore: at('2026-09-01T00:00:00Z'), notAfter: new Date(at('2026-09-01T00:00:00Z').getTime() + 398 * D) }), ROOT_A]));
 scenario('certificate', '398 days and one second is refused', 'rule 4', () => rule([leafOf(rootA, 'Alina Rao', hostA, E_A, { notBefore: at('2026-09-01T00:00:00Z'), notAfter: new Date(at('2026-09-01T00:00:00Z').getTime() + 398 * D + 1000) }), ROOT_A]));
 for (const [what, uris, dns] of [
@@ -392,7 +402,7 @@ const count = (v) => results.filter((r) => r.verdict === v).length;
 console.log(`\n${results.length} scenarios: ${count('blocked')} blocked, ${count('residual')} residual by decision, ${count('REPRODUCES')} reproduce`);
 
 // ── The same scenarios against the seed: every verdict must agree ───────────────
-const seedRun = spawnSync(process.execPath, [new URL('../../pact-protocol/vectors/intrude.mjs', import.meta.url).pathname], { encoding: 'utf8' });
+const seedRun = spawnSync(process.execPath, [fileURLToPath(new URL('../../pact-protocol/vectors/intrude.mjs', import.meta.url))], { encoding: 'utf8' });
 const seedVerdicts = new Map();
 for (const line of seedRun.stdout.split('\n')) {
   const m = /^  (blocked|residual|REPRODUCES)\s+(.*?)(?:\s+→ .*)?$/.exec(line);
