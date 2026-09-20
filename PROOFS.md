@@ -7,11 +7,11 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed here that did not pass.
 
-Specification: **2.1.0**. **46** normative sentences, **288** cross-port parity cases over **38** guarded functions.
+Specification: **2.1.1**. **47** normative sentences, **298** cross-port parity cases over **38** guarded functions.
 
-## The 46 normative sentences of the specification
+## The 47 normative sentences of the specification
 
-A sentence carrying MUST, MUST NOT or REQUIRED, one row each, in document order. **33** are
+A sentence carrying MUST, MUST NOT or REQUIRED, one row each, in document order. **34** are
 held by a test or an intrusion scenario in this repository; **13** belong to a wallet, a host
 or a node, and name the artefact that holds them there — checked against the sibling repository
 whenever it is on disk. A row with nothing in its last column would fail `js/musts.mjs`.
@@ -127,6 +127,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.1#1` | A certificate's `signatureAlgorithm` MUST be its issuer key's own algorithm; a verifier takes the algorithm from the key, never from the certificate, so a mismatch is simply a certificate the key did not sign. | `scenario:leaf declaring ECDSA but signed by an Ed25519 root`, `go:TestInnerAndOuterAlgorithmMustAgree`, `rust:inner_and_outer_algorithm_must_agree` |
 | `14.1#2` | The algorithm identifier inside the `tbsCertificate` and the outer `signatureAlgorithm` MUST be byte-equal and carry no parameters, as RFC 5280 §4.1.1.2 requires — a certificate that reads one way to a verifier of this profile and another to a TLS stack is exactly what §14.1 exists to exclude. | `scenario:one algorithm inside the TBS, another outside it`, `go:TestDERDeviationsAreRefused`, `rust:der_deviations_are_refused` |
+| `14.1#3` | So an ECDSA signature on a certificate MUST be the twin with `s ≤ n/2`, the *low-S* form: an issuer normalises what it signs, including a signature a hardware token made, and a verifier refuses the other twin as outside the profile, at card intake as much as in a chain. | `scenario:a P-256 leaf whose signature was swapped for its twin`, `rust:every_p256_signature_is_the_low_s_twin`, `rust:chain_cases`, `go:TestEveryP256SignatureIsTheLowSTwin`, `go:TestCertificatesReproduce` |
 
 ### 14.2 Chain validation
 
@@ -143,7 +144,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 288 cross-port parity cases
+## The 298 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -151,7 +152,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **288** cases, **0** disagreements, **38** of **38** functions compared whole on success.
+At the run that generated this file: **298** cases, **0** disagreements, **38** of **38** functions compared whole on success.
 
 ### `address_guard` — 28 cases · whole on success
 
@@ -184,8 +185,10 @@ At the run that generated this file: **288** cases, **0** disagreements, **38** 
 - address_guard with no endpoint
 - address_guard with nothing to work from
 
-### `assemble_leaf` — 4 cases · whole on success
+### `assemble_leaf` — 6 cases · whole on success
 
+- assemble_leaf with a token's high-S signature
+- assemble_leaf with a low-S signature
 - assemble_leaf with a sig_alg that is not the TBS's
 - assemble_leaf with no signature
 - assemble_leaf with nothing to work from
@@ -214,8 +217,9 @@ At the run that generated this file: **288** cases, **0** disagreements, **38** 
 - build_root with an instant that is not one
 - build_root with nothing to work from
 
-### `card_decode` — 8 cases · whole on success
+### `card_decode` — 9 cases · whole on success
 
+- card_decode of a card carrying that leaf
 - card_decode of a real card
 - card_decode of an empty card
 - card_decode of nothing at all
@@ -266,7 +270,7 @@ At the run that generated this file: **288** cases, **0** disagreements, **38** 
 - csr_new with a dns_name that is not the host
 - csr_new with nothing to work from
 
-### `decide` — 9 cases · whole on success
+### `decide` — 10 cases · whole on success
 
 - decide on an envelope from a pinned contact
 - decide on a pinned contact's call that names no tool
@@ -276,6 +280,7 @@ At the run that generated this file: **288** cases, **0** disagreements, **38** 
 - decide on a header that is not JSON
 - decide with no node at all
 - decide on an envelope long past its exp
+- decide on an envelope whose exp is in the year 71,000
 - decide with nothing to work from
 
 ### `derive_seed` — 10 cases · whole on success
@@ -418,13 +423,15 @@ At the run that generated this file: **288** cases, **0** disagreements, **38** 
 - open_result with nothing to work from
 - open_result of what seal_result made
 
-### `parse_certificate` — 7 cases · whole on success
+### `parse_certificate` — 9 cases · whole on success
 
 - parse_certificate of a root
 - parse_certificate of a leaf
 - parse_certificate of nothing
 - parse_certificate of a truncated certificate
 - parse_certificate of bytes that are not DER
+- parse_certificate of that leaf
+- parse_certificate of a leaf with a 129-bit OID arc
 - parse_certificate with nothing to work from
 - parse_certificate with der as null
 
@@ -432,11 +439,12 @@ At the run that generated this file: **288** cases, **0** disagreements, **38** 
 
 - prf_salt
 
-### `profile_error` — 6 cases · whole on success
+### `profile_error` — 7 cases · whole on success
 
 - profile_error of a leaf read as a root
 - profile_error of a root read as a leaf
 - profile_error with a kind nobody has
+- profile_error of that leaf
 - profile_error with nothing to work from
 - profile_error of a leaf read as a leaf
 - profile_error of a root read as a root
@@ -492,10 +500,13 @@ At the run that generated this file: **288** cases, **0** disagreements, **38** 
 - suite_for an RSA key
 - suite_for with nothing to work from
 
-### `validate_chain` — 18 cases · whole on success
+### `validate_chain` — 21 cases · whole on success
 
 - validate_chain of a real chain
 - validate_chain against the root and endpoint it really has
+- validate_chain of a P-256 chain
+- validate_chain of a leaf whose ECDSA signature is the high twin
+- validate_chain of a leaf dated 30 February
 - validate_chain of a chain of one
 - validate_chain of a chain of three
 - validate_chain of an empty chain
