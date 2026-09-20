@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"math"
 	"time"
 
 	"golang.org/x/crypto/argon2"
@@ -32,11 +33,15 @@ var DefaultKDF = KDF{Name: "argon2id", MKiB: 65536, T: 3, P: 1}
 // naming argon2id with those parameters, as the Rust core reads it. This port required the name and
 // refused the document as "not a pact-vault/1 document", which is a refusal about the wrong thing.
 func (k *KDF) UnmarshalJSON(p []byte) error {
+	// Wider than the fields, then bounded — so a value that does not fit is a KDF refusal and not a
+	// JSON one. Decoding straight into `uint32` made `m_kib: 4294967304` a parse error
+	// ("kdf does not read") where the Rust core says "kdf parameters out of range": the same document,
+	// two different answers, which CONTRACT section 0 forbids.
 	raw := struct {
 		Name *string `json:"name"`
-		MKiB *uint32 `json:"m_kib"`
-		T    *uint32 `json:"t"`
-		P    *uint8  `json:"p"`
+		MKiB *uint64 `json:"m_kib"`
+		T    *uint64 `json:"t"`
+		P    *uint64 `json:"p"`
 	}{}
 	if err := json.Unmarshal(p, &raw); err != nil {
 		return parseError{"kdf does not read"}
@@ -49,13 +54,22 @@ func (k *KDF) UnmarshalJSON(p []byte) error {
 		k.Name = *raw.Name
 	}
 	if raw.MKiB != nil {
-		k.MKiB = *raw.MKiB
+		if *raw.MKiB > math.MaxUint32 {
+			return vaultError{"kdf parameters out of range"}
+		}
+		k.MKiB = uint32(*raw.MKiB)
 	}
 	if raw.T != nil {
-		k.T = *raw.T
+		if *raw.T > math.MaxUint32 {
+			return vaultError{"kdf parameters out of range"}
+		}
+		k.T = uint32(*raw.T)
 	}
 	if raw.P != nil {
-		k.P = *raw.P
+		if *raw.P > math.MaxUint8 {
+			return vaultError{"kdf parameters out of range"}
+		}
+		k.P = uint8(*raw.P)
 	}
 	return nil
 }
@@ -104,8 +118,13 @@ const (
 )
 
 func vaultKey(passphrase string, v Vault) ([]byte, error) {
-	if v.Format != VaultFormat || v.KDF.Name != "argon2id" {
+	if v.Format != VaultFormat {
 		return nil, errors.New("not a pact-vault/1 document")
+	}
+	// Named separately, because the Rust core names it separately: a document whose kdf is not
+	// argon2id answered "not a pact-vault/1 document" here and "unknown kdf" there.
+	if v.KDF.Name != "argon2id" {
+		return nil, vaultError{"unknown kdf"}
 	}
 	if v.KDF.MKiB < minMKiB || v.KDF.MKiB > maxMKiB || v.KDF.T < 1 || v.KDF.T > maxT || v.KDF.P < 1 || v.KDF.P > maxP {
 		return nil, vaultError{"kdf parameters out of range"}

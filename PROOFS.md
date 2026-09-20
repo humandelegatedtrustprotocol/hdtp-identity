@@ -7,7 +7,7 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed here that did not pass.
 
-Specification: **2.1.0**. **46** normative sentences, **276** cross-port parity cases over **38** guarded functions.
+Specification: **2.1.0**. **46** normative sentences, **288** cross-port parity cases over **38** guarded functions.
 
 ## The 46 normative sentences of the specification
 
@@ -143,7 +143,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 276 cross-port parity cases
+## The 288 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -151,7 +151,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **276** cases, **0** disagreements, **38** of **38** functions compared whole on success.
+At the run that generated this file: **288** cases, **0** disagreements, **38** of **38** functions compared whole on success.
 
 ### `address_guard` — 28 cases · whole on success
 
@@ -513,20 +513,32 @@ At the run that generated this file: **276** cases, **0** disagreements, **38** 
 - validate_chain with nothing to work from
 - validate_chain with chain as null
 
-### `vault_open` — 5 cases · whole on success
+### `vault_open` — 11 cases · whole on success
 
 - vault_open of what vault_seal made
 - vault_open with a passphrase that is wrong
 - vault_open of a document that is not a vault
 - vault_open of no document at all
+- vault_open of a document with a KDF one pass over the ceiling
+- vault_open of a document with a KDF below the floor
+- vault_open of a document with a KDF whose m_kib does not fit in 32 bits
+- vault_open of a document with a KDF with no passes
+- vault_open of a document with a KDF with too many lanes
+- vault_open of a document with a KDF nobody implements
 - vault_open with nothing to work from
 
-### `vault_seal` — 5 cases · whole on success
+### `vault_seal` — 11 cases · whole on success
 
 - vault_seal
 - vault_seal with a nonce that is not 12 bytes
 - vault_seal with an empty passphrase
 - vault_seal with no plaintext
+- vault_seal with a KDF one pass over the ceiling
+- vault_seal with a KDF below the floor
+- vault_seal with a KDF whose m_kib does not fit in 32 bits
+- vault_seal with a KDF with no passes
+- vault_seal with a KDF with too many lanes
+- vault_seal with a KDF nobody implements
 - vault_seal with nothing to work from
 
 ### `verify` — 4 cases · whole on success
