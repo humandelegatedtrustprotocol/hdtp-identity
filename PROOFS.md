@@ -7,7 +7,7 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed here that did not pass.
 
-Specification: **2.1.1**. **47** normative sentences, **298** cross-port parity cases over **38** guarded functions.
+Specification: **2.1.2**. **47** normative sentences, **314** cross-port parity cases over **38** guarded functions.
 
 ## The 47 normative sentences of the specification
 
@@ -144,7 +144,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 298 cross-port parity cases
+## The 314 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -152,7 +152,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **298** cases, **0** disagreements, **38** of **38** functions compared whole on success.
+At the run that generated this file: **314** cases, **0** disagreements, **38** of **38** functions compared whole on success.
 
 ### `address_guard` — 28 cases · whole on success
 
@@ -423,7 +423,7 @@ At the run that generated this file: **298** cases, **0** disagreements, **38** 
 - open_result with nothing to work from
 - open_result of what seal_result made
 
-### `parse_certificate` — 9 cases · whole on success
+### `parse_certificate` — 17 cases · whole on success
 
 - parse_certificate of a root
 - parse_certificate of a leaf
@@ -431,6 +431,14 @@ At the run that generated this file: **298** cases, **0** disagreements, **38** 
 - parse_certificate of a truncated certificate
 - parse_certificate of bytes that are not DER
 - parse_certificate of that leaf
+- parse_certificate of a leaf with a keyUsage that is an OCTET STRING
+- parse_certificate of a leaf with a subjectKeyIdentifier that is a BIT STRING
+- parse_certificate of a leaf with a subjectAltName that is a SET
+- parse_certificate of a leaf with an authorityKeyIdentifier that is an OCTET STRING
+- parse_certificate of a leaf with a basicConstraints holding a NULL
+- parse_certificate of a leaf with a basicConstraints holding only an INTEGER
+- parse_certificate of a root whose basicConstraints is TRUE, 5, 0
+- parse_certificate of a root whose basicConstraints is a pathLenConstraint of 128
 - parse_certificate of a leaf with a 129-bit OID arc
 - parse_certificate with nothing to work from
 - parse_certificate with der as null
@@ -500,12 +508,20 @@ At the run that generated this file: **298** cases, **0** disagreements, **38** 
 - suite_for an RSA key
 - suite_for with nothing to work from
 
-### `validate_chain` — 21 cases · whole on success
+### `validate_chain` — 29 cases · whole on success
 
 - validate_chain of a real chain
 - validate_chain against the root and endpoint it really has
 - validate_chain of a P-256 chain
 - validate_chain of a leaf whose ECDSA signature is the high twin
+- validate_chain of a leaf with a keyUsage that is an OCTET STRING
+- validate_chain of a leaf with a subjectKeyIdentifier that is a BIT STRING
+- validate_chain of a leaf with a subjectAltName that is a SET
+- validate_chain of a leaf with an authorityKeyIdentifier that is an OCTET STRING
+- validate_chain of a leaf with a basicConstraints holding a NULL
+- validate_chain of a leaf with a basicConstraints holding only an INTEGER
+- validate_chain under a root whose basicConstraints is TRUE, 5, 0
+- validate_chain under a root whose basicConstraints is a pathLenConstraint of 128
 - validate_chain of a leaf dated 30 February
 - validate_chain of a chain of one
 - validate_chain of a chain of three
