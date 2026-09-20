@@ -16,6 +16,31 @@ pub const HEADER_MEMBERS: &str = "cty,exp,kid,msg_id,suite,ts,v";
 pub const SKEW_S: i64 = 300;
 /// §13.1: `exp − ts` is at most 30 days, so no receiver is asked to remember a msg_id for ever.
 pub const MAX_LIFETIME_S: i64 = 30 * 86_400;
+
+/// The band a real `ts` or `exp` lives in: about 34,000 years either side of the epoch.
+///
+/// A bound BEFORE the arithmetic, because the arithmetic is what wrapped. `(now - ts).abs()` on a
+/// `ts` of `i64::MIN + now` overflows to `i64::MIN`, and `i64::MIN.abs()` is `i64::MIN` again in a
+/// release build (documented Rust behaviour; a debug build panics instead, which is why `cargo test`
+/// was green over it). `i64::MIN <= 300` is true, so the skew window passed — and `exp - ts` wrapped
+/// the same way, so the thirty-day cap passed too. Two normative MUSTs of SPEC 13.3/13.1 bypassed by
+/// one header member, reachable from a stranger, in the PINNED wasm core: the workspace's release
+/// profile sets no `overflow-checks`, and cargo's default is off.
+///
+/// The other two ports compute these in `float64` and so refuse such a value already; only Rust
+/// wrapped, and `js/parity.mjs` has a case with an extreme `ts` now, which is the durable guard.
+const TS_BAND: i64 = 1 << 40;
+
+/// The skew window, with nothing that can overflow — the same condition as before the band existed,
+/// so which of the two refusals a caller gets is unchanged.
+fn in_window(now: i64, ts: i64, exp: i64) -> bool {
+    (-TS_BAND..TS_BAND).contains(&ts)
+        && (-TS_BAND..TS_BAND).contains(&exp)
+        && (-TS_BAND..TS_BAND).contains(&now)
+        && now < exp
+        && now.abs_diff(ts) <= SKEW_S as u64
+}
+
 pub const CLAIM_WINDOW_S: i64 = 30 * 86_400;
 pub const TOMBSTONE_S: i64 = 30 * 86_400;
 pub const CTY_CALL: &str = "application/pact-call+json";
@@ -236,8 +261,8 @@ pub fn open_result(a: OpenResultArgs<'_>) -> Result<Value> {
     }
     let (ts, exp) = (h.get("ts").and_then(|t| t.as_i64()), h.get("exp").and_then(|t| t.as_i64()));
     match (ts, exp) {
-        (Some(ts), Some(exp)) if a.now < exp && (a.now - ts).abs() <= SKEW_S => {
-            if exp - ts > MAX_LIFETIME_S {
+        (Some(ts), Some(exp)) if in_window(a.now, ts, exp) => {
+            if exp.saturating_sub(ts) > MAX_LIFETIME_S {
                 return invalid("exp too far from ts");
             }
         }
@@ -352,13 +377,27 @@ pub fn follow_renewed(answer: &Value, pinned_root: &str, pinned_leaf: &[u8], dia
 
 // ── decide ────────────────────────────────────────────────────────────────────────────────────────
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Clone)]
 pub struct HeldKey {
     pub kid: String,
     pub leaf: String,
     pub pkcs8: String,
     #[serde(default)]
     pub current: bool,
+}
+
+/// Written by hand so `pkcs8` cannot be printed. `PrivateKey` and `PublicKey` deliberately derive no
+/// `Debug`; a derive here undid that, and any `{:?}`, `expect` message or panic payload that touched a
+/// `HeldKey` printed a host's LEAF PRIVATE KEY. The rest is public and worth keeping debuggable.
+impl std::fmt::Debug for HeldKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HeldKey")
+            .field("kid", &self.kid)
+            .field("leaf", &self.leaf)
+            .field("pkcs8", &"<redacted>")
+            .field("current", &self.current)
+            .finish()
+    }
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -447,8 +486,8 @@ impl Freshness<'_> {
         let ts = self.h.get("ts").and_then(|t| t.as_i64());
         let exp = self.h.get("exp").and_then(|t| t.as_i64());
         match (ts, exp) {
-            (Some(ts), Some(exp)) if self.now < exp && (self.now - ts).abs() <= SKEW_S => {
-                if exp - ts > MAX_LIFETIME_S {
+            (Some(ts), Some(exp)) if in_window(self.now, ts, exp) => {
+                if exp.saturating_sub(ts) > MAX_LIFETIME_S {
                     return Some(invalid("exp too far from ts"));
                 }
             }

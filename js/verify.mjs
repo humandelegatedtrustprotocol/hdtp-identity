@@ -29,6 +29,19 @@ const manifest = JSON.parse(readFileSync(new URL('manifest.json', here), 'utf8')
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
 let failures = 0;
+// The BUILDER the pin was made by, against the builder this tree would use. Nothing compared these:
+// `manifest.builder` was only ever printed, inside a failure message, so bumping the image digest left
+// this saying "ok pin-of-commit" while the committed builder could no longer produce the pinned bytes.
+const builder = JSON.parse(readFileSync(new URL('builder.json', here), 'utf8'));
+for (const k of ['image', 'platform', 'wasm_pack', 'wasm_pack_sha256']) {
+  const was = manifest.builder?.[k];
+  if (was !== builder[k]) {
+    failures++;
+    console.log(`FAIL builder: js/builder.json's ${k} is ${builder[k] ?? '(absent)'}, and the pin was built with ${was ?? '(absent)'}`);
+    console.log('     The committed builder can no longer make these bytes. sh js/reproduce.sh --pin');
+  }
+}
+
 const head = inputsAtHead();
 if (!head) {
   console.log('note pin-of-commit: not checked — this is not a git checkout, so there is no HEAD to compare with');

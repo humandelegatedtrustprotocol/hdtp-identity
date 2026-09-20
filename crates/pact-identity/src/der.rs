@@ -158,7 +158,17 @@ pub fn read(buf: &[u8], pos: usize) -> Result<Node<'_>> {
             return err("parse", "DER length not minimal");
         }
     }
-    if at + len > buf.len() {
+    // Compared WITHOUT adding, because the addition wrapped. `len` is built from up to four length
+    // octets, so `0xFFFFFFFF` is reachable — and on wasm32 `usize` is 32 bits, so `at + len` wrapped
+    // to a small number, this guard passed, and `&buf[at..at + len]` panicked on the slice range.
+    // Six bytes (`30 84 FF FF FF FF`) did it, from any entry that parses DER: a card's certificate, a
+    // CSR, an SPKI — and, with no caller cooperation at all, an attacker's envelope `chain` through
+    // `decide`. Measured in the pinned build on 2026-09-20: `RuntimeError: unreachable`, which is the
+    // boundary throwing across, the one thing CONTRACT section 0 says it never does. 64-bit hosts
+    // computed the same guard correctly, so `cargo test`, the CLI and the Go node never saw it; the
+    // wasm port is what the wallet page and the intrusion suite's default defender run.
+    // `at <= buf.len()` holds here: every increment above is guarded by an `at >= buf.len()` check.
+    if len > buf.len() - at {
         return err("parse", "DER length overruns the buffer");
     }
     Ok(Node { tag, content: &buf[at..at + len], raw: &buf[pos..at + len], end: at + len })
