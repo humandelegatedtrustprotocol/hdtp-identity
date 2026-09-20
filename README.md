@@ -29,8 +29,8 @@ sh js/reproduce.sh              # the canonical build OF HEAD, in a container na
 node js/verify.mjs              # recomputes the SHA-256 of js/pkg-* against the manifest: passes after a --pin,
                                 # and not after a build.sh, whose bytes are this machine's (see below)
 node js/check.mjs               # Appendix B through the Wasm bindings, vectors read from SPEC.md: 114/114
-node js/intrude.mjs             # the 118 intrusion scenarios with the Wasm core as the defender, compared verdict by
-                                # verdict with the seed's run: 114 blocked, 4 residual by decision, 0 reproduce
+node js/intrude.mjs             # the 124 intrusion scenarios with the Wasm core as the defender, compared verdict by
+                                # verdict with the seed's run: 120 blocked, 4 residual by decision, 0 reproduce
 node js/intrude.mjs --port go   # the same against go/bin/pact-identity-go
 node js/live.mjs --endpoint https://host/slug [--card card.vcf] [--insecure]   # --insecure REQUIRES --card
                                 # the 28 black-box scenarios aimed at a LIVE endpoint, judged by the answer's code;
