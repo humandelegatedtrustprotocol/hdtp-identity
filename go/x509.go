@@ -265,11 +265,18 @@ func nameOf(n derNode) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// The length FIRST, because `parts[0]` on an empty slice panics — and an empty ATV SEQUENCE
+	// (`30 00`) is six bytes an attacker sends. Rust puts the same test first in a short-circuiting
+	// `||` (x509.rs `name_of`), which is why only this port could be reached; `Decide` walks here
+	// through `ValidateChain` -> `Parse` before any signature is verified, so it took no credential.
+	if len(parts) < 2 {
+		return "", errors.New("name is not a UTF-8 commonName")
+	}
 	cnOid, err := readOidStrict(parts[0])
 	if err != nil {
 		return "", err
 	}
-	if len(parts) < 2 || cnOid != OIDCommonName || parts[1].tag != 0x0c {
+	if cnOid != OIDCommonName || parts[1].tag != 0x0c {
 		return "", errors.New("name is not a UTF-8 commonName")
 	}
 	return string(parts[1].content), nil
@@ -523,7 +530,12 @@ func ProfileError(c *Cert, kind string) string {
 	if c.SigAlg != OIDEd25519 && c.SigAlg != OIDEcdsaSHA256 {
 		return "signature algorithm not in the profile"
 	}
-	if _, err := AlgorithmOf(c.PublicKey); err != nil {
+	// The ADMITTED set, not the excluded one. This asked `AlgorithmOf`, which errors only on an
+	// EMPTY `Alg` — and `ParseSPKI` sets `Alg = AlgX25519` for OID 1.3.101.110, so an X25519-keyed
+	// leaf was inside the profile to this port and outside it to Rust (x509.rs: an explicit X25519
+	// refusal). The node pins on this verdict, so it would pin a chain the wallet and the cloud
+	// both refuse, leaving the peer stuck rather than cleanly rejected.
+	if c.PublicKey == nil || (c.PublicKey.Alg != AlgEd25519 && c.PublicKey.Alg != AlgP256) {
 		return "key algorithm not in the profile"
 	}
 	if c.TimeTags[0] != timeTagFor(c.NotBefore) || c.TimeTags[1] != timeTagFor(c.NotAfter) {
