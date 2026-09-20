@@ -128,6 +128,15 @@ func TestDERDeviationsAreRefused(t *testing.T) {
 		{"unused bits that are not zero", 7, rootExtensions(id, seq(derBool(true), derIntN(0)), bitstr([]byte{0x05}, 2)), "BIT STRING not in the DER form"},
 		{"an extension value with a trailing byte", 7, rootExtensions(id, append(seq(derBool(true), derIntN(0)), 0x00), bitstr([]byte{0x04}, 2)), "extension value has trailing bytes"},
 		{"the version INTEGER written non-minimally", 0, explicit(0, tlv(0x02, []byte{0x00, 0x02})), "not a v3 certificate with extensions"},
+		// An empty attribute in a Name. `nameOf` indexed `parts[0]` one line ABOVE the `len(parts) < 2`
+		// that would have made it safe, so these six bytes panicked the parser — reachable with no
+		// credential through `Decide` -> `ValidateChain` -> `Parse`, before any signature is verified.
+		// Rust put the length first in a short-circuiting `||`, so only this port could be reached.
+		{"an empty attribute in the Name", 5, seq(tlv(0x31, seq())), "name is not a UTF-8 commonName"},
+		// An X25519 key. `AlgorithmOf` errors only on an EMPTY Alg, and `ParseSPKI` names X25519, so
+		// this leaf was inside the profile here and outside it in Rust — a chain this port validated
+		// and the wallet refused.
+		{"a key algorithm outside the profile", 6, seq(seq(oidBytes(oidX25519)), bitstr(make([]byte, 32), 0)), "key algorithm not in the profile"},
 	}
 	for _, c := range cases {
 		cert := withField(t, p.root, c.index, c.field, p.rootKey)

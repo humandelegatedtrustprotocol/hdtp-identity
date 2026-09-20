@@ -386,6 +386,11 @@ func Decide(now time.Time, env Envelope, node NodeState) Decision {
 	result := func(tier, root, endpoint, form string, extra map[string]any) Decision {
 		effects = append(effects, map[string]any{"op": "seen", "msg_id": msgID})
 		r := map[string]any{"code": "ok", "tier": tier, "root": root, "endpoint": endpoint, "method": method, "form": form, "params": body["params"], "leaf": leafB64}
+		// ALWAYS present, null when the call names no tool, because that is what the Rust core does
+		// (envelope.rs `ok`). Omitting it made a member appear in one port's answer and not the
+		// other's — the exact defect js/parity.mjs exists to catch, and it survived because the
+		// gate counted `decide`'s refusals as successes, so no populated answer was ever compared.
+		r["tool"] = nil
 		if hasTool {
 			r["tool"] = tool
 		}
