@@ -13,6 +13,7 @@ port presents: bytes in, JSON out, no state.
 | `crates/pact-identity-wasm` | the `wasm-bindgen` boundary: `call(name, args) -> json` |
 | `js/` | loaders (`index.mjs` for Node and the browser, `worker.mjs` for Workers), `build.sh`, `reproduce.sh` (the canonical, containerised build), `manifest.json` + `verify.mjs`, and the Node proofs `check.mjs` and `intrude.mjs` |
 | `go/` | the Go port and its `pact-identity-go` adapter binary (built by the Go side) |
+| `docs/` | `contract-one-place.md` — a PROPOSAL, not built: one JSON Schema file as the source of `CONTRACT.md`, the parity gate's surface and typed bindings |
 
 ## Build and prove
 
