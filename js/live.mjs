@@ -50,13 +50,21 @@ export function answerCode(body) {
       : body;
     try { body = JSON.parse(payload); } catch { return `unknown:not-json(${payload.slice(0, 60)})`; }
   }
-  if (body && body.error) return body.error.data?.code ?? body.error.code ?? 'error';
+  // A JSON-RPC `error.code` is a NUMBER, and every caller of this treats the answer as a string.
+  // Returning it raw threw `code.startsWith is not a function` out of `post()`, killed the run as an
+  // unhandled rejection and lost every result already collected — against any receiver that answers
+  // a plain JSON-RPC error, which is what the reference node does for a tool it does not have. The
+  // Rust driver has read this shape since 2026-09-18; this one never did (measured 2026-09-20).
+  if (body && body.error) {
+    const c = body.error.data?.code ?? body.error.code;
+    return typeof c === 'string' ? c : `unknown:jsonrpc-${c ?? 'error'}`;
+  }
   for (const item of body?.result?.content ?? []) {
     if (typeof item?.text !== 'string') continue;
     let r; try { r = JSON.parse(item.text); } catch { continue; }
     if (r && typeof r.protected === 'string' && typeof r.ct === 'string') return 'sealed';
     if (r && typeof r.code === 'string') return r.code;
-    if (r && r.error) return r.error.code ?? 'error';
+    if (r && r.error) return typeof r.error.code === 'string' ? r.error.code : `unknown:jsonrpc-${r.error.code ?? 'error'}`;
   }
   if (typeof body?.result?.code === 'string') return body.result.code;
   if (body?.result?.isError) return 'unknown:isError';
@@ -88,7 +96,7 @@ const WINDOW = 300, MARGIN = 30;
  * The names are the Rust driver's too (`pact vectors intrude`), and js/live.test.mjs holds the two
  * lists to each other: they drifted apart the day they were written, 27 against 26.
  */
-export function scenarios({ endpoint, targetLeaf, now = Date.now() }) {
+export function scenarios({ targetLeaf, now = Date.now() }) {
   const nowS = Math.floor(now / 1000);
   const E_M = 'https://mallory.example/mcp';
   const rootM = ed25519FromSeed(randomBytes(32)), hostM = ed25519FromSeed(randomBytes(32));
@@ -159,7 +167,12 @@ export function scenarios({ endpoint, targetLeaf, now = Date.now() }) {
     // stranger that must get through the same door — sealed, by the target, to her key. It
     // leaves a pending request behind, which is why nothing may come after it.
     { name: 'CONTROL: a stranger asking for contact with a card that is her leaf', envelope: request(), expect: 'sealed', note: 'leaves a contact request on the target' },
-  ].map((s) => ({ ...s, endpoint }));
+    // Every entry carries the ATTACKER's root, because "she is new every run" is otherwise
+    // untestable from outside: her chain rides inside the ciphertext, and the signature over it
+    // differs between two calls whatever her long-term keys are (HPKE's ephemeral is fresh each
+    // time). A test written against `sig` therefore passed with the fixed seed this fix removed.
+    // `endpoint` used to be spread here and nothing ever read it.
+  ].map((s) => ({ ...s, attacker: b64url(ROOT_M) }));
 }
 
 /**
@@ -182,7 +195,8 @@ export async function fetchTargetLeaf(endpoint, fetchImpl = fetch, cardText = nu
 async function rpc(endpoint, message, fetchImpl, session) {
   const headers = { 'content-type': 'application/json', accept: 'application/json, text/event-stream' };
   if (session) headers['mcp-session-id'] = session;
-  const res = await fetchImpl(endpoint, { method: 'POST', headers, body: JSON.stringify(message) });
+  // A hung receiver hung the whole battery; the Rust driver has had a 20s global timeout all along.
+  const res = await fetchImpl(endpoint, { method: 'POST', headers, body: JSON.stringify(message), signal: AbortSignal.timeout(20_000) });
   return { status: res.status, text: await res.text(), session: res.headers.get('mcp-session-id') };
 }
 
@@ -222,7 +236,7 @@ export async function runLive({ endpoint, card = null, fetchImpl = fetch, now = 
   const session = await initialize(dial, fetchImpl);
   if (session) log(`session: ${session}`);
   const results = [];
-  for (const s of scenarios({ endpoint: target.endpoint, targetLeaf: target.leaf, now })) {
+  for (const s of scenarios({ targetLeaf: target.leaf, now })) {
     const first = await post(dial, s.envelope, fetchImpl, session);
     let got = first.code;
     if (s.twice) { const second = await post(dial, s.envelope, fetchImpl, session); got = second.code === first.code ? first.code : `${first.code} then ${second.code}`; }
@@ -233,7 +247,7 @@ export async function runLive({ endpoint, card = null, fetchImpl = fetch, now = 
   const reproduces = results.filter((r) => r.verdict === 'REPRODUCES').length;
   const unreachedCount = results.filter((r) => r.verdict === 'UNREACHED').length;
   const total = seedScenarioCount();
-  log(`\n${results.length} scenarios against ${target.endpoint}: ${results.length - reproduces - unreachedCount} blocked, ${reproduces} reproduce, ${unreachedCount} never reached a PACT answer; ${total - results.length} of the seed's ${total} need the owner's state and were not run`);
+  log(`\n${results.length} scenarios against ${target.endpoint}: ${results.length - reproduces - unreachedCount} blocked, ${reproduces} reproduce, ${unreachedCount} never reached a PACT answer; ${Math.max(0, total - results.length)} of the seed's ${total} were not run here`);
   return { results, reproduces, unreached: unreachedCount, skipped: total - results.length, seedScenarios: total };
 }
 

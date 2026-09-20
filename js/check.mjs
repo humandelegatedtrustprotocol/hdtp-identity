@@ -36,7 +36,9 @@ if (!v2) {
     const c = new X509Certificate(bytes), mine = d.parseCert(bytes);
     ok(c.subject.includes(mine.subject), `${name}: subject`);
     ok(c.ca === mine.ca, `${name}: cA`);
-    if (mine.uris.length) ok(c.subjectAltName.includes('URI:' + mine.uris[0]), `${name}: subjectAltName`);
+    // Asked of OpenSSL's view, not of ours: `if (mine.uris.length)` takes the condition from the
+    // value under test, so a port that dropped its SANs made the assertion vanish rather than fail.
+    if (c.subjectAltName) ok(mine.uris.length > 0 && c.subjectAltName.includes('URI:' + mine.uris[0]), `${name}: subjectAltName`);
     ok(Math.abs(c.validFromDate - Date.parse(mine.not_before)) < 1000, `${name}: notBefore`);
     ok(mine.profile_error === null && mine.kind === (name.startsWith('root') ? 'root' : 'leaf'), `${name}: in the profile as a ${mine.kind}`);
     if (name.startsWith('leaf_a')) ok(c.checkIssued(new X509Certificate(der.root_a)) && c.verify(new X509Certificate(der.root_a).publicKey), `${name}: issued and verified by root_a per OpenSSL`);

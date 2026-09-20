@@ -101,9 +101,14 @@ function knownNames() {
     }
     return out;
   };
+  // Only functions carrying a TEST attribute, which is what a `rust:` citation claims to name. This
+  // collected EVERY `fn` under crates/, so `held_by: ["rust:parse"]` validated against the production
+  // helper `x509::parse` — a citation that names something real and proves nothing, which is the one
+  // outcome this file exists to prevent. The Go half was always narrowed to `func Test…`.
   for (const f of walk(join(here, '../crates'))) {
     if (!f.endsWith('.rs')) continue;
-    for (const m of readFileSync(f, 'utf8').matchAll(/fn\s+([a-z0-9_]+)\s*\(/g)) names.add('rust:' + m[1]);
+    const src = readFileSync(f, 'utf8');
+    for (const m of src.matchAll(/#\[(?:tokio::)?test\][\s\S]{0,200}?\bfn\s+([a-z0-9_]+)\s*\(/g)) names.add('rust:' + m[1]);
   }
   for (const f of readdirSync(join(here, '../go'))) {
     if (!f.endsWith('_test.go')) continue;
@@ -121,6 +126,9 @@ const walkTree = (dir, out = []) => {
   }
   return out;
 };
+
+/** The only repositories a citation's prefix may name, because these are the only two looked in. */
+const SIBLING_REPOS = ['gateway', 'cloud']; // invariant: constant
 
 /**
  * The holders that live in a sibling repository, checked when that repository is on
@@ -175,6 +183,14 @@ for (const m of musts) {
   // this run proved less than a run with the siblings on disk, and says so.
   for (const n of e.elsewhere_names ?? []) {
     const repo = n.split(':')[0];
+    // A prefix nobody can ever look in is a dangling citation, not an unverified one. `unverified` is
+    // printed and never asserted on, so `gatway:TestFoo` — or a prefix for a repository that will
+    // never be consulted — was excused for ever by the very mechanism built to stop citations nobody
+    // checks. Only these two repositories are ever looked in.
+    if (!SIBLING_REPOS.includes(repo)) {
+      problems.push(`DANGLING ${m.id}  names ${n}, whose prefix is not a repository this checks (${SIBLING_REPOS.join(', ')})`);
+      continue;
+    }
     if (!sibling.looked.includes(repo)) { unverified++; continue; }
     if (!sibling.names.has(n)) problems.push(`DANGLING ${m.id}  names ${n}, which does not exist in the ${repo} repository`);
   }

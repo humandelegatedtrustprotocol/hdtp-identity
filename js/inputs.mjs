@@ -29,23 +29,45 @@ export const INPUTS = [
 const root = fileURLToPath(new URL('../', import.meta.url));
 const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 
-/** The identity of the inputs at HEAD, or null where there is no git checkout to ask. */
+/**
+ * The identity of the inputs at HEAD, or null where there is no git checkout to ask.
+ *
+ * Every entry is also checked for matching SOMETHING. `git ls-tree` does not error on a pathspec
+ * that matches nothing, so renaming `.cargo/config.toml` to `.cargo/config` — which cargo still
+ * reads, and which still sets the wasm32 rustflags — would drop it from the listing, fail `verify`
+ * once, and leave it permanently unwatched after the next re-pin. A typo in this list did the same.
+ */
 export function inputsAtHead() {
   let listing;
   try { listing = git('ls-tree', '-r', 'HEAD', '--', ...INPUTS); } catch { return null; }
   const files = listing.split('\n').filter(Boolean).length;
   if (!files) return null;
+  const empty = INPUTS.filter((p) => {
+    try { return git('ls-tree', '-r', 'HEAD', '--', p).trim() === ''; } catch { return true; }
+  });
+  if (empty.length) {
+    throw new Error(`these build inputs match no tracked file at HEAD, so nothing is watching them: ${empty.join(', ')}`);
+  }
   return { sha256: createHash('sha256').update(listing).digest('hex'), files };
 }
 
-/** Inputs whose working copy or index differs from HEAD. */
+/**
+ * Inputs whose working copy or index differs from HEAD.
+ *
+ * A git failure is NOT an empty answer. This swallowed every error and returned `[]`, which
+ * `reproduce.sh --pin` reads as "clean" — so a git version that refused an argument, or a `.git` in
+ * a state `status` would not report on, let a pin be taken over uncommitted inputs: exactly the
+ * ambush the pin-of-commit design exists to prevent.
+ */
 export function dirtyInputs() {
-  try { return git('status', '--porcelain', '--', ...INPUTS).split('\n').filter(Boolean); } catch { return []; }
+  return git('status', '--porcelain', '--', ...INPUTS).split('\n').filter(Boolean);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (process.argv[2] === '--dirty') {
-    const dirty = dirtyInputs();
+    // 0 clean, 1 dirty, 2 could not tell — and `reproduce.sh` treats 2 as fatal when pinning.
+    let dirty;
+    try { dirty = dirtyInputs(); } catch (e) { console.error(`inputs: ${e.message}`); process.exit(2); }
     for (const line of dirty) console.log(line);
     process.exit(dirty.length ? 1 : 0);
   }
