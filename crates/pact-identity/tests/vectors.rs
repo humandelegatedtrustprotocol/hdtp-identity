@@ -16,7 +16,8 @@ fn root_dir() -> PathBuf {
 }
 
 fn vectors() -> Value {
-    let path = std::env::var("PACT_VECTORS").map(PathBuf::from).unwrap_or_else(|_| root_dir().join("pact-protocol/vectors/pact-2.0-vectors.json"));
+    let path =
+        std::env::var("PACT_VECTORS").map(PathBuf::from).unwrap_or_else(|_| root_dir().join("pact-protocol/vectors/pact-2.0-vectors.json"));
     serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))).unwrap()
 }
 
@@ -57,7 +58,11 @@ fn cast() -> Cast {
     hosts.insert("leaf_a", PrivateKey::from_seed(Alg::Ed25519, &seed("host/alina/2026")).unwrap());
     hosts.insert("leaf_a_next", PrivateKey::from_seed(Alg::Ed25519, &seed("host/alina/2027")).unwrap());
     hosts.insert("leaf_b", PrivateKey::from_seed(Alg::P256, &seed("host/bharat/2026")).unwrap());
-    Cast { root_a: PrivateKey::from_seed(Alg::Ed25519, &seed("root/alina")).unwrap(), root_b: PrivateKey::from_seed(Alg::P256, &seed("root/bharat")).unwrap(), hosts }
+    Cast {
+        root_a: PrivateKey::from_seed(Alg::Ed25519, &seed("root/alina")).unwrap(),
+        root_b: PrivateKey::from_seed(Alg::P256, &seed("root/bharat")).unwrap(),
+        hosts,
+    }
 }
 
 fn at(s: &str) -> i64 {
@@ -65,7 +70,18 @@ fn at(s: &str) -> i64 {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn leaf<'a>(c: &'a Cast, cn: &'a str, root: &'a PrivateKey, issuer: &'a PublicKey, host: &'a PublicKey, endpoint: &str, dns: Option<&str>, nb: &str, na: &str, label: &str) -> Vec<u8> {
+fn leaf<'a>(
+    c: &'a Cast,
+    cn: &'a str,
+    root: &'a PrivateKey,
+    issuer: &'a PublicKey,
+    host: &'a PublicKey,
+    endpoint: &str,
+    dns: Option<&str>,
+    nb: &str,
+    na: &str,
+    label: &str,
+) -> Vec<u8> {
     let _ = c;
     let spec = LeafSpec {
         cn,
@@ -104,16 +120,71 @@ fn the_seven_certificates_reproduce() {
     assert_eq!(parse(&root_b).unwrap().tbs, parse(&der["root_b"]).unwrap().tbs, "root_b TBS");
     assert!(x509::verify_cert(&parse(&der["root_b"]).unwrap(), &pub_b), "root_b verifies under its key");
 
-    let leaf_a = leaf(&c, "Alina Rao", &c.root_a, &pub_a, &h("leaf_a"), ENDPOINT_A, Some("agent.alina.example"), "2026-09-01T00:00:00Z", "2027-09-01T00:00:00Z", "leaf_a");
+    let leaf_a = leaf(
+        &c,
+        "Alina Rao",
+        &c.root_a,
+        &pub_a,
+        &h("leaf_a"),
+        ENDPOINT_A,
+        Some("agent.alina.example"),
+        "2026-09-01T00:00:00Z",
+        "2027-09-01T00:00:00Z",
+        "leaf_a",
+    );
     assert_eq!(hex(&leaf_a), hex(&der["leaf_a"]), "leaf_a byte for byte");
-    let leaf_b = leaf(&c, "Bharat Mehta", &c.root_b, &pub_b, &h("leaf_b"), ENDPOINT_B, None, "2026-09-01T00:00:00Z", "2027-09-01T00:00:00Z", "leaf_b");
+    let leaf_b = leaf(
+        &c,
+        "Bharat Mehta",
+        &c.root_b,
+        &pub_b,
+        &h("leaf_b"),
+        ENDPOINT_B,
+        None,
+        "2026-09-01T00:00:00Z",
+        "2027-09-01T00:00:00Z",
+        "leaf_b",
+    );
     assert_eq!(parse(&leaf_b).unwrap().tbs, parse(&der["leaf_b"]).unwrap().tbs, "leaf_b TBS");
     assert!(x509::verify_cert(&parse(&der["leaf_b"]).unwrap(), &pub_b), "leaf_b verifies under root_b");
-    let expired = leaf(&c, "Alina Rao", &c.root_a, &pub_a, &h("leaf_a"), ENDPOINT_A, None, "2025-06-01T00:00:00Z", "2026-06-01T00:00:00Z", "leaf_a_expired");
+    let expired = leaf(
+        &c,
+        "Alina Rao",
+        &c.root_a,
+        &pub_a,
+        &h("leaf_a"),
+        ENDPOINT_A,
+        None,
+        "2025-06-01T00:00:00Z",
+        "2026-06-01T00:00:00Z",
+        "leaf_a_expired",
+    );
     assert_eq!(hex(&expired), hex(&der["leaf_a_expired"]));
-    let long = leaf(&c, "Alina Rao", &c.root_a, &pub_a, &h("leaf_a"), ENDPOINT_A, None, "2026-09-01T00:00:00Z", "2027-10-10T00:00:00Z", "leaf_a_long");
+    let long = leaf(
+        &c,
+        "Alina Rao",
+        &c.root_a,
+        &pub_a,
+        &h("leaf_a"),
+        ENDPOINT_A,
+        None,
+        "2026-09-01T00:00:00Z",
+        "2027-10-10T00:00:00Z",
+        "leaf_a_long",
+    );
     assert_eq!(hex(&long), hex(&der["leaf_a_long"]));
-    let next = leaf(&c, "Alina Rao", &c.root_a, &pub_a, &h("leaf_a_next"), ENDPOINT_A, None, "2027-08-02T00:00:00Z", "2028-08-01T00:00:00Z", "leaf_a_next");
+    let next = leaf(
+        &c,
+        "Alina Rao",
+        &c.root_a,
+        &pub_a,
+        &h("leaf_a_next"),
+        ENDPOINT_A,
+        None,
+        "2027-08-02T00:00:00Z",
+        "2028-08-01T00:00:00Z",
+        "leaf_a_next",
+    );
     assert_eq!(hex(&next), hex(&der["leaf_a_next"]));
 
     for (name, pkcs8_hex) in v["leaf_keys_pkcs8_hex"].as_object().unwrap() {
@@ -161,7 +232,9 @@ fn chain_cases() {
             ("accept", ChainResult::Ok(_)) => {}
             ("refuse", ChainResult::Refused { rule, .. }) if rule as u64 == c["rule"].as_u64().unwrap() => {}
             (want, ChainResult::Ok(_)) => panic!("{name}: expected {want}, got accept"),
-            (want, ChainResult::Refused { rule, reason }) => panic!("{name}: expected {want} rule {}, got rule {rule} ({reason})", c["rule"]),
+            (want, ChainResult::Refused { rule, reason }) => {
+                panic!("{name}: expected {want} rule {}, got rule {rule} ({reason})", c["rule"])
+            }
         }
         n += 1;
     }
@@ -292,14 +365,19 @@ fn decide_on_the_vector_envelopes() {
     let wire = |e: &Value| json!({ "protected": e["protected"], "enc": e["enc"], "ct": e["ct"], "sig": e["sig"] });
 
     // A stranger with a chain calling send_message: the guest binding refuses it.
-    let input: DecideInput = serde_json::from_value(json!({ "now": NOW, "envelope": wire(full), "node": node_for(&v, &der, "leaf_b", "root_b", vec![]) })).unwrap();
+    let input: DecideInput =
+        serde_json::from_value(json!({ "now": NOW, "envelope": wire(full), "node": node_for(&v, &der, "leaf_b", "root_b", vec![]) }))
+            .unwrap();
     let out = envelope::decide(&input).unwrap();
     assert_eq!(out.result["code"], "envelope_invalid");
     assert_eq!(out.result["why"], "guest may only redeem or request");
     assert!(out.effects.is_empty());
 
     // The same envelope from a pinned contact is a contact-tier call, with the message id recorded.
-    let input: DecideInput = serde_json::from_value(json!({ "now": NOW, "envelope": wire(full), "node": node_for(&v, &der, "leaf_b", "root_b", vec![pin_a.clone()]) })).unwrap();
+    let input: DecideInput = serde_json::from_value(
+        json!({ "now": NOW, "envelope": wire(full), "node": node_for(&v, &der, "leaf_b", "root_b", vec![pin_a.clone()]) }),
+    )
+    .unwrap();
     let out = envelope::decide(&input).unwrap();
     assert_eq!(out.result["code"], "ok", "{}", out.result);
     assert_eq!(out.result["tier"], "contact");
@@ -311,9 +389,14 @@ fn decide_on_the_vector_envelopes() {
     assert_eq!(out.effects, vec![json!({ "op": "seen", "msg_id": "vec-v2-alina-to-bharat" })]);
 
     // The small form: chain_required for a stranger, contact for a pinned leaf.
-    let input: DecideInput = serde_json::from_value(json!({ "now": NOW, "envelope": wire(small), "node": node_for(&v, &der, "leaf_b", "root_b", vec![]) })).unwrap();
+    let input: DecideInput =
+        serde_json::from_value(json!({ "now": NOW, "envelope": wire(small), "node": node_for(&v, &der, "leaf_b", "root_b", vec![]) }))
+            .unwrap();
     assert_eq!(envelope::decide(&input).unwrap().result, json!({ "code": "chain_required" }));
-    let input: DecideInput = serde_json::from_value(json!({ "now": NOW, "envelope": wire(small), "node": node_for(&v, &der, "leaf_b", "root_b", vec![pin_a.clone()]) })).unwrap();
+    let input: DecideInput = serde_json::from_value(
+        json!({ "now": NOW, "envelope": wire(small), "node": node_for(&v, &der, "leaf_b", "root_b", vec![pin_a.clone()]) }),
+    )
+    .unwrap();
     let out = envelope::decide(&input).unwrap();
     assert_eq!(out.result["tier"], "contact");
     assert_eq!(out.result["form"], "leaf");
@@ -325,7 +408,11 @@ fn decide_on_the_vector_envelopes() {
     assert_eq!(envelope::decide(&input).unwrap().result, json!({ "code": "ok", "replayed": true }));
 
     // The same through the boundary.
-    let out: Value = serde_json::from_str(&pact_identity::call("decide", &json!({ "now": NOW, "envelope": wire(full), "node": node_for(&v, &der, "leaf_b", "root_b", vec![pin_a]) }).to_string())).unwrap();
+    let out: Value = serde_json::from_str(&pact_identity::call(
+        "decide",
+        &json!({ "now": NOW, "envelope": wire(full), "node": node_for(&v, &der, "leaf_b", "root_b", vec![pin_a]) }).to_string(),
+    ))
+    .unwrap();
     assert_eq!(out["result"]["tier"], "contact");
 }
 
@@ -367,9 +454,18 @@ fn a_result_seals_back_and_opens_on_the_caller_side() {
     assert_eq!(out["root"], root_b);
     assert_eq!(out["leaf_update"], b64u(&der["leaf_b"]));
     // The wrong msg_id does not correlate; a request envelope is not a result.
-    let bad = envelope::open_result(envelope::OpenResultArgs { envelope: &wire, my_key: alina, msg_id: "m-2", now: ts, pins: &[], expected_root: None, expected_endpoint: None });
+    let bad = envelope::open_result(envelope::OpenResultArgs {
+        envelope: &wire,
+        my_key: alina,
+        msg_id: "m-2",
+        now: ts,
+        pins: &[],
+        expected_root: None,
+        expected_endpoint: None,
+    });
     assert_eq!(bad.unwrap_err().why, "msg_id does not correlate");
-    let pins = vec![envelope::CallerPin { root: root_b.clone(), endpoint: ENDPOINT_B.into(), leaf: b64u(&der["leaf_b"]), state: "active".into() }];
+    let pins =
+        vec![envelope::CallerPin { root: root_b.clone(), endpoint: ENDPOINT_B.into(), leaf: b64u(&der["leaf_b"]), state: "active".into() }];
     let small = envelope::seal_result(envelope::SealResult {
         recipient: &alina.public(),
         sender: bharat,
@@ -383,7 +479,16 @@ fn a_result_seals_back_and_opens_on_the_caller_side() {
         ephemeral_seed: None,
     })
     .unwrap();
-    let out = envelope::open_result(envelope::OpenResultArgs { envelope: &small, my_key: alina, msg_id: "m-3", now: ts, pins: &pins, expected_root: Some(&root_b), expected_endpoint: Some(ENDPOINT_B) }).unwrap();
+    let out = envelope::open_result(envelope::OpenResultArgs {
+        envelope: &small,
+        my_key: alina,
+        msg_id: "m-3",
+        now: ts,
+        pins: &pins,
+        expected_root: Some(&root_b),
+        expected_endpoint: Some(ENDPOINT_B),
+    })
+    .unwrap();
     assert_eq!(out["form"], "leaf");
     assert_eq!(out["error"]["code"], "permission_denied");
 }

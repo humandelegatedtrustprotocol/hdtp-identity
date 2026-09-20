@@ -354,7 +354,14 @@ fn run(cli: Cli) -> Res<i32> {
             CardCmd::Check { file, now } => implementer::card_check(&file, now.as_deref()),
         },
         Cmd::Chain { cmd } => match cmd {
-            ChainCmd::Check { leaf, root, chain, expect_root, expect_endpoint, now } => implementer::chain_check(leaf.as_deref(), root.as_deref(), chain.as_deref(), expect_root.as_deref(), expect_endpoint.as_deref(), now.as_deref()),
+            ChainCmd::Check { leaf, root, chain, expect_root, expect_endpoint, now } => implementer::chain_check(
+                leaf.as_deref(),
+                root.as_deref(),
+                chain.as_deref(),
+                expect_root.as_deref(),
+                expect_endpoint.as_deref(),
+                now.as_deref(),
+            ),
         },
         Cmd::Cert { cmd } => match cmd {
             CertCmd::Show { file, json } => implementer::cert_show(&file, json),
@@ -369,15 +376,43 @@ fn run(cli: Cli) -> Res<i32> {
         Cmd::Vectors { cmd } => match cmd {
             VectorsCmd::Gen { out } => vectors::gen(out.as_deref()),
             VectorsCmd::Check { spec, file } => vectors::check(spec.as_deref(), file.as_deref()),
-            VectorsCmd::Intrude { against, card, allow_insecure, now } => vectors::intrude(&against, card.as_deref(), allow_insecure, now.as_deref()),
+            VectorsCmd::Intrude { against, card, allow_insecure, now } => {
+                vectors::intrude(&against, card.as_deref(), allow_insecure, now.as_deref())
+            }
         },
         Cmd::Id { cmd } => match cmd {
             IdCmd::Create { name, alg, vault, piv, reader, key_out } => match piv {
                 Some(slot) => wallet::id_create_piv(&name, &slot, reader.as_deref(), &vault),
                 None => wallet::id_create(&name, &alg, &vault, key_out.as_deref()),
             },
-            IdCmd::Issue { common: c, moving } => wallet::id_issue(wallet::IssueArgs { vault: &c.vault, csr: &c.csr, valid_days: io::parse_valid(&c.valid)?, moving, renew_only: false, origin: c.origin.as_deref(), root: c.root.as_deref(), yes: c.yes, out: c.out.as_deref(), chain_out: c.chain_out.as_deref(), now: c.now.as_deref(), reader: c.reader.as_deref() }),
-            IdCmd::Renew { common: c } => wallet::id_issue(wallet::IssueArgs { vault: &c.vault, csr: &c.csr, valid_days: io::parse_valid(&c.valid)?, moving: false, renew_only: true, origin: c.origin.as_deref(), root: c.root.as_deref(), yes: c.yes, out: c.out.as_deref(), chain_out: c.chain_out.as_deref(), now: c.now.as_deref(), reader: c.reader.as_deref() }),
+            IdCmd::Issue { common: c, moving } => wallet::id_issue(wallet::IssueArgs {
+                vault: &c.vault,
+                csr: &c.csr,
+                valid_days: io::parse_valid(&c.valid)?,
+                moving,
+                renew_only: false,
+                origin: c.origin.as_deref(),
+                root: c.root.as_deref(),
+                yes: c.yes,
+                out: c.out.as_deref(),
+                chain_out: c.chain_out.as_deref(),
+                now: c.now.as_deref(),
+                reader: c.reader.as_deref(),
+            }),
+            IdCmd::Renew { common: c } => wallet::id_issue(wallet::IssueArgs {
+                vault: &c.vault,
+                csr: &c.csr,
+                valid_days: io::parse_valid(&c.valid)?,
+                moving: false,
+                renew_only: true,
+                origin: c.origin.as_deref(),
+                root: c.root.as_deref(),
+                yes: c.yes,
+                out: c.out.as_deref(),
+                chain_out: c.chain_out.as_deref(),
+                now: c.now.as_deref(),
+                reader: c.reader.as_deref(),
+            }),
             IdCmd::Ledger { vault, root, json } => wallet::id_ledger(&vault, root.as_deref(), json),
             IdCmd::Show { vault, root, out } => wallet::id_show(&vault, root.as_deref(), out.as_deref()),
             IdCmd::Backup { vault, to, force } => wallet::id_backup(&vault, &to, force),
@@ -415,7 +450,8 @@ mod tests {
 
     #[test]
     fn arguments_parse_as_documented() {
-        let cli = Cli::try_parse_from(["pact", "id", "issue", "--vault", "v.json", "--csr", "r.pem", "--valid", "90d", "--move", "--yes"]).unwrap();
+        let cli = Cli::try_parse_from(["pact", "id", "issue", "--vault", "v.json", "--csr", "r.pem", "--valid", "90d", "--move", "--yes"])
+            .unwrap();
         match cli.cmd {
             Cmd::Id { cmd: IdCmd::Issue { common, moving } } => {
                 assert!(moving && common.yes);
@@ -484,14 +520,14 @@ mod tests {
         let mut out = Vec::new();
         for (i, _) in line.match_indices("pact ") {
             let before = line[..i].chars().next_back();
-            let advice = matches!(before, Some('`') | Some(' ') | Some('(') | None) && !line[..i].ends_with("the ") && !line[..i].ends_with("this ");
+            let advice =
+                matches!(before, Some('`') | Some(' ') | Some('(') | None) && !line[..i].ends_with("the ") && !line[..i].ends_with("this ");
             if !advice {
                 continue;
             }
             let mut words = line[i + "pact ".len()..].split_whitespace();
-            let word = |w: Option<&str>| {
-                w.map(|w| w.trim_end_matches(['`', ',', '.', ';', ')', '"', '\'']).to_string()).filter(|w| !w.is_empty())
-            };
+            let word =
+                |w: Option<&str>| w.map(|w| w.trim_end_matches(['`', ',', '.', ';', ')', '"', '\'']).to_string()).filter(|w| !w.is_empty());
             if let Some(first) = word(words.next()) {
                 out.push((first, word(words.next())));
             }

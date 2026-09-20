@@ -145,10 +145,17 @@ pub fn wallet_issue(plaintext: &Value, root_fingerprint: &str, csr_der: &[u8], n
         .filter_map(|l| l.get("not_before").and_then(|t| t.as_str()).and_then(|t| parse_rfc3339(t).ok()).map(|t| (t, *l)))
         .max_by_key(|(t, _)| *t)
         .map(|(_, l)| l);
-    let live = newest.filter(|l| l.get("not_after").and_then(|t| t.as_str()).and_then(|t| parse_rfc3339(t).ok()).map(|t| t > now).unwrap_or(false));
+    let live = newest
+        .filter(|l| l.get("not_after").and_then(|t| t.as_str()).and_then(|t| parse_rfc3339(t).ok()).map(|t| t > now).unwrap_or(false));
     if let Some(other) = live.filter(|l| l.get("endpoint").and_then(|e| e.as_str()) != Some(request.endpoint.as_str())) {
         if !moving {
-            return err("bad_request", format!("a leaf is live for {}: a second endpoint is a move, not a second home", other.get("endpoint").and_then(|e| e.as_str()).unwrap_or("?")));
+            return err(
+                "bad_request",
+                format!(
+                    "a leaf is live for {}: a second endpoint is a move, not a second home",
+                    other.get("endpoint").and_then(|e| e.as_str()).unwrap_or("?")
+                ),
+            );
         }
         warnings.push(json!("move: the live leaf at the previous endpoint is superseded once contacts see this one"));
     }
@@ -162,7 +169,9 @@ pub fn wallet_issue(plaintext: &Value, root_fingerprint: &str, csr_der: &[u8], n
         "not_after": format_rfc3339(issued.not_after),
         "issued_at": format_rfc3339(now),
     });
-    Ok(json!({ "der": b64u(&issued.der), "endpoint": request.endpoint, "not_before": entry["not_before"], "not_after": entry["not_after"], "ledger_entry": entry, "new_host": new_host, "warnings": warnings }))
+    Ok(
+        json!({ "der": b64u(&issued.der), "endpoint": request.endpoint, "not_before": entry["not_before"], "not_after": entry["not_after"], "ledger_entry": entry, "new_host": new_host, "warnings": warnings }),
+    )
 }
 
 #[cfg(test)]
@@ -198,7 +207,10 @@ mod tests {
         let out = wallet_issue(&plaintext, &fp, &req, now, 365, false).unwrap();
         assert_eq!(out["new_host"], true);
         let leaf = from_b64u(out["der"].as_str().unwrap()).unwrap();
-        assert!(matches!(x509::validate_chain(&[leaf, cert.clone()], now, Some(&fp), Some("https://agent.alina.example/mcp")), x509::ChainResult::Ok(_)));
+        assert!(matches!(
+            x509::validate_chain(&[leaf, cert.clone()], now, Some(&fp), Some("https://agent.alina.example/mcp")),
+            x509::ChainResult::Ok(_)
+        ));
         // A second endpoint while one is live is a move, refused without the flag.
         let mut with = plaintext.clone();
         with["ledger"] = json!([out["ledger_entry"].clone()]);
@@ -207,8 +219,8 @@ mod tests {
         assert!(wallet_issue(&with, &fp, &req2, now + 10, 365, false).is_err());
         let moved = wallet_issue(&with, &fp, &req2, now + 10, 365, true).unwrap();
         assert_eq!(moved["not_before"], format_rfc3339(now + 10 - 3600)); // an hour before issuance, later than the previous leaf plus one second
-        // After the move the new address is the live one: a renewal there is not a second home,
-        // and a leaf for the old address now is the move back, refused without the flag.
+                                                                          // After the move the new address is the live one: a renewal there is not a second home,
+                                                                          // and a leaf for the old address now is the move back, refused without the flag.
         with["ledger"] = json!([out["ledger_entry"].clone(), moved["ledger_entry"].clone()]);
         let host3 = PrivateKey::from_seed(Alg::Ed25519, &seed("vault/host3")).unwrap();
         let req3 = csr::csr_new("Alina Rao", &host3, "https://alina.pact.contact/alina/mcp", None).unwrap();

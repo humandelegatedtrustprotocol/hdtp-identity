@@ -23,8 +23,9 @@ cargo test                      # unit + vector tests: the Appendix B certificat
                                 # newest-leaf / certificate_renewed case, and every v2 envelope opened and re-sealed
                                 # from its ephemeral seed
 sh js/build.sh                  # wasm-pack: js/pkg-web (browser, Workers) and js/pkg-node (Node), built on THIS machine
-sh js/reproduce.sh              # the canonical build, in a container named by digest, compared with js/manifest.json;
-                                # `--pin` writes the manifest and installs those bytes (after crates/ changes)
+sh js/reproduce.sh              # the canonical build OF HEAD, in a container named by digest, compared with
+                                # js/manifest.json; `--pin` writes the manifest and installs those bytes (after a
+                                # commit changed a build input, and only once that input is committed)
 node js/verify.mjs              # recomputes the SHA-256 of js/pkg-* against the manifest: passes after a --pin,
                                 # and not after a build.sh, whose bytes are this machine's (see below)
 node js/check.mjs               # Appendix B through the Wasm bindings, vectors read from SPEC.md: 109/109
@@ -63,6 +64,26 @@ on `linux/arm64`, with wasm-pack fetched from its release and checked against a 
 `js/manifest.json` records that builder beside the hash. CI rebuilds it on every push, on a hosted
 runner that is not the machine the pin was written on, and fails if a byte differs.
 `rust-toolchain.toml` pins the compiler for everything else.
+
+**Style, then commit, then compile — in that order, and the tooling holds it.** The pin is of a
+COMMIT: `js/reproduce.sh` builds `git archive HEAD`, never the working tree, and `--pin` refuses
+while a build input (`js/inputs.mjs` has the list) is uncommitted. `js/manifest.json` records the
+identity of the inputs it was built from, and `node js/verify.mjs` compares it with HEAD's before
+it hashes a byte — so "the source moved and the pin did not" is learned in a second, locally,
+instead of from a container five minutes after a push, or (as on 2026-09-19) not at all. Style
+cannot move the pin after the fact because style is never applied after the fact: the umbrella's
+pre-commit hook runs rustfmt (`rustfmt.toml`) over staged Rust and re-stages it, then requires
+clippy with warnings as errors; its post-commit hook says when a commit has left the pin behind;
+and the pre-push hook runs `gate.sh`, which refuses a stale pin. This exists because the order
+was once the other way round: a clippy style lint nobody had ever run was obeyed after a pin, the
+fix moved a line, the line number was in the binary (`#[track_caller]`), and the pin stopped
+matching. After a change under `crates/`:
+
+```sh
+git commit …                    # the hook styles it and lints it
+sh js/reproduce.sh --pin        # the canonical build of THAT commit; writes js/manifest.json
+git commit js/manifest.json …   # then re-vendor into pact-cloud (gateway/vendor/pact-identity/VENDORED.md)
+```
 
 **The gate is local, and CI holds one job.** `sh gate.sh` is the list above as one command — all
 of it except the two builds, since the Wasm that ships is the pinned one and a native rebuild would

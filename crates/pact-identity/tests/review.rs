@@ -42,9 +42,18 @@ fn pair(alg: &str, endpoint: &str) -> Pair {
     let root_key = key(alg);
     let root = call("build_root", json!({ "cn": "Alina Rao", "pkcs8": root_key["pkcs8"], "not_before": "2026-09-01T00:00:00Z" }));
     let leaf_key = key(alg);
-    let leaf = call("build_leaf", json!({ "cn": "Alina Rao", "root_cn": "Alina Rao", "root_pkcs8": root_key["pkcs8"], "host_spki": leaf_key["spki"], "endpoint": endpoint, "not_before": "2026-09-01T00:00:00Z", "not_after": "2027-09-01T00:00:00Z" }));
+    let leaf = call(
+        "build_leaf",
+        json!({ "cn": "Alina Rao", "root_cn": "Alina Rao", "root_pkcs8": root_key["pkcs8"], "host_spki": leaf_key["spki"], "endpoint": endpoint, "not_before": "2026-09-01T00:00:00Z", "not_after": "2027-09-01T00:00:00Z" }),
+    );
     assert!(leaf["der"].is_string(), "{leaf}");
-    Pair { root_fp: root["fingerprint"].as_str().unwrap().to_string(), root: from_b64u(root["der"].as_str().unwrap()), leaf_key, leaf: from_b64u(leaf["der"].as_str().unwrap()), root_key }
+    Pair {
+        root_fp: root["fingerprint"].as_str().unwrap().to_string(),
+        root: from_b64u(root["der"].as_str().unwrap()),
+        leaf_key,
+        leaf: from_b64u(leaf["der"].as_str().unwrap()),
+        root_key,
+    }
 }
 fn refusal(chain: &[Vec<u8>]) -> (u32, String) {
     match x509::validate_chain(chain, now_s(), None, None) {
@@ -72,7 +81,10 @@ fn ext(oid: &str, critical: bool, value: &[u8]) -> Vec<u8> {
     der::seq(&parts)
 }
 fn root_extensions(id: &[u8], basic: Vec<u8>, usage: Vec<u8>) -> Vec<u8> {
-    der::explicit(3, &der::seq(&[ext(OID_BASIC_CONSTRAINTS, true, &basic), ext(OID_KEY_USAGE, true, &usage), ext(OID_SKI, false, &der::octet(id))]))
+    der::explicit(
+        3,
+        &der::seq(&[ext(OID_BASIC_CONSTRAINTS, true, &basic), ext(OID_KEY_USAGE, true, &usage), ext(OID_SKI, false, &der::octet(id))]),
+    )
 }
 
 // ── MEDIUM 2: the seam assembles with the algorithm the TBS declares, for a P-256 root too ──
@@ -93,10 +105,16 @@ fn a_p256_root_signs_through_the_seam() {
     assert_eq!(parsed["sig_alg"], OID_ECDSA_SHA256);
     // And a leaf under it, signed outside the core the same way.
     let host = key("p256");
-    let lu = call("leaf_tbs", json!({ "cn": "Bharat Mehta", "root_cn": "Bharat Mehta", "root_spki": root["spki"], "host_spki": host["spki"], "endpoint": "https://agent.bharat.example/mcp", "not_before": "2026-09-01T00:00:00Z", "not_after": "2027-09-01T00:00:00Z" }));
+    let lu = call(
+        "leaf_tbs",
+        json!({ "cn": "Bharat Mehta", "root_cn": "Bharat Mehta", "root_spki": root["spki"], "host_spki": host["spki"], "endpoint": "https://agent.bharat.example/mcp", "not_before": "2026-09-01T00:00:00Z", "not_after": "2027-09-01T00:00:00Z" }),
+    );
     let lsig = call("sign", json!({ "pkcs8": root["pkcs8"], "data": lu["tbs"] }));
     let leaf = call("assemble_leaf", json!({ "tbs": lu["tbs"], "sig": lsig["sig"], "sig_alg": lu["sig_alg"] }));
-    let v = call("validate_chain", json!({ "chain": [leaf["der"], b64u(&root_der)], "now": NOW_RFC, "expected_root": root["fingerprint"], "expected_endpoint": "https://agent.bharat.example/mcp" }));
+    let v = call(
+        "validate_chain",
+        json!({ "chain": [leaf["der"], b64u(&root_der)], "now": NOW_RFC, "expected_root": root["fingerprint"], "expected_endpoint": "https://agent.bharat.example/mcp" }),
+    );
     assert_eq!(v["ok"], true, "{v}");
 }
 
@@ -134,23 +152,49 @@ fn der_deviations_are_refused() {
     let r = with_field(&p.root, 7, root_extensions(&id, der::seq(&[der::boolean(false), der::int(0)]), der::bitstr(&[0x04], 2)), &root_key);
     assert_eq!(reason(&[p.leaf.clone(), r]), "BOOLEAN not in the DER form");
     // TRUE encoded as 0x01 instead of 0xFF (BER), as the critical flag.
-    let r = with_field(&p.root, 7, der::explicit(3, &der::seq(&[der::seq(&[der::oid(OID_BASIC_CONSTRAINTS), der::tlv(0x01, &[0x01]), der::octet(&der::seq(&[der::boolean(true), der::int(0)]))]), ext(OID_KEY_USAGE, true, &der::bitstr(&[0x04], 2)), ext(OID_SKI, false, &der::octet(&id))])), &root_key);
+    let r = with_field(
+        &p.root,
+        7,
+        der::explicit(
+            3,
+            &der::seq(&[
+                der::seq(&[
+                    der::oid(OID_BASIC_CONSTRAINTS),
+                    der::tlv(0x01, &[0x01]),
+                    der::octet(&der::seq(&[der::boolean(true), der::int(0)])),
+                ]),
+                ext(OID_KEY_USAGE, true, &der::bitstr(&[0x04], 2)),
+                ext(OID_SKI, false, &der::octet(&id)),
+            ]),
+        ),
+        &root_key,
+    );
     assert_eq!(reason(&[p.leaf.clone(), r]), "BOOLEAN not in the DER form");
     // A serial with a needless leading zero.
     let r = with_field(&p.root, 1, der::tlv(0x02, &[0x00, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0]), &root_key);
     assert_eq!(reason(&[p.leaf.clone(), r]), "INTEGER not minimal");
     // pathLenConstraint 128, whose first content byte is 0x00: read in full, it is not 0.
-    let r = with_field(&p.root, 7, root_extensions(&id, der::seq(&[der::boolean(true), der::int(128)]), der::bitstr(&[0x04], 2)), &root_key);
+    let r =
+        with_field(&p.root, 7, root_extensions(&id, der::seq(&[der::boolean(true), der::int(128)]), der::bitstr(&[0x04], 2)), &root_key);
     assert_eq!(reason(&[p.leaf.clone(), r]), "root basicConstraints");
     // keyUsage with a second byte (decipherOnly) hidden behind keyCertSign.
-    let r = with_field(&p.root, 7, root_extensions(&id, der::seq(&[der::boolean(true), der::int(0)]), der::bitstr(&[0x04, 0x80], 7)), &root_key);
+    let r = with_field(
+        &p.root,
+        7,
+        root_extensions(&id, der::seq(&[der::boolean(true), der::int(0)]), der::bitstr(&[0x04, 0x80], 7)),
+        &root_key,
+    );
     assert_eq!(reason(&[p.leaf.clone(), r]), "root keyUsage is not keyCertSign alone");
     // Unused bits that are not zero.
     let r = with_field(&p.root, 7, root_extensions(&id, der::seq(&[der::boolean(true), der::int(0)]), der::bitstr(&[0x05], 2)), &root_key);
     assert_eq!(reason(&[p.leaf.clone(), r]), "BIT STRING not in the DER form");
     // A validity with three times.
     let validity = der::children(&der::read(&root.tbs, 0).unwrap()).unwrap()[4].raw.to_vec();
-    let three = { let v = der::read(&validity, 0).unwrap(); let kids: Vec<Vec<u8>> = der::children(&v).unwrap().iter().map(|n| n.raw.to_vec()).collect(); der::seq(&[kids[0].clone(), kids[1].clone(), kids[1].clone()]) };
+    let three = {
+        let v = der::read(&validity, 0).unwrap();
+        let kids: Vec<Vec<u8>> = der::children(&v).unwrap().iter().map(|n| n.raw.to_vec()).collect();
+        der::seq(&[kids[0].clone(), kids[1].clone(), kids[1].clone()])
+    };
     let r = with_field(&p.root, 4, three, &root_key);
     assert_eq!(reason(&[p.leaf.clone(), r]), "time not in the DER form");
     // An extension value with a byte after its one TLV.
@@ -179,14 +223,23 @@ fn compressed_p256_points_are_refused() {
     let r = call("key_info", json!({ "spki": b64u(&compressed_spki) }));
     assert_eq!(r["error"], "parse", "{r}");
     // A sealed message whose enc is compressed does not open.
-    let sealed = call("hpke_seal", json!({ "suite": "PACT-SEAL-P256", "recipient_spki": k["spki"], "info": b64u(b"PACT-SEAL-v2"), "aad": b64u(b"h"), "plaintext": b64u(b"hi") }));
+    let sealed = call(
+        "hpke_seal",
+        json!({ "suite": "PACT-SEAL-P256", "recipient_spki": k["spki"], "info": b64u(b"PACT-SEAL-v2"), "aad": b64u(b"h"), "plaintext": b64u(b"hi") }),
+    );
     let enc = from_b64u(sealed["enc"].as_str().unwrap());
     assert_eq!(enc.len(), 65);
     let mut enc_c = vec![0x02 | (enc[64] & 1)];
     enc_c.extend_from_slice(&enc[1..33]);
-    let opened = call("hpke_open", json!({ "suite": "PACT-SEAL-P256", "recipient_pkcs8": k["pkcs8"], "info": b64u(b"PACT-SEAL-v2"), "aad": b64u(b"h"), "enc": b64u(&enc_c), "ct": sealed["ct"] }));
+    let opened = call(
+        "hpke_open",
+        json!({ "suite": "PACT-SEAL-P256", "recipient_pkcs8": k["pkcs8"], "info": b64u(b"PACT-SEAL-v2"), "aad": b64u(b"h"), "enc": b64u(&enc_c), "ct": sealed["ct"] }),
+    );
     assert!(opened["error"].is_string(), "{opened}");
-    let ok = call("hpke_open", json!({ "suite": "PACT-SEAL-P256", "recipient_pkcs8": k["pkcs8"], "info": b64u(b"PACT-SEAL-v2"), "aad": b64u(b"h"), "enc": sealed["enc"], "ct": sealed["ct"] }));
+    let ok = call(
+        "hpke_open",
+        json!({ "suite": "PACT-SEAL-P256", "recipient_pkcs8": k["pkcs8"], "info": b64u(b"PACT-SEAL-v2"), "aad": b64u(b"h"), "enc": sealed["enc"], "ct": sealed["ct"] }),
+    );
     assert_eq!(ok["plaintext"], b64u(b"hi"), "{ok}");
 }
 
@@ -204,20 +257,27 @@ fn an_envelope_asking_to_be_remembered_for_a_year_is_refused() {
     let alina = pair("ed25519", E_A);
     let bharat = pair("ed25519", "https://agent.bharat.example/mcp");
     let bharat_leaf = x509::parse(&bharat.leaf).unwrap();
-    let node = |seen: Vec<&str>| json!({
-        "endpoint": "https://agent.bharat.example/mcp", "accept_new_hosts": "auto",
-        "chain": [b64u(&bharat.leaf), b64u(&bharat.root)],
-        "keys": [{ "kid": bharat_leaf.public_key.fingerprint(), "leaf": b64u(&bharat.leaf), "pkcs8": bharat.leaf_key["pkcs8"], "current": true }],
-        "former": [], "sibling_kids": [],
-        "pins": [{ "root": alina.root_fp, "endpoint": E_A, "leaf": b64u(&alina.leaf), "state": "active" }],
-        "tombstones": [], "former_endpoints": [], "seen": seen,
-    });
-    let seal = |exp: i64, msg: &str| call("seal_request", json!({
-        "recipient_leaf": b64u(&bharat.leaf), "sender_pkcs8": alina.leaf_key["pkcs8"], "form": "chain",
-        "sender_chain": [b64u(&alina.leaf), b64u(&alina.root)], "method": "tools/call",
-        "params": { "name": "send_message", "arguments": { "msg_id": "m", "text": "hello" } },
-        "msg_id": msg, "ts": now_s(), "exp": exp,
-    }));
+    let node = |seen: Vec<&str>| {
+        json!({
+            "endpoint": "https://agent.bharat.example/mcp", "accept_new_hosts": "auto",
+            "chain": [b64u(&bharat.leaf), b64u(&bharat.root)],
+            "keys": [{ "kid": bharat_leaf.public_key.fingerprint(), "leaf": b64u(&bharat.leaf), "pkcs8": bharat.leaf_key["pkcs8"], "current": true }],
+            "former": [], "sibling_kids": [],
+            "pins": [{ "root": alina.root_fp, "endpoint": E_A, "leaf": b64u(&alina.leaf), "state": "active" }],
+            "tombstones": [], "former_endpoints": [], "seen": seen,
+        })
+    };
+    let seal = |exp: i64, msg: &str| {
+        call(
+            "seal_request",
+            json!({
+                "recipient_leaf": b64u(&bharat.leaf), "sender_pkcs8": alina.leaf_key["pkcs8"], "form": "chain",
+                "sender_chain": [b64u(&alina.leaf), b64u(&alina.root)], "method": "tools/call",
+                "params": { "name": "send_message", "arguments": { "msg_id": "m", "text": "hello" } },
+                "msg_id": msg, "ts": now_s(), "exp": exp,
+            }),
+        )
+    };
     let fine = call("decide", json!({ "now": NOW_RFC, "envelope": seal(now_s() + 600, "m-1"), "node": node(vec![]) }));
     assert_eq!(fine["result"]["code"], "ok", "{fine}");
     assert_eq!(fine["result"]["tier"], "contact");
@@ -232,7 +292,15 @@ fn an_envelope_asking_to_be_remembered_for_a_year_is_refused() {
 // ── MEDIUM 3: the address guard takes the normal form first ──
 #[test]
 fn the_address_guard_refuses_every_other_spelling_of_loopback() {
-    for bad in ["https://127.1/mcp", "https://2130706433/mcp", "https://0x7f000001/mcp", "https://0177.0.0.1/mcp", "https://localhost./mcp", "https://LOCALHOST/mcp", "https://[::1]/mcp"] {
+    for bad in [
+        "https://127.1/mcp",
+        "https://2130706433/mcp",
+        "https://0x7f000001/mcp",
+        "https://0177.0.0.1/mcp",
+        "https://localhost./mcp",
+        "https://LOCALHOST/mcp",
+        "https://[::1]/mcp",
+    ] {
         let r = call("address_guard", json!({ "endpoint": bad, "guest": true }));
         assert_eq!(r["ok"], false, "{bad}: {r}");
     }

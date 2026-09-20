@@ -4,6 +4,7 @@
 // the pinned bytes are the canonical container's, never whatever this machine happened to build.
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { INPUTS, inputsAtHead } from './inputs.mjs';
 
 const [toolchainFile, image, platform, wasmPackSha] = process.argv.slice(2);
 if (!toolchainFile || !image || !platform || !wasmPackSha) {
@@ -21,9 +22,16 @@ for (const pkg of ['pkg-web', 'pkg-node']) {
   const bytes = readFileSync(new URL(name, here));
   files[name] = { sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length };
 }
+// What the bytes were built FROM. reproduce.sh builds `git archive HEAD` and refuses to pin while
+// an input is uncommitted, so HEAD's inputs are exactly the source of these bytes; verify.mjs holds
+// every later HEAD to this, which is how "the source moved and the pin did not" is learned in a
+// second instead of from a container five minutes after a push.
+const source = inputsAtHead();
+if (!source) { console.error('manifest: no git checkout here, so the pin cannot name the commit it is of'); process.exit(2); }
 const manifest = {
   crate_version, rustc: toolchain.rustc, wasm_pack: toolchain.wasm_pack,
   builder: { image, platform, wasm_pack_sha256: wasmPackSha, how: 'sh js/reproduce.sh' },
+  source: { inputs_sha256: source.sha256, files: source.files, paths: INPUTS, how: 'node js/inputs.mjs' },
   files,
 };
 writeFileSync(new URL('manifest.json', here), JSON.stringify(manifest, null, 2) + '\n');

@@ -288,7 +288,11 @@ mod tests {
         assert_eq!(fs::read(&p).unwrap(), b"three");
         assert_eq!(fs::read(&stale).unwrap(), b"planted", "the planted file is untouched");
         assert_eq!(fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
-        let left: Vec<_> = fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).filter(|n| n.to_string_lossy().ends_with(".tmp") && n != "v.json.tmp").collect();
+        let left: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .filter(|n| n.to_string_lossy().ends_with(".tmp") && n != "v.json.tmp")
+            .collect();
         assert!(left.is_empty(), "no temporary files left behind: {left:?}");
 
         // And the exclusive write refuses a name that is taken rather than destroying it.

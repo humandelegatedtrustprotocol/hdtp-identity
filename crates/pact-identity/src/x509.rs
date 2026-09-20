@@ -102,11 +102,14 @@ pub fn root_tbs(cn: &str, key: &PublicKey, not_before: i64, serial: &[u8]) -> Re
         der::seq(&[time::der_time(not_before), time::der_time(FOREVER)]),
         name(cn),
         key.spki().to_vec(),
-        der::explicit(3, &der::seq(&[
-            ext(OID_BASIC_CONSTRAINTS, true, &der::seq(&[der::boolean(true), der::int(0)])),
-            ext(OID_KEY_USAGE, true, &key_usage(&[5])),
-            ext(OID_SKI, false, &der::octet(&id)),
-        ])),
+        der::explicit(
+            3,
+            &der::seq(&[
+                ext(OID_BASIC_CONSTRAINTS, true, &der::seq(&[der::boolean(true), der::int(0)])),
+                ext(OID_KEY_USAGE, true, &key_usage(&[5])),
+                ext(OID_SKI, false, &der::octet(&id)),
+            ]),
+        ),
     ]);
     Ok(Unsigned { tbs, sig_alg: alg_oid.to_string() })
 }
@@ -341,7 +344,11 @@ pub fn parse(der_bytes: &[u8]) -> Result<Cert> {
                             return err("parse", "INTEGER not minimal");
                         }
                         // An empty INTEGER reads as `undefined` in the seed: present, and equal to nothing.
-                        out.path_len = Some(if last.content.is_empty() { -1 } else { last.content.iter().fold(0i64, |acc, b| (acc << 8) | *b as i64) });
+                        out.path_len = Some(if last.content.is_empty() {
+                            -1
+                        } else {
+                            last.content.iter().fold(0i64, |acc, b| (acc << 8) | *b as i64)
+                        });
                     }
                 }
             }
@@ -555,7 +562,12 @@ pub fn validate_chain(chain: &[Vec<u8>], now: i64, expected_root: Option<&str>, 
 fn canonical_ipv4(host: &str) -> bool {
     let parts: Vec<&str> = host.split('.').collect();
     parts.len() == 4
-        && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) && (p.len() == 1 || !p.starts_with('0')) && p.parse::<u32>().map(|v| v <= 255).unwrap_or(false))
+        && parts.iter().all(|p| {
+            !p.is_empty()
+                && p.bytes().all(|b| b.is_ascii_digit())
+                && (p.len() == 1 || !p.starts_with('0'))
+                && p.parse::<u32>().map(|v| v <= 255).unwrap_or(false)
+        })
 }
 
 fn ends_in_a_number(host: &str) -> bool {
@@ -565,7 +577,8 @@ fn ends_in_a_number(host: &str) -> bool {
     }
     match labels.last() {
         Some(last) if !last.is_empty() => {
-            last.bytes().all(|b| b.is_ascii_digit()) || ((last.starts_with("0x") || last.starts_with("0X")) && last[2..].bytes().all(|b| b.is_ascii_hexdigit()))
+            last.bytes().all(|b| b.is_ascii_digit())
+                || ((last.starts_with("0x") || last.starts_with("0X")) && last[2..].bytes().all(|b| b.is_ascii_hexdigit()))
         }
         _ => false,
     }
@@ -589,7 +602,14 @@ pub fn is_normal_https(s: &str) -> bool {
         return false;
     }
     // A port stays as written when it is not the default: digits, no leading zero, in range, never 443.
-    let normal_port = |p: &str| p.len() <= 5 && !p.is_empty() && !p.starts_with('0') && p != "443" && p.bytes().all(|b| b.is_ascii_digit()) && p.parse::<u32>().map(|n| (1..=65535).contains(&n)).unwrap_or(false);
+    let normal_port = |p: &str| {
+        p.len() <= 5
+            && !p.is_empty()
+            && !p.starts_with('0')
+            && p != "443"
+            && p.bytes().all(|b| b.is_ascii_digit())
+            && p.parse::<u32>().map(|n| (1..=65535).contains(&n)).unwrap_or(false)
+    };
     if let Some(inner) = host.strip_prefix('[') {
         let Some(end) = inner.find(']') else { return false };
         let (inner, rest) = (&inner[..end], &inner[end + 1..]);
@@ -659,7 +679,26 @@ pub fn is_normal_https(s: &str) -> bool {
             continue;
         }
         let pchar = c.is_ascii_alphanumeric()
-            || matches!(c, b'-' | b'.' | b'_' | b'~' | b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b',' | b';' | b'=' | b':' | b'@' | b'/');
+            || matches!(
+                c,
+                b'-' | b'.'
+                    | b'_'
+                    | b'~'
+                    | b'!'
+                    | b'$'
+                    | b'&'
+                    | b'\''
+                    | b'('
+                    | b')'
+                    | b'*'
+                    | b'+'
+                    | b','
+                    | b';'
+                    | b'='
+                    | b':'
+                    | b'@'
+                    | b'/'
+            );
         if !pchar {
             return false;
         }
@@ -704,10 +743,30 @@ mod tests {
         assert!(is_normal_https("https://agent.alina.example/mcp"));
         assert!(is_normal_https("https://alina.pact.contact/alina/mcp"));
         assert!(is_normal_https("https://203.0.113.9/mcp"));
-        for good in ["https://a.example/x/y-z_~", "https://a.example/p%20q", "https://a.example/a:b@c", "https://agent.alina.example:8443/mcp", "https://[2001:db8::1]:8443/mcp", "https://203.0.113.9:8080/mcp"] {
+        for good in [
+            "https://a.example/x/y-z_~",
+            "https://a.example/p%20q",
+            "https://a.example/a:b@c",
+            "https://agent.alina.example:8443/mcp",
+            "https://[2001:db8::1]:8443/mcp",
+            "https://203.0.113.9:8080/mcp",
+        ] {
             assert!(is_normal_https(good), "{good}");
         }
-        for bad in ["https://a.example/p%2fq", "https://a.example/p%41", "https://a.example/p%7e", "https://a.example/x|y", "https://a.example/p%2", "https://a.example/p%", "https://a.example:443/mcp", "https://a.example:0/mcp", "https://a.example:08443/mcp", "https://a.example:65536/mcp", "https://a.example:/mcp", "https://[2001:db8::1]8443/mcp"] {
+        for bad in [
+            "https://a.example/p%2fq",
+            "https://a.example/p%41",
+            "https://a.example/p%7e",
+            "https://a.example/x|y",
+            "https://a.example/p%2",
+            "https://a.example/p%",
+            "https://a.example:443/mcp",
+            "https://a.example:0/mcp",
+            "https://a.example:08443/mcp",
+            "https://a.example:65536/mcp",
+            "https://a.example:/mcp",
+            "https://[2001:db8::1]8443/mcp",
+        ] {
             assert!(!is_normal_https(bad), "{bad}");
         }
         for bad in [

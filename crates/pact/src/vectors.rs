@@ -60,17 +60,70 @@ fn leaf(cn: &str, root: &PrivateKey, host: &PublicKey, endpoint: &str, dns: Opti
 fn certificates(c: &Cast) -> Res<Vec<(&'static str, Vec<u8>, String)>> {
     let a = |n: &str| c.hosts[n].public();
     Ok(vec![
-        ("root_a", x509::build_root("Alina Rao", &c.root_a, at("2026-09-01T00:00:00Z"), &serial_of("root_a")).map_err(|e| Fail(e.why))?, "Ed25519 root, self-signed, CN \"Alina Rao\", notAfter 9999-12-31".into()),
-        ("root_b", x509::build_root("Bharat Mehta", &c.root_b, at("2026-09-01T00:00:00Z"), &serial_of("root_b")).map_err(|e| Fail(e.why))?, "P-256 root, self-signed, CN \"Bharat Mehta\"".into()),
-        ("leaf_a", leaf("Alina Rao", &c.root_a, &a("leaf_a"), ENDPOINT_A, Some("agent.alina.example"), "2026-09-01T00:00:00Z", "2027-09-01T00:00:00Z", "leaf_a")?, format!("Ed25519 leaf under root_a for {ENDPOINT_A}, 2026-09-01 to 2027-09-01, with a dNSName beside the URI")),
-        ("leaf_b", leaf("Bharat Mehta", &c.root_b, &a("leaf_b"), ENDPOINT_B, None, "2026-09-01T00:00:00Z", "2027-09-01T00:00:00Z", "leaf_b")?, format!("P-256 leaf under root_b for {ENDPOINT_B}, 2026-09-01 to 2027-09-01, keyUsage digitalSignature+keyAgreement")),
-        ("leaf_a_expired", leaf("Alina Rao", &c.root_a, &a("leaf_a"), ENDPOINT_A, None, "2025-06-01T00:00:00Z", "2026-06-01T00:00:00Z", "leaf_a_expired")?, "leaf_a's key and endpoint, 2025-06-01 to 2026-06-01: expired at NOW".into()),
-        ("leaf_a_long", leaf("Alina Rao", &c.root_a, &a("leaf_a"), ENDPOINT_A, None, "2026-09-01T00:00:00Z", "2027-10-10T00:00:00Z", "leaf_a_long")?, "leaf_a's key and endpoint, 2026-09-01 to 2027-10-10: 404 days".into()),
-        ("leaf_a_next", leaf("Alina Rao", &c.root_a, &a("leaf_a_next"), ENDPOINT_A, None, "2027-08-02T00:00:00Z", "2028-08-01T00:00:00Z", "leaf_a_next")?, "a fresh key for the same endpoint, 2027-08-02 to 2028-08-01: the renewal that supersedes leaf_a".into()),
+        (
+            "root_a",
+            x509::build_root("Alina Rao", &c.root_a, at("2026-09-01T00:00:00Z"), &serial_of("root_a")).map_err(|e| Fail(e.why))?,
+            "Ed25519 root, self-signed, CN \"Alina Rao\", notAfter 9999-12-31".into(),
+        ),
+        (
+            "root_b",
+            x509::build_root("Bharat Mehta", &c.root_b, at("2026-09-01T00:00:00Z"), &serial_of("root_b")).map_err(|e| Fail(e.why))?,
+            "P-256 root, self-signed, CN \"Bharat Mehta\"".into(),
+        ),
+        (
+            "leaf_a",
+            leaf(
+                "Alina Rao",
+                &c.root_a,
+                &a("leaf_a"),
+                ENDPOINT_A,
+                Some("agent.alina.example"),
+                "2026-09-01T00:00:00Z",
+                "2027-09-01T00:00:00Z",
+                "leaf_a",
+            )?,
+            format!("Ed25519 leaf under root_a for {ENDPOINT_A}, 2026-09-01 to 2027-09-01, with a dNSName beside the URI"),
+        ),
+        (
+            "leaf_b",
+            leaf("Bharat Mehta", &c.root_b, &a("leaf_b"), ENDPOINT_B, None, "2026-09-01T00:00:00Z", "2027-09-01T00:00:00Z", "leaf_b")?,
+            format!("P-256 leaf under root_b for {ENDPOINT_B}, 2026-09-01 to 2027-09-01, keyUsage digitalSignature+keyAgreement"),
+        ),
+        (
+            "leaf_a_expired",
+            leaf("Alina Rao", &c.root_a, &a("leaf_a"), ENDPOINT_A, None, "2025-06-01T00:00:00Z", "2026-06-01T00:00:00Z", "leaf_a_expired")?,
+            "leaf_a's key and endpoint, 2025-06-01 to 2026-06-01: expired at NOW".into(),
+        ),
+        (
+            "leaf_a_long",
+            leaf("Alina Rao", &c.root_a, &a("leaf_a"), ENDPOINT_A, None, "2026-09-01T00:00:00Z", "2027-10-10T00:00:00Z", "leaf_a_long")?,
+            "leaf_a's key and endpoint, 2026-09-01 to 2027-10-10: 404 days".into(),
+        ),
+        (
+            "leaf_a_next",
+            leaf(
+                "Alina Rao",
+                &c.root_a,
+                &a("leaf_a_next"),
+                ENDPOINT_A,
+                None,
+                "2027-08-02T00:00:00Z",
+                "2028-08-01T00:00:00Z",
+                "leaf_a_next",
+            )?,
+            "a fresh key for the same endpoint, 2027-08-02 to 2028-08-01: the renewal that supersedes leaf_a".into(),
+        ),
     ])
 }
 
-fn chain_case(name: &str, chain: &[&str], expected_root: Option<String>, expected_endpoint: Option<&str>, expect: &str, rule: Option<u8>) -> Value {
+fn chain_case(
+    name: &str,
+    chain: &[&str],
+    expected_root: Option<String>,
+    expected_endpoint: Option<&str>,
+    expect: &str,
+    rule: Option<u8>,
+) -> Value {
     let mut m = Map::new();
     m.insert("name".into(), json!(name));
     m.insert("chain".into(), json!(chain));
@@ -143,13 +196,30 @@ pub fn gen(out: Option<&str>) -> Res<i32> {
         // The plaintext bytes are what the recipient reads back; opening is how the generator learns them.
         let recipient = &c.hosts[recipient_chain[0]];
         let suite = suite_for(&recipient_leaf.public_key);
-        let pt = hpke::open(suite, recipient, envelope::INFO_V2, &from_b64u(&wire.protected).map_err(|e| Fail(e.why))?, &from_b64u(&wire.enc).map_err(|e| Fail(e.why))?, &from_b64u(&wire.ct).map_err(|e| Fail(e.why))?).map_err(|e| Fail(e.why))?;
-        Ok(json!({ "name": name, "form": form, "suite": suite.id(), "sender_chain": sender_chain, "recipient_chain": recipient_chain, "plaintext_hex": hex(&pt), "protected": wire.protected, "enc": wire.enc, "ct": wire.ct, "sig": wire.sig }))
+        let pt = hpke::open(
+            suite,
+            recipient,
+            envelope::INFO_V2,
+            &from_b64u(&wire.protected).map_err(|e| Fail(e.why))?,
+            &from_b64u(&wire.enc).map_err(|e| Fail(e.why))?,
+            &from_b64u(&wire.ct).map_err(|e| Fail(e.why))?,
+        )
+        .map_err(|e| Fail(e.why))?;
+        Ok(
+            json!({ "name": name, "form": form, "suite": suite.id(), "sender_chain": sender_chain, "recipient_chain": recipient_chain, "plaintext_hex": hex(&pt), "protected": wire.protected, "enc": wire.enc, "ct": wire.ct, "sig": wire.sig }),
+        )
     };
     let envelopes = vec![
         envelope("alina-to-bharat", "leaf_a", &["leaf_a", "root_a"], &["leaf_b", "root_b"], "vec-v2-alina-to-bharat", "chain")?,
         envelope("bharat-to-alina", "leaf_b", &["leaf_b", "root_b"], &["leaf_a", "root_a"], "vec-v2-bharat-to-alina", "chain")?,
-        envelope("alina-to-bharat-by-reference", "leaf_a", &["leaf_a", "root_a"], &["leaf_b", "root_b"], "vec-v2-alina-to-bharat-ref", "leaf")?,
+        envelope(
+            "alina-to-bharat-by-reference",
+            "leaf_a",
+            &["leaf_a", "root_a"],
+            &["leaf_b", "root_b"],
+            "vec-v2-alina-to-bharat-ref",
+            "leaf",
+        )?,
     ];
 
     let mut cert_map = Map::new();
@@ -171,7 +241,12 @@ pub fn gen(out: Option<&str>) -> Res<i32> {
         "envelopes": envelopes,
     });
     write_output(out, &format!("{}\n", serde_json::to_string_pretty(&doc)?))?;
-    eprintln!("{} certificates, {} chain cases, {} envelopes", certs.len(), doc["chain_cases"].as_array().map_or(0, |a| a.len()), envelopes.len());
+    eprintln!(
+        "{} certificates, {} chain cases, {} envelopes",
+        certs.len(),
+        doc["chain_cases"].as_array().map_or(0, |a| a.len()),
+        envelopes.len()
+    );
     Ok(0)
 }
 
@@ -227,7 +302,10 @@ pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
     };
     let mut t = Tally { checks: 0, failures: 0 };
 
-    let der: BTreeMap<String, Vec<u8>> = v2["certificates"].as_object().map(|o| o.iter().filter_map(|(k, c)| from_hex(c["der_hex"].as_str()?).ok().map(|d| (k.clone(), d))).collect()).unwrap_or_default();
+    let der: BTreeMap<String, Vec<u8>> = v2["certificates"]
+        .as_object()
+        .map(|o| o.iter().filter_map(|(k, c)| from_hex(c["der_hex"].as_str()?).ok().map(|d| (k.clone(), d))).collect())
+        .unwrap_or_default();
     let get = |n: &str| der.get(n).cloned().unwrap_or_default();
 
     println!("certificates rebuild from their seeds");
@@ -244,7 +322,10 @@ pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
                         let same_tbs = parse(rebuilt).map(|r| r.tbs == cert.tbs).unwrap_or(false);
                         let issuer = if name.ends_with("_b") { c.root_b.public() } else { c.root_a.public() };
                         let signed = x509::verify_cert(&cert, &issuer);
-                        t.ok(same_tbs && signed && (cert.public_key.alg() == Alg::P256 || rebuilt == bytes), format!("{name}: rebuilt from the labelled seeds"));
+                        t.ok(
+                            same_tbs && signed && (cert.public_key.alg() == Alg::P256 || rebuilt == bytes),
+                            format!("{name}: rebuilt from the labelled seeds"),
+                        );
                     }
                     None => t.ok(false, format!("{name}: not one the generator knows")),
                 }
@@ -255,21 +336,34 @@ pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
     for (name, k) in v2["leaf_keys_pkcs8_hex"].as_object().cloned().unwrap_or_default() {
         let parsed = from_hex(k.as_str().unwrap_or("")).ok().and_then(|b| PrivateKey::from_pkcs8(&b).ok());
         let mine_spki = c.hosts.get(name.as_str()).map(|h| h.public().spki().to_vec());
-        t.ok(parsed.as_ref().map(|p| p.public().spki().to_vec()) == mine_spki && mine_spki.is_some(), format!("{name}: leaf key is the seed's"));
+        t.ok(
+            parsed.as_ref().map(|p| p.public().spki().to_vec()) == mine_spki && mine_spki.is_some(),
+            format!("{name}: leaf key is the seed's"),
+        );
     }
 
     println!("chain cases (§14.2)");
     for case in v2["chain_cases"].as_array().cloned().unwrap_or_default() {
         let name = case["name"].as_str().unwrap_or("?");
-        let chain: Vec<Vec<u8>> = case["chain"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).map(get).collect()).unwrap_or_default();
+        let chain: Vec<Vec<u8>> =
+            case["chain"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).map(get).collect()).unwrap_or_default();
         let now = case["now"].as_str().and_then(|s| parse_rfc3339(s).ok()).unwrap_or(0);
         let r = validate_chain(&chain, now, case["expected_root"].as_str(), case["expected_endpoint"].as_str());
         let want = case["expect"].as_str().unwrap_or("");
         match &r {
             ChainResult::Ok(_) => t.ok(want == "accept", format!("{name}: expected {want}, got accept")),
-            ChainResult::Refused { rule, reason } => t.ok(want == "refuse" && Some(*rule as u64) == case["rule"].as_u64(), format!("{name}: expected {want} rule {}, got rule {rule} ({reason})", case["rule"])),
+            ChainResult::Refused { rule, reason } => t.ok(
+                want == "refuse" && Some(*rule as u64) == case["rule"].as_u64(),
+                format!("{name}: expected {want} rule {}, got rule {rule} ({reason})", case["rule"]),
+            ),
         }
-        println!("  {name}: {}", match r { ChainResult::Ok(_) => "accepted".to_string(), ChainResult::Refused { rule, .. } => format!("refused by rule {rule}") });
+        println!(
+            "  {name}: {}",
+            match r {
+                ChainResult::Ok(_) => "accepted".to_string(),
+                ChainResult::Refused { rule, .. } => format!("refused by rule {rule}"),
+            }
+        );
     }
 
     println!("newest leaf (§14.3)");
@@ -301,7 +395,8 @@ pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
             let rn = e["recipient_chain"][0].as_str().ok_or("recipient_chain")?;
             let sn = e["sender_chain"][0].as_str().ok_or("sender_chain")?;
             let recipient_leaf = parse(&get(rn)).map_err(|e| e.why)?;
-            let recipient = PrivateKey::from_pkcs8(&from_hex(v2["leaf_keys_pkcs8_hex"][rn].as_str().unwrap_or("")).map_err(|e| e.why)?).map_err(|e| e.why)?;
+            let recipient = PrivateKey::from_pkcs8(&from_hex(v2["leaf_keys_pkcs8_hex"][rn].as_str().unwrap_or("")).map_err(|e| e.why)?)
+                .map_err(|e| e.why)?;
             let aad = from_b64u(e["protected"].as_str().unwrap_or("")).map_err(|e| e.why)?;
             let enc = from_b64u(e["enc"].as_str().unwrap_or("")).map_err(|e| e.why)?;
             let ct = from_b64u(e["ct"].as_str().unwrap_or("")).map_err(|e| e.why)?;
@@ -311,7 +406,10 @@ pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
             members.sort_unstable();
             t.ok(members.join(",") == envelope::HEADER_MEMBERS, format!("{name}: header members"));
             let suite = suite_for(&recipient_leaf.public_key);
-            t.ok(header["v"] == 2 && header["suite"] == e["suite"] && Suite::parse(e["suite"].as_str().unwrap_or("")) == Some(suite), format!("{name}: version and suite"));
+            t.ok(
+                header["v"] == 2 && header["suite"] == e["suite"] && Suite::parse(e["suite"].as_str().unwrap_or("")) == Some(suite),
+                format!("{name}: version and suite"),
+            );
             t.ok(header["kid"] == recipient_leaf.public_key.fingerprint(), format!("{name}: kid is the recipient leaf key"));
             t.ok(recipient.public().spki() == &recipient_leaf.spki[..], format!("{name}: the recipient key is the leaf's"));
             let pt = hpke::open(suite, &recipient, envelope::INFO_V2, &aad, &enc, &ct).map_err(|e| e.why)?;
@@ -330,7 +428,8 @@ pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
                 t.ok(ct.len() < 400, format!("{name}: small form stays small ({} bytes sealed)", ct.len()));
             } else {
                 t.ok(bm.join(",") == "chain,method,params", format!("{name}: full form carries chain, method, params"));
-                let chain: Vec<Vec<u8>> = body["chain"].as_array().map(|a| a.iter().filter_map(|x| from_b64u(x.as_str()?).ok()).collect()).unwrap_or_default();
+                let chain: Vec<Vec<u8>> =
+                    body["chain"].as_array().map(|a| a.iter().filter_map(|x| from_b64u(x.as_str()?).ok()).collect()).unwrap_or_default();
                 match validate_chain(&chain, now2, None, None) {
                     ChainResult::Ok(ok) => {
                         t.ok(true, "");
@@ -341,8 +440,10 @@ pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
                 }
             }
             // Re-sealed from the same inputs and the vector's ephemeral seed: enc and ct reproduce.
-            let sender = PrivateKey::from_pkcs8(&from_hex(v2["leaf_keys_pkcs8_hex"][sn].as_str().unwrap_or("")).map_err(|e| e.why)?).map_err(|e| e.why)?;
-            let chain: Vec<Vec<u8>> = e["sender_chain"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).map(get).collect()).unwrap_or_default();
+            let sender = PrivateKey::from_pkcs8(&from_hex(v2["leaf_keys_pkcs8_hex"][sn].as_str().unwrap_or("")).map_err(|e| e.why)?)
+                .map_err(|e| e.why)?;
+            let chain: Vec<Vec<u8>> =
+                e["sender_chain"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).map(get).collect()).unwrap_or_default();
             let wire = envelope::seal_request(SealRequest {
                 recipient: &recipient_leaf.public_key,
                 sender: &sender,
@@ -357,7 +458,10 @@ pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
                 ephemeral_seed: Some(seed(&format!("ephemeral/{name}"))),
             })
             .map_err(|e| e.why)?;
-            t.ok(wire.protected == e["protected"] && wire.enc == e["enc"] && wire.ct == e["ct"], format!("{name}: re-sealed from the seed, enc and ct reproduce"));
+            t.ok(
+                wire.protected == e["protected"] && wire.enc == e["enc"] && wire.ct == e["ct"],
+                format!("{name}: re-sealed from the seed, enc and ct reproduce"),
+            );
             Ok(())
         };
         match go() {
@@ -380,14 +484,19 @@ pub fn answer_code(text: &str) -> String {
     } else {
         text.to_string()
     };
-    let Ok(v) = serde_json::from_str::<Value>(&payload) else { return format!("unknown:not-json({})", payload.chars().take(60).collect::<String>()) };
+    let Ok(v) = serde_json::from_str::<Value>(&payload) else {
+        return format!("unknown:not-json({})", payload.chars().take(60).collect::<String>());
+    };
     if let Some(code) = v["error"]["data"]["code"].as_str() {
         return code.into();
     }
     if let Some(code) = v["error"]["code"].as_str() {
         return code.into();
     }
-    let texts: Vec<Value> = v["result"]["content"].as_array().map(|a| a.iter().filter_map(|c| c["text"].as_str()).filter_map(|t| serde_json::from_str(t).ok()).collect()).unwrap_or_default();
+    let texts: Vec<Value> = v["result"]["content"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|c| c["text"].as_str()).filter_map(|t| serde_json::from_str(t).ok()).collect())
+        .unwrap_or_default();
     for inner in texts {
         if inner.get("protected").is_some() && inner.get("ct").is_some() {
             return "sealed".into();
@@ -409,9 +518,7 @@ pub fn answer_code(text: &str) -> String {
 }
 
 fn post(endpoint: &str, body: &str, session: Option<&str>) -> Res<(String, Option<String>)> {
-    let mut req = ureq::post(endpoint)
-        .header("content-type", "application/json")
-        .header("accept", "application/json, text/event-stream");
+    let mut req = ureq::post(endpoint).header("content-type", "application/json").header("accept", "application/json, text/event-stream");
     if let Some(id) = session {
         req = req.header("mcp-session-id", id);
     }
@@ -446,7 +553,10 @@ fn initialize(endpoint: &str) -> Res<Option<String>> {
     }});
     let (text, session) = post(endpoint, &body.to_string(), None)?;
     if session.is_none() && !text.contains("\"result\"") {
-        return fail(format!("{endpoint}: initialize was refused, so no scenario could be posted: {}", text.chars().take(200).collect::<String>()));
+        return fail(format!(
+            "{endpoint}: initialize was refused, so no scenario could be posted: {}",
+            text.chars().take(200).collect::<String>()
+        ));
     }
     if session.is_some() {
         // The notification the protocol requires before any call; a receiver that gates on it
@@ -477,7 +587,10 @@ pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now
     if !allow_insecure {
         let guard = core("address_guard", json!({ "endpoint": &endpoint, "guest": false }))?;
         if guard["ok"].as_bool() != Some(true) {
-            return fail(format!("{endpoint}: {} (pass --allow-insecure for a node on your own machine)", guard["why"].as_str().unwrap_or("the address guard refuses this endpoint")));
+            return fail(format!(
+                "{endpoint}: {} (pass --allow-insecure for a node on your own machine)",
+                guard["why"].as_str().unwrap_or("the address guard refuses this endpoint")
+            ));
         }
     }
     // The card comes from a file when one is given, and from `<endpoint>/card.vcf` otherwise.
@@ -502,15 +615,36 @@ pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now
     };
     let recipient_leaf = from_b64u(card["cert"].as_str().unwrap_or("")).map_err(|e| Fail(e.why))?;
     let recipient = parse(&recipient_leaf).map_err(|e| Fail(e.why))?;
-    println!("target      {} root {} leaf {}", card["endpoint"].as_str().unwrap_or(""), card["root"].as_str().unwrap_or(""), recipient.public_key.fingerprint());
+    println!(
+        "target      {} root {} leaf {}",
+        card["endpoint"].as_str().unwrap_or(""),
+        card["root"].as_str().unwrap_or(""),
+        recipient.public_key.fingerprint()
+    );
 
     // Mallory: her own root, her own host, a leaf for an address of her own.
     let root_m = PrivateKey::generate(Alg::Ed25519).map_err(|e| Fail(e.why))?;
     let host_m = PrivateKey::generate(Alg::Ed25519).map_err(|e| Fail(e.why))?;
-    let root_m_der = x509::build_root("Alina Rao", &root_m, now - 3600, &x509::random_serial().map_err(|e| Fail(e.why))?).map_err(|e| Fail(e.why))?;
+    let root_m_der =
+        x509::build_root("Alina Rao", &root_m, now - 3600, &x509::random_serial().map_err(|e| Fail(e.why))?).map_err(|e| Fail(e.why))?;
     let issuer = root_m.public();
     let host_pub = host_m.public();
-    let mut spec = LeafSpec { cn: "Alina Rao", root_cn: "Alina Rao", issuer: &issuer, host_key: &host_pub, uris: vec!["https://mallory.example/mcp".into()], dns_name: None, not_before: now - 3600, not_after: now + 365 * 86_400, serial: x509::random_serial().map_err(|e| Fail(e.why))?, ca: false, usage: None, aki: None, extra: Vec::new(), alg_oid: None };
+    let mut spec = LeafSpec {
+        cn: "Alina Rao",
+        root_cn: "Alina Rao",
+        issuer: &issuer,
+        host_key: &host_pub,
+        uris: vec!["https://mallory.example/mcp".into()],
+        dns_name: None,
+        not_before: now - 3600,
+        not_after: now + 365 * 86_400,
+        serial: x509::random_serial().map_err(|e| Fail(e.why))?,
+        ca: false,
+        usage: None,
+        aki: None,
+        extra: Vec::new(),
+        alg_oid: None,
+    };
     let leaf_m = x509::build_leaf(&spec, &root_m).map_err(|e| Fail(e.why))?;
     spec.not_before = now - 400 * 86_400;
     spec.not_after = now - 2 * 86_400;
@@ -520,7 +654,20 @@ pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now
     let mut sealed = 0u32;
     let mut seal = |form: Form, chain: &[Vec<u8>], params: Value| -> Res<Value> {
         sealed += 1;
-        let wire = envelope::seal_request(SealRequest { recipient: &recipient.public_key, sender: &host_m, form, sender_chain: Some(chain), method: "tools/call".into(), params, msg_id: format!("intrude-{}-{sealed}", now), ts, exp: Some(ts + 600), cty: None, ephemeral_seed: None }).map_err(|e| Fail(e.why))?;
+        let wire = envelope::seal_request(SealRequest {
+            recipient: &recipient.public_key,
+            sender: &host_m,
+            form,
+            sender_chain: Some(chain),
+            method: "tools/call".into(),
+            params,
+            msg_id: format!("intrude-{}-{sealed}", now),
+            ts,
+            exp: Some(ts + 600),
+            cty: None,
+            ephemeral_seed: None,
+        })
+        .map_err(|e| Fail(e.why))?;
         serde_json::to_value(wire).map_err(|e| Fail(e.to_string()))
     };
     let message = json!({ "name": "send_message", "arguments": { "msg_id": "m", "text": "hello" } });
@@ -554,7 +701,8 @@ pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now
     tampered["sig"] = json!(b64u(&[0u8; 64]));
     run("a chain envelope with a forged signature", tampered, &["envelope_invalid"])?;
     let mut unknown_kid = seal(Form::Chain, &chain_m, message.clone())?;
-    let header: Value = serde_json::from_slice(&from_b64u(unknown_kid["protected"].as_str().unwrap_or("")).map_err(|e| Fail(e.why))?).map_err(|e| Fail(e.to_string()))?;
+    let header: Value = serde_json::from_slice(&from_b64u(unknown_kid["protected"].as_str().unwrap_or("")).map_err(|e| Fail(e.why))?)
+        .map_err(|e| Fail(e.to_string()))?;
     let mut h2 = header.clone();
     h2["kid"] = json!(host_pub.fingerprint());
     unknown_kid["protected"] = json!(b64u(pact_identity::canonical::canonical(&h2).as_bytes()));
@@ -569,7 +717,11 @@ pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now
     h4["suite"] = json!(if header["suite"] == "PACT-SEAL-X25519" { "PACT-SEAL-P256" } else { "PACT-SEAL-X25519" });
     wrong_suite["protected"] = json!(b64u(pact_identity::canonical::canonical(&h4).as_bytes()));
     run("a suite that is not the one the recipient key takes", wrong_suite, &["envelope_invalid"])?;
-    run("an expired leaf in the chain", seal(Form::Chain, &[leaf_m_expired.clone(), root_m_der.clone()], message.clone())?, &["envelope_invalid"])?;
+    run(
+        "an expired leaf in the chain",
+        seal(Form::Chain, &[leaf_m_expired.clone(), root_m_der.clone()], message.clone())?,
+        &["envelope_invalid"],
+    )?;
     // Chains and headers an honest sealer will not build, hand-rolled.
     //
     // `seal_request` refuses a chain that is not exactly a leaf and a root — right for a
@@ -624,7 +776,22 @@ pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now
     // any public CA could mint an identity. Rule 2 wants the root self-signed, so there is no
     // hierarchy to climb and no authority above the person.
     let intermediate = {
-        let mut ispec = LeafSpec { cn: "Alina Rao", root_cn: "Alina Rao", issuer: &issuer, host_key: &issuer, uris: vec!["https://mallory.example/mcp".into()], dns_name: None, not_before: now - 3600, not_after: now + 365 * 86_400, serial: x509::random_serial().map_err(|e| Fail(e.why))?, ca: true, usage: Some(vec![5]), aki: None, extra: Vec::new(), alg_oid: None };
+        let mut ispec = LeafSpec {
+            cn: "Alina Rao",
+            root_cn: "Alina Rao",
+            issuer: &issuer,
+            host_key: &issuer,
+            uris: vec!["https://mallory.example/mcp".into()],
+            dns_name: None,
+            not_before: now - 3600,
+            not_after: now + 365 * 86_400,
+            serial: x509::random_serial().map_err(|e| Fail(e.why))?,
+            ca: true,
+            usage: Some(vec![5]),
+            aki: None,
+            extra: Vec::new(),
+            alg_oid: None,
+        };
         ispec.ca = true;
         x509::build_leaf(&ispec, &root_m).map_err(|e| Fail(e.why))?
     };
@@ -649,20 +816,87 @@ pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now
     run("a header whose ts and exp are strings", strings, &["envelope_invalid"])?;
 
     run("a sealed tools/list from a stranger (no card to bind)", seal(Form::Chain, &chain_m, listing)?, &["envelope_invalid"])?;
-    let stale = envelope::seal_request(SealRequest { recipient: &recipient.public_key, sender: &host_m, form: Form::Chain, sender_chain: Some(&chain_m), method: "tools/call".into(), params: message.clone(), msg_id: "intrude-stale".into(), ts: ts - 3600, exp: Some(ts - 3000), cty: None, ephemeral_seed: None }).map_err(|e| Fail(e.why))?;
+    let stale = envelope::seal_request(SealRequest {
+        recipient: &recipient.public_key,
+        sender: &host_m,
+        form: Form::Chain,
+        sender_chain: Some(&chain_m),
+        method: "tools/call".into(),
+        params: message.clone(),
+        msg_id: "intrude-stale".into(),
+        ts: ts - 3600,
+        exp: Some(ts - 3000),
+        cty: None,
+        ephemeral_seed: None,
+    })
+    .map_err(|e| Fail(e.why))?;
     run("an envelope an hour old", serde_json::to_value(stale)?, &["envelope_invalid"])?;
     // §13.3's skew window is 300 seconds either way. A boundary nothing tests drifts.
-    let skewed = envelope::seal_request(SealRequest { recipient: &recipient.public_key, sender: &host_m, form: Form::Chain, sender_chain: Some(&chain_m), method: "tools/call".into(), params: message.clone(), msg_id: format!("intrude-{now}-skew"), ts: ts - 301, exp: Some(ts + 300), cty: None, ephemeral_seed: None }).map_err(|e| Fail(e.why))?;
+    let skewed = envelope::seal_request(SealRequest {
+        recipient: &recipient.public_key,
+        sender: &host_m,
+        form: Form::Chain,
+        sender_chain: Some(&chain_m),
+        method: "tools/call".into(),
+        params: message.clone(),
+        msg_id: format!("intrude-{now}-skew"),
+        ts: ts - 301,
+        exp: Some(ts + 300),
+        cty: None,
+        ephemeral_seed: None,
+    })
+    .map_err(|e| Fail(e.why))?;
     run("an envelope 301 seconds old", serde_json::to_value(skewed)?, &["envelope_invalid"])?;
-    let ahead = envelope::seal_request(SealRequest { recipient: &recipient.public_key, sender: &host_m, form: Form::Chain, sender_chain: Some(&chain_m), method: "tools/call".into(), params: message.clone(), msg_id: format!("intrude-{now}-ahead"), ts: ts + 301, exp: Some(ts + 900), cty: None, ephemeral_seed: None }).map_err(|e| Fail(e.why))?;
+    let ahead = envelope::seal_request(SealRequest {
+        recipient: &recipient.public_key,
+        sender: &host_m,
+        form: Form::Chain,
+        sender_chain: Some(&chain_m),
+        method: "tools/call".into(),
+        params: message.clone(),
+        msg_id: format!("intrude-{now}-ahead"),
+        ts: ts + 301,
+        exp: Some(ts + 900),
+        cty: None,
+        ephemeral_seed: None,
+    })
+    .map_err(|e| Fail(e.why))?;
     run("an envelope 301 seconds in the future", serde_json::to_value(ahead)?, &["envelope_invalid"])?;
     // `exp - ts` bounds how long every receiver must remember a msg_id (§13.3).
-    let forever = envelope::seal_request(SealRequest { recipient: &recipient.public_key, sender: &host_m, form: Form::Chain, sender_chain: Some(&chain_m), method: "tools/call".into(), params: message.clone(), msg_id: format!("intrude-{now}-forever"), ts, exp: Some(ts + 365 * 86_400), cty: None, ephemeral_seed: None }).map_err(|e| Fail(e.why))?;
+    let forever = envelope::seal_request(SealRequest {
+        recipient: &recipient.public_key,
+        sender: &host_m,
+        form: Form::Chain,
+        sender_chain: Some(&chain_m),
+        method: "tools/call".into(),
+        params: message.clone(),
+        msg_id: format!("intrude-{now}-forever"),
+        ts,
+        exp: Some(ts + 365 * 86_400),
+        cty: None,
+        ephemeral_seed: None,
+    })
+    .map_err(|e| Fail(e.why))?;
     run("an envelope asking to be remembered for a year", serde_json::to_value(forever)?, &["envelope_invalid"])?;
     // Rule 4 checks the leaf's dates and only the leaf's: a leaf not valid yet is refused
     // exactly as an expired one is.
     let leaf_m_future = {
-        let mut fspec = LeafSpec { cn: "Alina Rao", root_cn: "Alina Rao", issuer: &issuer, host_key: &host_pub, uris: vec!["https://mallory.example/mcp".into()], dns_name: None, not_before: now + 3600, not_after: now + 300 * 86_400, serial: x509::random_serial().map_err(|e| Fail(e.why))?, ca: false, usage: None, aki: None, extra: Vec::new(), alg_oid: None };
+        let mut fspec = LeafSpec {
+            cn: "Alina Rao",
+            root_cn: "Alina Rao",
+            issuer: &issuer,
+            host_key: &host_pub,
+            uris: vec!["https://mallory.example/mcp".into()],
+            dns_name: None,
+            not_before: now + 3600,
+            not_after: now + 300 * 86_400,
+            serial: x509::random_serial().map_err(|e| Fail(e.why))?,
+            ca: false,
+            usage: None,
+            aki: None,
+            extra: Vec::new(),
+            alg_oid: None,
+        };
         fspec.not_before = now + 3600;
         x509::build_leaf(&fspec, &root_m).map_err(|e| Fail(e.why))?
     };
@@ -679,9 +913,20 @@ mod tests {
 
     #[test]
     fn answers_reduce_to_one_word() {
-        assert_eq!(answer_code(r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"x","data":{"code":"envelope_invalid"}}}"#), "envelope_invalid");
-        assert_eq!(answer_code(r#"{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"{\"code\":\"chain_required\"}"}]}}"#), "chain_required");
-        assert_eq!(answer_code(r#"{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"{\"protected\":\"a\",\"enc\":\"b\",\"ct\":\"c\",\"sig\":\"d\"}"}]}}"#), "sealed");
+        assert_eq!(
+            answer_code(r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"x","data":{"code":"envelope_invalid"}}}"#),
+            "envelope_invalid"
+        );
+        assert_eq!(
+            answer_code(r#"{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"{\"code\":\"chain_required\"}"}]}}"#),
+            "chain_required"
+        );
+        assert_eq!(
+            answer_code(
+                r#"{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"{\"protected\":\"a\",\"enc\":\"b\",\"ct\":\"c\",\"sig\":\"d\"}"}]}}"#
+            ),
+            "sealed"
+        );
         assert_eq!(answer_code("event: message\ndata: {\"result\":{\"code\":\"certificate_renewed\"}}\n\n"), "certificate_renewed");
         assert!(answer_code("<html>").starts_with("unknown:"));
     }
