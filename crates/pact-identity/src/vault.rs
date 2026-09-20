@@ -1,6 +1,6 @@
 //! The vault (SPEC §9; CONTRACT §6): the root keys, the issued-leaf ledger and the contact book,
 //! under Argon2id and AES-256-GCM with the document's header as AAD. Shared by the sign-up
-//! ceremony, the CLI and the extension.
+//! ceremony and the CLI.
 use crate::canonical::canonical;
 use crate::csr;
 use crate::keys::PrivateKey;

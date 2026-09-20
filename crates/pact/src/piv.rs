@@ -12,8 +12,7 @@
 //! claim an interface a kernel driver already owns, and on macOS, Linux and Windows the CCID driver
 //! owns this one; `chrome.platformKeys` is ChromeOS enterprise-managed. PC/SC — a system service on
 //! all three platforms — is the only door, and a native binary is the only thing that can open it.
-//! The extension reaches this signer through Chrome's native messaging, with this binary as the
-//! host (README).
+//! So a card-held root is used from this command line, and from nowhere in a browser.
 //!
 //! **What the card is asked to do.** For ECC, PIV's GENERAL AUTHENTICATE takes the *digest* — for
 //! P-256, the 32 bytes of a SHA-256 — and answers with a DER ECDSA signature (NIST SP 800-73-4

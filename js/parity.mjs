@@ -208,6 +208,27 @@ add('card_decode of a card carrying that leaf', 'card_decode', { vcard: wasm.cal
   add('assemble_leaf with a token\'s high-S signature', 'assemble_leaf', { tbs: plan.tbs, sig: b64url(high), sig_alg: plan.sig_alg }, lowS);
   add('assemble_leaf with a low-S signature', 'assemble_leaf', { tbs: plan.tbs, sig: b64url(low), sig_alg: plan.sig_alg }, lowS);
 }
+// An extension VALUE under another type, and a basicConstraints that reads two ways (2026-09-20).
+// Every one of these validated as a chain in BOTH ports; the refusal has to be the same words in each.
+{
+  const strictLeaf = (misencode) => b64url(buildLeaf({ cn: 'Alina Rao', rootCn: 'Alina Rao', root: rootKey, hostKey, endpoint: ENDPOINT, notBefore: new Date('2026-09-01T00:00:00Z'), notAfter: new Date('2027-09-01T00:00:00Z'), label: 'parity/strict', misencode }));
+  for (const [what, misencode] of [
+    ['a keyUsage that is an OCTET STRING', { retag: { oid: '2.5.29.15', tag: 0x04 } }],
+    ['a subjectKeyIdentifier that is a BIT STRING', { retag: { oid: '2.5.29.14', tag: 0x03 } }],
+    ['a subjectAltName that is a SET', { retag: { oid: '2.5.29.17', tag: 0x31 } }],
+    ['an authorityKeyIdentifier that is an OCTET STRING', { retag: { oid: '2.5.29.35', tag: 0x04 } }],
+    ['a basicConstraints holding a NULL', { basicConstraints: '30020500' }],
+    ['a basicConstraints holding only an INTEGER', { basicConstraints: '3003020100' }],
+  ]) {
+    add(`validate_chain of a leaf with ${what}`, 'validate_chain', { chain: [strictLeaf(misencode), rootDer], now });
+    add(`parse_certificate of a leaf with ${what}`, 'parse_certificate', { der: strictLeaf(misencode) });
+  }
+  for (const [what, bc] of [['TRUE, 5, 0', '30090101ff020105020100'], ['a pathLenConstraint of 128', '30070101ff02020080']]) {
+    const root = b64url(buildRoot({ cn: 'Alina Rao', key: rootKey, notBefore: new Date('2026-09-01T00:00:00Z'), label: 'parity/root', basicConstraints: bc }));
+    add(`validate_chain under a root whose basicConstraints is ${what}`, 'validate_chain', { chain: [leafDer, root], now });
+    add(`parse_certificate of a root whose basicConstraints is ${what}`, 'parse_certificate', { der: root });
+  }
+}
 // A validity field that is not a date, which one port used to read as 2 March.
 add('validate_chain of a leaf dated 30 February', 'validate_chain', { chain: [b64url(buildLeaf({ cn: 'Alina Rao', rootCn: 'Alina Rao', root: rootKey, hostKey, endpoint: ENDPOINT, notBefore: new Date('2026-03-02T12:00:00Z'), notAfter: new Date('2027-03-01T00:00:00Z'), label: 'parity/feb30', misencode: { notBefore: '260230120000Z' } })), rootDer], now });
 // An extension whose OID has an arc over 128 bits: 2.5.29.(2^128 + 17). One port accumulated arcs in

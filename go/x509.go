@@ -294,6 +294,13 @@ func nameOf(n derNode) (string, error) {
 	return string(parts[1].content), nil
 }
 
+// extensionValueTag is the ASN.1 type each profile extension's VALUE is: SEQUENCE for the four
+// structured ones, BIT STRING for keyUsage, OCTET STRING for subjectKeyIdentifier (RFC 5280 4.2.1).
+var extensionValueTag = map[string]byte{
+	OIDBasicConstraints: 0x30, OIDKeyUsage: 0x03, OIDExtKeyUsage: 0x30,
+	OIDSubjectAltName: 0x30, OIDSubjectKeyID: 0x04, OIDAuthorityKeyID: 0x30,
+}
+
 // Parse reads a certificate. It errors on anything malformed, with the seed's messages.
 func Parse(der []byte) (*Cert, error) {
 	cert, err := derRead(der, 0)
@@ -409,6 +416,14 @@ func Parse(der []byte) (*Cert, error) {
 		if value.end != len(octets) {
 			return nil, errors.New("extension value has trailing bytes")
 		}
+		// The value is the TYPE its extension names (RFC 5280 4.2.1). Nothing looked at this tag, so a
+		// keyUsage that is an OCTET STRING whose body happens to look like a BIT STRING's was read as
+		// one, a subjectKeyIdentifier took its 32 bytes from anything, and a subjectAltName could be a
+		// SET — each a certificate that validated here (measured 2026-09-20: accepted as a chain) and
+		// that SPEC 14.1's exact profile says is not a PACT certificate.
+		if want, named := extensionValueTag[id]; named && value.tag != want {
+			return nil, errors.New("extension value of another type")
+		}
 		out.Extensions = append(out.Extensions, extInfo{ID: id, Critical: critical})
 		switch id {
 		case OIDBasicConstraints:
@@ -416,15 +431,24 @@ func Parse(der []byte) (*Cert, error) {
 			if err != nil {
 				return nil, err
 			}
-			if len(c) > 0 && c[0].tag == 0x01 {
+			// BasicConstraints ::= SEQUENCE { cA BOOLEAN DEFAULT FALSE, pathLenConstraint INTEGER
+			// OPTIONAL }, which in DER is exactly one of: nothing, [TRUE], [TRUE, n]. This read the FIRST
+			// and the LAST element, so SEQUENCE { NULL } was a valid leaf and SEQUENCE { TRUE, 5, 0 } was
+			// a root whose pathLen is 0 here and 5 to every other X.509 reader — one certificate, two
+			// readings, which is what 14.1 exists to exclude.
+			shapeOK := len(c) == 0 || (len(c) == 1 && c[0].tag == 0x01) || (len(c) == 2 && c[0].tag == 0x01 && c[1].tag == 0x02)
+			if !shapeOK {
+				return nil, errors.New("basicConstraints not in the DER form")
+			}
+			if len(c) > 0 {
 				// cA BOOLEAN DEFAULT FALSE: present means TRUE, and TRUE is 0xFF.
 				if !derBoolTrue(c[0]) {
 					return nil, errors.New("BOOLEAN not in the DER form")
 				}
 				out.CA = true
 			}
-			if len(c) > 0 && c[len(c)-1].tag == 0x02 {
-				pl := c[len(c)-1].content
+			if len(c) == 2 {
+				pl := c[1].content
 				if !derIntMinimal(pl) || len(pl) > 8 {
 					return nil, errors.New("INTEGER not minimal")
 				}

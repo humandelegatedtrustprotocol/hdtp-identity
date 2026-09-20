@@ -335,31 +335,47 @@ pub fn parse(der_bytes: &[u8]) -> Result<Cert> {
         if value.end != octets.len() {
             return err("parse", "extension value has trailing bytes");
         }
+        // The value is the TYPE its extension names (RFC 5280 4.2.1). Nothing looked at this tag, so
+        // a `keyUsage` that is an OCTET STRING whose body happens to look like a BIT STRING's was read
+        // as one, a `subjectKeyIdentifier` took its 32 bytes from anything, and a `subjectAltName`
+        // could be a SET — each a certificate that validated here (measured 2026-09-20: accepted as a
+        // chain) and that SPEC 14.1's exact profile says is not a PACT certificate.
+        let want_tag = match id.as_str() {
+            OID_BASIC_CONSTRAINTS | OID_EKU | OID_SAN | OID_AKI => Some(0x30),
+            OID_KEY_USAGE => Some(0x03),
+            OID_SKI => Some(0x04),
+            _ => None,
+        };
+        if want_tag.is_some_and(|t| t != value.tag) {
+            return err("parse", "extension value of another type");
+        }
         out.extensions.push(Extension { id: id.clone(), critical });
         match id.as_str() {
             OID_BASIC_CONSTRAINTS => {
+                // BasicConstraints ::= SEQUENCE { cA BOOLEAN DEFAULT FALSE, pathLenConstraint INTEGER
+                // OPTIONAL }, which in DER is exactly one of: nothing, [TRUE], [TRUE, n]. This read the
+                // FIRST and the LAST element, so `SEQUENCE { NULL }` was a valid leaf and
+                // `SEQUENCE { TRUE, 5, 0 }` was a root whose pathLen is 0 here and 5 to every other X.509
+                // reader — one certificate, two readings, which is what 14.1 exists to exclude.
                 let c = children(&value)?;
-                if let Some(first) = c.first() {
-                    if first.tag == 0x01 {
-                        // cA BOOLEAN DEFAULT FALSE: present means TRUE, and TRUE is 0xFF.
-                        if !der::bool_true(first) {
-                            return err("parse", "BOOLEAN not in the DER form");
-                        }
-                        out.ca = true;
-                    }
+                let shape: Vec<u8> = c.iter().map(|x| x.tag).collect();
+                if !matches!(shape.as_slice(), [] | [0x01] | [0x01, 0x02]) {
+                    return err("parse", "basicConstraints not in the DER form");
                 }
-                if let Some(last) = c.last() {
-                    if last.tag == 0x02 {
-                        if !der::int_minimal(last.content) || last.content.len() > 8 {
-                            return err("parse", "INTEGER not minimal");
-                        }
-                        // An empty INTEGER reads as `undefined` in the seed: present, and equal to nothing.
-                        out.path_len = Some(if last.content.is_empty() {
-                            -1
-                        } else {
-                            last.content.iter().fold(0i64, |acc, b| (acc << 8) | *b as i64)
-                        });
+                if let Some(first) = c.first() {
+                    // cA BOOLEAN DEFAULT FALSE: present means TRUE, and TRUE is 0xFF.
+                    if !der::bool_true(first) {
+                        return err("parse", "BOOLEAN not in the DER form");
                     }
+                    out.ca = true;
+                }
+                if let Some(n) = c.get(1) {
+                    if !der::int_minimal(n.content) || n.content.len() > 8 {
+                        return err("parse", "INTEGER not minimal");
+                    }
+                    // An empty INTEGER reads as `undefined` in the seed: present, and equal to nothing.
+                    out.path_len =
+                        Some(if n.content.is_empty() { -1 } else { n.content.iter().fold(0i64, |acc, b| (acc << 8) | *b as i64) });
                 }
             }
             OID_KEY_USAGE => {
