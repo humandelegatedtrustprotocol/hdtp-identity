@@ -33,6 +33,13 @@ func IPIsPrivate(ip string) bool {
 	if a.IsLoopback() || a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() || a.IsPrivate() || a.IsUnspecified() || a.IsMulticast() {
 		return true
 	}
+	// `netip` has no IsBroadcast, and 255.255.255.255 is none of the above (255 & 0xf0 is 0xf0, so
+	// not multicast either). Rust's v4_private calls `is_broadcast`, so the node accepted a guest
+	// card at the broadcast address that the wallet refused — and `manager.go` vets a stranger's
+	// endpoint with this on redeem and request.
+	if a.Is4() && a == netip.AddrFrom4([4]byte{255, 255, 255, 255}) {
+		return true
+	}
 	for _, r := range privateRanges {
 		p, err := netip.ParsePrefix(r)
 		if err == nil && p.Contains(a) {

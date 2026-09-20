@@ -7,7 +7,7 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed here that did not pass.
 
-Specification: **2.1.0**. **46** normative sentences, **270** cross-port parity cases over **38** guarded functions.
+Specification: **2.1.0**. **46** normative sentences, **276** cross-port parity cases over **38** guarded functions.
 
 ## The 46 normative sentences of the specification
 
@@ -143,7 +143,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 270 cross-port parity cases
+## The 276 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -151,10 +151,11 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **270** cases, **0** disagreements, **38** of **38** functions compared whole on success.
+At the run that generated this file: **276** cases, **0** disagreements, **38** of **38** functions compared whole on success.
 
-### `address_guard` — 27 cases · whole on success
+### `address_guard` — 28 cases · whole on success
 
+- address_guard https://255.255.255.255/mcp
 - address_guard https://127.0.0.1/mcp
 - address_guard https://127.0.0.1:8443/mcp
 - address_guard https://localhost/mcp
@@ -265,8 +266,10 @@ At the run that generated this file: **270** cases, **0** disagreements, **38** 
 - csr_new with a dns_name that is not the host
 - csr_new with nothing to work from
 
-### `decide` — 7 cases · whole on success
+### `decide` — 9 cases · whole on success
 
+- decide on an envelope from a pinned contact
+- decide on a pinned contact's call that names no tool
 - decide on an envelope for a key nobody holds
 - decide on a real envelope from a stranger
 - decide on an envelope whose signature is wrong
@@ -315,7 +318,7 @@ At the run that generated this file: **270** cases, **0** disagreements, **38** 
 - hpke_seal with nothing to work from
 - hpke_seal
 
-### `ip_is_private` — 11 cases · whole on success
+### `ip_is_private` — 12 cases · whole on success
 
 - ip_is_private "10.0.0.1"
 - ip_is_private "8.8.8.8"
@@ -327,6 +330,7 @@ At the run that generated this file: **270** cases, **0** disagreements, **38** 
 - ip_is_private "::ffff:10.0.0.1"
 - ip_is_private "100.64.0.1"
 - ip_is_private "224.0.0.1"
+- ip_is_private "255.255.255.255"
 - ip_is_private with nothing to work from
 
 ### `is_normal_https` — 26 cases · whole on success
@@ -488,8 +492,10 @@ At the run that generated this file: **270** cases, **0** disagreements, **38** 
 - suite_for an RSA key
 - suite_for with nothing to work from
 
-### `validate_chain` — 16 cases · whole on success
+### `validate_chain` — 18 cases · whole on success
 
+- validate_chain of a real chain
+- validate_chain against the root and endpoint it really has
 - validate_chain of a chain of one
 - validate_chain of a chain of three
 - validate_chain of an empty chain

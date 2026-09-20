@@ -81,8 +81,11 @@ func CSRCheck(der []byte, rootSPKIs [][]byte) CSRInfo {
 		return csrRefuse("request is not in the profile")
 	}
 	attr, err := derChildren(attrs[0])
+	if err != nil || len(attr) != 2 {
+		return csrRefuse("request is not in the profile")
+	}
 	attrOid, oidErr := readOidStrict(attr[0])
-	if err != nil || oidErr != nil || len(attr) != 2 || attrOid != oidExtensionRequest || attr[1].tag != 0x31 {
+	if oidErr != nil || attrOid != oidExtensionRequest || attr[1].tag != 0x31 {
 		return csrRefuse("request is not in the profile")
 	}
 	values, err := derChildren(attr[1])
@@ -94,8 +97,11 @@ func CSRCheck(der []byte, rootSPKIs [][]byte) CSRInfo {
 		return csrRefuse("request is not in the profile")
 	}
 	ext, err := derChildren(exts[0])
+	if err != nil || len(ext) != 2 {
+		return csrRefuse("request is not in the profile")
+	}
 	extOid, extOidErr := readOidStrict(ext[0])
-	if err != nil || extOidErr != nil || len(ext) != 2 || extOid != OIDSubjectAltName || ext[1].tag != 0x04 {
+	if extOidErr != nil || extOid != OIDSubjectAltName || ext[1].tag != 0x04 {
 		return csrRefuse("request is not in the profile")
 	}
 	san, err := derRead(ext[1].content, 0)

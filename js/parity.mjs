@@ -50,6 +50,7 @@ const card = wasm.call('card_encode', { fn: 'Alina Rao', cert: leafDer, seal: 'r
 const vault = { v: 1, roots: [{ fingerprint: rootFp, cn: 'Alina Rao', pkcs8: rootPkcs8, cert: rootDer, created: now }], ledger: [], contacts: [] };
 const leafTbs = wasm.call('leaf_tbs', { cn: 'Alina Rao', root_cn: 'Alina Rao', root_spki: rootSpki, host_spki: hostSpki, endpoint: ENDPOINT, not_before: now, not_after: '2027-09-01T00:00:00Z' });
 const sealed = wasm.call('seal_request', { recipient_leaf: leafDer, sender_pkcs8: hostPkcs8, form: 'chain', sender_chain: [leafDer, rootDer], method: 'tools/call', params: { name: 'send_message' }, msg_id: 'p-1', ts: Math.floor(Date.parse(now) / 1000) });
+const sealedNoTool = wasm.call('seal_request', { recipient_leaf: leafDer, sender_pkcs8: hostPkcs8, form: 'chain', sender_chain: [leafDer, rootDer], method: 'tools/call', params: {}, msg_id: 'p-1', ts: Math.floor(Date.parse(now) / 1000) });
 const node = {
   endpoint: ENDPOINT,
   accept_new_hosts: 'auto',
@@ -91,6 +92,10 @@ const withoutSerial = (member) => (answer, port) => {
 };
 const B64_BAD = ['!!!', '', 'AA=', 'a b c', '~~~~'];
 const LOCAL = [
+  // 255.255.255.255 is the one spelling of "not a real peer" that netip has no predicate for, so the
+  // Go guard admitted it while Rust's `is_broadcast` refused: a stranger's card could name the IPv4
+  // broadcast address and the node would pin it.
+  'https://255.255.255.255/mcp',
   'https://127.0.0.1/mcp', 'https://127.0.0.1:8443/mcp', 'https://localhost/mcp', 'https://localhost:8443/mcp',
   'https://[::1]/mcp', 'https://[::1]:8443/mcp', 'https://10.0.0.5:8443/mcp', 'https://192.168.1.1:443/mcp',
   'https://169.254.169.254/mcp', 'https://100.64.0.1:9000/mcp', 'https://0.0.0.0/mcp', 'https://[fe80::1]:9999/mcp',
@@ -172,6 +177,12 @@ add('build_leaf over 398 days', 'build_leaf', { cn: 'A', root_cn: 'A', root_pkcs
 add('build_leaf backwards in time', 'build_leaf', { cn: 'A', root_cn: 'A', root_pkcs8: rootPkcs8, host_spki: hostSpki, endpoint: ENDPOINT, not_before: '2027-09-01T00:00:00Z', not_after: '2026-09-01T00:00:00Z', serial: SERIAL });
 for (const url of ['https://127.0.0.1/mcp', 'http://a.example/x', 'https://a.example/x/'])
   add(`build_leaf naming ${url}`, 'build_leaf', { cn: 'A', root_cn: 'A', root_pkcs8: rootPkcs8, host_spki: hostSpki, endpoint: url, not_before: now, not_after: '2027-09-01T00:00:00Z', serial: SERIAL });
+// The HAPPY PATH first, and it was missing: all fourteen cases below are refusals, so until the
+// `provenWhole` gate learned to read `ok: false` (2026-09-20) the six chain rules had never had a
+// SUCCESSFUL answer compared between the ports. `leaf_spki`, `leaf_fingerprint`, `root_fingerprint`
+// and `endpoint` are what a caller pins on, and a member dropped from any of them was invisible.
+add('validate_chain of a real chain', 'validate_chain', { chain: [leafDer, rootDer], now });
+add('validate_chain against the root and endpoint it really has', 'validate_chain', { chain: [leafDer, rootDer], now, expected_root: rootFp, expected_endpoint: ENDPOINT });
 add('validate_chain of a chain of one', 'validate_chain', { chain: [rootDer], now });
 add('validate_chain of a chain of three', 'validate_chain', { chain: [leafDer, rootDer, rootDer], now });
 add('validate_chain of an empty chain', 'validate_chain', { chain: [], now });
@@ -197,7 +208,7 @@ for (const endpoint of [ENDPOINT, 'https://agent.alina.example:8443/mcp', 'https
 add('address_guard on a guest naming us', 'address_guard', { endpoint: ENDPOINT, self_endpoint: ENDPOINT, guest: true });
 add('address_guard on a contact naming us', 'address_guard', { endpoint: ENDPOINT, self_endpoint: ENDPOINT, guest: false });
 add('address_guard with no endpoint', 'address_guard', { guest: true });
-for (const ip of ['10.0.0.1', '8.8.8.8', '::1', '[::1]', 'not-an-ip', '', '0177.0.0.1', '::ffff:10.0.0.1', '100.64.0.1', '224.0.0.1'])
+for (const ip of ['10.0.0.1', '8.8.8.8', '::1', '[::1]', 'not-an-ip', '', '0177.0.0.1', '::ffff:10.0.0.1', '100.64.0.1', '224.0.0.1', '255.255.255.255'])
   add(`ip_is_private ${JSON.stringify(ip)}`, 'ip_is_private', { ip });
 
 // §3 certificate signing requests
@@ -249,6 +260,15 @@ add('seal_request with an empty msg_id', 'seal_request', { recipient_leaf: leafD
 add('seal_request whose exp is a month past its ts', 'seal_request', { recipient_leaf: leafDer, sender_pkcs8: hostPkcs8, form: 'chain', sender_chain: [leafDer, rootDer], method: 'tools/call', params: {}, msg_id: 'x', ts: 1, exp: 1 + 31 * 86400, ephemeral_seed: b64url(new Uint8Array(32).fill(7)) });
 add('hpke_open of a ciphertext that is not one', 'hpke_open', { suite: 'PACT-SEAL-X25519', recipient_pkcs8: hostPkcs8, info: 'PACT-SEAL-v2', aad: '', enc: b64url(new Uint8Array(32)), ct: b64url(new Uint8Array(32)) });
 add('hpke_seal with a suite nobody has', 'hpke_seal', { suite: 'PACT-SEAL-ROT13', recipient_spki: hostSpki, info: 'x', aad: '', plaintext: '' });
+// Likewise `decide`: every case below refuses, and its refusal lives in `result.code`, not in a
+// top-level `error` — so it too was counted as proven whole on a success it had never given. This
+// is the one that reaches the contact tier, where `tier`, `root`, `endpoint`, `method`, `form`,
+// `params`, `leaf` and `effects` are all populated and comparable.
+add('decide on an envelope from a pinned contact', 'decide', { now, envelope: sealed, node: { ...node, pins: [{ root: rootFp, endpoint: ENDPOINT, leaf: leafDer, state: 'active' }] } });
+// A call that names no tool, from a pinned contact: the answer's `tool` member is the one the Go
+// port omits and the Rust core sets to null. Nothing reached it before, because every decide case
+// either refused early or carried a tool name.
+add('decide on a pinned contact\'s call that names no tool', 'decide', { now, envelope: sealedNoTool, node: { ...node, pins: [{ root: rootFp, endpoint: ENDPOINT, leaf: leafDer, state: 'active' }] } });
 add('decide on an envelope for a key nobody holds', 'decide', { now, envelope: sealed, node: { ...node, keys: [] } });
 add('decide on a real envelope from a stranger', 'decide', { now, envelope: sealed, node });
 add('decide on an envelope whose signature is wrong', 'decide', { now, envelope: { ...sealed, sig: b64url(new Uint8Array(64)) }, node });
@@ -379,12 +399,22 @@ let ran = 0;
 // Which functions were compared whole on an answer that SUCCEEDED. A refusal compared whole proves
 // only that both ports refuse alike; it says nothing about the members of the answer a caller
 // actually uses, and that is where `card_decode` lost its entire `leaf`.
+//
+// "Succeeded" has to be asked of the ANSWER's own shape, not of a top-level `error`. This tested
+// `!raw.error`, and two functions never put their refusal there: `decide` answers
+// `{result:{code:"envelope_invalid"}, effects:[]}` and `csr_check` answers `{ok:false, why}`. So
+// both were recorded as proven whole on a success while every one of their cases was a refusal —
+// and the richest answers in the contract (`decide`'s tier/root/endpoint/method/form/params/leaf
+// /effects, `csr_check`'s cn/spki/fingerprint/alg/endpoint/dns_name) were guarded by nothing. That
+// is how `decide`'s `tool` member came to be absent in Go and `null` in Rust with the gate green.
+const succeeded = (raw) =>
+  raw && !raw.error && !raw.threw && raw.ok !== false && !(raw.result && raw.result.code && raw.result.code !== 'ok');
 const provenWhole = new Set();
 for (const [name, fn, args, keys] of cases) {
   if (only && !name.includes(only) && fn !== only) continue;
   ran++;
   const raw = answer(wasm, fn, args);
-  if ((keys === '*' || typeof keys === 'function') && raw && !raw.error && !raw.threw) provenWhole.add(fn);
+  if ((keys === '*' || typeof keys === 'function') && succeeded(raw)) provenWhole.add(fn);
   const a = pick(raw, keys, wasm);
   const b = pick(answer(go, fn, args), keys, go);
   const same = JSON.stringify(a) === JSON.stringify(b);

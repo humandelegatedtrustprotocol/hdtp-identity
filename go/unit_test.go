@@ -28,7 +28,7 @@ func TestIsNormalHTTPS(t *testing.T) {
 }
 
 func TestAddressGuard(t *testing.T) {
-	refused := []string{"https://localhost/mcp", "https://alina.localhost/mcp", "https://127.0.0.1/mcp", "https://10.1.2.3/mcp", "https://172.16.0.9/mcp", "https://192.168.1.1/mcp", "https://169.254.1.1/mcp", "https://100.64.0.1/mcp", "https://0.0.0.0/mcp", "https://[::1]/mcp", "https://[::]/mcp", "https://[fd00::1]/mcp", "https://[fe80::1]/mcp", "https://[::ffff:10.0.0.1]/mcp"}
+	refused := []string{"https://255.255.255.255/mcp", "https://localhost/mcp", "https://alina.localhost/mcp", "https://127.0.0.1/mcp", "https://10.1.2.3/mcp", "https://172.16.0.9/mcp", "https://192.168.1.1/mcp", "https://169.254.1.1/mcp", "https://100.64.0.1/mcp", "https://0.0.0.0/mcp", "https://[::1]/mcp", "https://[::]/mcp", "https://[fd00::1]/mcp", "https://[fe80::1]/mcp", "https://[::ffff:10.0.0.1]/mcp"}
 	for _, u := range refused {
 		if ok, _ := AddressGuard(u, "", false); ok {
 			t.Errorf("should be refused: %s", u)
@@ -45,7 +45,7 @@ func TestAddressGuard(t *testing.T) {
 	if ok, _ := AddressGuard(endpointB, endpointB, false); !ok {
 		t.Error("a contact may name the receiver's endpoint (the guard is for guests)")
 	}
-	for ip, want := range map[string]bool{"127.0.0.1": true, "8.8.8.8": false, "::1": true, "2001:db8::1": false, "::ffff:192.168.0.1": true, "not an ip": false} {
+	for ip, want := range map[string]bool{"255.255.255.255": true, "127.0.0.1": true, "8.8.8.8": false, "::1": true, "2001:db8::1": false, "::ffff:192.168.0.1": true, "not an ip": false} {
 		if IPIsPrivate(ip) != want {
 			t.Errorf("ip_is_private(%s) should be %v", ip, want)
 		}
