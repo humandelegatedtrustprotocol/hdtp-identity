@@ -27,3 +27,15 @@ getrandom = "0.2"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
+
+# One clippy lint is allowed, and the reason is the pin, not taste.
+#
+# `src/keys.rs` has items after its test module (the derived-root section was appended below it).
+# Moving the module to the end is the right fix and was tried on 2026-09-20: it renumbers a
+# `#[track_caller]` site in shipped code (`copy_from_slice` in `derive_seed`), the line number is
+# in the binary, and the canonical container build stopped matching `js/manifest.json`. A style
+# lint is not worth a new pin of the wallet's core, a re-vendor into the gateway and a new ceremony
+# page. Make the move — and delete this table — in the next change under `crates/` that needs a
+# new pin for a reason of its own.
+[lints.clippy]
+items_after_test_module = "allow"
