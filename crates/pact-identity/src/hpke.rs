@@ -63,7 +63,11 @@ impl Suite {
 
 /// Which suite a recipient key needs (§13.1): its curve's.
 pub fn suite_for(key: &PublicKey) -> Suite {
-    if key.alg() == Alg::P256 { Suite::P256 } else { Suite::X25519 }
+    if key.alg() == Alg::P256 {
+        Suite::P256
+    } else {
+        Suite::X25519
+    }
 }
 
 fn i2osp2(n: u16) -> [u8; 2] {
@@ -129,7 +133,10 @@ fn key_schedule(s: Suite, shared_secret: &[u8], info: &[u8]) -> (Zeroizing<Vec<u
     ksc.extend_from_slice(&labeled_extract(&id, &[], "psk_id_hash", &[]));
     ksc.extend_from_slice(&labeled_extract(&id, &[], "info_hash", info));
     let secret = labeled_extract(&id, shared_secret, "secret", &[]);
-    (Zeroizing::new(labeled_expand(&id, &secret, "key", &ksc, s.nk())), Zeroizing::new(labeled_expand(&id, &secret, "base_nonce", &ksc, Suite::NN)))
+    (
+        Zeroizing::new(labeled_expand(&id, &secret, "key", &ksc, s.nk())),
+        Zeroizing::new(labeled_expand(&id, &secret, "base_nonce", &ksc, Suite::NN)),
+    )
 }
 
 fn shared_secret(s: Suite, dh: &[u8], kem_context: &[u8]) -> Result<Zeroizing<Vec<u8>>> {
@@ -183,7 +190,8 @@ fn decap(suite: Suite, key: &PrivateKey, enc: &[u8]) -> Result<Zeroizing<Vec<u8>
             if enc.len() != 65 || enc[0] != 0x04 {
                 return err("internal", "encapsulated key is not the uncompressed P-256 point");
             }
-            let point = p256::PublicKey::from_sec1_bytes(enc).map_err(|_| Error::new("internal", "encapsulated key is not a P-256 point"))?;
+            let point =
+                p256::PublicKey::from_sec1_bytes(enc).map_err(|_| Error::new("internal", "encapsulated key is not a P-256 point"))?;
             let dh = p256::ecdh::diffie_hellman(sk.to_nonzero_scalar(), point.as_affine());
             shared_secret(suite, dh.raw_secret_bytes(), &ctx)
         }
@@ -199,8 +207,12 @@ fn decap(suite: Suite, key: &PrivateKey, enc: &[u8]) -> Result<Zeroizing<Vec<u8>
 fn aead_seal(s: Suite, key: &[u8], nonce: &[u8], aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>> {
     let payload = Payload { msg: plaintext, aad };
     let out = match s {
-        Suite::P256 => aes_gcm::Aes128Gcm::new_from_slice(key).map_err(|_| Error::new("internal", "key length"))?.encrypt(nonce.into(), payload),
-        Suite::X25519 => chacha20poly1305::ChaCha20Poly1305::new_from_slice(key).map_err(|_| Error::new("internal", "key length"))?.encrypt(nonce.into(), payload),
+        Suite::P256 => {
+            aes_gcm::Aes128Gcm::new_from_slice(key).map_err(|_| Error::new("internal", "key length"))?.encrypt(nonce.into(), payload)
+        }
+        Suite::X25519 => chacha20poly1305::ChaCha20Poly1305::new_from_slice(key)
+            .map_err(|_| Error::new("internal", "key length"))?
+            .encrypt(nonce.into(), payload),
     };
     out.map_err(|_| Error::new("internal", "AEAD failure"))
 }
@@ -208,8 +220,12 @@ fn aead_seal(s: Suite, key: &[u8], nonce: &[u8], aad: &[u8], plaintext: &[u8]) -
 fn aead_open(s: Suite, key: &[u8], nonce: &[u8], aad: &[u8], ct: &[u8]) -> Result<Vec<u8>> {
     let payload = Payload { msg: ct, aad };
     let out = match s {
-        Suite::P256 => aes_gcm::Aes128Gcm::new_from_slice(key).map_err(|_| Error::new("internal", "key length"))?.decrypt(nonce.into(), payload),
-        Suite::X25519 => chacha20poly1305::ChaCha20Poly1305::new_from_slice(key).map_err(|_| Error::new("internal", "key length"))?.decrypt(nonce.into(), payload),
+        Suite::P256 => {
+            aes_gcm::Aes128Gcm::new_from_slice(key).map_err(|_| Error::new("internal", "key length"))?.decrypt(nonce.into(), payload)
+        }
+        Suite::X25519 => chacha20poly1305::ChaCha20Poly1305::new_from_slice(key)
+            .map_err(|_| Error::new("internal", "key length"))?
+            .decrypt(nonce.into(), payload),
     };
     out.map_err(|_| Error::new("envelope_invalid", "does not open"))
 }
@@ -217,7 +233,14 @@ fn aead_open(s: Suite, key: &[u8], nonce: &[u8], aad: &[u8], ct: &[u8]) -> Resul
 /// Seals to `recipient`. Production draws a fresh ephemeral every time: a reused ephemeral repeats
 /// the key and the nonce, and two ciphertexts under them leak the XOR of their plaintexts. A seed
 /// exists only for vectors and for demonstrating that leak.
-pub fn seal(suite: Suite, recipient: &PublicKey, info: &[u8], aad: &[u8], plaintext: &[u8], seed: Option<[u8; 32]>) -> Result<(Vec<u8>, Vec<u8>)> {
+pub fn seal(
+    suite: Suite,
+    recipient: &PublicKey,
+    info: &[u8],
+    aad: &[u8],
+    plaintext: &[u8],
+    seed: Option<[u8; 32]>,
+) -> Result<(Vec<u8>, Vec<u8>)> {
     let seed = match seed {
         Some(s) => Zeroizing::new(s),
         None => Zeroizing::new(crate::util::random(32)?.try_into().map_err(|_| Error::new("internal", "randomness"))?),

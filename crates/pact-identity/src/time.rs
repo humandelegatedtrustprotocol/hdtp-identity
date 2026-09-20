@@ -99,7 +99,11 @@ pub fn der_time(t: i64) -> Vec<u8> {
 
 /// The tag a well-formed certificate must use for an instant.
 pub fn tag_for(t: i64) -> u8 {
-    if year_of(t) < 2050 { 0x17 } else { 0x18 }
+    if year_of(t) < 2050 {
+        0x17
+    } else {
+        0x18
+    }
 }
 
 /// Reads a UTCTime or GeneralizedTime node; anything but `YYYYMMDDHHMMSSZ` is refused.

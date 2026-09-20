@@ -70,7 +70,16 @@ fn proof(form: Form, sender: &PrivateKey, sender_chain: Option<&[Vec<u8>]>) -> R
 }
 
 #[allow(clippy::too_many_arguments)]
-fn seal_body(recipient: &PublicKey, sender: &PrivateKey, body: &Value, msg_id: &str, ts: i64, exp: i64, cty: &str, seed: Option<[u8; 32]>) -> Result<Wire> {
+fn seal_body(
+    recipient: &PublicKey,
+    sender: &PrivateKey,
+    body: &Value,
+    msg_id: &str,
+    ts: i64,
+    exp: i64,
+    cty: &str,
+    seed: Option<[u8; 32]>,
+) -> Result<Wire> {
     let suite = suite_for(recipient);
     let aad = header(suite, &recipient.fingerprint(), msg_id, ts, exp, cty);
     let plaintext = serde_json::to_vec(body).map_err(|e| Error::new("internal", e.to_string()))?;
@@ -103,7 +112,16 @@ pub fn seal_request(r: SealRequest<'_>) -> Result<Wire> {
     body.insert("method".into(), Value::String(r.method.clone()));
     body.insert("params".into(), r.params.clone());
     body.insert(k.into(), v);
-    seal_body(r.recipient, r.sender, &Value::Object(body), &r.msg_id, r.ts, r.exp.unwrap_or(r.ts + 600), r.cty.as_deref().unwrap_or(CTY_CALL), r.ephemeral_seed)
+    seal_body(
+        r.recipient,
+        r.sender,
+        &Value::Object(body),
+        &r.msg_id,
+        r.ts,
+        r.exp.unwrap_or(r.ts + 600),
+        r.cty.as_deref().unwrap_or(CTY_CALL),
+        r.ephemeral_seed,
+    )
 }
 
 pub struct SealResult<'a> {
@@ -520,7 +538,14 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
 
     // `leaf` is the leaf the signature verified under — the chain's, or the pinned one the small
     // form named — so a host can pin, seal to and answer the caller without opening it again.
-    let ok = |tier: &str, root: &str, endpoint: &str, form: &str, leaf_b64: &str, extra: Map<String, Value>, effects: Vec<Value>| -> DecideOutput {
+    let ok = |tier: &str,
+              root: &str,
+              endpoint: &str,
+              form: &str,
+              leaf_b64: &str,
+              extra: Map<String, Value>,
+              effects: Vec<Value>|
+     -> DecideOutput {
         let mut r = Map::new();
         r.insert("code".into(), json!("ok"));
         r.insert("leaf".into(), json!(leaf_b64));
@@ -639,7 +664,9 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
                 let mut extra = Map::new();
                 extra.insert("forced".into(), json!("tombstone"));
                 extra.insert("decision".into(), json!("ask"));
-                let effects = vec![json!({ "op": "pending", "root": root, "endpoint": endpoint, "why": "returned after removal", "leaf": b64u(&chain[0]) })];
+                let effects = vec![
+                    json!({ "op": "pending", "root": root, "endpoint": endpoint, "why": "returned after removal", "leaf": b64u(&chain[0]) }),
+                ];
                 return Ok(ok("pending_new_address", &root, &endpoint, "chain", &leaf_b64, extra, effects));
             }
         }
@@ -676,7 +703,10 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
     let r = ok("contact", &root, &endpoint, "chain", &leaf_b64, Map::new(), effects);
     if p.state == "pending_out" && !tool_ref.map(|t| PENDING_TOOLS.contains(&t)).unwrap_or(false) {
         // The pin moved (a peer may move between my request and their answer) but the call waits.
-        return Ok(DecideOutput { result: json!({ "code": "pending_approval" }), effects: r.effects.into_iter().filter(|e| e["op"] != "seen").collect() });
+        return Ok(DecideOutput {
+            result: json!({ "code": "pending_approval" }),
+            effects: r.effects.into_iter().filter(|e| e["op"] != "seen").collect(),
+        });
     }
     Ok(pending_or(r, &p.state))
 }

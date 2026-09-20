@@ -237,7 +237,12 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
         }
         "parse_certificate" => cert_json(&x509::parse(&bytes(a, "der")?)?),
         "profile_error" => json!({ "error": x509::profile_error(&x509::parse(&bytes(a, "der")?)?, s(a, "kind")?) }),
-        "validate_chain" => chain_result(x509::validate_chain(&chain(a, "chain")?, instant(a, "now")?, opt_s(a, "expected_root"), opt_s(a, "expected_endpoint"))),
+        "validate_chain" => chain_result(x509::validate_chain(
+            &chain(a, "chain")?,
+            instant(a, "now")?,
+            opt_s(a, "expected_root"),
+            opt_s(a, "expected_endpoint"),
+        )),
         "compare_leaves" => json!({ "order": x509::compare_leaves(&bytes(a, "pinned")?, &bytes(a, "presented")?)? }),
         "is_normal_https" => json!({ "normal": x509::is_normal_https(s(a, "url")?) }),
         "address_guard" => match address::address_guard(s(a, "endpoint")?, opt_s(a, "self_endpoint"), boolean(a, "guest")) {
@@ -247,9 +252,13 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
         "ip_is_private" => json!({ "private": address::ip_is_private(s(a, "ip")?) }),
 
         // §3 CSR
-        "csr_new" => json!({ "der": b64u(&csr::csr_new(s(a, "cn")?, &private(a, "host_pkcs8")?, s(a, "endpoint")?, opt_s(a, "dns_name"))?) }),
+        "csr_new" => {
+            json!({ "der": b64u(&csr::csr_new(s(a, "cn")?, &private(a, "host_pkcs8")?, s(a, "endpoint")?, opt_s(a, "dns_name"))?) })
+        }
         "csr_check" => match csr::check(&bytes(a, "der")?, &opt_chain(a, "root_spkis")?) {
-            Ok(c) => json!({ "ok": true, "cn": c.cn, "spki": b64u(c.key.spki()), "fingerprint": c.key.fingerprint(), "alg": c.key.alg().name(), "endpoint": c.endpoint, "dns_name": c.dns_name }),
+            Ok(c) => {
+                json!({ "ok": true, "cn": c.cn, "spki": b64u(c.key.spki()), "fingerprint": c.key.fingerprint(), "alg": c.key.alg().name(), "endpoint": c.endpoint, "dns_name": c.dns_name })
+            }
             Err(e) => json!({ "ok": false, "why": e.why }),
         },
         "issue_from_csr" => {
@@ -257,7 +266,14 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
             let mut roots = opt_chain(a, "root_spkis")?;
             roots.push(root.public().spki().to_vec());
             let req = csr::check(&bytes(a, "csr")?, &roots)?;
-            let i = csr::issue(&req, s(a, "root_cn")?, &root, instant(a, "now")?, opt_instant(a, "previous_not_before")?, opt_int(a, "valid_days").unwrap_or(365))?;
+            let i = csr::issue(
+                &req,
+                s(a, "root_cn")?,
+                &root,
+                instant(a, "now")?,
+                opt_instant(a, "previous_not_before")?,
+                opt_int(a, "valid_days").unwrap_or(365),
+            )?;
             json!({ "der": b64u(&i.der), "endpoint": req.endpoint, "not_before": format_rfc3339(i.not_before), "not_after": format_rfc3339(i.not_after) })
         }
         "issue_tbs_from_csr" => {
@@ -265,13 +281,24 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
             let mut roots = opt_chain(a, "root_spkis")?;
             roots.push(root.spki().to_vec());
             let req = csr::check(&bytes(a, "csr")?, &roots)?;
-            let (u, nb, na) = csr::issue_tbs(&req, s(a, "root_cn")?, &root, instant(a, "now")?, opt_instant(a, "previous_not_before")?, opt_int(a, "valid_days").unwrap_or(365))?;
+            let (u, nb, na) = csr::issue_tbs(
+                &req,
+                s(a, "root_cn")?,
+                &root,
+                instant(a, "now")?,
+                opt_instant(a, "previous_not_before")?,
+                opt_int(a, "valid_days").unwrap_or(365),
+            )?;
             json!({ "tbs": b64u(&u.tbs), "sig_alg": b64u(&x509::sig_alg(&u.sig_alg)), "endpoint": req.endpoint, "not_before": format_rfc3339(nb), "not_after": format_rfc3339(na) })
         }
 
         // §4 cards
         "card_encode" => {
-            let extra: Vec<String> = a.get("extra").and_then(|e| e.as_array()).map(|items| items.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect()).unwrap_or_default();
+            let extra: Vec<String> = a
+                .get("extra")
+                .and_then(|e| e.as_array())
+                .map(|items| items.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+                .unwrap_or_default();
             json!({ "vcard": card::encode(s(a, "fn")?, &bytes(a, "cert")?, opt_s(a, "seal"), &extra) })
         }
         "card_decode" => {
@@ -285,12 +312,26 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
         "suite_for" => json!({ "suite": envelope::suite_name(&bytes(a, "spki")?)? }),
         "hpke_seal" => {
             let suite = Suite::parse(s(a, "suite")?).ok_or_else(|| Error::new("envelope_invalid", "version or suite"))?;
-            let (enc, ct) = hpke::seal(suite, &public(a, "recipient_spki")?, s(a, "info")?.as_bytes(), &opt_bytes(a, "aad")?.unwrap_or_default(), &bytes(a, "plaintext")?, seed32(a, "ephemeral_seed")?)?;
+            let (enc, ct) = hpke::seal(
+                suite,
+                &public(a, "recipient_spki")?,
+                s(a, "info")?.as_bytes(),
+                &opt_bytes(a, "aad")?.unwrap_or_default(),
+                &bytes(a, "plaintext")?,
+                seed32(a, "ephemeral_seed")?,
+            )?;
             json!({ "enc": b64u(&enc), "ct": b64u(&ct) })
         }
         "hpke_open" => {
             let suite = Suite::parse(s(a, "suite")?).ok_or_else(|| Error::new("envelope_invalid", "version or suite"))?;
-            let pt = hpke::open(suite, &private(a, "recipient_pkcs8")?, s(a, "info")?.as_bytes(), &opt_bytes(a, "aad")?.unwrap_or_default(), &bytes(a, "enc")?, &bytes(a, "ct")?)?;
+            let pt = hpke::open(
+                suite,
+                &private(a, "recipient_pkcs8")?,
+                s(a, "info")?.as_bytes(),
+                &opt_bytes(a, "aad")?.unwrap_or_default(),
+                &bytes(a, "enc")?,
+                &bytes(a, "ct")?,
+            )?;
             json!({ "plaintext": b64u(&pt) })
         }
         "seal_request" => {
@@ -331,9 +372,11 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
             serde_json::to_value(wire).map_err(|e| Error::new("internal", e.to_string()))?
         }
         "open_result" => {
-            let wire: Wire = serde_json::from_value(a.get("envelope").cloned().unwrap_or(Value::Null)).map_err(|_| Error::new("envelope_invalid", "envelope members"))?;
+            let wire: Wire = serde_json::from_value(a.get("envelope").cloned().unwrap_or(Value::Null))
+                .map_err(|_| Error::new("envelope_invalid", "envelope members"))?;
             let key = private(a, "my_pkcs8")?;
-            let pins: Vec<CallerPin> = serde_json::from_value(a.get("pins").cloned().unwrap_or(json!([]))).map_err(|e| Error::new("bad_request", format!("pins: {e}")))?;
+            let pins: Vec<CallerPin> = serde_json::from_value(a.get("pins").cloned().unwrap_or(json!([])))
+                .map_err(|e| Error::new("bad_request", format!("pins: {e}")))?;
             envelope::open_result(OpenResultArgs {
                 envelope: &wire,
                 my_key: &key,
@@ -344,7 +387,13 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
                 expected_endpoint: opt_s(a, "expected_endpoint"),
             })?
         }
-        "follow_renewed" => envelope::follow_renewed(a.get("answer").unwrap_or(&Value::Null), s(a, "pinned_root")?, &bytes(a, "pinned_leaf")?, s(a, "dialed")?, instant(a, "now")?),
+        "follow_renewed" => envelope::follow_renewed(
+            a.get("answer").unwrap_or(&Value::Null),
+            s(a, "pinned_root")?,
+            &bytes(a, "pinned_leaf")?,
+            s(a, "dialed")?,
+            instant(a, "now")?,
+        ),
         "decide" => {
             // A missing `node` is not a decision against an empty node, and the member is named the
             // way the caller wrote it rather than the way serde reports a missing field — the Go port
@@ -354,13 +403,18 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
                     return err("bad_request", format!("{k} is required"));
                 }
             }
-            let input: envelope::DecideInput = serde_json::from_value(a.clone()).map_err(|_| Error::new("bad_request", "decide input does not read"))?;
+            let input: envelope::DecideInput =
+                serde_json::from_value(a.clone()).map_err(|_| Error::new("bad_request", "decide input does not read"))?;
             serde_json::to_value(envelope::decide(&input)?).map_err(|e| Error::new("internal", e.to_string()))?
         }
 
         // §6 vault
         "vault_seal" => {
-            let kdf = a.get("kdf").map(|k| Kdf { m_kib: k.get("m_kib").and_then(|x| x.as_u64()).unwrap_or(65_536) as u32, t: k.get("t").and_then(|x| x.as_u64()).unwrap_or(3) as u32, p: k.get("p").and_then(|x| x.as_u64()).unwrap_or(1) as u32 });
+            let kdf = a.get("kdf").map(|k| Kdf {
+                m_kib: k.get("m_kib").and_then(|x| x.as_u64()).unwrap_or(65_536) as u32,
+                t: k.get("t").and_then(|x| x.as_u64()).unwrap_or(3) as u32,
+                p: k.get("p").and_then(|x| x.as_u64()).unwrap_or(1) as u32,
+            });
             // Sealing an absent plaintext sealed the JSON literal `null` and handed back a
             // well-formed vault with nothing in it — a file a person would keep, and restore from.
             let Some(plaintext) = a.get("plaintext").filter(|v| !v.is_null()) else {
@@ -374,7 +428,14 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
             };
             json!({ "plaintext": vault::open(s(a, "passphrase")?, doc)? })
         }
-        "wallet_issue" => vault::wallet_issue(a.get("vault_plaintext").unwrap_or(&Value::Null), s(a, "root_fingerprint")?, &bytes(a, "csr")?, instant(a, "now")?, opt_int(a, "valid_days").unwrap_or(365), boolean(a, "move"))?,
+        "wallet_issue" => vault::wallet_issue(
+            a.get("vault_plaintext").unwrap_or(&Value::Null),
+            s(a, "root_fingerprint")?,
+            &bytes(a, "csr")?,
+            instant(a, "now")?,
+            opt_int(a, "valid_days").unwrap_or(365),
+            boolean(a, "move"),
+        )?,
 
         "version" => json!({ "crate": env!("CARGO_PKG_VERSION"), "spec": SPEC_VERSION }),
         other => return err("unsupported", format!("no function named {other}")),

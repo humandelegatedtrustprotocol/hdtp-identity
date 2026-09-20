@@ -5,7 +5,7 @@ use crate::der::{self, children, read, read_oid_strict};
 use crate::keys::{PrivateKey, PublicKey};
 use crate::time::{DAY, HOUR};
 use crate::util::{err, Error, Result};
-use crate::x509::{self, is_normal_https, name, LeafSpec, OID_SAN, MAX_LEAF_DAYS};
+use crate::x509::{self, is_normal_https, name, LeafSpec, MAX_LEAF_DAYS, OID_SAN};
 
 pub const OID_EXTENSION_REQUEST: &str = "1.2.840.113549.1.9.14";
 
@@ -167,7 +167,14 @@ pub fn validity(now: i64, previous_not_before: Option<i64>, valid_days: i64) -> 
     Ok((not_before, not_before + valid_days * DAY))
 }
 
-pub fn issue_tbs(csr: &Csr, root_cn: &str, root: &PublicKey, now: i64, previous_not_before: Option<i64>, valid_days: i64) -> Result<(x509::Unsigned, i64, i64)> {
+pub fn issue_tbs(
+    csr: &Csr,
+    root_cn: &str,
+    root: &PublicKey,
+    now: i64,
+    previous_not_before: Option<i64>,
+    valid_days: i64,
+) -> Result<(x509::Unsigned, i64, i64)> {
     let (not_before, not_after) = validity(now, previous_not_before, valid_days)?;
     let spec = LeafSpec {
         cn: &csr.cn,
