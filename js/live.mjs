@@ -3,12 +3,17 @@
 // the seed library exactly as intrude.mjs builds them; what differs is the defender, which is
 // whatever answers at the address, judged by the one thing a stranger can see — the answer's code.
 //
+// `--card <file>` supplies the card for a host that serves none at a URL (the reference node);
+// `--insecure` is for a node on your own machine, whose TLS chain is its own.
+//
 // Only scenarios a code decides are run: the rest need the owner's state (a pin, a block, a
 // tombstone) or a look inside the node, and are counted as skipped rather than pretended. One
 // scenario (a contact request with a matching card) leaves a pending request behind on the
 // target, because that is what it proves; aim it at a test identity.
 import { spawnSync } from 'node:child_process';
-import { seed, ed25519FromSeed, b64url, fromB64url } from '../../pact-protocol/vectors/lib/keys.mjs';
+import { randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { ed25519FromSeed, b64url, fromB64url } from '../../pact-protocol/vectors/lib/keys.mjs';
 import { buildRoot, buildLeaf } from '../../pact-protocol/vectors/lib/x509.mjs';
 import { encodeCard, decodeCard } from '../../pact-protocol/vectors/lib/card.mjs';
 import { sealEnvelope } from '../../pact-protocol/vectors/lib/envelope.mjs';
@@ -28,21 +33,65 @@ export function seedScenarioCount() {
   return Number(m[1]);
 }
 
-/** What a stranger can read from an answer: the error's code, or `sealed` for a sealed result. */
+/**
+ * What a stranger can read from an answer: the error's code, or `sealed` for a sealed result.
+ *
+ * Takes the parsed body or the raw text. A streamable-HTTP receiver may answer as an event stream
+ * (`data: {…}` lines) — the reference node does — and a tool error may arrive as the JSON-RPC
+ * error, as a `code` in the tool's own text, or on the result. The Rust driver
+ * (`pact vectors intrude`) has read all of these since 2026-09-18; this one read two, which was
+ * enough for the hosted platform and the seed's fake and for nothing else.
+ */
 export function answerCode(body) {
-  if (body && body.error) return body.error.data?.code ?? body.error.code ?? 'error';
-  const text = body?.result?.content?.[0]?.text;
-  if (typeof text === 'string') {
-    try { const r = JSON.parse(text); if (r && typeof r.protected === 'string' && typeof r.ct === 'string') return 'sealed'; if (r && r.error) return r.error.code ?? 'error'; } catch { /* not JSON */ }
+  if (typeof body === 'string') {
+    const t = body.trimStart();
+    const payload = t.startsWith('event:') || t.startsWith('data:')
+      ? body.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim()).join('')
+      : body;
+    try { body = JSON.parse(payload); } catch { return `unknown:not-json(${payload.slice(0, 60)})`; }
   }
-  if (body?.result?.isError) return 'error';
+  if (body && body.error) return body.error.data?.code ?? body.error.code ?? 'error';
+  for (const item of body?.result?.content ?? []) {
+    if (typeof item?.text !== 'string') continue;
+    let r; try { r = JSON.parse(item.text); } catch { continue; }
+    if (r && typeof r.protected === 'string' && typeof r.ct === 'string') return 'sealed';
+    if (r && typeof r.code === 'string') return r.code;
+    if (r && r.error) return r.error.code ?? 'error';
+  }
+  if (typeof body?.result?.code === 'string') return body.result.code;
+  if (body?.result?.isError) return 'unknown:isError';
   return body?.result ? 'result' : 'unknown';
 }
 
+/** §13.3's skew window, and the margin a LIVE run adds to it. */
+const WINDOW = 300, MARGIN = 30;
+
+/**
+ * The scenarios, in an order that matters, by an attacker nobody has met.
+ *
+ * Three things here were wrong until 2026-09-20, and every one of them passed against the seed's
+ * fake node and failed against a real one — which nothing had been aimed at since the list grew:
+ *
+ *  - **Mallory is new every run.** Her keys came from a fixed seed, so she was the same person each
+ *    time, and the control below leaves her request PENDING on the target: from the second run on
+ *    she was no stranger anywhere this had been aimed, and "a stranger in the small form" was
+ *    answered as the pending contact she had become.
+ *  - **The control runs LAST.** It sat ninth of twenty-seven, so the eighteen scenarios after it
+ *    were not a stranger's either; two of them (a replayed small form, a sealed tools/list) were
+ *    answered with a sealed refusal — correctly — and reported as intrusions that reproduce.
+ *  - **The skew scenarios carry a margin.** "301 seconds in the future" was sealed when the list
+ *    was built and posted seconds later, by which time it was 299 seconds in the future and inside
+ *    the window: the receiver accepted it, correctly. The exact boundary (300 in, 301 out) is the
+ *    offline suite's, where there is no transit and one clock. Over a network the honest claim is
+ *    "well outside the window is refused", so these are 300 + 30.
+ *
+ * The names are the Rust driver's too (`pact vectors intrude`), and js/live.test.mjs holds the two
+ * lists to each other: they drifted apart the day they were written, 27 against 26.
+ */
 export function scenarios({ endpoint, targetLeaf, now = Date.now() }) {
   const nowS = Math.floor(now / 1000);
   const E_M = 'https://mallory.example/mcp';
-  const rootM = ed25519FromSeed(seed('live/root/mallory')), hostM = ed25519FromSeed(seed('live/host/mallory'));
+  const rootM = ed25519FromSeed(randomBytes(32)), hostM = ed25519FromSeed(randomBytes(32));
   const ROOT_M = buildRoot({ cn: 'Mallory', key: rootM, notBefore: new Date(now - D), label: 'live/root_m' });
   const LEAF_M = buildLeaf({ cn: 'Mallory', rootCn: 'Mallory', root: rootM, hostKey: hostM, endpoint: E_M, notBefore: new Date(now - H), notAfter: new Date(now + 365 * D), label: 'live/leaf_m' });
   const chainM = [LEAF_M, ROOT_M];
@@ -56,90 +105,150 @@ export function scenarios({ endpoint, targetLeaf, now = Date.now() }) {
   // across the enc/ct boundary leaves the signed bytes identical: what refuses it is
   // `enc` being the suite's own length (§13.1).
   const slid = (e) => { const enc = fromB64url(e.enc), ct = fromB64url(e.ct); return { ...e, enc: b64url(enc.subarray(0, enc.length - 1)), ct: b64url(Buffer.concat([enc.subarray(enc.length - 1), ct])) }; };
+  // The suite the target's key does NOT take, claimed in a header the envelope is sealed under.
+  const realSuite = JSON.parse(fromB64url(message().protected).toString()).suite;
+  const otherSuite = realSuite === 'PACT-SEAL-X25519' ? 'PACT-SEAL-P256' : 'PACT-SEAL-X25519';
   // Certificates the receiver must refuse: a CA-signed intermediate in the root slot
   // (there is no authority above the person), and leaves outside their validity.
   const INTER_M = buildLeaf({ cn: 'Mallory', rootCn: 'Mallory', root: rootM, hostKey: rootM, endpoint: E_M, notBefore: new Date(now - D), notAfter: new Date(now + 365 * D), cA: true, usage: [5], label: 'live/inter_m' });
   const FUTURE_M = buildLeaf({ cn: 'Mallory', rootCn: 'Mallory', root: rootM, hostKey: hostM, endpoint: E_M, notBefore: new Date(now + H), notAfter: new Date(now + 300 * D), label: 'live/future_m' });
   const EXPIRED_M = buildLeaf({ cn: 'Mallory', rootCn: 'Mallory', root: rootM, hostKey: hostM, endpoint: E_M, notBefore: new Date(now - 400 * D), notAfter: new Date(now - D), label: 'live/expired_m' });
-  const replayed = message({ reference: true });
+  const INVALID = 'envelope_invalid';
   return [
     { name: 'a stranger in the small form, naming a leaf nobody holds', envelope: message({ reference: true }), expect: 'chain_required' },
-    { name: 'a stranger in the full form calling a contact tool', envelope: message(), expect: 'envelope_invalid' },
-    { name: 'a full-form envelope whose signature was tampered', envelope: tamper(message()), expect: 'envelope_invalid' },
-    { name: 'an envelope sealed to a key this endpoint never held', envelope: message({ header: { kid: 'sha256:' + b64url(Buffer.alloc(32, 7)) } }), expect: 'envelope_invalid' },
-    { name: 'a header carrying a member the protocol does not list', envelope: message({ header: { from: 'sha256:x' } }), expect: 'envelope_invalid' },
-    { name: 'an envelope an hour old', envelope: message({ ts: nowS - 3600, exp: nowS - 3540 }), expect: 'envelope_invalid' },
-    { name: 'a chain of three', envelope: message({ chainInside: [LEAF_M, ROOT_M, ROOT_M] }), expect: 'envelope_invalid' },
-    { name: 'a leaf presented as the root', envelope: message({ chainInside: [LEAF_M, LEAF_M] }), expect: 'envelope_invalid' },
-    { name: 'a stranger asking for contact with a card that is her leaf', envelope: request(), expect: 'sealed', note: 'leaves a contact request on the target' },
-    { name: 'the same small-form envelope replayed', envelope: replayed, twice: true, expect: 'chain_required' },
+    { name: 'the same small-form envelope replayed', envelope: message({ reference: true }), twice: true, expect: 'chain_required' },
+    { name: 'a stranger in the full form calling a contact tool', envelope: message(), expect: INVALID },
+    { name: 'a full-form envelope whose signature was tampered', envelope: tamper(message()), expect: INVALID },
+
+    // Headers no honest sealer writes, each SEALED UNDER the forged header: rewritten afterwards,
+    // the AAD stops matching and the envelope is refused for that alone, whatever the header says.
+    { name: 'an envelope sealed to a key this endpoint never held', envelope: message({ header: { kid: 'sha256:' + b64url(Buffer.alloc(32, 7)) } }), expect: INVALID },
+    { name: 'a header carrying a member the protocol does not list', envelope: message({ header: { from: 'sha256:x' } }), expect: INVALID },
+    { name: 'a suite that is not the one the recipient key takes', envelope: message({ header: { suite: otherSuite } }), expect: INVALID },
 
     // Chain confusion, over the wire. The offline battery proves the library
     // refuses these shapes; these prove the DEPLOYED node runs that library on
     // the path a stranger actually reaches, past its edge and its router.
-    { name: 'a chain of one certificate, live', envelope: message({ chainInside: [LEAF_M] }), expect: 'envelope_invalid' },
-    { name: 'an empty chain, live', envelope: message({ chainInside: [] }), expect: 'envelope_invalid' },
-    { name: 'the chain in reverse order, live', envelope: message({ chainInside: [ROOT_M, LEAF_M] }), expect: 'envelope_invalid' },
-    { name: 'the root presented as its own leaf, live', envelope: message({ chainInside: [ROOT_M, ROOT_M] }), expect: 'envelope_invalid' },
-    { name: 'an intermediate posing as the root, live', envelope: message({ chainInside: [LEAF_M, INTER_M] }), expect: 'envelope_invalid' },
+    { name: 'a chain of one certificate', envelope: message({ chainInside: [LEAF_M] }), expect: INVALID },
+    { name: 'an empty chain', envelope: message({ chainInside: [] }), expect: INVALID },
+    { name: 'a chain of three certificates', envelope: message({ chainInside: [LEAF_M, ROOT_M, ROOT_M] }), expect: INVALID },
+    { name: 'the chain in reverse order', envelope: message({ chainInside: [ROOT_M, LEAF_M] }), expect: INVALID },
+    { name: 'the root presented as its own leaf', envelope: message({ chainInside: [ROOT_M, ROOT_M] }), expect: INVALID },
+    { name: 'the leaf presented as its own root', envelope: message({ chainInside: [LEAF_M, LEAF_M] }), expect: INVALID },
+    { name: 'an intermediate posing as the root', envelope: message({ chainInside: [LEAF_M, INTER_M] }), expect: INVALID },
 
-    // Time, at the edges the receiver is supposed to hold.
-    { name: 'a not-yet-valid leaf, live', envelope: message({ chainInside: [FUTURE_M, ROOT_M] }), expect: 'envelope_invalid' },
-    { name: 'an expired leaf, live', envelope: message({ chainInside: [EXPIRED_M, ROOT_M] }), expect: 'envelope_invalid' },
-    { name: 'an envelope 301 seconds old, live', envelope: message({ ts: nowS - 301, exp: nowS + 300 }), expect: 'envelope_invalid' },
-    { name: 'an envelope 301 seconds in the future, live', envelope: message({ ts: nowS + 301, exp: nowS + 900 }), expect: 'envelope_invalid' },
-    { name: 'an envelope asking to be remembered for a year, live', envelope: message({ ts: nowS, exp: nowS + 365 * 86400 }), expect: 'envelope_invalid' },
+    // Time, well outside the edges the receiver is supposed to hold.
+    { name: 'a leaf that is not valid yet', envelope: message({ chainInside: [FUTURE_M, ROOT_M] }), expect: INVALID },
+    { name: 'an expired leaf', envelope: message({ chainInside: [EXPIRED_M, ROOT_M] }), expect: INVALID },
+    { name: 'an envelope an hour old', envelope: message({ ts: nowS - 3600, exp: nowS - 3540 }), expect: INVALID },
+    { name: `an envelope ${WINDOW + MARGIN} seconds old`, envelope: message({ ts: nowS - WINDOW - MARGIN, exp: nowS + 300 }), expect: INVALID },
+    { name: `an envelope ${WINDOW + MARGIN} seconds in the future`, envelope: message({ ts: nowS + WINDOW + MARGIN, exp: nowS + 900 }), expect: INVALID },
+    { name: 'an envelope asking to be remembered for a year', envelope: message({ ts: nowS, exp: nowS + 365 * 86400 }), expect: INVALID },
 
     // The retired generation, refused by a node that no longer implements it.
-    { name: 'a v: 1 header, live', envelope: message({ header: { v: 1 } }), expect: 'envelope_invalid' },
-    { name: 'a header claiming a version that does not exist yet, live', envelope: message({ header: { v: 3 } }), expect: 'envelope_invalid' },
-    { name: 'a header whose ts and exp are strings, live', envelope: message({ header: { ts: String(nowS), exp: String(nowS + 600) } }), expect: 'envelope_invalid' },
-    { name: 'an empty msg_id, live', envelope: message({ msgId: '' }), expect: 'envelope_invalid' },
-    { name: 'a result envelope dispatched as a request, live', envelope: message({ cty: 'application/pact-result+json' }), expect: 'envelope_invalid' },
-    { name: 'a sealed tools/list from a stranger, live', envelope: env({ method: 'tools/list', params: {} }), expect: 'envelope_invalid' },
-    { name: 'a byte moved from the encapsulated key into the ciphertext, live', envelope: slid(message()), expect: 'envelope_invalid' },
+    { name: 'a v: 1 header, the retired generation', envelope: message({ header: { v: 1 } }), expect: INVALID },
+    { name: 'a header claiming a version that does not exist yet', envelope: message({ header: { v: 3 } }), expect: INVALID },
+    { name: 'a header whose ts and exp are strings', envelope: message({ header: { ts: String(nowS), exp: String(nowS + 600) } }), expect: INVALID },
+    { name: 'an empty msg_id', envelope: message({ msgId: '' }), expect: INVALID },
+    { name: 'a result envelope dispatched as a request', envelope: message({ cty: 'application/pact-result+json' }), expect: INVALID },
+    { name: 'a sealed tools/list from a stranger', envelope: env({ method: 'tools/list', params: {} }), expect: INVALID },
+    { name: 'a byte moved from the encapsulated key into the ciphertext', envelope: slid(message()), expect: INVALID },
+
+    // THE CONTROL, and it is last on purpose. Twenty-six answers of `envelope_invalid` are also
+    // what a receiver that refuses EVERYTHING gives; this is the one well-formed call from a
+    // stranger that must get through the same door — sealed, by the target, to her key. It
+    // leaves a pending request behind, which is why nothing may come after it.
+    { name: 'CONTROL: a stranger asking for contact with a card that is her leaf', envelope: request(), expect: 'sealed', note: 'leaves a contact request on the target' },
   ].map((s) => ({ ...s, endpoint }));
 }
 
-export async function fetchTargetLeaf(endpoint, fetchImpl = fetch) {
-  const res = await fetchImpl(endpoint.replace(/\/+$/, '') + '/card.vcf');
-  if (!res.ok) throw new Error(`card.vcf answered ${res.status}`);
-  const card = decodeCard(await res.text());
+/**
+ * The target's card: from a file when one is given, from `<endpoint>/card.vcf` otherwise. That URL
+ * is one deployment's convenience — SPEC §9 puts the card on the invite landing page, and the
+ * reference node serves no card at a URL of its own — so without `card` this could be aimed at the
+ * hosted platform and at nothing else.
+ */
+export async function fetchTargetLeaf(endpoint, fetchImpl = fetch, cardText = null) {
+  if (cardText == null) {
+    const res = await fetchImpl(endpoint.replace(/\/+$/, '') + '/card.vcf');
+    if (!res.ok) throw new Error(`card.vcf answered ${res.status} — a host need not serve a card at a URL of its own (SPEC §9); save the target's card and pass --card <file>`);
+    cardText = await res.text();
+  }
+  const card = decodeCard(cardText);
   if (card.error) throw new Error(`the target's card is not a 2.0 card: ${card.why}`);
   return { leaf: card.cert, root: card.root, endpoint: card.endpoint };
 }
 
-export async function post(endpoint, envelope, fetchImpl = fetch) {
-  const res = await fetchImpl(endpoint, {
-    method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'sealed_call', arguments: envelope } }),
-  });
-  let body; try { body = await res.json(); } catch { body = { error: { code: `http_${res.status}` } }; }
-  return { status: res.status, body, code: answerCode(body) };
+async function rpc(endpoint, message, fetchImpl, session) {
+  const headers = { 'content-type': 'application/json', accept: 'application/json, text/event-stream' };
+  if (session) headers['mcp-session-id'] = session;
+  const res = await fetchImpl(endpoint, { method: 'POST', headers, body: JSON.stringify(message) });
+  return { status: res.status, text: await res.text(), session: res.headers.get('mcp-session-id') };
 }
 
-export async function runLive({ endpoint, fetchImpl = fetch, now = Date.now(), log = console.log }) {
-  const target = await fetchTargetLeaf(endpoint, fetchImpl);
-  log(`target: ${target.endpoint} (root ${target.root})`);
+/**
+ * The MCP handshake, before any scenario.
+ *
+ * Without it a receiver that keeps sessions answers every post with the same session error, and
+ * this driver then reported 27 of 27 intrusions as REPRODUCING against the reference node — each
+ * one an `http_400` that had never reached the PACT layer (measured 2026-09-20). A stateless
+ * receiver hands back no session id, and then this changes nothing.
+ */
+export async function initialize(endpoint, fetchImpl = fetch) {
+  const first = await rpc(endpoint, { jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'pact-identity js/live.mjs', version: '1' } } }, fetchImpl, null);
+  if (!first.session && !first.text.includes('"result"')) throw new Error(`${endpoint}: initialize was refused (HTTP ${first.status}), so no scenario could be posted: ${first.text.slice(0, 200)}`);
+  if (first.session) await rpc(endpoint, { jsonrpc: '2.0', method: 'notifications/initialized' }, fetchImpl, first.session);
+  return first.session;
+}
+
+export async function post(endpoint, envelope, fetchImpl = fetch, session = null) {
+  const res = await rpc(endpoint, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'sealed_call', arguments: envelope } }, fetchImpl, session);
+  const code = answerCode(res.text);
+  return { status: res.status, code: code.startsWith('unknown:not-json') && res.status >= 400 ? `http_${res.status}` : code };
+}
+
+/** An answer that is no PACT answer at all: the scenario never reached the layer it tests. */
+const unreached = (code) => code.startsWith('http_') || code.startsWith('unknown');
+
+/**
+ * `endpoint` is what gets DIALLED. It is usually the address in the target's leaf, and for a node
+ * on your own machine it is not (the leaf names the public address; you dial 127.0.0.1) — so this
+ * dials what it was given, as `pact vectors intrude --against` does, and seals to the card.
+ */
+export async function runLive({ endpoint, card = null, fetchImpl = fetch, now = Date.now(), log = console.log }) {
+  const dial = endpoint.replace(/\/+$/, '');
+  const target = await fetchTargetLeaf(dial, fetchImpl, card);
+  log(`target: ${target.endpoint} (root ${target.root})${dial === target.endpoint ? '' : `, dialled at ${dial}`}`);
+  const session = await initialize(dial, fetchImpl);
+  if (session) log(`session: ${session}`);
   const results = [];
   for (const s of scenarios({ endpoint: target.endpoint, targetLeaf: target.leaf, now })) {
-    const first = await post(target.endpoint, s.envelope, fetchImpl);
+    const first = await post(dial, s.envelope, fetchImpl, session);
     let got = first.code;
-    if (s.twice) { const second = await post(target.endpoint, s.envelope, fetchImpl); got = second.code === first.code ? first.code : `${first.code} then ${second.code}`; }
-    const verdict = got === s.expect ? 'blocked' : 'REPRODUCES';
+    if (s.twice) { const second = await post(dial, s.envelope, fetchImpl, session); got = second.code === first.code ? first.code : `${first.code} then ${second.code}`; }
+    const verdict = got === s.expect ? 'blocked' : unreached(got) ? 'UNREACHED' : 'REPRODUCES';
     results.push({ name: s.name, expect: s.expect, got, verdict });
     log(`  ${verdict.padEnd(10)} ${s.name} → ${got}${s.note ? ` (${s.note})` : ''}`);
   }
   const reproduces = results.filter((r) => r.verdict === 'REPRODUCES').length;
+  const unreachedCount = results.filter((r) => r.verdict === 'UNREACHED').length;
   const total = seedScenarioCount();
-  log(`\n${results.length} scenarios against ${target.endpoint}: ${results.length - reproduces} blocked, ${reproduces} reproduce; ${total - results.length} of the seed's ${total} need the owner's state and were not run`);
-  return { results, reproduces, skipped: total - results.length, seedScenarios: total };
+  log(`\n${results.length} scenarios against ${target.endpoint}: ${results.length - reproduces - unreachedCount} blocked, ${reproduces} reproduce, ${unreachedCount} never reached a PACT answer; ${total - results.length} of the seed's ${total} need the owner's state and were not run`);
+  return { results, reproduces, unreached: unreachedCount, skipped: total - results.length, seedScenarios: total };
 }
 
-if (process.argv[1] && new URL(import.meta.url).pathname === process.argv[1]) {
-  const i = process.argv.indexOf('--endpoint');
-  const endpoint = i >= 0 ? process.argv[i + 1] : null;
-  if (!endpoint) { console.error('usage: node js/live.mjs --endpoint https://host/slug'); process.exit(2); }
-  const { reproduces } = await runLive({ endpoint });
-  process.exit(reproduces ? 1 : 0);
+/** The one command-line entry, for `node js/live.mjs …` and for `intrude.mjs --port live …` alike. */
+export async function cli(argv) {
+  const arg = (name) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : null; };
+  const endpoint = arg('--endpoint');
+  if (!endpoint) { console.error('usage: --endpoint https://host/slug [--card file.vcf] [--insecure]'); return 2; }
+  // A node on your own machine serves TLS under its own chain, which no public authority signed.
+  // Every envelope is sealed to the key in the target's CARD, so what is measured does not rest on
+  // the transport; the flag is named for what it is.
+  if (argv.includes('--insecure')) process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  const cardFile = arg('--card');
+  const { reproduces, unreached: missed } = await runLive({ endpoint, card: cardFile ? readFileSync(cardFile, 'utf8') : null });
+  return reproduces || missed ? 1 : 0;
 }
+
+if (process.argv[1] && new URL(import.meta.url).pathname === process.argv[1]) process.exit(await cli(process.argv));
