@@ -46,9 +46,13 @@ test('every black-box scenario is blocked by the seed node behind an HTTP door',
   const out = await runLive({ endpoint, fetchImpl: (u, init) => fetch(u.replace('https://alina.example/mcp', endpoint), init), log: (l) => lines.push(l) });
   server.close();
   assert.equal(out.reproduces, 0, lines.join('\n'));
-  assert.equal(out.results.length, 10);
-  // The count comes from the seed, so this test cannot lock a stale number in: what it asserts is
-  // that the two add up.
+  // A FLOOR, not a count. This was `=== 10`, and it locked a stale number in the day the live
+  // battery grew to 26 (2026-09-18): the test failed from then on, and nothing ran it — its only
+  // runner was a CI job that never got past its first step. What a number here is for is noticing
+  // the battery SHRINK, so it may only ever be raised.
+  assert.ok(out.results.length >= 27, `the live battery ran ${out.results.length} scenarios; it has run 27`);
+  // The total comes from the seed, so this cannot lock a stale number in: what it asserts is that
+  // the two add up.
   assert.equal(out.skipped, out.seedScenarios - out.results.length);
   assert.ok(out.seedScenarios >= out.results.length, 'the seed has at least the scenarios a live run covers');
   assert.ok(out.results.every((r) => r.verdict === 'blocked'));
