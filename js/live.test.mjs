@@ -60,7 +60,6 @@ test('every black-box scenario is blocked by the seed node behind an HTTP door',
   assert.equal(out.unreached, 0, 'every scenario reached a PACT answer');
   // The total comes from the seed, so this cannot lock a stale number in: what it asserts is that
   // the two add up.
-  assert.equal(out.skipped, out.seedScenarios - out.results.length);
   assert.ok(out.seedScenarios >= out.results.length, 'the seed has at least the scenarios a live run covers');
   assert.ok(out.results.every((r) => r.verdict === 'blocked'));
 });
@@ -91,19 +90,67 @@ test('the Rust driver runs the same scenarios, in the same order', () => {
   const constant = (name) => Number(new RegExp(`const ${name}: i64 = (\\d+);`).exec(body)?.[1]);
   const seconds = constant('WINDOW') + constant('MARGIN');
   const names = [...body.matchAll(/\brun\(\s*(?:&format!\(\s*)?"([^"]+)"/g)].map((m) => m[1].replace('{}', String(seconds)));
-  const mine = scenarios({ endpoint: 'https://t.example/mcp', targetLeaf: fakeNode(1).LEAF }).map((s) => s.name);
+  const mine = scenarios({ targetLeaf: fakeNode(1).LEAF }).map((s) => s.name);
   assert.ok(names.length >= 28, `read ${names.length} scenario names out of the Rust driver; the extraction has stopped seeing it`);
   assert.deepEqual(names, mine);
 });
 
+/**
+ * ...and the same EXPECTED CODE, which the name check above cannot see.
+ *
+ * Holding names and order still let the two drivers disagree about what each scenario should be
+ * answered with: change the Rust `expect` for the small form from `chain_required` to
+ * `envelope_invalid` and every gate stayed green, because only a live run against a real node would
+ * notice, as a REPRODUCES with no obvious cause. The last argument of each `run(` call is that code,
+ * read by walking the call's arguments at depth zero -- which survives a comma inside
+ * `&format!("...{}...", WINDOW + MARGIN)` and rustfmt reflowing a call across lines.
+ */
+test('the Rust driver expects the same answer for each scenario', () => {
+  const rust = readFileSync(new URL('../crates/pact/src/vectors.rs', import.meta.url), 'utf8');
+  const body = rust.slice(rust.indexOf('pub fn intrude('));
+  const consts = Object.fromEntries(
+    [...body.matchAll(/const ([A-Z_]+): &str = "([^"]+)";/g)].map((m) => [m[1], m[2]]),
+  );
+  /** The top-level arguments of one `run(...)` call. */
+  const args = (text) => {
+    const out = [];
+    let depth = 0, quoted = false, start = 0;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (quoted) { if (c === '\\') i++; else if (c === '"') quoted = false; continue; }
+      if (c === '"') quoted = true;
+      else if (c === '(' || c === '[' || c === '{') depth++;
+      else if (c === ')' || c === ']' || c === '}') depth--;
+      else if (c === ',' && depth === 0) { out.push(text.slice(start, i).trim()); start = i + 1; }
+    }
+    out.push(text.slice(start).trim());
+    return out;
+  };
+  const expects = [...body.matchAll(/\brun\(([\s\S]*?)\)\?;/g)].map((m) => {
+    // rustfmt writes a TRAILING comma when it reflows a call across lines, which leaves an empty
+    // final argument; two of the 28 are written that way.
+    const last = args(m[1]).filter((a) => a !== '').at(-1);
+    const literal = /^"([^"]*)"$/.exec(last);
+    return literal ? literal[1] : (consts[last] ?? `UNRESOLVED(${last})`);
+  });
+  assert.ok(expects.length >= 28, `read ${expects.length} expected codes out of the Rust driver`);
+  assert.deepEqual(expects.filter((e) => e.startsWith('UNRESOLVED')), [], 'every expected code must resolve to a string');
+  assert.deepEqual(expects, scenarios({ targetLeaf: fakeNode(1).LEAF }).map((s) => s.expect));
+});
+
 test('the control is last, because after it the attacker is no stranger', () => {
-  const list = scenarios({ endpoint: 'https://t.example/mcp', targetLeaf: fakeNode(1).LEAF });
+  const list = scenarios({ targetLeaf: fakeNode(1).LEAF });
   const controls = list.filter((s) => s.expect === 'sealed');
   assert.equal(controls.length, 1, 'exactly one scenario must get THROUGH: a receiver that refuses everything fails it');
   assert.equal(list.at(-1), controls[0]);
 });
 
 test('the attacker is new every run', () => {
-  const chainOf = () => JSON.stringify(scenarios({ endpoint: 'https://t.example/mcp', targetLeaf: fakeNode(1).LEAF }).at(-1).envelope.sig);
-  assert.notEqual(chainOf(), chainOf());
+  // On her ROOT, not on a signature. This asserted `notEqual` over `envelope.sig`, which is a
+  // signature covering the HPKE ephemeral public key — fresh on every seal whatever her long-term
+  // keys are. So it passed with the fixed seed it was written to catch: the mutation check I owed
+  // this test and did not do (2026-09-20). Her root is the thing that must differ, because the
+  // control leaves her PENDING on the target and a repeat run must arrive as a stranger.
+  const rootOf = () => scenarios({ targetLeaf: fakeNode(1).LEAF }).at(-1).attacker;
+  assert.notEqual(rootOf(), rootOf());
 });

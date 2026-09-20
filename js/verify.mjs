@@ -1,6 +1,6 @@
 // Recomputes the SHA-256 of the built .wasm files and compares them with js/manifest.json.
 //   node verify.mjs            — checks both packages in place
-//   node verify.mjs <file>     — checks one vendored copy against the web package's entry
+//   node verify.mjs <file> [entry]  — checks one copy against a named manifest entry (pkg-web's by default)
 //   node verify.mjs --inputs   — only the fast question below (what the post-commit hook asks)
 // Exit 1 on any mismatch, so a pipeline that vendors the bytes cannot ship a different core.
 //
@@ -53,7 +53,13 @@ const check = (label, bytes, expected) => {
 
 const file = process.argv[2];
 if (file) {
-  check(file, readFileSync(file), manifest.files['pkg-web/pact_identity_wasm_bg.wasm']);
+  const entry = process.argv[3] && !process.argv[3].startsWith('--') ? process.argv[3] : 'pkg-web/pact_identity_wasm_bg.wasm';
+  const expected = manifest.files[entry];
+  if (!expected) {
+    console.log(`FAIL ${file}: js/manifest.json has no entry named ${entry}`);
+    process.exit(1);
+  }
+  check(file, readFileSync(file), expected);
 } else {
   for (const [name, expected] of Object.entries(manifest.files)) check(name, readFileSync(new URL(name, here)), expected);
 }

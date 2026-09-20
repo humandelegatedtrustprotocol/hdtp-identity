@@ -57,7 +57,16 @@ GOT="$( (sha256sum "$WORK/wasm-pack.tar.gz" 2>/dev/null || shasum -a 256 "$WORK/
 #
 # So `--pin` refuses while a build input is uncommitted (js/inputs.mjs has the list), and a plain
 # run says so and carries on, because comparing the COMMIT with the manifest is still the question.
-DIRTY="$(node js/inputs.mjs --dirty || true)"
+# The STATUS matters, not just the output: `|| true` read every failure as "clean". 0 clean,
+# 1 dirty, anything else means the question could not be answered — fatal when pinning.
+DIRTY="$(node js/inputs.mjs --dirty)" && DIRTY_RC=0 || DIRTY_RC=$?
+if [ "$DIRTY_RC" -gt 1 ]; then
+  echo "reproduce: could not tell whether the build inputs are committed" >&2
+  if [ "$MODE" = "--pin" ]; then
+    echo "reproduce: refusing to pin without that answer" >&2
+    exit 1
+  fi
+fi
 if [ -n "$DIRTY" ]; then
   if [ "$MODE" = "--pin" ]; then
     { echo "reproduce: these build inputs are not committed, and a pin is of a commit:"; echo "$DIRTY"; echo "commit them (the pre-commit hook styles them), then pin."; } >&2
@@ -97,6 +106,8 @@ fi
 echo "rebuilt on $PLATFORM in $IMAGE:"
 FAILED=0
 for pkg in web node; do
-  node js/verify.mjs "$WORK/pkg-$pkg/pact_identity_wasm_bg.wasm" || FAILED=1
+  # ...against its OWN entry. Single-file mode used to compare whatever it was given with pkg-web's
+  # recorded hash, which passed only because the two packages happen to be byte-identical today.
+  node js/verify.mjs "$WORK/pkg-$pkg/pact_identity_wasm_bg.wasm" "pkg-$pkg/pact_identity_wasm_bg.wasm" || FAILED=1
 done
 exit "$FAILED"

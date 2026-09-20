@@ -300,6 +300,18 @@ pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
             }
         }
     };
+    // EVERY section, or this proves nothing. Each loop below reads its section with
+    // `unwrap_or_default()` and records a failure only for an item that is PRESENT, so deleting
+    // `chain_cases` from Appendix B left the checker printing a smaller `N/N checks passed` and
+    // exiting 0 — with SPEC 14.2's twelve cases no longer proven and nothing in the tree noticing.
+    // `{}` passed too, as `0/0`. The names are asserted rather than counted, so the guard cannot
+    // itself go stale as the suite grows.
+    for section in ["certificates", "chain_cases", "newest_leaf_cases", "certificate_renewed_cases", "envelopes"] {
+        if v2.get(section).is_none() {
+            return fail(format!("the document has no `{section}`: a vector suite missing a section proves less than it says"));
+        }
+    }
+
     let mut t = Tally { checks: 0, failures: 0 };
 
     let der: BTreeMap<String, Vec<u8>> = v2["certificates"]
@@ -498,7 +510,11 @@ pub fn answer_code(text: &str) -> String {
         .map(|a| a.iter().filter_map(|c| c["text"].as_str()).filter_map(|t| serde_json::from_str(t).ok()).collect())
         .unwrap_or_default();
     for inner in texts {
-        if inner.get("protected").is_some() && inner.get("ct").is_some() {
+        // All FOUR members, each a non-empty string. This asked only whether `protected` and `ct`
+        // existed, so `{"protected":"","ct":""}` scored the CONTROL as passed -- and the control is
+        // the one scenario whose whole job is to prove a well-formed call gets through.
+        let full = ["protected", "enc", "ct", "sig"].iter().all(|k| inner.get(*k).and_then(|v| v.as_str()).is_some_and(|v| !v.is_empty()));
+        if full {
             return "sealed".into();
         }
         if let Some(code) = inner["code"].as_str() {
@@ -524,13 +540,20 @@ pub fn answer_code(text: &str) -> String {
 /// no public authority signed — so the flag that promised "a node on your own machine" got past
 /// the guard and stopped at `invalid peer certificate: UnknownIssuer`, having posted nothing. On
 /// 2026-09-18 nobody noticed, because the rig this was aimed at sat behind Cloudflare, whose
-/// certificates WebPKI does accept. What the battery measures does not rest on the transport: every
-/// envelope is sealed to the key in the target's CARD, which no carrier can open or answer for.
+/// certificates WebPKI does accept.
+///
+/// **With the card from a FILE, what the battery measures does not rest on the transport**: every
+/// envelope is sealed to the key in that card, which no carrier can open or answer for. Without
+/// `--card` the sentence is false, and that is why `--card` is now required alongside this flag:
+/// the card was fetched over the very channel the flag stopped authenticating, so a carrier could
+/// hand over its own card, hold the key all 28 envelopes were sealed to, answer `envelope_invalid`
+/// 27 times and a stub once, and the tool printed `28 blocked, 0 reproduce` and exited 0. A
+/// fabricated clean security report is worse than a crash.
 fn tls(insecure: bool) -> ureq::tls::TlsConfig {
     ureq::tls::TlsConfig::builder().disable_verification(insecure).build()
 }
 
-fn post(endpoint: &str, body: &str, session: Option<&str>, insecure: bool) -> Res<(String, Option<String>)> {
+fn post(endpoint: &str, body: &str, session: Option<&str>, insecure: bool) -> Res<(String, Option<String>, u16)> {
     let mut req = ureq::post(endpoint).header("content-type", "application/json").header("accept", "application/json, text/event-stream");
     if let Some(id) = session {
         req = req.header("mcp-session-id", id);
@@ -543,9 +566,10 @@ fn post(endpoint: &str, body: &str, session: Option<&str>, insecure: bool) -> Re
         .build()
         .send(body)
         .map_err(|e| Fail(format!("{endpoint}: {e}")))?;
+    let status = resp.status().as_u16();
     let given = resp.headers().get("mcp-session-id").and_then(|v| v.to_str().ok()).map(|s| s.to_string());
     let text = resp.body_mut().read_to_string().map_err(|e| Fail(format!("{endpoint}: {e}")))?;
-    Ok((text, given))
+    Ok((text, given, status))
 }
 
 /// The MCP handshake, before any scenario.
@@ -565,7 +589,7 @@ fn initialize(endpoint: &str, insecure: bool) -> Res<Option<String>> {
         "capabilities": {},
         "clientInfo": { "name": "pact vectors intrude", "version": env!("CARGO_PKG_VERSION") },
     }});
-    let (text, session) = post(endpoint, &body.to_string(), None, insecure)?;
+    let (text, session, _) = post(endpoint, &body.to_string(), None, insecure)?;
     if session.is_none() && !text.contains("\"result\"") {
         return fail(format!(
             "{endpoint}: initialize was refused, so no scenario could be posted: {}",
@@ -583,8 +607,16 @@ fn initialize(endpoint: &str, insecure: bool) -> Res<Option<String>> {
 
 fn sealed_call(endpoint: &str, wire: &Value, id: u32, session: Option<&str>, insecure: bool) -> Res<String> {
     let body = json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call", "params": { "name": "sealed_call", "arguments": wire } });
-    let (text, _) = post(endpoint, &body.to_string(), session, insecure)?;
-    Ok(answer_code(&text))
+    let (text, _, status) = post(endpoint, &body.to_string(), session, insecure)?;
+    let code = answer_code(&text);
+    // A door that refuses before PACT sees anything is `http_<n>`, as the JS driver has always
+    // reported it. This dropped the status, so an HTTP 403 at the edge arrived as
+    // `unknown:not-json(...)` -- classified UNREACHED correctly, but unable to say why, and the
+    // `http_` arm of the verdict test below was dead code in this port.
+    if code.starts_with("unknown:not-json") && status >= 400 {
+        return Ok(format!("http_{status}"));
+    }
+    Ok(code)
 }
 
 pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now: Option<&str>) -> Res<i32> {
@@ -598,6 +630,15 @@ pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now
     // of §14.1 as its own first rule, so asking `is_normal_https` first only took the refusal away
     // from the guard that owns it — and gave two different sentences for one rule, which is how a
     // guard and its message drift apart.
+    // The card must come from DISK when verification is off, or the run's verdict is the carrier's.
+    // See `tls` above: this is the whole of the flag's safety argument.
+    if allow_insecure && card_file.is_none() {
+        return fail(format!(
+            "{endpoint}: --allow-insecure turns off certificate verification, so the card must come from a file: pass --card <file>. \
+             Fetched over an unverified channel the card is whatever answered, every envelope is sealed to ITS key, and a clean \
+             `28 blocked` would say nothing about the target."
+        ));
+    }
     if !allow_insecure {
         let guard = core("address_guard", json!({ "endpoint": &endpoint, "guest": false }))?;
         if guard["ok"].as_bool() != Some(true) {
@@ -710,6 +751,12 @@ pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now
             "blocked"
         } else if got.starts_with("unknown") || got.starts_with("http_") {
             "UNREACHED"
+        } else if expect == "sealed" {
+            // The control is the one scenario that must get THROUGH, so its failure is the opposite
+            // of an intrusion: a receiver refusing everything -- exactly what the control exists to
+            // catch -- was reported as `REPRODUCES`, i.e. "something got in", while what happened
+            // was that the legitimate call was blocked.
+            "CONTROL REFUSED"
         } else {
             "REPRODUCES"
         };
@@ -901,14 +948,16 @@ pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now
 
     let reproduce = results.iter().filter(|(_, _, v)| *v == "REPRODUCES").count();
     let unreached = results.iter().filter(|(_, _, v)| *v == "UNREACHED").count();
+    let control = results.iter().filter(|(_, _, v)| *v == "CONTROL REFUSED").count();
     println!(
-        "{} scenarios: {} blocked, {} reproduce, {} never reached a PACT answer",
+        "{} scenarios: {} blocked, {} reproduce, {} never reached a PACT answer{}",
         results.len(),
-        results.len() - reproduce - unreached,
+        results.len() - reproduce - unreached - control,
         reproduce,
-        unreached
+        unreached,
+        if control > 0 { ", and the CONTROL was refused: this receiver refuses a legitimate call too" } else { "" }
     );
-    Ok(if reproduce + unreached > 0 { 1 } else { 0 })
+    Ok(if reproduce + unreached + control > 0 { 1 } else { 0 })
 }
 
 #[cfg(test)]
