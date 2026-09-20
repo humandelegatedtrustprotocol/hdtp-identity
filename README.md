@@ -16,6 +16,8 @@ port presents: bytes in, JSON out, no state.
 
 ## Build and prove
 
+`sh gate.sh` runs everything below except the two builds, and is what the pre-push hook runs.
+
 ```sh
 cargo test                      # unit + vector tests: the Appendix B certificates rebuilt byte for byte, every chain /
                                 # newest-leaf / certificate_renewed case, and every v2 envelope opened and re-sealed
@@ -25,14 +27,14 @@ sh js/reproduce.sh              # the canonical build, in a container named by d
                                 # `--pin` writes the manifest and installs those bytes (after crates/ changes)
 node js/verify.mjs              # recomputes the SHA-256 of js/pkg-* against the manifest: passes after a --pin,
                                 # and not after a build.sh, whose bytes are this machine's (see below)
-node js/check.mjs               # Appendix B through the Wasm bindings, vectors read from SPEC.md: 107/107
+node js/check.mjs               # Appendix B through the Wasm bindings, vectors read from SPEC.md: 109/109
 node js/intrude.mjs             # the 115 intrusion scenarios with the Wasm core as the defender, compared verdict by
                                 # verdict with the seed's run: 111 blocked, 4 residual by decision, 0 reproduce
 node js/intrude.mjs --port go   # the same against go/bin/pact-identity-go
 node js/musts.mjs               # every MUST in pact-protocol/SPEC.md names something that holds it, or says who does
 node js/record.mjs             # regenerate PROOFS.md: every MUST with its holder, every parity case (it prints both counts)
-node js/record.mjs --check     # ...and fail if it is stale (what CI runs)
-                                # and why: 44 MUSTs, 33 held here, 11 declared elsewhere
+node js/record.mjs --check     # ...and fail if it is stale (what gate.sh runs)
+                                # and why: 46 MUSTs, 33 held here, 13 declared elsewhere
 ```
 
 Toolchain: Rust 1.92, `wasm-pack` 0.15 (installs a matching `wasm-bindgen`), the
@@ -62,15 +64,16 @@ on `linux/arm64`, with wasm-pack fetched from its release and checked against a 
 runner that is not the machine the pin was written on, and fails if a byte differs.
 `rust-toolchain.toml` pins the compiler for everything else.
 
-**In CI.** `.github/workflows/pact-identity.yml` runs the same list. It cannot use
-`actions/checkout`'s `submodules: true`, because every repository here is private and a runner's
-`GITHUB_TOKEN` is scoped to the one it is running in — git answers "Repository not found" for a
-sibling, which reads like a missing repository rather than a missing permission, and this job failed
-that way on every run it had before 2026-09-15. It now checks out `pact-protocol` by name, at the
-commit this tree pins, using a **`PACT_PROTOCOL_TOKEN`** secret: a fine-grained PAT with read-only
-Contents on that repository (a read-only deploy key via `ssh-key` works too). Without the secret the
-job stops at its first step and says so, rather than failing at checkout for a reason that looks
-unrelated. `pact-cloud` is not fetched; nothing here reads it.
+**The gate is local, and CI holds one job.** `sh gate.sh` is the list above as one command — all
+of it except the two builds, since the Wasm that ships is the pinned one and a native rebuild would
+write this machine's bytes over it. It reads the private sibling `pact-protocol` (SPEC.md, the seed
+under `vectors/lib`), which a runner's `GITHUB_TOKEN` cannot see, and the owner's decision
+(2026-09-20) is that no CI credential will be made for it: this project builds, gates and deploys
+from the owner's machine. So the umbrella's pre-push hook runs `gate.sh` whenever a push touches
+`pact-identity/` or moves the `pact-protocol` pointer. A `gate` job used to hold this list in
+`.github/workflows/pact-identity.yml` and failed at its first step on every run it ever had; it is
+gone, and the first real run of the list found a clippy error that job had never once reported.
+What CI still runs is `reproduce`, the container rebuild described above, which needs no secret.
 
 **Workers.** Workers Builds has no Rust toolchain, so the gateway vendors the built `js/pkg-web`
 files and checks `pact_identity_wasm_bg.wasm` against `js/manifest.json` with `node js/verify.mjs
