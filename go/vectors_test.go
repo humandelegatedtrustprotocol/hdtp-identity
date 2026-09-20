@@ -19,6 +19,9 @@ type vectorFile struct {
 	Now          string `json:"now"`
 	Certificates map[string]struct {
 		DerHex string `json:"der_hex"`
+		// Refused marks a certificate that exists to be refused (SPEC 14.1): it is not one the
+		// generator rebuilds, and it must not come out of Parse and the profile check clean.
+		Refused bool `json:"refused"`
 	} `json:"certificates"`
 	LeafKeys   map[string]string `json:"leaf_keys_pkcs8_hex"`
 	ChainCases []struct {
@@ -180,6 +183,18 @@ func TestCertificatesReproduce(t *testing.T) {
 	built := rebuild(t, c)
 	for name, cert := range v.Certificates {
 		want := hexBytes(t, cert.DerHex)
+		if cert.Refused {
+			why := ""
+			if parsed, err := Parse(want); err != nil {
+				why = err.Error()
+			} else {
+				why = ProfileError(parsed, "leaf")
+			}
+			if why == "" {
+				t.Errorf("%s: marked refused, and Parse + the profile let it through", name)
+			}
+			continue
+		}
 		got, ok := built[name]
 		if !ok {
 			t.Errorf("%s: not rebuilt", name)

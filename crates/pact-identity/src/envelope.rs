@@ -17,28 +17,35 @@ pub const SKEW_S: i64 = 300;
 /// §13.1: `exp − ts` is at most 30 days, so no receiver is asked to remember a msg_id for ever.
 pub const MAX_LIFETIME_S: i64 = 30 * 86_400;
 
-/// The band a real `ts` or `exp` lives in: about 34,000 years either side of the epoch.
+/// The skew window and the lifetime cap, in arithmetic that cannot overflow.
 ///
-/// A bound BEFORE the arithmetic, because the arithmetic is what wrapped. `(now - ts).abs()` on a
-/// `ts` of `i64::MIN + now` overflows to `i64::MIN`, and `i64::MIN.abs()` is `i64::MIN` again in a
-/// release build (documented Rust behaviour; a debug build panics instead, which is why `cargo test`
-/// was green over it). `i64::MIN <= 300` is true, so the skew window passed — and `exp - ts` wrapped
-/// the same way, so the thirty-day cap passed too. Two normative MUSTs of SPEC 13.3/13.1 bypassed by
-/// one header member, reachable from a stranger, in the PINNED wasm core: the workspace's release
-/// profile sets no `overflow-checks`, and cargo's default is off.
+/// `(now - ts).abs()` on a `ts` of `i64::MIN + now` overflows to `i64::MIN`, and `i64::MIN.abs()` is
+/// `i64::MIN` again in a release build (a debug build panics instead, which is why `cargo test` was
+/// green over it). `i64::MIN <= 300` is true, so the skew window passed, and `exp - ts` wrapped the
+/// same way past the thirty-day cap: two normative MUSTs of SPEC 13.3/13.1 bypassed by one header
+/// member, from a stranger, in the pinned wasm core.
 ///
-/// The other two ports compute these in `float64` and so refuse such a value already; only Rust
-/// wrapped, and `js/parity.mjs` has a case with an extreme `ts` now, which is the durable guard.
-const TS_BAND: i64 = 1 << 40;
+/// Widened to `i128`, where no pair of `i64`s can overflow a difference — not bounded to a band of
+/// plausible years, which is what the first fix did (2026-09-20) and which was itself a defect: an
+/// `exp` beyond the band answered "outside the time window" where the Go port, computing in
+/// `float64`, answers "exp too far from ts". The comment on that fix said the refusals were unchanged,
+/// and they were not. Exact arithmetic has no constant to choose and agrees with the other two ports
+/// on every input the header's integer check admits.
+enum Timing {
+    Ok,
+    OutsideWindow,
+    TooLong,
+}
 
-/// The skew window, with nothing that can overflow — the same condition as before the band existed,
-/// so which of the two refusals a caller gets is unchanged.
-fn in_window(now: i64, ts: i64, exp: i64) -> bool {
-    (-TS_BAND..TS_BAND).contains(&ts)
-        && (-TS_BAND..TS_BAND).contains(&exp)
-        && (-TS_BAND..TS_BAND).contains(&now)
-        && now < exp
-        && now.abs_diff(ts) <= SKEW_S as u64
+fn timing(now: i64, ts: i64, exp: i64) -> Timing {
+    let (now, ts, exp) = (now as i128, ts as i128, exp as i128);
+    if !(now < exp && (now - ts).abs() <= SKEW_S as i128) {
+        return Timing::OutsideWindow;
+    }
+    if exp - ts > MAX_LIFETIME_S as i128 {
+        return Timing::TooLong;
+    }
+    Timing::Ok
 }
 
 pub const CLAIM_WINDOW_S: i64 = 30 * 86_400;
@@ -261,11 +268,11 @@ pub fn open_result(a: OpenResultArgs<'_>) -> Result<Value> {
     }
     let (ts, exp) = (h.get("ts").and_then(|t| t.as_i64()), h.get("exp").and_then(|t| t.as_i64()));
     match (ts, exp) {
-        (Some(ts), Some(exp)) if in_window(a.now, ts, exp) => {
-            if exp.saturating_sub(ts) > MAX_LIFETIME_S {
-                return invalid("exp too far from ts");
-            }
-        }
+        (Some(ts), Some(exp)) => match timing(a.now, ts, exp) {
+            Timing::Ok => {}
+            Timing::TooLong => return invalid("exp too far from ts"),
+            Timing::OutsideWindow => return invalid("outside the time window"),
+        },
         _ => return invalid("outside the time window"),
     }
     let enc = from_b64u(&a.envelope.enc).map_err(|_| Error::new("envelope_invalid", "does not open"))?;
@@ -486,11 +493,11 @@ impl Freshness<'_> {
         let ts = self.h.get("ts").and_then(|t| t.as_i64());
         let exp = self.h.get("exp").and_then(|t| t.as_i64());
         match (ts, exp) {
-            (Some(ts), Some(exp)) if in_window(self.now, ts, exp) => {
-                if exp.saturating_sub(ts) > MAX_LIFETIME_S {
-                    return Some(invalid("exp too far from ts"));
-                }
-            }
+            (Some(ts), Some(exp)) => match timing(self.now, ts, exp) {
+                Timing::Ok => {}
+                Timing::TooLong => return Some(invalid("exp too far from ts")),
+                Timing::OutsideWindow => return Some(invalid("outside the time window")),
+            },
             _ => return Some(invalid("outside the time window")),
         }
         let msg_id = self.h.get("msg_id").and_then(|m| m.as_str()).unwrap_or("");
@@ -757,4 +764,30 @@ pub fn suite_name(spki: &[u8]) -> Result<&'static str> {
 
 pub fn fingerprint_of_leaf(leaf_der: &[u8]) -> Result<String> {
     Ok(x509::parse(leaf_der)?.public_key.fingerprint())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The values that wrapped. `ts = i64::MIN + now` made `(now - ts).abs()` equal `i64::MIN`, which
+    /// is <= 300; a JSON number cannot carry it exactly, so it is held here and not in js/parity.mjs.
+    #[test]
+    fn timing_cannot_be_wrapped_and_keeps_both_refusals() {
+        let now = 1_758_000_000i64;
+        assert!(matches!(timing(now, now, now + 600), Timing::Ok));
+        assert!(matches!(timing(now, now - 300, now + 600), Timing::Ok));
+        assert!(matches!(timing(now, now - 301, now + 600), Timing::OutsideWindow));
+        assert!(matches!(timing(now, now + 301, now + 900), Timing::OutsideWindow));
+        assert!(matches!(timing(now, now, now), Timing::OutsideWindow), "now < exp is strict");
+        // the wrap: both of these were ACCEPTED by the release build
+        assert!(matches!(timing(now, i64::MIN + now, i64::MAX), Timing::OutsideWindow));
+        assert!(matches!(timing(now, i64::MIN, i64::MAX), Timing::OutsideWindow));
+        // and the refusal a far `exp` gets is the lifetime one, as the other ports say — not the
+        // window one, which is what a band of plausible years answered
+        assert!(matches!(timing(now, now, 1i64 << 41), Timing::TooLong));
+        assert!(matches!(timing(now, now, i64::MAX), Timing::TooLong));
+        assert!(matches!(timing(now, now, now + MAX_LIFETIME_S), Timing::Ok));
+        assert!(matches!(timing(now, now, now + MAX_LIFETIME_S + 1), Timing::TooLong));
+    }
 }

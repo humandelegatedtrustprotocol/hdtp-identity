@@ -287,7 +287,10 @@ impl PrivateKey {
             PrivateKey::P256(k) => {
                 let sk = p256::ecdsa::SigningKey::from(k);
                 let sig: p256::ecdsa::Signature = sk.sign(data);
-                sig.to_der().as_bytes().to_vec()
+                // The low-S twin, always (SPEC 14.1). `p256` does not normalise on its own — only
+                // `k256` does, for Bitcoin's sake — so half of what this returned was the high twin,
+                // and a certificate carrying that one is outside the profile.
+                sig.normalize_s().unwrap_or(sig).to_der().as_bytes().to_vec()
             }
         }
     }
@@ -313,6 +316,28 @@ impl PrivateKey {
             _ => err("unsupported", "not a P-256 key"),
         }
     }
+}
+
+/// Whether a DER ECDSA-Sig-Value over P-256 is the low-S twin; `None` when the bytes are not an ECDSA
+/// value at all.
+///
+/// An ECDSA signature `(r, s)` has a twin `(r, n - s)` that verifies under the same key over the same
+/// bytes, and anybody can compute it. On a CERTIFICATE that is a second byte string for one leaf —
+/// same key, fingerprint, endpoint and notBefore — which `compare_leaves` reads as a conflict, so a
+/// card altered in transit pins a leaf the real host can never match. SPEC 14.1 admits one twin.
+///
+/// `None` is not a refusal: a certificate that declares ECDSA over bytes that are not an ECDSA value
+/// cannot verify under any key, and rule 3 refuses it as "a certificate the key did not sign".
+pub fn ecdsa_is_low_s(sig_der: &[u8]) -> Option<bool> {
+    let sig = p256::ecdsa::Signature::from_der(sig_der).ok()?;
+    Some(sig.normalize_s().is_none())
+}
+
+/// The same signature as its low-S twin: unchanged if it already is one. For the external-signing
+/// seam, where the signature came from a hardware token that has never heard of this rule.
+pub fn ecdsa_low_s(sig_der: &[u8]) -> Result<Vec<u8>> {
+    let sig = p256::ecdsa::Signature::from_der(sig_der).map_err(|_| Error::new("bad_request", "sig is not a DER ECDSA signature"))?;
+    Ok(sig.normalize_s().unwrap_or(sig).to_der().as_bytes().to_vec())
 }
 
 /// An X25519 SubjectPublicKeyInfo, for a raw recipient key (the seed builds these for its low-order test).
@@ -401,5 +426,20 @@ mod tests {
         let k = PrivateKey::from_seed(Alg::Ed25519, &seed("root/alina")).unwrap();
         let pk = x25519_dalek::PublicKey::from(&k.x25519().unwrap());
         assert_eq!(pk.to_bytes(), k.public().x25519().unwrap());
+    }
+
+    /// `p256` returns either twin; this library returns the low-S one, every time. Half of these
+    /// were high before the rule, so forty signatures all low is not luck (2^-40).
+    #[test]
+    fn every_p256_signature_is_the_low_s_twin() {
+        let k = PrivateKey::from_seed(Alg::P256, &seed("low-s/key")).unwrap();
+        for i in 0u32..40 {
+            let sig = k.sign(&i.to_be_bytes());
+            assert_eq!(ecdsa_is_low_s(&sig), Some(true), "signature {i} is the high twin");
+            assert!(k.public().verify(&i.to_be_bytes(), &sig));
+        }
+        assert_eq!(ecdsa_is_low_s(&[1, 2, 3]), None, "bytes that are not an ECDSA value are not judged");
+        let ed = PrivateKey::from_seed(Alg::Ed25519, &seed("low-s/ed")).unwrap();
+        assert_eq!(ecdsa_is_low_s(&ed.sign(b"x")), None);
     }
 }

@@ -1,6 +1,7 @@
 // A port is `{ kind, call(name, args) }`: the Wasm bindings in-process, or the Go binary one
 // request at a time over stdin/stdout. Both present the CONTRACT's functions by name.
 import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 export async function makePort(kind = 'wasm') {
@@ -10,7 +11,7 @@ export async function makePort(kind = 'wasm') {
     return { kind, call: core.call };
   }
   if (kind === 'go') {
-    const bin = new URL('../go/bin/pact-identity-go', import.meta.url).pathname;
+    const bin = fileURLToPath(new URL('../go/bin/pact-identity-go', import.meta.url));
     if (!existsSync(bin)) return null;
     return {
       kind,

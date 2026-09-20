@@ -196,6 +196,16 @@ fn the_seven_certificates_reproduce() {
     }
     for (name, bytes) in &der {
         assert!(bytes.len() <= 4096, "{name} under 4 KiB");
+        // A certificate the appendix marks `refused` exists to be refused (SPEC 14.1): it must not
+        // come out of parse and the profile check clean.
+        if v["certificates"][name.as_str()]["refused"].as_bool() == Some(true) {
+            let why = match parse(bytes) {
+                Ok(c) => x509::profile_error(&c, "leaf"),
+                Err(e) => Some(e.why),
+            };
+            assert!(why.is_some(), "{name} is marked refused, and parse + the profile let it through");
+            continue;
+        }
         let c = parse(bytes).unwrap();
         assert_eq!(c.kind(), if name.starts_with("root") { "root" } else { "leaf" }, "{name}");
     }
@@ -238,7 +248,9 @@ fn chain_cases() {
         }
         n += 1;
     }
-    assert_eq!(n, 12);
+    // A floor, not a count: `== 12` went stale the day Appendix B gained two cases, and failed a run
+    // in which every case had passed. What a number here is for is noticing the suite SHRINK.
+    assert!(n >= 14, "Appendix B has carried 14 chain cases; this run saw {n}");
 }
 
 #[test]

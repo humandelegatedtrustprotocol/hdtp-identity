@@ -250,12 +250,30 @@ pub fn read_oid(node: &Node<'_>) -> String {
         return String::new();
     }
     let mut out = vec![(b[0] / 40).to_string(), (b[0] % 40).to_string()];
-    let mut v: u128 = 0;
+    // EXACTLY, whatever the size. This accumulated an arc in a `u128` with `<<`, which discards high
+    // bits without a word even in a debug build, so an arc over 128 bits read as its value mod 2^128
+    // — `2.5.29.<2^128 + 17>` decoded as `2.5.29.17`, subjectAltName, and was parsed as one, where the
+    // Go port and the seed (big integers both) read a 39-digit arc and refused an unlisted extension.
+    // One leaf, accepted here and refused there, inside a 4 KiB certificate. Schoolbook base-128 to
+    // decimal, in limbs of 10^9: a certificate is capped at 4 KiB, so the cost is nothing.
+    let mut limbs: Vec<u32> = vec![0];
     for &x in &b[1..] {
-        v = (v << 7) | (x & 0x7f) as u128;
+        let mut carry = (x & 0x7f) as u64;
+        for limb in limbs.iter_mut() {
+            let t = (*limb as u64) * 128 + carry;
+            *limb = (t % 1_000_000_000) as u32;
+            carry = t / 1_000_000_000;
+        }
+        if carry > 0 {
+            limbs.push(carry as u32);
+        }
         if x & 0x80 == 0 {
-            out.push(v.to_string());
-            v = 0;
+            let mut text = limbs.last().map(|l| l.to_string()).unwrap_or_default();
+            for limb in limbs.iter().rev().skip(1) {
+                text.push_str(&format!("{limb:09}"));
+            }
+            out.push(text);
+            limbs = vec![0];
         }
     }
     out.join(".")
@@ -317,5 +335,38 @@ mod tests {
         assert!(read(&[0x30, 0x80], 0).is_err()); // indefinite
         assert!(read(&[0x30, 0x02, 0x01], 0).is_err()); // overrun
         assert_eq!(read(&[0x30, 0x03, 0x02, 0x01, 0x05], 0).unwrap().end, 5);
+    }
+
+    /// An arc over 128 bits decodes EXACTLY. This was accumulated in a `u128` with `<<`, which wraps
+    /// without a word, so 2.5.29.(2^128 + 17) read as 2.5.29.17 — subjectAltName.
+    #[test]
+    fn an_oid_arc_of_any_size_decodes_exactly() {
+        // 2^128 + 17 in base 128, most significant group first: 19 groups.
+        let mut v: Vec<u8> = Vec::new();
+        let mut n: [u32; 5] = [17, 0, 0, 0, 1]; // little-endian 32-bit limbs of 2^128 + 17
+        let mut groups = Vec::new();
+        while n.iter().any(|x| *x != 0) {
+            let mut rem = 0u64;
+            for limb in n.iter_mut().rev() {
+                let cur = (rem << 32) | *limb as u64;
+                *limb = (cur / 128) as u32;
+                rem = cur % 128;
+            }
+            groups.push(rem as u8);
+        }
+        groups.reverse();
+        let last = groups.len() - 1;
+        for (i, g) in groups.iter().enumerate() {
+            v.push(if i == last { *g } else { g | 0x80 });
+        }
+        let mut content = vec![0x55, 0x1d]; // 2.5.29
+        content.extend_from_slice(&v);
+        let node = Node { tag: 0x06, content: &content, raw: &content, end: content.len() };
+        assert_eq!(read_oid(&node), "2.5.29.340282366920938463463374607431768211473");
+        // and the ordinary ones are unchanged
+        let san = [0x55, 0x1d, 0x11];
+        assert_eq!(read_oid(&Node { tag: 0x06, content: &san, raw: &san, end: 3 }), "2.5.29.17");
+        let big = [0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x02];
+        assert_eq!(read_oid(&Node { tag: 0x06, content: &big, raw: &big, end: 8 }), "1.2.840.10045.4.3.2");
     }
 }

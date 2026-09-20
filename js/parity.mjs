@@ -22,6 +22,8 @@
 import { makePort } from './port.mjs';
 import { seed, ed25519FromSeed, p256FromSeed, pkcs8Of, b64url } from '../../pact-protocol/vectors/lib/keys.mjs';
 import { buildRoot, buildLeaf } from '../../pact-protocol/vectors/lib/x509.mjs';
+import { ecdsaTwin, ecdsaIsLowS, read as derRead, children as derChildren } from '../../pact-protocol/vectors/lib/der.mjs';
+import { signDetached } from '../../pact-protocol/vectors/lib/hpke.mjs';
 
 const wasm = await makePort('wasm');
 const go = await makePort('go');
@@ -183,6 +185,34 @@ for (const url of ['https://127.0.0.1/mcp', 'http://a.example/x', 'https://a.exa
 // and `endpoint` are what a caller pins on, and a member dropped from any of them was invisible.
 add('validate_chain of a real chain', 'validate_chain', { chain: [leafDer, rootDer], now });
 add('validate_chain against the root and endpoint it really has', 'validate_chain', { chain: [leafDer, rootDer], now, expected_root: rootFp, expected_endpoint: ENDPOINT });
+// ── SPEC 2.1.1: the three rules added to the profile on 2026-09-20, held across the ports ─────────
+//
+// A P-256-rooted identity, because the first rule is about ECDSA and every other fixture here is
+// Ed25519 — which is how a port could have lacked the rule entirely with this harness green.
+const p256RootDer = b64url(buildRoot({ cn: 'Bharat Mehta', key: p256Key, notBefore: new Date('2026-09-01T00:00:00Z'), label: 'parity/p256root' }));
+const p256Leaf = (misencode = {}) => b64url(buildLeaf({ cn: 'Bharat Mehta', rootCn: 'Bharat Mehta', root: p256Key, hostKey, endpoint: ENDPOINT, notBefore: new Date('2026-09-01T00:00:00Z'), notAfter: new Date('2027-09-01T00:00:00Z'), label: 'parity/p256leaf', misencode }));
+const twinLeaf = p256Leaf({ sigTwin: true });
+add('validate_chain of a P-256 chain', 'validate_chain', { chain: [p256Leaf(), p256RootDer], now });
+add('validate_chain of a leaf whose ECDSA signature is the high twin', 'validate_chain', { chain: [twinLeaf, p256RootDer], now });
+add('parse_certificate of that leaf', 'parse_certificate', { der: twinLeaf }, (a) => ({ profile_error: a.profile_error, kind: a.kind }));
+add('profile_error of that leaf', 'profile_error', { der: twinLeaf, kind: 'leaf' });
+add('card_decode of a card carrying that leaf', 'card_decode', { vcard: wasm.call('card_encode', { fn: 'Bharat Mehta', cert: twinLeaf }).vcard, now });
+// The external-signing seam normalises: a token's high-S signature goes in, the low-S certificate
+// comes out, and it is the SAME certificate from both ports.
+{
+  const plan = wasm.call('leaf_tbs', { cn: 'Bharat Mehta', root_cn: 'Bharat Mehta', root_spki: wasm.call('public_key', { pkcs8: p256Pkcs8 }).spki, host_spki: hostSpki, endpoint: ENDPOINT, not_before: now, not_after: '2027-09-01T00:00:00Z', serial: b64url(new Uint8Array(8).fill(0x51)) });
+  const low = signDetached(p256Key.priv, Buffer.from(plan.tbs, 'base64url'));
+  const high = ecdsaTwin(low);
+  if (ecdsaIsLowS(high)) throw new Error('parity: the fixture meant to be the HIGH twin is not');
+  const lowS = (answer) => { if (!answer.der) return answer; const cert = derChildren(derRead(Buffer.from(answer.der, 'base64url'))); return { ...answer, low_s: ecdsaIsLowS(cert[2].content.subarray(1)) }; };
+  add('assemble_leaf with a token\'s high-S signature', 'assemble_leaf', { tbs: plan.tbs, sig: b64url(high), sig_alg: plan.sig_alg }, lowS);
+  add('assemble_leaf with a low-S signature', 'assemble_leaf', { tbs: plan.tbs, sig: b64url(low), sig_alg: plan.sig_alg }, lowS);
+}
+// A validity field that is not a date, which one port used to read as 2 March.
+add('validate_chain of a leaf dated 30 February', 'validate_chain', { chain: [b64url(buildLeaf({ cn: 'Alina Rao', rootCn: 'Alina Rao', root: rootKey, hostKey, endpoint: ENDPOINT, notBefore: new Date('2026-03-02T12:00:00Z'), notAfter: new Date('2027-03-01T00:00:00Z'), label: 'parity/feb30', misencode: { notBefore: '260230120000Z' } })), rootDer], now });
+// An extension whose OID has an arc over 128 bits: 2.5.29.(2^128 + 17). One port accumulated arcs in
+// a u128 and read this as 2.5.29.17 — subjectAltName — and parsed it as one.
+add('parse_certificate of a leaf with a 129-bit OID arc', 'parse_certificate', { der: b64url(buildLeaf({ cn: 'Alina Rao', rootCn: 'Alina Rao', root: rootKey, hostKey, endpoint: ENDPOINT, notBefore: new Date('2026-09-01T00:00:00Z'), notAfter: new Date('2027-09-01T00:00:00Z'), label: 'parity/bigoid', extra: [{ oid: '2.5.29.' + (2n ** 128n + 17n).toString(), critical: false, value: Buffer.from([0x30, 0x00]) }] })) });
 add('validate_chain of a chain of one', 'validate_chain', { chain: [rootDer], now });
 add('validate_chain of a chain of three', 'validate_chain', { chain: [leafDer, rootDer, rootDer], now });
 add('validate_chain of an empty chain', 'validate_chain', { chain: [], now });
@@ -275,6 +305,10 @@ add('decide on an envelope whose signature is wrong', 'decide', { now, envelope:
 add('decide on a header that is not JSON', 'decide', { now, envelope: { ...sealed, protected: b64url(new Uint8Array([1, 2, 3])) }, node });
 add('decide with no node at all', 'decide', { now, envelope: sealed });
 add('decide on an envelope long past its exp', 'decide', { now: '2027-01-01T00:00:00Z', envelope: sealed, node });
+// An `exp` of 2^41 — past any plausible year. A first fix for an i64 wrap bounded the timestamps to a
+// band before the arithmetic, and so answered "outside the time window" here where the other port
+// answers "exp too far from ts": a divergence introduced by the fix for one. Exact arithmetic now.
+add('decide on an envelope whose exp is in the year 71,000', 'decide', { now, envelope: wasm.call('seal_request', { recipient_leaf: leafDer, sender_pkcs8: hostPkcs8, form: 'chain', sender_chain: [leafDer, rootDer], method: 'tools/call', params: { name: 'send_message' }, msg_id: 'parity-far', ts: Math.floor(Date.parse(now) / 1000), exp: 2 ** 41, ephemeral_seed: b64url(new Uint8Array(32).fill(6)) }), node });
 add('open_result of a request envelope', 'open_result', { envelope: sealed, my_pkcs8: hostPkcs8, msg_id: 'p-1', now, pins: [] });
 add('follow_renewed on a chain to another root', 'follow_renewed', { answer: { code: 'certificate_renewed', data: { chain: [leafDer, rootDer] } }, pinned_root: 'sha256:' + 'A'.repeat(43), pinned_leaf: leafDer, dialed: ENDPOINT, now });
 add('follow_renewed on a chain that is not one', 'follow_renewed', { answer: { code: 'certificate_renewed', data: { chain: [] } }, pinned_root: rootFp, pinned_leaf: leafDer, dialed: ENDPOINT, now });
