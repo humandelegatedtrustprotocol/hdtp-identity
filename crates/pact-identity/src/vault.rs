@@ -26,6 +26,22 @@ impl Default for Kdf {
     }
 }
 
+/// The range a passphrase KDF may name, at BOTH ends, and it is not negotiable by the document.
+///
+/// The parameters are read out of the vault's own header and handed to Argon2id BEFORE the passphrase
+/// is tested, so forging them costs an attacker nothing. Unbounded above, `m_kib: 268435455` asks for
+/// ~256 GiB — an allocation failure, and with `panic = "abort"` a wasm trap that kills the wallet page
+/// mid-restore — and `t: 4000000000` simply never returns. Unbounded below, `{"m_kib":8,"t":1,"p":1}`
+/// seals a document indistinguishable from an honest one except for three numbers in its own header,
+/// with the person's ROOT behind a KDF a laptop brute-forces.
+///
+/// The ceiling is far above any honest wallet and the floor is the documented default, so nothing a
+/// real caller asks for moves. The Go port carries the same four numbers.
+const MAX_M_KIB: u32 = 1 << 21; // 2 GiB
+const MIN_M_KIB: u32 = 8 * 1024; // 8 MiB: enough to be worth doing, low enough for a test
+const MAX_T: u32 = 16;
+const MAX_P: u32 = 16;
+
 impl Kdf {
     fn from_value(v: Option<&Value>) -> Result<Kdf> {
         let Some(v) = v else { return Ok(Kdf::default()) };
@@ -33,12 +49,31 @@ impl Kdf {
             return err("vault", "unknown kdf");
         }
         let d = Kdf::default();
-        let g = |k: &str, dflt: u32| v.get(k).and_then(|x| x.as_u64()).map(|x| x as u32).unwrap_or(dflt);
-        Ok(Kdf { m_kib: g("m_kib", d.m_kib), t: g("t", d.t), p: g("p", d.p) })
+        // `u32::try_from`, not `as`: a truncating cast turned `m_kib: 4294967304` (2^32 + 8) into 8,
+        // so a caller asking for more than it could express got the weakest KDF that is legal, and
+        // was told nothing.
+        let g = |k: &str, dflt: u32| -> Result<u32> {
+            match v.get(k) {
+                None | Some(Value::Null) => Ok(dflt),
+                Some(x) => x.as_u64().and_then(|n| u32::try_from(n).ok()).ok_or_else(|| Error::new("vault", "kdf parameters out of range")),
+            }
+        };
+        let kdf = Kdf { m_kib: g("m_kib", d.m_kib)?, t: g("t", d.t)?, p: g("p", d.p)? };
+        if !(MIN_M_KIB..=MAX_M_KIB).contains(&kdf.m_kib) || kdf.t < 1 || kdf.t > MAX_T || kdf.p < 1 || kdf.p > MAX_P {
+            return err("vault", "kdf parameters out of range");
+        }
+        Ok(kdf)
     }
     fn to_value(self) -> Value {
         json!({ "name": "argon2id", "m_kib": self.m_kib, "t": self.t, "p": self.p })
     }
+}
+
+/// The KDF a caller named, parsed and bounded exactly as `vault_open` parses the document's own —
+/// so `vault_seal` cannot write a document that `vault_open` would refuse, and neither end has a
+/// range the other does not.
+pub fn kdf_from_args(v: Option<&Value>) -> Result<Kdf> {
+    Kdf::from_value(v)
 }
 
 fn derive(passphrase: &str, salt: &[u8], kdf: Kdf) -> Result<Zeroizing<[u8; 32]>> {

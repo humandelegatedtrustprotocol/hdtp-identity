@@ -24,6 +24,10 @@ export const INPUTS = [
   'rust-toolchain.toml',
   '.cargo/config.toml',
   'js/build.sh',
+  // The builder itself: the image digest, the platform and the wasm-pack release. Not on this list,
+  // a bump of any of them left the pin looking current while the committed builder could no longer
+  // produce those bytes.
+  'js/builder.json',
 ];
 
 const root = fileURLToPath(new URL('../', import.meta.url));

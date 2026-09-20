@@ -290,6 +290,33 @@ add('vault_seal with no plaintext', 'vault_seal', { passphrase: 'a passphrase', 
 add('vault_open with a passphrase that is wrong', 'vault_open', { passphrase: 'wrong', vault: { format: 'pact-vault/1', kdf: { name: 'argon2id', m_kib: 8192, t: 1, p: 1 }, salt: b64url(new Uint8Array(16)), nonce: b64url(new Uint8Array(12)), ct: b64url(new Uint8Array(48)) } });
 add('vault_open of a document that is not a vault', 'vault_open', { passphrase: 'x', vault: { format: 'something-else' } });
 add('vault_open of no document at all', 'vault_open', { passphrase: 'x' });
+
+// The KDF's range, at BOTH ends and on BOTH paths. These parameters come out of an attacker-supplied
+// document and are used before the passphrase is tested, and neither port bounded them the same way:
+// Rust had no bounds at all (so `m_kib: 268435455` asked for ~256 GiB and `t: 4e9` never returned),
+// Go bounded only the bottom at 8 and then let x/crypto quietly clamp the cost, and `name` was
+// checked when opening but ignored when sealing. Every case below is a refusal both ports must word
+// alike; the honest ones above already pin what a real caller asks for.
+const KDF_EDGES = [
+  // Just over each line, not catastrophically over, and the reason is worth writing down: a case in
+  // this harness runs against an implementation that may have NO bound, and asking an unbounded
+  // Argon2id for 256 GiB or four billion passes hangs or kills the harness rather than testing it —
+  // which is what happened here on 2026-09-20. The boundary is what the ports must agree on; the
+  // catastrophic values are refused before any derivation and are asserted in the Rust unit tests.
+  // The MEMORY ceiling is deliberately not here: one KiB over it is still a 2 GiB allocation, which an
+  // unbounded implementation attempts. Both ports' unit tests assert it, where the bound exists and the
+  // refusal costs nothing.
+  ['a KDF one pass over the ceiling', { name: 'argon2id', m_kib: 65536, t: 17, p: 1 }],
+  ['a KDF below the floor', { name: 'argon2id', m_kib: 8, t: 1, p: 1 }],
+  ['a KDF whose m_kib does not fit in 32 bits', { name: 'argon2id', m_kib: 4294967304, t: 3, p: 1 }],
+  ['a KDF with no passes', { name: 'argon2id', m_kib: 65536, t: 0, p: 1 }],
+  ['a KDF with too many lanes', { name: 'argon2id', m_kib: 65536, t: 3, p: 99 }],
+  ['a KDF nobody implements', { name: 'scrypt', m_kib: 65536, t: 3, p: 1 }],
+];
+for (const [what, kdf] of KDF_EDGES) {
+  add(`vault_seal with ${what}`, 'vault_seal', { passphrase: 'a passphrase', plaintext: { v: 1 }, kdf, salt: SALT, nonce: NONCE });
+  add(`vault_open of a document with ${what}`, 'vault_open', { passphrase: 'a passphrase', vault: { format: 'pact-vault/1', kdf, salt: SALT, nonce: NONCE, ct: b64url(new Uint8Array(32)) } });
+}
 add('wallet_issue', 'wallet_issue', { vault_plaintext: vault, root_fingerprint: rootFp, csr, now, valid_days: 365 }, withoutSerial('der'));
 add('wallet_issue for a root the vault does not hold', 'wallet_issue', { vault_plaintext: vault, root_fingerprint: 'sha256:' + 'A'.repeat(43), csr, now });
 add('wallet_issue of the root\'s own key', 'wallet_issue', { vault_plaintext: vault, root_fingerprint: rootFp, csr: rootCsr, now });

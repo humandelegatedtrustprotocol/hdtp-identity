@@ -32,10 +32,17 @@
 set -eu
 cd "$(dirname "$0")/.."
 
-IMAGE='rust:1.92.0-slim-bookworm@sha256:f1f73538ebe623fd3673a35aff3df358ae1084c64c55646516e5b17b321b6c9b'
-PLATFORM='linux/arm64'
-WP='wasm-pack-v0.15.0-aarch64-unknown-linux-musl'
-WP_SHA='e17ef0806381c3a0acb9c9ddad643a49facaa5a2ecf657a421d4d8f3357a24b7'
+# The builder is DATA, in js/builder.json, for two reasons. It is a build input — change the image
+# digest and the bytes may change — so it belongs on `js/inputs.mjs`'s list, and a file of pure data
+# can be on that list without every comment edit in this script invalidating the pin. And because
+# `manifest.mjs` copies it verbatim, `verify.mjs` can compare the builder the pin was made by with the
+# builder this tree would use: before that, bumping the image left `verify` saying "ok pin-of-commit"
+# while the committed builder could no longer produce the pinned bytes, and only the five-minute
+# container job noticed — the slow path the inputs hash exists to front-run.
+IMAGE="$(node -p "require('./js/builder.json').image")"
+PLATFORM="$(node -p "require('./js/builder.json').platform")"
+WP="$(node -p "require('./js/builder.json').wasm_pack")"
+WP_SHA="$(node -p "require('./js/builder.json').wasm_pack_sha256")"
 
 MODE="${1:-verify}"
 case "$MODE" in verify|--pin) ;; *) echo "usage: sh js/reproduce.sh [--pin]" >&2; exit 2 ;; esac
@@ -98,7 +105,7 @@ docker run --rm --platform "$PLATFORM" -v "$WORK/src":/src:ro -v "$WORK":/work -
 if [ "$MODE" = "--pin" ]; then
   rm -rf js/pkg-web js/pkg-node
   cp -r "$WORK/pkg-web" "$WORK/pkg-node" js/
-  node js/manifest.mjs "$WORK/toolchain.json" "$IMAGE" "$PLATFORM" "$WP_SHA"
+  node js/manifest.mjs "$WORK/toolchain.json"
   echo "pinned. Commit js/manifest.json, and vendor js/pkg-web into pact-cloud (gateway/vendor/pact-identity/VENDORED.md)."
   exit 0
 fi

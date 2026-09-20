@@ -90,9 +90,25 @@ func vaultDoc(v Vault) map[string]any {
 	}
 }
 
+// The range a passphrase KDF may name, at BOTH ends, matching the Rust core's four numbers exactly
+// (vault.rs). The parameters come out of the document and are used before the passphrase is tested,
+// so forging them is free: unbounded above, `m_kib: 4294967295` asked x/crypto/argon2 for terabytes;
+// unbounded below, `m_kib: 8` put the person's root behind a KDF a laptop brute-forces, and
+// x/crypto's own clamp then quietly rewrote the cost so this port could write a document the Rust
+// core refuses to open.
+const (
+	maxMKiB uint32 = 1 << 21 // 2 GiB
+	minMKiB uint32 = 8 * 1024
+	maxT    uint32 = 16
+	maxP    uint8  = 16
+)
+
 func vaultKey(passphrase string, v Vault) ([]byte, error) {
-	if v.Format != VaultFormat || v.KDF.Name != "argon2id" || v.KDF.MKiB < 8 || v.KDF.T < 1 || v.KDF.P < 1 {
+	if v.Format != VaultFormat || v.KDF.Name != "argon2id" {
 		return nil, errors.New("not a pact-vault/1 document")
+	}
+	if v.KDF.MKiB < minMKiB || v.KDF.MKiB > maxMKiB || v.KDF.T < 1 || v.KDF.T > maxT || v.KDF.P < 1 || v.KDF.P > maxP {
+		return nil, vaultError{"kdf parameters out of range"}
 	}
 	salt := FromB64url(v.Salt)
 	if len(salt) < 8 {

@@ -172,7 +172,12 @@ impl PrivateKey {
     }
 
     pub fn generate(alg: Alg) -> Result<PrivateKey> {
-        let seed: [u8; 32] = crate::util::random(32)?.try_into().unwrap_or([0; 32]);
+        // Propagated, not defaulted. `random(32)` returns exactly 32 bytes or an error, so the old
+        // `unwrap_or([0; 32])` was unreachable — but what it encoded was "if the randomness came back
+        // the wrong length, generate the same key for everybody", and every caller would have accepted
+        // it. One character, and it cannot rot into a real defect.
+        let seed: [u8; 32] =
+            crate::util::random(32)?.try_into().map_err(|_| Error::new("internal", "randomness came back the wrong length"))?;
         let seed = Zeroizing::new(seed);
         PrivateKey::from_seed(alg, &seed)
     }
@@ -343,7 +348,12 @@ pub fn derive_seed(prf: &[u8], info: &str) -> Result<[u8; 32]> {
     if !DERIVATION_INFOS.contains(&info) {
         return err("bad_request", format!("{info} is not one of the derivation info strings of SPEC \u{a7}2.1"));
     }
-    let okm = crate::hpke::hkdf_sha256(prf, &[], info.as_bytes(), 32);
+    // Zeroized on the way out. These 32 bytes are the seed a wallet turns into the person's ROOT
+    // (SPEC 2.1), and CONTRACT section 6's list of what this library scrubs reads as covering them; it
+    // did not, because `hkdf_sha256` returned a plain `Vec` that dropped uncleared. The caller still
+    // base64s the value into an answer string, which section 6 hands to the host to clear — so this is
+    // defence in depth, and it makes the section true.
+    let okm = Zeroizing::new(crate::hpke::hkdf_sha256(prf, &[], info.as_bytes(), 32));
     let mut out = [0u8; 32];
     out.copy_from_slice(&okm);
     Ok(out)
