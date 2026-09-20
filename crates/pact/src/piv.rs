@@ -245,7 +245,8 @@ mod real {
         /// the PIV application on it.
         pub fn open(wanted: Option<&str>, slot: &str) -> Res<PivCard> {
             let (slot_id, object) = slot_object(slot)?;
-            let ctx = pcsc::Context::establish(pcsc::Scope::User).map_err(|e| Fail(format!("no smartcard service on this machine: {e}")))?;
+            let ctx =
+                pcsc::Context::establish(pcsc::Scope::User).map_err(|e| Fail(format!("no smartcard service on this machine: {e}")))?;
             let mut buf = [0u8; 4096];
             let readers: Vec<String> = ctx
                 .list_readers(&mut buf)
@@ -311,7 +312,8 @@ mod real {
             apdu.push(0x00);
             let obj = send(&self.card.borrow(), &apdu, "reading the slot", &self.info.slot)?;
             let cert = certificate_in_object(&obj)?;
-            let parsed = pact_identity::x509::parse(&cert).map_err(|e| Fail(format!("the certificate in that slot does not parse: {}", e.why)))?;
+            let parsed =
+                pact_identity::x509::parse(&cert).map_err(|e| Fail(format!("the certificate in that slot does not parse: {}", e.why)))?;
             Ok(parsed.public_key)
         }
 
@@ -483,7 +485,8 @@ pub mod fake {
             // handed the digest, so here the same signature is made from it.
             let key = self.key.as_ref().expect("a key");
             let sk = p256::ecdsa::SigningKey::from(key.p256().map_err(|e| Fail(e.why))?);
-            let sig: p256::ecdsa::Signature = signature::hazmat::PrehashSigner::sign_prehash(&sk, digest).map_err(|e| Fail(format!("the fake card: {e}")))?;
+            let sig: p256::ecdsa::Signature =
+                signature::hazmat::PrehashSigner::sign_prehash(&sk, digest).map_err(|e| Fail(format!("the fake card: {e}")))?;
             Ok(sig.to_der().as_bytes().to_vec())
         }
     }

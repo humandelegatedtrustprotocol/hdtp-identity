@@ -1,7 +1,7 @@
 //! The §3 card: a vCard 4.0 with the leaf in it, folded per RFC 6350, read back with the intake rules.
 use crate::keys::fingerprint_of_id;
 use crate::time::DAY;
-use crate::util::{b64u, from_b64u, err, Result};
+use crate::util::{b64u, err, from_b64u, Result};
 use crate::x509::{self, Cert, MAX_LEAF_DAYS};
 
 /// RFC 6350 folding, counted in **UTF-16 code units** — what the seed library counts, and so the
@@ -43,7 +43,13 @@ fn assemble(lines: Vec<String>) -> String {
 }
 
 pub fn encode(fn_: &str, cert: &[u8], seal: Option<&str>, extra: &[String]) -> String {
-    let mut lines = vec!["BEGIN:VCARD".to_string(), "VERSION:4.0".to_string(), format!("FN:{fn_}"), "X-PACT-VERSION:2".to_string(), format!("X-PACT-CERT:{}", b64u(cert))];
+    let mut lines = vec![
+        "BEGIN:VCARD".to_string(),
+        "VERSION:4.0".to_string(),
+        format!("FN:{fn_}"),
+        "X-PACT-VERSION:2".to_string(),
+        format!("X-PACT-CERT:{}", b64u(cert)),
+    ];
     lines.extend(extra.iter().cloned());
     if let Some(s) = seal.filter(|s| !s.is_empty()) {
         lines.push(format!("X-PACT-SEAL:{s}"));
@@ -70,7 +76,13 @@ fn unfold(text: &str) -> Vec<String> {
     let mut bytes: Vec<u8> = Vec::with_capacity(text.len());
     let mut i = 0;
     while i < b.len() {
-        let nl = if b[i] == b'\r' && i + 1 < b.len() && b[i + 1] == b'\n' { 2 } else if b[i] == b'\n' { 1 } else { 0 };
+        let nl = if b[i] == b'\r' && i + 1 < b.len() && b[i + 1] == b'\n' {
+            2
+        } else if b[i] == b'\n' {
+            1
+        } else {
+            0
+        };
         if nl > 0 && i + nl < b.len() && (b[i + nl] == b' ' || b[i + nl] == b'\t') {
             i += nl + 1;
             continue;
@@ -136,7 +148,11 @@ pub fn decode(text: &str, now: i64) -> Result<Card> {
         root,
         endpoint,
         expired,
-        ignored: props.iter().map(|(k, _)| k.clone()).filter(|k| k.starts_with("X-PACT-") && !["X-PACT-VERSION", "X-PACT-CERT", "X-PACT-SEAL"].contains(&k.as_str())).collect(),
+        ignored: props
+            .iter()
+            .map(|(k, _)| k.clone())
+            .filter(|k| k.starts_with("X-PACT-") && !["X-PACT-VERSION", "X-PACT-CERT", "X-PACT-SEAL"].contains(&k.as_str()))
+            .collect(),
     })
 }
 

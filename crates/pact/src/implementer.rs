@@ -27,11 +27,21 @@ pub fn card_show(path: &str, now: Option<&str>, json: bool) -> Res<i32> {
     println!("root        {}", s(&c, "root"));
     println!("endpoint    {}", s(&c, "endpoint"));
     println!("leaf key    {} ({})", s(&c["leaf"], "fingerprint"), s(&c["leaf"], "alg"));
-    println!("valid       {} to {}{}", s(&c["leaf"], "not_before"), s(&c["leaf"], "not_after"), if c["expired"].as_bool().unwrap_or(false) { "  (expired: a bootstrap, not a proof)" } else { "" });
+    println!(
+        "valid       {} to {}{}",
+        s(&c["leaf"], "not_before"),
+        s(&c["leaf"], "not_after"),
+        if c["expired"].as_bool().unwrap_or(false) { "  (expired: a bootstrap, not a proof)" } else { "" }
+    );
     println!("seal        {}", s(&c, "seal"));
-    let ignored: Vec<String> = c["ignored"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
+    let ignored: Vec<String> =
+        c["ignored"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
     println!("ignored     {}", if ignored.is_empty() { "none".to_string() } else { ignored.join(", ") });
-    println!("bytes       {}{}", s(&c, "bytes"), if c["bytes"].as_u64().unwrap_or(0) > 1024 { "  (over a kilobyte: too big for a QR)" } else { "" });
+    println!(
+        "bytes       {}{}",
+        s(&c, "bytes"),
+        if c["bytes"].as_u64().unwrap_or(0) > 1024 { "  (over a kilobyte: too big for a QR)" } else { "" }
+    );
     Ok(0)
 }
 
@@ -40,7 +50,12 @@ pub fn card_check(path: &str, now: Option<&str>) -> Res<i32> {
     let now = now_or(now)?;
     match core("card_decode", json!({ "vcard": text, "now": instant(now) })) {
         Ok(c) => {
-            println!("accepted: root {} at {}{}", s(&c, "root"), s(&c, "endpoint"), if c["expired"].as_bool().unwrap_or(false) { " (leaf expired)" } else { "" });
+            println!(
+                "accepted: root {} at {}{}",
+                s(&c, "root"),
+                s(&c, "endpoint"),
+                if c["expired"].as_bool().unwrap_or(false) { " (leaf expired)" } else { "" }
+            );
             Ok(0)
         }
         Err(e) => {
@@ -50,7 +65,14 @@ pub fn card_check(path: &str, now: Option<&str>) -> Res<i32> {
     }
 }
 
-pub fn chain_check(leaf: Option<&str>, root: Option<&str>, bundle: Option<&str>, expect_root: Option<&str>, expect_endpoint: Option<&str>, now: Option<&str>) -> Res<i32> {
+pub fn chain_check(
+    leaf: Option<&str>,
+    root: Option<&str>,
+    bundle: Option<&str>,
+    expect_root: Option<&str>,
+    expect_endpoint: Option<&str>,
+    now: Option<&str>,
+) -> Res<i32> {
     let chain: Vec<Vec<u8>> = match (bundle, leaf, root) {
         (Some(b), _, _) => {
             let raw = read_input(b)?;
@@ -64,7 +86,10 @@ pub fn chain_check(leaf: Option<&str>, root: Option<&str>, bundle: Option<&str>,
         _ => return fail("give --leaf and --root, or --chain with a PEM bundle"),
     };
     let now = now_or(now)?;
-    let r = core("validate_chain", json!({ "chain": chain.iter().map(|c| b64u(c)).collect::<Vec<_>>(), "now": instant(now), "expected_root": expect_root, "expected_endpoint": expect_endpoint }))?;
+    let r = core(
+        "validate_chain",
+        json!({ "chain": chain.iter().map(|c| b64u(c)).collect::<Vec<_>>(), "now": instant(now), "expected_root": expect_root, "expected_endpoint": expect_endpoint }),
+    )?;
     if r["ok"].as_bool().unwrap_or(false) {
         println!("accepted");
         println!("root        {}", s(&r, "root_fingerprint"));
@@ -113,7 +138,10 @@ pub fn csr_new(key: &str, endpoint: &str, cn: Option<&str>, dns: bool, out: Opti
     let k = PrivateKey::from_pkcs8(&pkcs8).map_err(|e| crate::io::Fail(format!("{key}: {}", e.why)))?;
     let host = x509::host_of(endpoint).to_string();
     let cn = cn.map(String::from).unwrap_or(host.clone());
-    let r = core("csr_new", json!({ "cn": cn, "host_pkcs8": b64u(&k.to_pkcs8()), "endpoint": endpoint, "dns_name": if dns { Some(host.as_str()) } else { None } }))?;
+    let r = core(
+        "csr_new",
+        json!({ "cn": cn, "host_pkcs8": b64u(&k.to_pkcs8()), "endpoint": endpoint, "dns_name": if dns { Some(host.as_str()) } else { None } }),
+    )?;
     let der = from_b64u(r["der"].as_str().unwrap_or("")).map_err(|e| crate::io::Fail(e.why))?;
     write_output(out, &pem("CERTIFICATE REQUEST", &der))?;
     eprintln!("request for {endpoint} by {}", k.public().fingerprint());
@@ -126,7 +154,9 @@ fn spki_of_file(path: &str) -> Res<Vec<u8>> {
     if let Ok(c) = x509::parse(&der) {
         return Ok(c.spki);
     }
-    PublicKey::from_spki(&der).map(|p| p.spki().to_vec()).map_err(|e| crate::io::Fail(format!("{path}: neither a certificate nor a public key ({})", e.why)))
+    PublicKey::from_spki(&der)
+        .map(|p| p.spki().to_vec())
+        .map_err(|e| crate::io::Fail(format!("{path}: neither a certificate nor a public key ({})", e.why)))
 }
 
 pub fn csr_check(path: &str, root_spkis: &[String]) -> Res<i32> {

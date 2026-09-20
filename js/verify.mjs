@@ -1,7 +1,13 @@
 // Recomputes the SHA-256 of the built .wasm files and compares them with js/manifest.json.
 //   node verify.mjs            — checks both packages in place
 //   node verify.mjs <file>     — checks one vendored copy against the web package's entry
+//   node verify.mjs --inputs   — only the fast question below (what the post-commit hook asks)
 // Exit 1 on any mismatch, so a pipeline that vendors the bytes cannot ship a different core.
+//
+// **First, in every mode: is the pin OF this commit?** The manifest records the identity of the
+// build inputs it was made from (js/inputs.mjs); if HEAD's inputs differ, the source moved after
+// the pin and the bytes below describe an older commit, however well they hash. That answer takes
+// a second and needs no build.
 //
 // **What a mismatch usually means: the source moved and the pin did not.** On 2026-09-19 the
 // pinned core turned out to predate the 1.x removal by two days — it still contained the 1.x
@@ -16,12 +22,28 @@
 // hashes differently; checking js/pkg-* in place after one is expected to fail, and says so.
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { inputsAtHead } from './inputs.mjs';
 
 const here = new URL('./', import.meta.url);
 const manifest = JSON.parse(readFileSync(new URL('manifest.json', here), 'utf8'));
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
 let failures = 0;
+const head = inputsAtHead();
+if (!head) {
+  console.log('note pin-of-commit: not checked — this is not a git checkout, so there is no HEAD to compare with');
+} else if (!manifest.source?.inputs_sha256) {
+  failures++;
+  console.log('FAIL pin-of-commit: js/manifest.json does not say what it was built from. Pin again: sh js/reproduce.sh --pin');
+} else if (manifest.source.inputs_sha256 !== head.sha256) {
+  failures++;
+  console.log(`FAIL pin-of-commit: HEAD's build inputs (${head.sha256.slice(0, 16)}…) are not the ones the pin was built from (${manifest.source.inputs_sha256.slice(0, 16)}…).`);
+  console.log('     A commit changed the Rust source, the lock file, the toolchain or js/build.sh after the pin.');
+  console.log('     sh js/reproduce.sh --pin   then commit js/manifest.json and re-vendor into pact-cloud.');
+} else {
+  console.log(`ok   pin-of-commit: HEAD's ${head.files} build inputs are the ones the pin was built from`);
+}
+if (process.argv[2] === '--inputs') process.exit(failures ? 1 : 0);
 const check = (label, bytes, expected) => {
   const got = sha(bytes);
   const ok = got === expected.sha256 && bytes.length === expected.bytes;

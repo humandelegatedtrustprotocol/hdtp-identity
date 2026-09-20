@@ -1,9 +1,9 @@
 #!/bin/sh
 # The canonical build of the Wasm core: in one container, named by digest, on one platform.
 #
-#   sh js/reproduce.sh          rebuild, and compare the bytes with js/manifest.json (exit 1 if not)
-#   sh js/reproduce.sh --pin    rebuild, install the bytes as js/pkg-web and js/pkg-node, and write
-#                               js/manifest.json from them — after the Rust source has changed
+#   sh js/reproduce.sh          rebuild HEAD, and compare the bytes with js/manifest.json (exit 1 if not)
+#   sh js/reproduce.sh --pin    rebuild HEAD, install the bytes as js/pkg-web and js/pkg-node, and write
+#                               js/manifest.json from them — after a COMMIT has changed a build input
 #
 # js/manifest.json pins the SHA-256 of the core every host runs: the browser wallet, the cloud's
 # Worker, the CLI. A pin is worth something only if somebody ELSE can make those bytes from the
@@ -46,6 +46,29 @@ curl -fsSL -o "$WORK/wasm-pack.tar.gz" "https://github.com/rustwasm/wasm-pack/re
 GOT="$( (sha256sum "$WORK/wasm-pack.tar.gz" 2>/dev/null || shasum -a 256 "$WORK/wasm-pack.tar.gz") | cut -d' ' -f1)"
 [ "$GOT" = "$WP_SHA" ] || { echo "reproduce: $WP.tar.gz is $GOT, not the $WP_SHA written here: refusing to run it" >&2; exit 1; }
 
+# WHAT IS BUILT IS THE COMMIT, not this working tree: `git archive HEAD`, unpacked beside the
+# build's other scratch. A pin is a statement about source somebody else can fetch, and a working
+# tree is not that — it can hold an edit nobody committed, or lack one somebody did. It also puts
+# the steps in the only order that cannot surprise: style is applied BEFORE the commit (the
+# pre-commit hook formats staged Rust), the commit is made, and only then is it compiled and
+# pinned. On 2026-09-20 a style fix made AFTER a pin moved a line, the line number was in the
+# binary, and the pin stopped matching; a build that only ever reads commits cannot be ambushed by
+# what has not been committed yet.
+#
+# So `--pin` refuses while a build input is uncommitted (js/inputs.mjs has the list), and a plain
+# run says so and carries on, because comparing the COMMIT with the manifest is still the question.
+DIRTY="$(node js/inputs.mjs --dirty || true)"
+if [ -n "$DIRTY" ]; then
+  if [ "$MODE" = "--pin" ]; then
+    { echo "reproduce: these build inputs are not committed, and a pin is of a commit:"; echo "$DIRTY"; echo "commit them (the pre-commit hook styles them), then pin."; } >&2
+    exit 1
+  fi
+  { echo "reproduce: NOTE — building HEAD; these uncommitted changes are NOT in this build:"; echo "$DIRTY"; } >&2
+fi
+mkdir "$WORK/src"
+git archive --format=tar HEAD | tar -x -C "$WORK/src"
+echo "reproduce: building commit $(git rev-parse --short HEAD) (inputs $(node js/inputs.mjs | cut -c1-16)…)"
+
 # The source goes in read-only and is copied, so the build cannot touch this checkout, and the
 # path it builds under is the container's and not this machine's.
 #
@@ -53,10 +76,10 @@ GOT="$( (sha256sum "$WORK/wasm-pack.tar.gz" 2>/dev/null || shasum -a 256 "$WORK/
 # Desktop that is this user's file; on a Linux host it is root's, and the clean-up is refused — the
 # first run on a hosted runner rebuilt the pinned bytes exactly and then failed for that. So what
 # the container leaves behind is handed back to whoever ran this, whether or not the build worked.
-docker run --rm --platform "$PLATFORM" -v "$(pwd)":/src:ro -v "$WORK":/work -e WP="$WP" -e OWNER="$(id -u):$(id -g)" "$IMAGE" sh -euc '
+docker run --rm --platform "$PLATFORM" -v "$WORK/src":/src:ro -v "$WORK":/work -e WP="$WP" -e OWNER="$(id -u):$(id -g)" "$IMAGE" sh -euc '
   trap "chown -R \"$OWNER\" /work" EXIT
   mkdir -p /build && cd /src
-  tar -c --exclude=./target --exclude="./js/pkg-*" --exclude=./js/node_modules --exclude=./go/bin --exclude=./extension . | tar -x -C /build
+  cp -a . /build/
   tar -xzf /work/wasm-pack.tar.gz -C /usr/local/bin --strip-components=1 "$WP/wasm-pack"
   cd /build && sh js/build.sh
   cp -r js/pkg-web js/pkg-node /work/

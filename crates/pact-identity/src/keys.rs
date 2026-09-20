@@ -88,7 +88,9 @@ impl PublicKey {
                 let k: [u8; 32] = key.try_into().map_err(|_| Error::new("parse", "X25519 key is not 32 bytes"))?;
                 Public::X25519(k)
             }
-            OID_EC_PUBLIC_KEY if alg.len() == 2 && alg[1].tag == 0x06 && der::oid_minimal(&alg[1]) && read_oid(&alg[1]) == OID_PRIME256V1 => {
+            OID_EC_PUBLIC_KEY
+                if alg.len() == 2 && alg[1].tag == 0x06 && der::oid_minimal(&alg[1]) && read_oid(&alg[1]) == OID_PRIME256V1 =>
+            {
                 // RFC 5480 §2.2 allows a compressed point; the profile takes the uncompressed form only,
                 // so one key has one SubjectPublicKeyInfo and one fingerprint.
                 if key.len() != 65 || key[0] != 0x04 {
@@ -213,7 +215,9 @@ impl PrivateKey {
                 let seed: [u8; 32] = inner.content.try_into().map_err(|_| Error::new("parse", "Ed25519 seed is not 32 bytes"))?;
                 Ok(PrivateKey::Ed25519(ed25519_dalek::SigningKey::from_bytes(&seed)))
             }
-            OID_EC_PUBLIC_KEY if alg.len() == 2 && alg[1].tag == 0x06 && der::oid_minimal(&alg[1]) && read_oid(&alg[1]) == OID_PRIME256V1 => {
+            OID_EC_PUBLIC_KEY
+                if alg.len() == 2 && alg[1].tag == 0x06 && der::oid_minimal(&alg[1]) && read_oid(&alg[1]) == OID_PRIME256V1 =>
+            {
                 let ec = read(f[2].content, 0)?;
                 if ec.tag != 0x30 || ec.end != f[2].content.len() {
                     return err("parse", "ECPrivateKey shape");
@@ -233,11 +237,9 @@ impl PrivateKey {
 
     pub fn to_pkcs8(&self) -> Zeroizing<Vec<u8>> {
         match self {
-            PrivateKey::Ed25519(k) => Zeroizing::new(der::seq(&[
-                der::int(0),
-                der::seq(&[der::oid(OID_ED25519)]),
-                der::octet(&der::octet(k.as_bytes())),
-            ])),
+            PrivateKey::Ed25519(k) => {
+                Zeroizing::new(der::seq(&[der::int(0), der::seq(&[der::oid(OID_ED25519)]), der::octet(&der::octet(k.as_bytes()))]))
+            }
             PrivateKey::P256(k) => {
                 let d = Zeroizing::new(k.to_bytes());
                 // RFC 5915's optional publicKey is left out, because the seed library's
@@ -265,7 +267,10 @@ impl PrivateKey {
             PrivateKey::P256(k) => {
                 let pk = k.public_key();
                 let point = pk.to_encoded_point(false);
-                PublicKey { spki: spki_of(der::seq(&[der::oid(OID_EC_PUBLIC_KEY), der::oid(OID_PRIME256V1)]), point.as_bytes()), inner: Public::P256(pk) }
+                PublicKey {
+                    spki: spki_of(der::seq(&[der::oid(OID_EC_PUBLIC_KEY), der::oid(OID_PRIME256V1)]), point.as_bytes()),
+                    inner: Public::P256(pk),
+                }
             }
         }
     }
@@ -308,6 +313,40 @@ impl PrivateKey {
 /// An X25519 SubjectPublicKeyInfo, for a raw recipient key (the seed builds these for its low-order test).
 pub fn x25519_spki(raw: &[u8; 32]) -> Vec<u8> {
     spki_of(der::seq(&[der::oid(OID_X25519)]), raw)
+}
+
+// ── §2.1: a root derived from a passkey ──────────────────────────────────────────────────
+
+/// The fixed input handed to the authenticator's `prf` extension: `SHA-256("pact/vault/1")`.
+///
+/// Fixed, not per-credential, because a wallet arriving cold on a new device has to derive before
+/// it can fetch anything — a per-credential salt would have to be fetched first, and there is
+/// nothing to fetch it with. The secret is still per-credential, because the PRF is keyed by the
+/// credential. The name is inherited and no longer describes anything; these are normative bytes.
+pub fn prf_salt() -> [u8; 32] {
+    Sha256::digest(b"pact/vault/1").into()
+}
+
+/// The three `info` strings §2.1 defines, and the only ones this will derive for.
+///
+/// Refusing an unknown `info` is the point rather than a restriction. The failure this whole
+/// design has to engineer against is *silently deriving a different identity*, and a mistyped
+/// domain separator is the cheapest way to do that — it would succeed, return 32 perfectly good
+/// bytes, and produce a key belonging to nobody. There is no fourth use, so there is no cost.
+pub const DERIVATION_INFOS: [&str; 3] = ["pact/root/1", "pact/store-key/1", "pact/store-id/1"];
+
+/// §2.1: `HKDF-SHA256(ikm = prf, salt = "", info, L = 32)`.
+pub fn derive_seed(prf: &[u8], info: &str) -> Result<[u8; 32]> {
+    if prf.len() != 32 {
+        return err("bad_request", format!("a prf output is 32 bytes, not {}", prf.len()));
+    }
+    if !DERIVATION_INFOS.contains(&info) {
+        return err("bad_request", format!("{info} is not one of the derivation info strings of SPEC \u{a7}2.1"));
+    }
+    let okm = crate::hpke::hkdf_sha256(prf, &[], info.as_bytes(), 32);
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&okm);
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -353,38 +392,4 @@ mod tests {
         let pk = x25519_dalek::PublicKey::from(&k.x25519().unwrap());
         assert_eq!(pk.to_bytes(), k.public().x25519().unwrap());
     }
-}
-
-// ── §2.1: a root derived from a passkey ──────────────────────────────────────────────────
-
-/// The fixed input handed to the authenticator's `prf` extension: `SHA-256("pact/vault/1")`.
-///
-/// Fixed, not per-credential, because a wallet arriving cold on a new device has to derive before
-/// it can fetch anything — a per-credential salt would have to be fetched first, and there is
-/// nothing to fetch it with. The secret is still per-credential, because the PRF is keyed by the
-/// credential. The name is inherited and no longer describes anything; these are normative bytes.
-pub fn prf_salt() -> [u8; 32] {
-    Sha256::digest(b"pact/vault/1").into()
-}
-
-/// The three `info` strings §2.1 defines, and the only ones this will derive for.
-///
-/// Refusing an unknown `info` is the point rather than a restriction. The failure this whole
-/// design has to engineer against is *silently deriving a different identity*, and a mistyped
-/// domain separator is the cheapest way to do that — it would succeed, return 32 perfectly good
-/// bytes, and produce a key belonging to nobody. There is no fourth use, so there is no cost.
-pub const DERIVATION_INFOS: [&str; 3] = ["pact/root/1", "pact/store-key/1", "pact/store-id/1"];
-
-/// §2.1: `HKDF-SHA256(ikm = prf, salt = "", info, L = 32)`.
-pub fn derive_seed(prf: &[u8], info: &str) -> Result<[u8; 32]> {
-    if prf.len() != 32 {
-        return err("bad_request", format!("a prf output is 32 bytes, not {}", prf.len()));
-    }
-    if !DERIVATION_INFOS.contains(&info) {
-        return err("bad_request", format!("{info} is not one of the derivation info strings of SPEC \u{a7}2.1"));
-    }
-    let okm = crate::hpke::hkdf_sha256(prf, &[], info.as_bytes(), 32);
-    let mut out = [0u8; 32];
-    out.copy_from_slice(&okm);
-    Ok(out)
 }

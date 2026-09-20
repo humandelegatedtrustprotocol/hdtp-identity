@@ -25,14 +25,15 @@ cd "$(dirname "$0")"
 
 step() { printf '\n── %s\n' "$1"; }
 
-step "Rust core, CLI and Wasm crate: tests, clippy"
-cargo test --workspace --locked
+step "Rust core, CLI and Wasm crate: style, clippy, tests"
+cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
 
 step "Go port: vet, tests, adapter"
 ( cd go && go vet ./... && go test ./... && make build )
 
-step "The Wasm build in this tree is the pinned one"
+step "The pin is of THIS commit, and the Wasm build in this tree is the pinned one"
 node js/verify.mjs
 
 step "Appendix B through the bindings, and through the Go port"

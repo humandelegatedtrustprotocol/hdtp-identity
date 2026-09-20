@@ -1,7 +1,10 @@
 //! The wallet half: a root in a vault, leaves issued from it under SPEC §9's rules, the ledger, the
 //! contact book. The rules live in the core's `wallet_issue`; this file adds the terminal's
 //! discipline — the passphrase from a prompt, the vault owner-only, nothing a root key ever printed.
-use crate::io::{check_writable, confirm, core, fail, instant, now_or, passphrase, pem, read_der, read_input, write_new_private, write_output, write_private, Fail, Res};
+use crate::io::{
+    check_writable, confirm, core, fail, instant, now_or, passphrase, pem, read_der, read_input, write_new_private, write_output,
+    write_private, Fail, Res,
+};
 use crate::piv::{digest_of, CardSigner};
 use pact_identity::csr;
 use pact_identity::keys::{Alg, PrivateKey};
@@ -59,7 +62,9 @@ fn roots(v: &Value) -> Vec<Value> {
 fn pick_root(v: &Value, wanted: Option<&str>) -> Res<Value> {
     let all = roots(v);
     match wanted {
-        Some(fp) => all.into_iter().find(|r| r["fingerprint"].as_str() == Some(fp)).ok_or_else(|| Fail(format!("no root {fp} in this vault"))),
+        Some(fp) => {
+            all.into_iter().find(|r| r["fingerprint"].as_str() == Some(fp)).ok_or_else(|| Fail(format!("no root {fp} in this vault")))
+        }
         None => match all.len() {
             0 => fail("the vault holds no identity yet: pact id create"),
             1 => Ok(all[0].clone()),
@@ -142,7 +147,10 @@ fn root_from_card(card: &dyn CardSigner, name: &str, now: i64) -> Res<(Vec<u8>, 
     if !key.verify(&tbs, &sig) {
         return fail("the card's signature does not verify under the slot's key: nothing written");
     }
-    let cert = from_b64u(core("assemble_root", json!({ "tbs": u["tbs"], "sig": b64u(&sig), "sig_alg": u["sig_alg"] }))?["der"].as_str().unwrap_or("")).map_err(|e| Fail(e.why))?;
+    let cert = from_b64u(
+        core("assemble_root", json!({ "tbs": u["tbs"], "sig": b64u(&sig), "sig_alg": u["sig_alg"] }))?["der"].as_str().unwrap_or(""),
+    )
+    .map_err(|e| Fail(e.why))?;
     Ok((cert, key))
 }
 
@@ -271,11 +279,14 @@ pub fn card_status(vault: Option<&str>, slot: &str, reader: Option<&str>) -> Res
             // one key? A person asking "is this card my identity?" gets the whole answer or none.
             root_key(&r)?;
             println!("identity    {} ({})", r["fingerprint"].as_str().unwrap_or(""), r["cn"].as_str().unwrap_or(""));
-            println!("held        {}", match card_holder(&r).and_then(|h| h["mode"].as_str()) {
-                Some("generated") => "on this card, generated there: the vault has no key and there is no backup",
-                Some("imported") => "on this card, imported: the vault keeps the key too, so a lost card is not a lost identity",
-                Some(_) | None => "as a key in the vault; this card signs nothing for it",
-            });
+            println!(
+                "held        {}",
+                match card_holder(&r).and_then(|h| h["mode"].as_str()) {
+                    Some("generated") => "on this card, generated there: the vault has no key and there is no backup",
+                    Some("imported") => "on this card, imported: the vault keeps the key too, so a lost card is not a lost identity",
+                    Some(_) | None => "as a key in the vault; this card signs nothing for it",
+                }
+            );
             Ok(0)
         }
         None => {
@@ -297,7 +308,9 @@ pub fn card_attach(vault: &str, slot: &str, reader: Option<&str>, root: Option<&
     let info = card.describe();
     let on_card = card.public_key()?.fingerprint();
     if on_card != fp {
-        return fail(format!("the key in slot {slot} is {on_card}, and this identity's root is {fp}: import the right key, or attach the right identity"));
+        return fail(format!(
+            "the key in slot {slot} is {on_card}, and this identity's root is {fp}: import the right key, or attach the right identity"
+        ));
     }
     // One signature now, and the PIN it costs, in exchange for never recording a card that cannot
     // sign for this root.
@@ -392,13 +405,26 @@ pub fn id_issue(a: IssueArgs<'_>) -> Res<i32> {
     let known_endpoint = mine.iter().any(|l| l["endpoint"].as_str() == Some(request.endpoint.as_str()));
     let new_host = !mine.iter().any(|l| l["endpoint"].as_str().map(|e| x509::host_of(e) == host).unwrap_or(false));
     if a.renew_only && !known_endpoint {
-        return fail(format!("{} is not in the ledger: a renewal is for an endpoint already issued to; use pact id issue", request.endpoint));
+        return fail(format!(
+            "{} is not in the ledger: a renewal is for an endpoint already issued to; use pact id issue",
+            request.endpoint
+        ));
     }
     let previous = mine.iter().filter_map(|l| l["not_before"].as_str().and_then(|t| parse_rfc3339(t).ok())).max();
     let (nb, na) = csr::validity(now, previous, a.valid_days).map_err(|e| Fail(e.why))?;
 
     eprintln!("identity    {} ({})", fp, root["cn"].as_str().unwrap_or(""));
-    eprintln!("endpoint    {}{}", request.endpoint, if new_host { "  NEW HOST: never issued to before" } else if known_endpoint { "  (renewal)" } else { "  (a new address on a known host)" });
+    eprintln!(
+        "endpoint    {}{}",
+        request.endpoint,
+        if new_host {
+            "  NEW HOST: never issued to before"
+        } else if known_endpoint {
+            "  (renewal)"
+        } else {
+            "  (a new address on a known host)"
+        }
+    );
     eprintln!("origin      {}", a.origin.unwrap_or("(not given)"));
     eprintln!("host key    {} ({})", request.key.fingerprint(), request.key.alg().name());
     eprintln!("valid       {} to {}  ({} days)", instant(nb), instant(na), a.valid_days);
@@ -422,7 +448,16 @@ pub fn id_issue(a: IssueArgs<'_>) -> Res<i32> {
         Some(h) => {
             let c = card_for(&root, a.reader)?;
             let i = c.describe();
-            eprintln!("held        on card {} slot {}{}", i.serial.clone().unwrap_or_else(|| "?".into()), i.slot, if h["serial"].as_str().is_some_and(|s| Some(s) != i.serial.as_deref()) { "  (a different card from the one this identity was made on)" } else { "" });
+            eprintln!(
+                "held        on card {} slot {}{}",
+                i.serial.clone().unwrap_or_else(|| "?".into()),
+                i.slot,
+                if h["serial"].as_str().is_some_and(|s| Some(s) != i.serial.as_deref()) {
+                    "  (a different card from the one this identity was made on)"
+                } else {
+                    ""
+                }
+            );
             Some(c)
         }
         None => None,
@@ -450,7 +485,10 @@ pub fn id_issue(a: IssueArgs<'_>) -> Res<i32> {
             });
             out
         }
-        None => core("wallet_issue", json!({ "vault_plaintext": v.plaintext, "root_fingerprint": fp, "csr": b64u(&csr_der), "now": instant(now), "valid_days": a.valid_days, "move": a.moving }))?,
+        None => core(
+            "wallet_issue",
+            json!({ "vault_plaintext": v.plaintext, "root_fingerprint": fp, "csr": b64u(&csr_der), "now": instant(now), "valid_days": a.valid_days, "move": a.moving }),
+        )?,
     };
     for w in r["warnings"].as_array().cloned().unwrap_or_default() {
         eprintln!("note        {}", w.as_str().unwrap_or(""));
@@ -492,13 +530,20 @@ pub fn id_ledger(vault: &str, root: Option<&str>, json: bool) -> Res<i32> {
             let fp = r["fingerprint"].as_str()?;
             rows.iter()
                 .enumerate()
-                .filter(|(_, l)| l["root"].as_str() == Some(fp) && l["not_after"].as_str().and_then(|t| parse_rfc3339(t).ok()).is_some_and(|t| t > now))
+                .filter(|(_, l)| {
+                    l["root"].as_str() == Some(fp) && l["not_after"].as_str().and_then(|t| parse_rfc3339(t).ok()).is_some_and(|t| t > now)
+                })
                 .max_by_key(|(_, l)| l["not_before"].as_str().and_then(|t| parse_rfc3339(t).ok()).unwrap_or(0))
                 .map(|(i, _)| i)
         })
         .collect();
     for (i, l) in rows.iter().enumerate() {
-        let leaf_fp = l["leaf"].as_str().and_then(|b| from_b64u(b).ok()).and_then(|d| x509::parse(&d).ok()).map(|c| c.public_key.fingerprint()).unwrap_or_else(|| "?".into());
+        let leaf_fp = l["leaf"]
+            .as_str()
+            .and_then(|b| from_b64u(b).ok())
+            .and_then(|d| x509::parse(&d).ok())
+            .map(|c| c.public_key.fingerprint())
+            .unwrap_or_else(|| "?".into());
         println!(
             "{} {}  {}  {} to {}  root {}  key {}{}",
             if current.contains(&i) { "*" } else { " " },
@@ -521,7 +566,12 @@ pub fn id_show(vault: &str, root: Option<&str>, out: Option<&str>) -> Res<i32> {
     // What is printed here is what a contact pins, so it is the entry's own key or nothing.
     root_key(&r)?;
     let der = from_b64u(r["cert"].as_str().unwrap_or("")).map_err(|e| Fail(e.why))?;
-    eprintln!("{}  {}  created {}", r["fingerprint"].as_str().unwrap_or(""), r["cn"].as_str().unwrap_or(""), r["created"].as_str().unwrap_or(""));
+    eprintln!(
+        "{}  {}  created {}",
+        r["fingerprint"].as_str().unwrap_or(""),
+        r["cn"].as_str().unwrap_or(""),
+        r["created"].as_str().unwrap_or("")
+    );
     write_output(out, &pem("CERTIFICATE", &der))?;
     Ok(0)
 }
@@ -555,7 +605,12 @@ pub fn id_restore(from: &str, vault: &str) -> Res<i32> {
     write_new_private(Path::new(vault), &read_input(from)?)?;
     let doc: Value = serde_json::from_slice(&read_input(vault)?)?;
     core("vault_open", json!({ "passphrase": v.passphrase, "vault": doc }))?;
-    eprintln!("restored {from} to {vault}: {} identities, {} leaves, {} contacts", roots(&v.plaintext).len(), v.plaintext["ledger"].as_array().map_or(0, |a| a.len()), v.plaintext["contacts"].as_array().map_or(0, |a| a.len()));
+    eprintln!(
+        "restored {from} to {vault}: {} identities, {} leaves, {} contacts",
+        roots(&v.plaintext).len(),
+        v.plaintext["ledger"].as_array().map_or(0, |a| a.len()),
+        v.plaintext["contacts"].as_array().map_or(0, |a| a.len())
+    );
     Ok(0)
 }
 
@@ -583,7 +638,8 @@ fn is_fingerprint(v: &Value) -> bool {
 fn check_root_cert(c: &Value) -> Res<()> {
     let Some(cert) = c["root_cert"].as_str() else { return Ok(()) };
     let root = c["root"].as_str().unwrap_or("?");
-    let parsed = core("parse_certificate", json!({ "der": cert })).map_err(|e| Fail(format!("{root}: root_cert does not parse ({})", e.0)))?;
+    let parsed =
+        core("parse_certificate", json!({ "der": cert })).map_err(|e| Fail(format!("{root}: root_cert does not parse ({})", e.0)))?;
     if parsed["fingerprint"].as_str() != Some(root) {
         return fail(format!(
             "{root}: root_cert is a certificate for {}, not for the root this contact is pinned by",
@@ -591,13 +647,17 @@ fn check_root_cert(c: &Value) -> Res<()> {
         ));
     }
     if parsed["kind"].as_str() != Some("root") {
-        return fail(format!("{root}: root_cert is not a root certificate ({})", parsed["profile_error"].as_str().unwrap_or("not self-signed")));
+        return fail(format!(
+            "{root}: root_cert is not a root certificate ({})",
+            parsed["profile_error"].as_str().unwrap_or("not self-signed")
+        ));
     }
     Ok(())
 }
 
 pub fn contacts_import(vault: &str, file: &str, yes: bool) -> Res<i32> {
-    let incoming: Vec<Value> = serde_json::from_slice(&read_input(file)?).map_err(|e| Fail(format!("{file}: a JSON array of contacts ({e})")))?;
+    let incoming: Vec<Value> =
+        serde_json::from_slice(&read_input(file)?).map_err(|e| Fail(format!("{file}: a JSON array of contacts ({e})")))?;
     for c in &incoming {
         if !is_fingerprint(&c["root"]) || c["endpoint"].as_str().is_none() {
             return fail(format!("{file}: every contact needs a root fingerprint and an endpoint"));
@@ -770,7 +830,8 @@ mod card_tests {
         let key = PrivateKey::generate(Alg::P256).expect("a key");
         let cert = x509::build_root("Alina Rao", &key, NOW, &x509::serial_of("both-paths")).expect("a root");
         let fp = key.public().fingerprint();
-        let software = json!({ "fingerprint": fp, "cn": "Alina Rao", "pkcs8": b64u(&key.to_pkcs8()), "cert": b64u(&cert), "created": instant(NOW) });
+        let software =
+            json!({ "fingerprint": fp, "cn": "Alina Rao", "pkcs8": b64u(&key.to_pkcs8()), "cert": b64u(&cert), "created": instant(NOW) });
         let first = core(
             "wallet_issue",
             json!({ "vault_plaintext": { "v": 1, "roots": [software.clone()], "ledger": [], "contacts": [] }, "root_fingerprint": fp, "csr": b64u(&a_request(ENDPOINT)), "now": instant(NOW), "valid_days": 365 }),
@@ -821,7 +882,11 @@ mod card_tests {
             Ok(out) => {
                 // What was assembled, and what it is worth, before failing — the defect is the
                 // artefact, not the exit code.
-                let r = core("validate_chain", json!({ "chain": [out["der"].clone(), b64u(&cert)], "now": instant(NOW), "expected_root": root["fingerprint"] })).expect("an answer");
+                let r = core(
+                    "validate_chain",
+                    json!({ "chain": [out["der"].clone(), b64u(&cert)], "now": instant(NOW), "expected_root": root["fingerprint"] }),
+                )
+                .expect("an answer");
                 panic!("a leaf was assembled from a card that swapped its key after the check; against the pinned root it is {r}");
             }
         }
