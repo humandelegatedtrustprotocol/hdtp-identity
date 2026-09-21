@@ -539,21 +539,26 @@ const provenWhole = new Set();
     const i = A64.indexOf(s.at(-1));
     return spare && (i & ((1 << spare) - 1)) === 0 ? s.slice(0, -1) + A64[i | 1] : null;
   };
+  // Sealed from a FIXED ephemeral seed. Which of the spellings below exist depends on the bytes — a
+  // string with no `-` or `_` has no standard-alphabet twin — and `sealed` above is new every run, so
+  // the NUMBER of cases moved between runs (420, then 421) and PROOFS.md's count with it: a gate that
+  // goes stale at random. These bytes are the same every time.
+  const spelt = wasm.call('seal_request', { recipient_leaf: leafDer, sender_pkcs8: hostPkcs8, form: 'chain', sender_chain: [leafDer, rootDer], method: 'tools/call', params: { name: 'send_message' }, msg_id: 'p-spelt', ts: at(now), ephemeral_seed: b64url(seed('parity/spelt')) });
   // The other spellings a forgiving reader takes: padding, the standard alphabet, whitespace. Both
   // ports forgave these in an envelope, consistently — and an envelope member has ONE spelling (§13.1).
   const pad = (s) => s + '='.repeat((4 - (s.length % 4)) % 4);
   const std = (s) => s.replace(/-/g, '+').replace(/_/g, '/');
   for (const member of ['protected', 'enc', 'ct', 'sig']) {
-    if (pad(sealed[member]) !== sealed[member]) add(`decide on a real envelope whose ${member} is padded`, 'decide', { now, envelope: { ...sealed, [member]: pad(sealed[member]) }, node });
-    if (std(sealed[member]) !== sealed[member]) add(`decide on a real envelope whose ${member} uses the standard alphabet`, 'decide', { now, envelope: { ...sealed, [member]: std(sealed[member]) }, node });
-    add(`decide on a real envelope whose ${member} has a line break in it`, 'decide', { now, envelope: { ...sealed, [member]: `${sealed[member].slice(0, 8)}\n${sealed[member].slice(8)}` }, node });
-    add(`decide on a real envelope whose ${member} has a space in it`, 'decide', { now, envelope: { ...sealed, [member]: `${sealed[member].slice(0, 8)} ${sealed[member].slice(8)}` }, node });
+    if (pad(spelt[member]) !== spelt[member]) add(`decide on a real envelope whose ${member} is padded`, 'decide', { now, envelope: { ...spelt, [member]: pad(spelt[member]) }, node });
+    if (std(spelt[member]) !== spelt[member]) add(`decide on a real envelope whose ${member} uses the standard alphabet`, 'decide', { now, envelope: { ...spelt, [member]: std(spelt[member]) }, node });
+    add(`decide on a real envelope whose ${member} has a line break in it`, 'decide', { now, envelope: { ...spelt, [member]: `${spelt[member].slice(0, 8)}\n${spelt[member].slice(8)}` }, node });
+    add(`decide on a real envelope whose ${member} has a space in it`, 'decide', { now, envelope: { ...spelt, [member]: `${spelt[member].slice(0, 8)} ${spelt[member].slice(8)}` }, node });
   }
   add('open_result on a real answer whose enc is padded', 'open_result', open({ ...chainForm, enc: pad(chainForm.enc) }));
   add('open_result on a real answer whose sig has a line break in it', 'open_result', open({ ...chainForm, sig: `${chainForm.sig.slice(0, 8)}\n${chainForm.sig.slice(8)}` }));
   for (const member of ['protected', 'enc', 'ct', 'sig']) {
-    const again = respell(sealed[member]);
-    if (again) add(`decide on a real envelope whose ${member} is spelled with its spare bits set`, 'decide', { now, envelope: { ...sealed, [member]: again }, node });
+    const again = respell(spelt[member]);
+    if (again) add(`decide on a real envelope whose ${member} is spelled with its spare bits set`, 'decide', { now, envelope: { ...spelt, [member]: again }, node });
   }
 
   // B3 — the node's OWN state, unreadable. The seed throws; so does the core.
