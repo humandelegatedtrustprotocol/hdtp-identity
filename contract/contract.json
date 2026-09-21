@@ -1,0 +1,1292 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:pact:identity:contract",
+  "title": "pact-identity: the library boundary",
+  "description": "Every function a port of pact-identity presents, as `call(name, args) -> answer`: what it takes, what it answers, and which error codes it can fail with. This file is the source; CONTRACT.md is rendered from it and js/parity.mjs holds both ports to it.",
+  "spec": "2.1.3",
+  "sections": {
+    "build": "The build",
+    "keys": "Keys",
+    "certificates": "Certificates",
+    "csr": "Certificate signing requests",
+    "cards": "Cards",
+    "envelopes": "Envelopes",
+    "vault": "Vault"
+  },
+  "failure": {
+    "type": "object",
+    "properties": {
+      "error": { "$ref": "#/$defs/ErrorCode" },
+      "why": {
+        "type": "string",
+        "description": "One line, in this library's own words — never another library's error text, which a second port could not reproduce."
+      }
+    },
+    "required": ["error", "why"],
+    "additionalProperties": false
+  },
+  "$defs": {
+    "ErrorCode": {
+      "enum": ["bad_request", "parse", "unsupported", "envelope_invalid", "vault", "key", "internal"],
+      "description": "Why a call failed. `bad_request`: an argument is missing or unusable as asked. `parse`: bytes that are there and will not read. `unsupported`: an algorithm or a function this library does not have. `envelope_invalid`: SPEC §12's code, for an envelope that does not open or prove itself. `vault`: the vault refused. `key` and `internal` are declared so a caller's switch has a name for them; no input known reaches either."
+    },
+    "B64url": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]*$",
+      "description": "Bytes, as base64url without padding. An ANSWER always spells them this way. An ARGUMENT is read forgivingly about padding and alphabet (§0); the members of an envelope that travelled are not (§5)."
+    },
+    "Alg": { "enum": ["ed25519", "p256"], "description": "A key algorithm." },
+    "Fingerprint": {
+      "type": "string",
+      "pattern": "^sha256:[A-Za-z0-9_-]{43}$",
+      "description": "`\"sha256:\" + b64url(SHA-256(SPKI))`."
+    },
+    "Instant": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      "description": "An RFC 3339 UTC instant with second precision, as every answer writes one."
+    },
+    "InstantIn": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?[Zz]$",
+      "description": "An RFC 3339 UTC instant as an argument: a fraction of a second is allowed and DROPPED, because the boundary is whole seconds."
+    },
+    "Pkcs8": { "$ref": "#/$defs/B64url", "description": "A private key: PKCS #8 DER." },
+    "Spki": { "$ref": "#/$defs/B64url", "description": "A public key: SubjectPublicKeyInfo DER." },
+    "CertDer": { "$ref": "#/$defs/B64url", "description": "One X.509 certificate, DER." },
+    "Chain": { "type": "array", "items": { "$ref": "#/$defs/CertDer" }, "description": "`[leaf, root]`." },
+    "Tbs": { "$ref": "#/$defs/B64url", "description": "A TBSCertificate, DER: the bytes an external signer signs." },
+    "SigAlg": { "$ref": "#/$defs/B64url", "description": "An AlgorithmIdentifier, DER — the TBS's own third field." },
+    "Csr": { "$ref": "#/$defs/B64url", "description": "A PKCS #10 CertificationRequest, DER." },
+    "Serial": {
+      "$ref": "#/$defs/B64url",
+      "description": "A certificate serial number, 8 to 20 bytes. Absent, the core draws 8 random bytes."
+    },
+    "Seed32": { "$ref": "#/$defs/B64url", "description": "Exactly 32 bytes." },
+    "Suite": { "enum": ["PACT-SEAL-P256", "PACT-SEAL-X25519"], "description": "An HPKE suite (§5)." },
+    "Form": {
+      "enum": ["chain", "leaf"],
+      "description": "How the sender proves itself inside the plaintext: its whole chain, or the fingerprint of a leaf the recipient already holds."
+    },
+    "Key": {
+      "type": "object",
+      "properties": {
+        "alg": { "$ref": "#/$defs/Alg" },
+        "pkcs8": { "$ref": "#/$defs/Pkcs8" },
+        "spki": { "$ref": "#/$defs/Spki" },
+        "fingerprint": { "$ref": "#/$defs/Fingerprint" }
+      },
+      "required": ["alg", "pkcs8", "spki", "fingerprint"],
+      "additionalProperties": false
+    },
+    "Envelope": {
+      "type": "object",
+      "properties": {
+        "protected": { "$ref": "#/$defs/B64url" },
+        "enc": { "$ref": "#/$defs/B64url" },
+        "ct": { "$ref": "#/$defs/B64url" },
+        "sig": { "$ref": "#/$defs/B64url" }
+      },
+      "required": ["protected", "enc", "ct", "sig"],
+      "additionalProperties": false,
+      "description": "A sealed envelope as this library WRITES one (SPEC §13.1)."
+    },
+    "ArrivedEnvelope": {
+      "type": "object",
+      "properties": {
+        "protected": { "type": "string" },
+        "enc": { "type": "string" },
+        "ct": { "type": "string" },
+        "sig": { "type": "string" }
+      },
+      "required": ["protected", "enc", "ct", "sig"],
+      "additionalProperties": false,
+      "description": "An envelope as it ARRIVED: four strings, which may be anything. Judging their spelling is the function's work, not the caller's."
+    },
+    "Certificate": {
+      "type": "object",
+      "properties": {
+        "kind": { "enum": ["root", "leaf", "other"] },
+        "subject": { "type": "string" },
+        "issuer": { "type": "string" },
+        "serial": { "$ref": "#/$defs/B64url" },
+        "not_before": { "$ref": "#/$defs/Instant" },
+        "not_after": { "$ref": "#/$defs/Instant" },
+        "alg": { "$ref": "#/$defs/Alg" },
+        "spki": { "$ref": "#/$defs/Spki" },
+        "fingerprint": { "$ref": "#/$defs/Fingerprint" },
+        "key_id": { "$ref": "#/$defs/B64url" },
+        "ski": { "anyOf": [{ "$ref": "#/$defs/B64url" }, { "type": "null" }] },
+        "aki": { "anyOf": [{ "$ref": "#/$defs/B64url" }, { "type": "null" }] },
+        "ca": { "type": "boolean" },
+        "path_len": { "type": ["integer", "null"] },
+        "key_usage": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0, "maximum": 8 },
+          "description": "The bit positions that are set."
+        },
+        "eku": { "type": "array", "items": { "type": "string" }, "description": "OIDs, dotted." },
+        "uris": { "type": "array", "items": { "type": "string" } },
+        "dns": { "type": "array", "items": { "type": "string" } },
+        "sig_alg": { "type": "string", "description": "The signature algorithm's OID, dotted." },
+        "extensions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": { "id": { "type": "string" }, "critical": { "type": "boolean" } },
+            "required": ["id", "critical"],
+            "additionalProperties": false
+          },
+          "description": "Every extension in the order the certificate carries them."
+        },
+        "profile_error": { "type": ["string", "null"] },
+        "bytes": { "type": "integer", "minimum": 0 }
+      },
+      "required": [
+        "kind",
+        "subject",
+        "issuer",
+        "serial",
+        "not_before",
+        "not_after",
+        "alg",
+        "spki",
+        "fingerprint",
+        "key_id",
+        "ski",
+        "aki",
+        "ca",
+        "path_len",
+        "key_usage",
+        "eku",
+        "uris",
+        "dns",
+        "sig_alg",
+        "extensions",
+        "profile_error",
+        "bytes"
+      ],
+      "additionalProperties": false,
+      "description": "A certificate read back. `profile_error` judges it as a root when it is self-issued and a CA, otherwise as a leaf."
+    },
+    "ChainAccepted": {
+      "type": "object",
+      "properties": {
+        "ok": { "const": true },
+        "leaf_spki": { "$ref": "#/$defs/Spki" },
+        "leaf_fingerprint": { "$ref": "#/$defs/Fingerprint" },
+        "root_fingerprint": { "$ref": "#/$defs/Fingerprint" },
+        "endpoint": { "type": "string" },
+        "not_before": { "$ref": "#/$defs/Instant" },
+        "not_after": { "$ref": "#/$defs/Instant" },
+        "alg": { "$ref": "#/$defs/Alg" }
+      },
+      "required": ["ok", "leaf_spki", "leaf_fingerprint", "root_fingerprint", "endpoint", "not_before", "not_after", "alg"],
+      "additionalProperties": false
+    },
+    "ChainRefused": {
+      "type": "object",
+      "properties": {
+        "ok": { "const": false },
+        "rule": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "reason": { "type": "string" }
+      },
+      "required": ["ok", "rule", "reason"],
+      "additionalProperties": false
+    },
+    "Pin": {
+      "type": "object",
+      "properties": {
+        "root": { "type": "string" },
+        "endpoint": { "type": "string" },
+        "leaf": { "type": "string", "description": "The pinned leaf, base64url DER." },
+        "state": { "enum": ["active", "pending_out", "blocked"] },
+        "leaf_fingerprint": {
+          "type": "string",
+          "description": "Which leaf this pin holds (§5). Optional: with it, only the pin that matched is parsed."
+        }
+      },
+      "required": ["root", "endpoint", "leaf"],
+      "additionalProperties": false,
+      "description": "A contact as the host holds it. `state` absent is `active`."
+    },
+    "HeldKey": {
+      "type": "object",
+      "properties": {
+        "kid": { "$ref": "#/$defs/Fingerprint" },
+        "leaf": { "$ref": "#/$defs/CertDer" },
+        "pkcs8": { "$ref": "#/$defs/Pkcs8" },
+        "current": { "type": "boolean" }
+      },
+      "required": ["kid", "leaf", "pkcs8"],
+      "additionalProperties": false
+    },
+    "Tombstone": {
+      "type": "object",
+      "properties": { "root": { "type": "string" }, "leaf": { "type": "string" }, "at": { "type": "string" } },
+      "required": ["root", "leaf", "at"],
+      "additionalProperties": false
+    },
+    "FormerEndpoint": {
+      "type": "object",
+      "properties": { "root": { "type": "string" }, "endpoint": { "type": "string" }, "at": { "type": "string" } },
+      "required": ["root", "endpoint", "at"],
+      "additionalProperties": false
+    },
+    "NodeState": {
+      "type": "object",
+      "properties": {
+        "endpoint": { "type": "string" },
+        "accept_new_hosts": { "enum": ["auto", "ask"] },
+        "chain": { "$ref": "#/$defs/Chain" },
+        "keys": { "type": "array", "items": { "$ref": "#/$defs/HeldKey" } },
+        "former": { "type": "array", "items": { "type": "string" } },
+        "sibling_kids": { "type": "array", "items": { "type": "string" } },
+        "pins": { "type": "array", "items": { "$ref": "#/$defs/Pin" } },
+        "tombstones": { "type": "array", "items": { "$ref": "#/$defs/Tombstone" } },
+        "former_endpoints": { "type": "array", "items": { "$ref": "#/$defs/FormerEndpoint" } },
+        "seen": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["endpoint"],
+      "additionalProperties": false,
+      "description": "What the host knows, handed to `decide` whole. Every list absent is empty; `accept_new_hosts` absent is `auto`."
+    },
+    "Decision": {
+      "description": "What `decide` decided. `code` says which shape this is.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "code": { "const": "ok" },
+            "tier": { "enum": ["contact", "pending", "guest", "pending_new_address"] },
+            "root": { "$ref": "#/$defs/Fingerprint" },
+            "endpoint": { "type": "string" },
+            "method": { "enum": ["tools/call", "tools/list"] },
+            "tool": { "type": ["string", "null"] },
+            "params": true,
+            "form": { "$ref": "#/$defs/Form" },
+            "leaf": { "$ref": "#/$defs/CertDer" },
+            "why": { "type": "string" },
+            "address_claim": { "anyOf": [{ "$ref": "#/$defs/Fingerprint" }, { "type": "null" }] },
+            "forced": { "const": "tombstone" },
+            "decision": { "const": "ask" }
+          },
+          "required": ["code", "tier", "root", "endpoint", "method", "tool", "params", "form", "leaf"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": { "code": { "const": "ok" }, "replayed": { "const": true } },
+          "required": ["code", "replayed"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "code": { "const": "envelope_invalid" },
+            "why": { "type": "string" },
+            "root": { "$ref": "#/$defs/Fingerprint" },
+            "leaf": { "$ref": "#/$defs/CertDer" }
+          },
+          "required": ["code", "why"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": { "code": { "const": "chain_required" } },
+          "required": ["code"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "code": { "const": "certificate_renewed" },
+            "data": {
+              "type": "object",
+              "properties": { "chain": { "$ref": "#/$defs/Chain" } },
+              "required": ["chain"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["code", "data"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": { "code": { "const": "pending_approval" } },
+          "required": ["code"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "Effect": {
+      "description": "Something the host must apply. `decide` changes nothing itself.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": { "op": { "const": "seen" }, "msg_id": { "type": "string" } },
+          "required": ["op", "msg_id"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": { "const": "pin_update" },
+            "root": { "$ref": "#/$defs/Fingerprint" },
+            "endpoint": { "type": "string" },
+            "leaf": { "$ref": "#/$defs/CertDer" }
+          },
+          "required": ["op", "root", "endpoint", "leaf"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": { "const": "former_endpoint" },
+            "root": { "$ref": "#/$defs/Fingerprint" },
+            "endpoint": { "type": "string" },
+            "at": { "$ref": "#/$defs/Instant" }
+          },
+          "required": ["op", "root", "endpoint", "at"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": { "const": "event" },
+            "event": { "enum": ["new_address", "renewal"] },
+            "root": { "$ref": "#/$defs/Fingerprint" },
+            "endpoint": { "type": "string" }
+          },
+          "required": ["op", "event", "root"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": { "const": "pending" },
+            "root": { "$ref": "#/$defs/Fingerprint" },
+            "endpoint": { "type": "string" },
+            "leaf": { "$ref": "#/$defs/CertDer" },
+            "why": { "enum": ["ask", "returned after removal"] }
+          },
+          "required": ["op", "root", "endpoint", "leaf", "why"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "Kdf": {
+      "type": "object",
+      "properties": {
+        "name": { "const": "argon2id" },
+        "m_kib": { "type": "integer", "minimum": 8192, "maximum": 2097152 },
+        "t": { "type": "integer", "minimum": 1, "maximum": 16 },
+        "p": { "type": "integer", "minimum": 1, "maximum": 16 }
+      },
+      "required": ["name", "m_kib", "t", "p"],
+      "additionalProperties": false,
+      "description": "The key derivation, as a vault DOCUMENT carries it: all four members, each inside its range. The ranges are checked at both ends on both paths, by one parser — an unbounded reader hands an attacker's file a 256 GiB allocation, and an unbounded writer seals a person's root behind a KDF a laptop brute-forces. A value that does not fit in 32 bits is out of range, never truncated."
+    },
+    "KdfArgs": {
+      "type": "object",
+      "properties": {
+        "name": { "const": "argon2id" },
+        "m_kib": { "type": "integer", "minimum": 8192, "maximum": 2097152 },
+        "t": { "type": "integer", "minimum": 1, "maximum": 16 },
+        "p": { "type": "integer", "minimum": 1, "maximum": 16 }
+      },
+      "required": [],
+      "additionalProperties": false,
+      "description": "The same, as an ARGUMENT to `vault_seal`: every member may be left out and takes the default (64 MiB, t 3, p 1), and what is given is held to the same range as a document's."
+    },
+    "VaultDocument": {
+      "type": "object",
+      "properties": {
+        "format": { "const": "pact-vault/1" },
+        "kdf": { "$ref": "#/$defs/Kdf" },
+        "salt": { "$ref": "#/$defs/B64url" },
+        "nonce": { "$ref": "#/$defs/B64url" },
+        "ct": { "$ref": "#/$defs/B64url" }
+      },
+      "required": ["format", "kdf", "salt", "nonce", "ct"],
+      "additionalProperties": false
+    },
+    "LedgerEntry": {
+      "type": "object",
+      "properties": {
+        "root": { "$ref": "#/$defs/Fingerprint" },
+        "leaf": { "$ref": "#/$defs/CertDer" },
+        "endpoint": { "type": "string" },
+        "not_before": { "$ref": "#/$defs/Instant" },
+        "not_after": { "$ref": "#/$defs/Instant" },
+        "issued_at": { "$ref": "#/$defs/Instant" },
+        "origin": { "type": "string" }
+      },
+      "required": ["root", "leaf", "endpoint", "not_before", "not_after", "issued_at"],
+      "additionalProperties": false
+    }
+  },
+  "methods": {
+    "version": {
+      "section": "build",
+      "params": { "type": "object", "properties": {}, "required": [], "additionalProperties": false },
+      "result": {
+        "type": "object",
+        "properties": { "spec": { "type": "string" }, "crate": { "type": "string" }, "module": { "type": "string" } },
+        "required": ["spec"],
+        "additionalProperties": false
+      },
+      "errors": [],
+      "notes": "The build, not a rule: `spec` is the version of `pact-protocol/SPEC.md` the port implements and is the same everywhere; the other member names the port's own release, so the answers differ and nothing compares them."
+    },
+    "generate_key": {
+      "section": "keys",
+      "params": {
+        "type": "object",
+        "properties": { "alg": { "$ref": "#/$defs/Alg" } },
+        "required": ["alg"],
+        "additionalProperties": false
+      },
+      "result": { "$ref": "#/$defs/Key" },
+      "errors": ["bad_request", "unsupported"]
+    },
+    "key_from_seed": {
+      "section": "keys",
+      "params": {
+        "type": "object",
+        "properties": { "alg": { "$ref": "#/$defs/Alg" }, "seed": { "$ref": "#/$defs/Seed32" } },
+        "required": ["alg", "seed"],
+        "additionalProperties": false
+      },
+      "result": { "$ref": "#/$defs/Key" },
+      "errors": ["bad_request", "unsupported"],
+      "notes": "An Ed25519 seed is used directly; a P-256 scalar is the seed mod n, with 0 → 1 (the seed library's `keys.mjs`). Written for the vectors, and production API since SPEC §2.1: it is how a wallet turns a derived seed into its root."
+    },
+    "prf_salt": {
+      "section": "keys",
+      "params": { "type": "object", "properties": {}, "required": [], "additionalProperties": false },
+      "result": {
+        "type": "object",
+        "properties": {
+          "salt": { "$ref": "#/$defs/Seed32" },
+          "infos": { "type": "array", "items": { "type": "string" }, "minItems": 3, "maxItems": 3 }
+        },
+        "required": ["salt", "infos"],
+        "additionalProperties": false
+      },
+      "errors": [],
+      "notes": "SPEC §2.1's fixed PRF input, `SHA-256(\"pact/vault/1\")`, and the three `info` strings. A call rather than a constant a caller copies, so the bytes live in one place and the vectors prove them."
+    },
+    "derive_seed": {
+      "section": "keys",
+      "params": {
+        "type": "object",
+        "properties": { "prf": { "$ref": "#/$defs/Seed32" }, "info": { "type": "string" } },
+        "required": ["prf", "info"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": { "seed": { "$ref": "#/$defs/Seed32" } },
+        "required": ["seed"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "parse"],
+      "notes": "`HKDF-SHA256(ikm = prf, salt = \"\", info, L = 32)`. **Refuses an `info` outside the three, and a `prf` that is not 32 bytes.** Both refusals are the point rather than hygiene: a mistyped domain separator would otherwise return 32 perfectly good bytes and silently derive an identity belonging to nobody, which is the one failure the derived-root design exists to prevent."
+    },
+    "public_key": {
+      "section": "keys",
+      "params": {
+        "type": "object",
+        "properties": { "pkcs8": { "$ref": "#/$defs/Pkcs8" } },
+        "required": ["pkcs8"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "alg": { "$ref": "#/$defs/Alg" },
+          "spki": { "$ref": "#/$defs/Spki" },
+          "fingerprint": { "$ref": "#/$defs/Fingerprint" }
+        },
+        "required": ["alg", "spki", "fingerprint"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "parse", "unsupported"]
+    },
+    "key_info": {
+      "section": "keys",
+      "params": {
+        "type": "object",
+        "properties": { "spki": { "$ref": "#/$defs/Spki" } },
+        "required": ["spki"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "alg": { "$ref": "#/$defs/Alg" },
+          "fingerprint": { "$ref": "#/$defs/Fingerprint" },
+          "key_id": { "$ref": "#/$defs/B64url" }
+        },
+        "required": ["alg", "fingerprint", "key_id"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "parse", "unsupported"],
+      "notes": "`key_id` is the 32 raw bytes of the fingerprint's hash."
+    },
+    "sign": {
+      "section": "keys",
+      "params": {
+        "type": "object",
+        "properties": { "pkcs8": { "$ref": "#/$defs/Pkcs8" }, "data": { "$ref": "#/$defs/B64url" } },
+        "required": ["pkcs8", "data"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": { "sig": { "$ref": "#/$defs/B64url" } },
+        "required": ["sig"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "parse", "unsupported"],
+      "notes": "Ed25519 pure, or ECDSA P-256/SHA-256 in ASN.1 DER, **always the low-S twin** (`s ≤ n/2`, SPEC §14.1): a library returns either twin of an ECDSA signature, and a port returns one."
+    },
+    "verify": {
+      "section": "keys",
+      "params": {
+        "type": "object",
+        "properties": {
+          "spki": { "$ref": "#/$defs/Spki" },
+          "data": { "$ref": "#/$defs/B64url" },
+          "sig": { "$ref": "#/$defs/B64url" }
+        },
+        "required": ["spki", "data", "sig"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": { "valid": { "type": "boolean" } },
+        "required": ["valid"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "parse", "unsupported"]
+    },
+    "build_root": {
+      "section": "certificates",
+      "params": {
+        "type": "object",
+        "properties": {
+          "cn": { "type": "string" },
+          "pkcs8": { "$ref": "#/$defs/Pkcs8" },
+          "not_before": { "$ref": "#/$defs/InstantIn" },
+          "serial": { "$ref": "#/$defs/Serial" }
+        },
+        "required": ["cn", "pkcs8", "not_before"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": { "der": { "$ref": "#/$defs/CertDer" }, "fingerprint": { "$ref": "#/$defs/Fingerprint" } },
+        "required": ["der", "fingerprint"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "parse"]
+    },
+    "root_tbs": {
+      "section": "certificates",
+      "params": {
+        "type": "object",
+        "properties": {
+          "cn": { "type": "string" },
+          "spki": { "$ref": "#/$defs/Spki" },
+          "not_before": { "$ref": "#/$defs/InstantIn" },
+          "serial": { "$ref": "#/$defs/Serial" }
+        },
+        "required": ["cn", "spki", "not_before"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": { "tbs": { "$ref": "#/$defs/Tbs" }, "sig_alg": { "$ref": "#/$defs/SigAlg" } },
+        "required": ["tbs", "sig_alg"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "parse"],
+      "notes": "The external-signing seam: a root in a passkey or a security key signs `tbs` in the host, and `assemble_root` builds the certificate from the signature handed back."
+    },
+    "assemble_root": {
+      "section": "certificates",
+      "params": {
+        "type": "object",
+        "properties": {
+          "tbs": { "$ref": "#/$defs/Tbs" },
+          "sig": { "$ref": "#/$defs/B64url" },
+          "sig_alg": { "$ref": "#/$defs/SigAlg" }
+        },
+        "required": ["tbs", "sig"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": { "der": { "$ref": "#/$defs/CertDer" } },
+        "required": ["der"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "parse"],
+      "notes": "`sig_alg` is read from the TBS; when one is handed back it must be equal, so the algorithm outside a certificate can never differ from the one inside. **An ECDSA `sig` is normalised to its low-S twin** before assembling: what arrives at the seam was made by a token or a KMS that has never heard of §14.1, and swapping a signature for its twin needs no key. Anything that is not an ECDSA value passes through untouched."
+    },
+    "build_leaf": {
+      "section": "certificates",
+      "params": {
+        "type": "object",
+        "properties": {
+          "cn": { "type": "string" },
+          "root_cn": { "type": "string" },
+          "host_spki": { "$ref": "#/$defs/Spki" },
+          "endpoint": { "type": "string" },
+          "dns_name": { "type": "string" },
+          "not_before": { "$ref": "#/$defs/InstantIn" },
+          "not_after": { "$ref": "#/$defs/InstantIn" },
+          "serial": { "$ref": "#/$defs/Serial" },
+          "root_pkcs8": { "$ref": "#/$defs/Pkcs8" }
+        },
+        "required": ["cn", "root_cn", "host_spki", "endpoint", "not_before", "not_after", "root_pkcs8"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": { "der": { "$ref": "#/$defs/CertDer" } },
+        "required": ["der"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "parse"],
+      "notes": "Refuses a validity over 398 days and an endpoint that is not an https URL in normal form."
+    },
+    "leaf_tbs": {
+      "section": "certificates",
+      "params": {
+        "type": "object",
+        "properties": {
+          "cn": { "type": "string" },
+          "root_cn": { "type": "string" },
+          "host_spki": { "$ref": "#/$defs/Spki" },
+          "endpoint": { "type": "string" },
+          "dns_name": { "type": "string" },
+          "not_before": { "$ref": "#/$defs/InstantIn" },
+          "not_after": { "$ref": "#/$defs/InstantIn" },
+          "serial": { "$ref": "#/$defs/Serial" },
+          "root_spki": { "$ref": "#/$defs/Spki" }
+        },
+        "required": ["cn", "root_cn", "host_spki", "endpoint", "not_before", "not_after", "root_spki"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": { "tbs": { "$ref": "#/$defs/Tbs" }, "sig_alg": { "$ref": "#/$defs/SigAlg" } },
+        "required": ["tbs", "sig_alg"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "parse"],
+      "notes": "The same seam for leaves: `build_leaf` with the root's public key in place of its private one."
+    },
+    "assemble_leaf": {
+      "section": "certificates",
+      "params": {
+        "type": "object",
+        "properties": {
+          "tbs": { "$ref": "#/$defs/Tbs" },
+          "sig": { "$ref": "#/$defs/B64url" },
+          "sig_alg": { "$ref": "#/$defs/SigAlg" }
+        },
+        "required": ["tbs", "sig"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": { "der": { "$ref": "#/$defs/CertDer" } },
+        "required": ["der"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "parse"],
+      "notes": "As `assemble_root`."
+    },
+    "parse_certificate": {
+      "section": "certificates",
+      "params": {
+        "type": "object",
+        "properties": { "der": { "$ref": "#/$defs/CertDer" } },
+        "required": ["der"],
+        "additionalProperties": false
+      },
+      "result": { "$ref": "#/$defs/Certificate" },
+      "errors": ["bad_request", "parse"],
+      "notes": "Parsing itself refuses, with a `parse` error, what DER has one encoding for and the certificate spells another way: the AlgorithmIdentifier inside the TBS differing from the one outside (`signature algorithm inside and outside differ`), a BOOLEAN that is not `0xFF` or is an explicit FALSE, a non-minimal INTEGER, an OBJECT IDENTIFIER with a padded subidentifier, a `keyUsage` BIT STRING whose unused bits are set or whose trailing zero bits are not removed, a validity of other than two times, an extension of other than two or three parts or whose OCTET STRING holds more than one TLV, a P-256 key that is not the uncompressed point. Every one of these is a scenario in `vectors/intrude.mjs`, which the seed and both ports answer alike — the seed's strictness and the ports' are one rule, proven rather than asserted."
+    },
+    "profile_error": {
+      "section": "certificates",
+      "params": {
+        "type": "object",
+        "properties": {
+          "der": { "$ref": "#/$defs/CertDer" },
+          "kind": {
+            "type": "string",
+            "description": "`root` or `leaf`. **Declared, not enforced**: both ports compare it with `\"root\"` and judge anything else as a leaf, so a third value is read as `leaf` rather than refused. Narrowing it is a change to the Rust core, which costs a re-pin, so it waits for a change that pays for one."
+          }
+        },
+        "required": ["der", "kind"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": { "error": { "type": ["string", "null"] } },
+        "required": ["error"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "parse"],
+      "notes": "The exact strings of the seed's `x509.mjs profileError`; `null` when the certificate is inside the profile. This is an ANSWER whose one member happens to be called `error`: a failure of the call carries `why` beside it (§0), and this never does."
+    },
+    "validate_chain": {
+      "section": "certificates",
+      "params": {
+        "type": "object",
+        "properties": {
+          "chain": { "$ref": "#/$defs/Chain" },
+          "now": { "$ref": "#/$defs/InstantIn" },
+          "expected_root": { "type": "string" },
+          "expected_endpoint": { "type": "string" }
+        },
+        "required": ["chain", "now"],
+        "additionalProperties": false
+      },
+      "result": { "oneOf": [{ "$ref": "#/$defs/ChainAccepted" }, { "$ref": "#/$defs/ChainRefused" }] },
+      "errors": ["bad_request", "parse"],
+      "notes": "SPEC §14.2's rules in order. A refusal is an answer, not a failure of the call: `rule` says which one refused."
+    },
+    "compare_leaves": {
+      "section": "certificates",
+      "params": {
+        "type": "object",
+        "properties": { "pinned": { "$ref": "#/$defs/CertDer" }, "presented": { "$ref": "#/$defs/CertDer" } },
+        "required": ["pinned", "presented"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": { "order": { "enum": ["same", "newer", "superseded", "conflict"] } },
+        "required": ["order"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "parse"]
+    },
+    "is_normal_https": {
+      "section": "certificates",
+      "params": {
+        "type": "object",
+        "properties": { "url": { "type": "string" } },
+        "required": ["url"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": { "normal": { "type": "boolean" } },
+        "required": ["normal"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request"]
+    },
+    "address_guard": {
+      "section": "certificates",
+      "params": {
+        "type": "object",
+        "properties": { "endpoint": { "type": "string" }, "self_endpoint": { "type": "string" }, "guest": { "type": "boolean" } },
+        "required": ["endpoint"],
+        "additionalProperties": false
+      },
+      "result": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": { "ok": { "const": true } },
+            "required": ["ok"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": { "ok": { "const": false }, "why": { "type": "string" } },
+            "required": ["ok", "why"],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "errors": ["bad_request"],
+      "notes": "Refuses a host that is a loopback, link-local, private, unspecified or CGNAT literal (`localhost`, `*.localhost`, `127/8`, `10/8`, `172.16/12`, `192.168/16`, `169.254/16`, `100.64/10`, `0.0.0.0`, `::1`, `::`, `fc00::/7`, `fe80::/10`, deprecated site-local `fec0::/10`, NAT64's local-use `64:ff9b:1::/48`), an IPv6 literal that EMBEDS such an IPv4 address — IPv4-mapped, IPv4-compatible `::/96`, NAT64 `64:ff9b::/96`, 6to4 `2002::/16` — because a translator dials the address inside (`[64:ff9b::7f00:1]` is loopback on a NAT64 network, and a literal has no name to resolve, so this is the whole guard), and, for a guest, an endpoint equal to `self_endpoint`. DNS resolution is the host's; `ip_is_private` is exposed so the host applies the same predicate to what it resolves."
+    },
+    "ip_is_private": {
+      "section": "certificates",
+      "params": {
+        "type": "object",
+        "properties": { "ip": { "type": "string" } },
+        "required": ["ip"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": { "private": { "type": "boolean" } },
+        "required": ["private"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request"]
+    },
+    "csr_new": {
+      "section": "csr",
+      "params": {
+        "type": "object",
+        "properties": {
+          "cn": { "type": "string" },
+          "host_pkcs8": { "$ref": "#/$defs/Pkcs8" },
+          "endpoint": { "type": "string" },
+          "dns_name": { "type": "string" }
+        },
+        "required": ["cn", "host_pkcs8", "endpoint"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": { "der": { "$ref": "#/$defs/Csr" } },
+        "required": ["der"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "parse"]
+    },
+    "csr_check": {
+      "section": "csr",
+      "params": {
+        "type": "object",
+        "properties": { "der": { "$ref": "#/$defs/Csr" }, "root_spkis": { "type": "array", "items": { "$ref": "#/$defs/Spki" } } },
+        "required": ["der"],
+        "additionalProperties": false
+      },
+      "result": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "ok": { "const": true },
+              "cn": { "type": "string" },
+              "spki": { "$ref": "#/$defs/Spki" },
+              "fingerprint": { "$ref": "#/$defs/Fingerprint" },
+              "alg": { "$ref": "#/$defs/Alg" },
+              "endpoint": { "type": "string" },
+              "dns_name": { "type": ["string", "null"] }
+            },
+            "required": ["ok", "cn", "spki", "fingerprint", "alg", "endpoint", "dns_name"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": { "ok": { "const": false }, "why": { "type": "string" } },
+            "required": ["ok", "why"],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "errors": ["bad_request", "parse"],
+      "notes": "Refuses a bad signature (no proof of possession), a key equal to any root in `root_spkis` (the root-key refusal), an endpoint that is not normal https, an endpoint the address guard refuses. `root_spkis` absent is no roots; present and unreadable is an error, never \"no roots to refuse against\"."
+    },
+    "issue_from_csr": {
+      "section": "csr",
+      "params": {
+        "type": "object",
+        "properties": {
+          "csr": { "$ref": "#/$defs/Csr" },
+          "root_cn": { "type": "string" },
+          "root_spkis": { "type": "array", "items": { "$ref": "#/$defs/Spki" } },
+          "now": { "$ref": "#/$defs/InstantIn" },
+          "previous_not_before": { "$ref": "#/$defs/InstantIn" },
+          "valid_days": { "type": "integer", "minimum": 1, "maximum": 398 },
+          "root_pkcs8": { "$ref": "#/$defs/Pkcs8" }
+        },
+        "required": ["csr", "root_cn", "root_pkcs8", "now"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "der": { "$ref": "#/$defs/CertDer" },
+          "endpoint": { "type": "string" },
+          "not_before": { "$ref": "#/$defs/Instant" },
+          "not_after": { "$ref": "#/$defs/Instant" }
+        },
+        "required": ["der", "endpoint", "not_before", "not_after"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "parse"],
+      "notes": "`csr_check` first — with the issuing root added to `root_spkis` — then `build_leaf` under the monotonic rule. `valid_days` absent is 365; an explicit 0 is refused."
+    },
+    "issue_tbs_from_csr": {
+      "section": "csr",
+      "params": {
+        "type": "object",
+        "properties": {
+          "csr": { "$ref": "#/$defs/Csr" },
+          "root_cn": { "type": "string" },
+          "root_spkis": { "type": "array", "items": { "$ref": "#/$defs/Spki" } },
+          "now": { "$ref": "#/$defs/InstantIn" },
+          "previous_not_before": { "$ref": "#/$defs/InstantIn" },
+          "valid_days": { "type": "integer", "minimum": 1, "maximum": 398 },
+          "root_spki": { "$ref": "#/$defs/Spki" }
+        },
+        "required": ["csr", "root_cn", "root_spki", "now"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "tbs": { "$ref": "#/$defs/Tbs" },
+          "sig_alg": { "$ref": "#/$defs/SigAlg" },
+          "endpoint": { "type": "string" },
+          "not_before": { "$ref": "#/$defs/Instant" },
+          "not_after": { "$ref": "#/$defs/Instant" }
+        },
+        "required": ["tbs", "sig_alg", "endpoint", "not_before", "not_after"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "parse"],
+      "notes": "As `issue_from_csr`, for the seam: assembled with `assemble_leaf`."
+    },
+    "card_encode": {
+      "section": "cards",
+      "params": {
+        "type": "object",
+        "properties": {
+          "fn": { "type": "string" },
+          "cert": { "$ref": "#/$defs/CertDer" },
+          "seal": {
+            "type": "string",
+            "description": "`none`, `optional` or `required` (SPEC §3). **Declared, not enforced**: a non-empty value is written into `X-PACT-SEAL` as given, so a fourth word makes a card whose policy no reader implements. Narrowing it is a change to the Rust core, which costs a re-pin, so it waits for a change that pays for one. What IS refused is a control character, in this member and every other one a caller supplies."
+          },
+          "extra": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Whole lines, written after the certificate."
+          }
+        },
+        "required": ["fn", "cert"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": { "vcard": { "type": "string" } },
+        "required": ["vcard"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request"],
+      "notes": "Folded per RFC 6350 at 75 octets, CRLF, exactly as the seed's `card.mjs`. Refuses `<fn|seal|extra> carries a control character`: a card is lines, and a line break in anything a caller supplies writes a property of the caller's choosing (SPEC §3)."
+    },
+    "card_decode": {
+      "section": "cards",
+      "params": {
+        "type": "object",
+        "properties": { "vcard": { "type": "string" }, "now": { "$ref": "#/$defs/InstantIn" } },
+        "required": ["vcard", "now"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "fn": { "type": "string" },
+          "version": { "const": 2 },
+          "seal": { "type": "string" },
+          "cert": { "$ref": "#/$defs/CertDer" },
+          "root": { "$ref": "#/$defs/Fingerprint" },
+          "endpoint": { "type": "string" },
+          "expired": { "type": "boolean" },
+          "ignored": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Property names the card carried and this library does not read."
+          },
+          "bytes": { "type": "integer", "minimum": 0 },
+          "leaf": { "$ref": "#/$defs/Certificate" }
+        },
+        "required": ["fn", "version", "seal", "cert", "root", "endpoint", "expired", "ignored", "bytes", "leaf"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request"],
+      "notes": "Every refusal is `bad_request` with the exact `why` strings of `card.mjs`."
+    },
+    "suite_for": {
+      "section": "envelopes",
+      "params": {
+        "type": "object",
+        "properties": { "spki": { "$ref": "#/$defs/Spki" } },
+        "required": ["spki"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": { "suite": { "$ref": "#/$defs/Suite" } },
+        "required": ["suite"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "parse", "unsupported"]
+    },
+    "hpke_seal": {
+      "section": "envelopes",
+      "params": {
+        "type": "object",
+        "properties": {
+          "suite": { "$ref": "#/$defs/Suite" },
+          "recipient_spki": { "$ref": "#/$defs/Spki" },
+          "info": { "type": "string" },
+          "aad": { "$ref": "#/$defs/B64url" },
+          "plaintext": { "$ref": "#/$defs/B64url" },
+          "ephemeral_seed": { "$ref": "#/$defs/Seed32" }
+        },
+        "required": ["suite", "recipient_spki", "info", "plaintext"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": { "enc": { "$ref": "#/$defs/B64url" }, "ct": { "$ref": "#/$defs/B64url" } },
+        "required": ["enc", "ct"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "envelope_invalid", "parse"],
+      "notes": "`ephemeral_seed` exists for vectors and the intrusion suite; production callers omit it and the core draws 32 fresh bytes. `aad` absent is empty."
+    },
+    "hpke_open": {
+      "section": "envelopes",
+      "params": {
+        "type": "object",
+        "properties": {
+          "suite": { "$ref": "#/$defs/Suite" },
+          "recipient_pkcs8": { "$ref": "#/$defs/Pkcs8" },
+          "info": { "type": "string" },
+          "aad": { "$ref": "#/$defs/B64url" },
+          "enc": { "$ref": "#/$defs/B64url" },
+          "ct": { "$ref": "#/$defs/B64url" }
+        },
+        "required": ["suite", "recipient_pkcs8", "info", "enc", "ct"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": { "plaintext": { "$ref": "#/$defs/B64url" } },
+        "required": ["plaintext"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "envelope_invalid", "parse"]
+    },
+    "seal_request": {
+      "section": "envelopes",
+      "params": {
+        "type": "object",
+        "properties": {
+          "recipient_leaf": { "$ref": "#/$defs/CertDer" },
+          "sender_pkcs8": { "$ref": "#/$defs/Pkcs8" },
+          "form": { "$ref": "#/$defs/Form" },
+          "sender_chain": { "$ref": "#/$defs/Chain" },
+          "msg_id": { "type": "string", "minLength": 1 },
+          "ts": { "type": "integer" },
+          "exp": { "type": "integer" },
+          "ephemeral_seed": { "$ref": "#/$defs/Seed32" },
+          "method": { "type": "string" },
+          "params": true,
+          "cty": { "type": "string" }
+        },
+        "required": ["recipient_leaf", "sender_pkcs8", "msg_id", "ts"],
+        "additionalProperties": false
+      },
+      "result": { "$ref": "#/$defs/Envelope" },
+      "errors": ["bad_request", "parse"],
+      "notes": "`form` absent is `chain`, which needs `sender_chain`; `method` absent is `tools/call`; `params` absent is `{}`; `exp` absent is `ts + 600`; `cty` absent is a call."
+    },
+    "seal_result": {
+      "section": "envelopes",
+      "params": {
+        "type": "object",
+        "properties": {
+          "recipient_spki": { "$ref": "#/$defs/Spki" },
+          "sender_pkcs8": { "$ref": "#/$defs/Pkcs8" },
+          "form": { "$ref": "#/$defs/Form" },
+          "sender_chain": { "$ref": "#/$defs/Chain" },
+          "msg_id": { "type": "string", "minLength": 1 },
+          "ts": { "type": "integer" },
+          "exp": { "type": "integer" },
+          "ephemeral_seed": { "$ref": "#/$defs/Seed32" },
+          "result": true,
+          "error": true
+        },
+        "required": ["recipient_spki", "sender_pkcs8", "msg_id", "ts"],
+        "additionalProperties": false
+      },
+      "result": { "$ref": "#/$defs/Envelope" },
+      "errors": ["bad_request", "parse"],
+      "notes": "Exactly one of `result` and `error`. `cty` is `application/pact-result+json`."
+    },
+    "open_result": {
+      "section": "envelopes",
+      "params": {
+        "type": "object",
+        "properties": {
+          "envelope": { "$ref": "#/$defs/ArrivedEnvelope" },
+          "my_pkcs8": { "$ref": "#/$defs/Pkcs8" },
+          "msg_id": { "type": "string" },
+          "now": { "$ref": "#/$defs/InstantIn" },
+          "pins": { "type": "array", "items": { "$ref": "#/$defs/Pin" } },
+          "expected_root": { "type": "string" },
+          "expected_endpoint": { "type": "string" }
+        },
+        "required": ["envelope", "my_pkcs8", "msg_id", "now"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "ok": { "const": true },
+          "result": true,
+          "error": true,
+          "root": { "$ref": "#/$defs/Fingerprint" },
+          "endpoint": { "type": "string" },
+          "form": { "$ref": "#/$defs/Form" },
+          "leaf_update": { "$ref": "#/$defs/CertDer" }
+        },
+        "required": ["ok", "root", "endpoint", "form"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "envelope_invalid", "parse"],
+      "notes": "The caller side of §13.2: opens, requires `result` xor `error` plus one of `chain`/`leaf`, validates the chain to `expected_root` and `expected_endpoint` or finds the named leaf among `pins`, refuses a superseded leaf, verifies `sig`, checks `cty` and `msg_id`. Every refusal of the ENVELOPE is `{\"error\": \"envelope_invalid\", \"why\"}`. `leaf_update` is a leaf newer than the pin, for the host to store."
+    },
+    "follow_renewed": {
+      "section": "envelopes",
+      "params": {
+        "type": "object",
+        "properties": {
+          "answer": true,
+          "pinned_root": { "type": "string" },
+          "pinned_leaf": { "$ref": "#/$defs/CertDer" },
+          "dialed": { "type": "string" },
+          "now": { "$ref": "#/$defs/InstantIn" }
+        },
+        "required": ["pinned_root", "pinned_leaf", "dialed", "now"],
+        "additionalProperties": false
+      },
+      "result": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": { "follow": { "const": true }, "leaf": { "$ref": "#/$defs/CertDer" } },
+            "required": ["follow", "leaf"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": { "follow": { "const": false }, "why": { "type": "string" } },
+            "required": ["follow", "why"],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "errors": ["bad_request", "parse"],
+      "notes": "§14.4: `answer` is the peer's `{\"code\": \"certificate_renewed\", \"data\": {\"chain\"}}`, whatever it actually sent. Validate to the pinned root and the dialed address, and follow only when the chain is newer than or equal to the pin."
+    },
+    "decide": {
+      "section": "envelopes",
+      "params": {
+        "type": "object",
+        "properties": {
+          "now": { "$ref": "#/$defs/InstantIn" },
+          "envelope": { "$ref": "#/$defs/ArrivedEnvelope" },
+          "node": { "$ref": "#/$defs/NodeState" }
+        },
+        "required": ["now", "envelope", "node"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "result": { "$ref": "#/$defs/Decision" },
+          "effects": { "type": "array", "items": { "$ref": "#/$defs/Effect" } }
+        },
+        "required": ["result", "effects"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "parse"],
+      "notes": "§5.1 below."
+    },
+    "vault_seal": {
+      "section": "vault",
+      "params": {
+        "type": "object",
+        "properties": {
+          "passphrase": { "type": "string" },
+          "plaintext": true,
+          "kdf": { "$ref": "#/$defs/KdfArgs" },
+          "salt": { "$ref": "#/$defs/B64url" },
+          "nonce": { "$ref": "#/$defs/B64url" }
+        },
+        "required": ["passphrase", "plaintext"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": { "vault": { "$ref": "#/$defs/VaultDocument" } },
+        "required": ["vault"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "vault"],
+      "notes": "`salt` and `nonce` are for tests only."
+    },
+    "vault_open": {
+      "section": "vault",
+      "params": {
+        "type": "object",
+        "properties": { "passphrase": { "type": "string" }, "vault": true },
+        "required": ["passphrase", "vault"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": { "plaintext": true },
+        "required": ["plaintext"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "vault"],
+      "notes": "A wrong passphrase and a tampered document are one message."
+    },
+    "wallet_issue": {
+      "section": "vault",
+      "params": {
+        "type": "object",
+        "properties": {
+          "vault_plaintext": true,
+          "root_fingerprint": { "type": "string" },
+          "csr": { "$ref": "#/$defs/Csr" },
+          "now": { "$ref": "#/$defs/InstantIn" },
+          "valid_days": { "type": "integer", "minimum": 1, "maximum": 398 },
+          "move": { "type": "boolean" }
+        },
+        "required": ["vault_plaintext", "root_fingerprint", "csr", "now"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "der": { "$ref": "#/$defs/CertDer" },
+          "endpoint": { "type": "string" },
+          "not_before": { "$ref": "#/$defs/Instant" },
+          "not_after": { "$ref": "#/$defs/Instant" },
+          "ledger_entry": { "$ref": "#/$defs/LedgerEntry" },
+          "new_host": { "type": "boolean" },
+          "warnings": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["der", "endpoint", "not_before", "not_after", "ledger_entry", "new_host", "warnings"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "parse"],
+      "notes": "The wallet's rules: `csr_check` with the vault's roots as `root_spkis`; `new_host` true when no ledger entry names that endpoint's host, with the warning `new host: this endpoint's host has never been issued to`; the **live leaf is the newest one issued** (§14.3) and a second endpoint while it is unexpired is refused unless `move: true`, which instead warns `move: the live leaf at the previous endpoint is superseded once contacts see this one`; `not_before` monotonic over the ledger; `valid_days` absent means 365 and an explicit 0 is refused."
+    }
+  }
+}

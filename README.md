@@ -13,7 +13,8 @@ port presents: bytes in, JSON out, no state.
 | `crates/pact-identity-wasm` | the `wasm-bindgen` boundary: `call(name, args) -> json` |
 | `js/` | loaders (`index.mjs` for Node and the browser, `worker.mjs` for Workers), `build.sh`, `reproduce.sh` (the canonical, containerised build), `manifest.json` + `verify.mjs`, and the Node proofs `check.mjs` and `intrude.mjs` |
 | `go/` | the Go port and its `pact-identity-go` adapter binary (built by the Go side) |
-| `docs/` | `contract-one-place.md` — a PROPOSAL, not built: one JSON Schema file as the source of `CONTRACT.md`, the parity gate's surface and typed bindings |
+| `contract/` | `contract.json` — the boundary as data, and the source `CONTRACT.md` is rendered from (`render.mjs`); `schema.mjs` + `schema.test.mjs`, the JSON Schema subset it is written in; `contract.mjs`, which judges one answer by it |
+| `docs/` | `contract-one-place.md` — the proposal this came from. Phases 1 and 2 are built; 3 (typed bindings, an OpenAPI view), 4 (the Rust library validating against the file, which costs a re-pin) and 5 (the wire contract's schema bundle) are not |
 
 ## Build and prove
 
@@ -40,6 +41,11 @@ node js/live.mjs --endpoint https://host/slug [--card card.vcf] [--insecure]   #
                                 # scenario is a control that must get THROUGH — and whose ANSWER each driver opens with the
                                 # attacker's own key, because four strings shaped like an envelope are not one; it
                                 # leaves a pending request behind
+node --test contract/schema.test.mjs   # the contract's own validator: a value per keyword that must fail it, and
+                                # a keyword it does not implement, which `compile` must REFUSE
+node contract/render.mjs --check  # CONTRACT.md is what contract/contract.json and the template render.
+                                # `js/parity.mjs` validates every answer of both ports against that same
+                                # file, so the document and the gate cannot describe different contracts
 node js/musts.mjs               # every MUST in pact-protocol/SPEC.md names something that holds it, or says who does
 node js/record.mjs             # regenerate PROOFS.md: every MUST with its holder, every parity case (it prints both counts)
 node js/record.mjs --check     # ...and fail if it is stale (what gate.sh runs)

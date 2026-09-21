@@ -19,7 +19,13 @@
 //
 // It also fails when the contract's surface grows without a case here, so the harness cannot fall
 // silently behind the thing it guards.
+//
+// And it holds both ports to `contract/contract.json`, which is where the surface is WRITTEN DOWN:
+// every answer of every case, from each port, is validated against the schema the contract declares
+// for it. Two ports agreeing proves they are the same; it does not prove they are what the contract
+// says, and a member both ports grew, or both dropped, is invisible to a comparison.
 import { makePort } from './port.mjs';
+import { loadContract, judge } from '../contract/contract.mjs';
 import { seed, ed25519FromSeed, p256FromSeed, x25519FromSeed, pkcs8Of, b64url } from '../../pact-protocol/vectors/lib/keys.mjs';
 import { buildRoot, buildLeaf } from '../../pact-protocol/vectors/lib/x509.mjs';
 import { ecdsaTwin, ecdsaIsLowS, read as derRead, children as derChildren, tlv as derTlv, seq as derSeq, set as derSet, bitstr as derBitstr, int as derInt } from '../../pact-protocol/vectors/lib/der.mjs';
@@ -478,6 +484,10 @@ const answer = (port, fn, args) => {
 const only = process.argv.includes('--only') ? process.argv[process.argv.indexOf('--only') + 1] : null;
 let bad = 0;
 let ran = 0;
+const contract = await loadContract();
+let held = 0; // answers validated against the contract's schemas, both ports counted
+let offContract = 0;
+const seenCodes = new Map(); // function -> the error codes it was seen to fail with
 // Which functions were compared whole on an answer that SUCCEEDED. A refusal compared whole proves
 // only that both ports refuse alike; it says nothing about the members of the answer a caller
 // actually uses, and that is where `card_decode` lost its entire `leaf`.
@@ -672,9 +682,20 @@ for (const [name, fn, args, keys] of cases) {
   if (only && !name.includes(only) && fn !== only) continue;
   ran++;
   const raw = answer(wasm, fn, args);
+  const rawGo = answer(go, fn, args);
   if ((keys === '*' || typeof keys === 'function') && succeeded(raw)) provenWhole.add(fn);
+  for (const [port, got] of [['wasm', raw], ['go', rawGo]]) {
+    if (got?.threw) continue; // a port that threw has already failed the comparison below
+    held++;
+    const wrong = judge(contract, fn, args, got, seenCodes);
+    if (wrong.length) {
+      offContract++;
+      console.log(`  OFF THE CONTRACT  ${name}  (${port})`);
+      for (const w of wrong.slice(0, 4)) console.log(`    ${w}`);
+    }
+  }
   const a = pick(raw, keys, wasm);
-  const b = pick(answer(go, fn, args), keys, go);
+  const b = pick(rawGo, keys, go);
   const same = JSON.stringify(a) === JSON.stringify(b);
   if (!same) {
     bad++;
@@ -691,8 +712,9 @@ for (const [name, fn, args, keys] of cases) {
 // A harness that guards a surface has to know when the surface grows, and has to be reading the
 // surface rather than a guess at it. Both dispatchers are read here, and three things are asserted:
 //
-//   1. the two ports dispatch the same names — `version` lived in one dispatcher and not the other
-//      until this check was written;
+//   1. the two ports and the CONTRACT FILE name the same functions — three sets, not two. `version`
+//      lived in one dispatcher and not the other until this check was written; and a function in
+//      `contract/contract.json` that neither port dispatches would otherwise be prose nothing runs;
 //   2. every name has a case above;
 //   3. every name has at least one case compared whole (`'*'`), not through a key list. That is the
 //      one that matters: `card_decode` dropped its entire `leaf` member in one port, and no key list
@@ -710,6 +732,8 @@ const goNames = new Set(
   [...(await read('../go/api.go')).matchAll(/^\t"([a-z_0-9]+)":\s/gm)].map((m) => m[1]),
 );
 
+const contractNames = new Set(Object.keys(contract.methods));
+
 const problems = [];
 if (rustNames.size < 20 || goNames.size < 20) {
   problems.push(`the dispatchers did not read (rust ${rustNames.size}, go ${goNames.size}): this gate is not guarding anything`);
@@ -718,6 +742,10 @@ const onlyRust = [...rustNames].filter((n) => !goNames.has(n)).sort();
 const onlyGo = [...goNames].filter((n) => !rustNames.has(n)).sort();
 if (onlyRust.length) problems.push(`only the Rust core dispatches: ${onlyRust.join(', ')}`);
 if (onlyGo.length) problems.push(`only the Go port dispatches: ${onlyGo.join(', ')}`);
+const undispatched = [...contractNames].filter((n) => !rustNames.has(n) && !goNames.has(n)).sort();
+const undeclared = [...new Set([...rustNames, ...goNames])].filter((n) => !contractNames.has(n)).sort();
+if (undispatched.length) problems.push(`in contract/contract.json and in neither port: ${undispatched.join(', ')}`);
+if (undeclared.length) problems.push(`dispatched and not in contract/contract.json: ${undeclared.join(', ')}`);
 
 const surface = new Set([...rustNames, ...goNames]);
 surface.delete('version'); // the build, not a rule: its answer describes the port and cannot agree
@@ -731,6 +759,16 @@ if (partial.length) {
     `never compared whole on an answer that succeeded, so a dropped member would not show: ${partial.join(', ')}`,
   );
 }
+
+// A declared error code no case ever produced is not a failure — some are unreachable from any
+// argument, and `ErrorCode` declares `key` and `internal` so a caller's switch has a name for them
+// — but it is the honest measure of how much of the failure side these cases reach, so it is
+// printed rather than left as an impression.
+const declared = [...contractNames].flatMap((fn) => contract.methods[fn].errors.map((c) => `${fn}/${c}`));
+const unseen = declared.filter((k) => {
+  const [fn, code] = k.split('/');
+  return !seenCodes.get(fn)?.has(code);
+});
 
 if (problems.length && !only) {
   console.log('\n  THE GATE IS NOT SATISFIED');
@@ -748,7 +786,7 @@ if (problems.length && !only) {
 // disagreements and all, a few lines above the exit code that says the run failed; `record.mjs`
 // was safe only because a non-zero exit throws before it reads the file.
 const manifestAt = process.argv[process.argv.indexOf('--manifest') + 1];
-const agreed = bad === 0 && problems.length === 0;
+const agreed = bad === 0 && offContract === 0 && problems.length === 0;
 if (process.argv.includes('--manifest') && manifestAt && !only && agreed) {
   const byFn = new Map();
   for (const [name, fn] of cases) {
@@ -762,6 +800,15 @@ if (process.argv.includes('--manifest') && manifestAt && !only && agreed) {
     functions: surface.size,
     compared_whole: [...surface].filter((f) => whole.has(f)).length,
     disagreements: bad,
+    contract: {
+      file: 'contract/contract.json',
+      spec: contract.spec,
+      methods: contractNames.size,
+      answers_validated: held,
+      off_contract: offContract,
+      declared_error_codes: declared.length,
+      codes_never_produced: unseen,
+    },
     by_function: [...byFn.entries()].sort(([a], [b]) => (a < b ? -1 : 1))
       .map(([fn, names]) => ({ fn, in_surface: surface.has(fn), compared_whole: whole.has(fn), cases: names })),
   }, null, 2) + '\n');
@@ -770,6 +817,7 @@ if (process.argv.includes('--manifest') && manifestAt && !only && agreed) {
 const total = only ? ran : cases.length;
 const wholeInSurface = [...surface].filter((f) => whole.has(f)).length;
 console.log(`\n${total - bad}/${total} boundary answers agree between the ports${only ? ` (filtered by ${JSON.stringify(only)})` : `; ${surface.size} functions guarded, ${wholeInSurface} of them compared whole`}`);
+console.log(`${held - offContract}/${held} answers hold to contract/contract.json (spec ${contract.spec}, ${contractNames.size} functions, both ports); ${declared.length - unseen.length}/${declared.length} declared error codes were produced`);
 // `bad` is a COUNT, and process.exit truncates mod 256: with 276 cases, exactly 256 disagreements
 // would have exited 0.
-process.exit(bad > 0 || (problems.length && !only) ? 1 : 0);
+process.exit(bad > 0 || offContract > 0 || (problems.length && !only) ? 1 : 0);

@@ -9,6 +9,8 @@ case can be listed here that did not pass.
 
 Specification: **2.1.3**. **49** normative sentences, **419** cross-port parity cases over **38** guarded functions.
 
+Every answer of both ports is validated against `contract/contract.json` (**39** functions, spec 2.1.3): **838** answers held to the shape it declares, **0** did not. Of **77** declared error codes, **62** were produced by a case here; the rest are declared for a caller's benefit and no argument in this suite reaches them.
+
 ## The 49 normative sentences of the specification
 
 A sentence carrying MUST, MUST NOT or REQUIRED, one row each, in document order. **36** are
