@@ -410,22 +410,22 @@ func TestDecideOnVectors(t *testing.T) {
 		t.Fatal("no envelope " + name)
 		return Envelope{}
 	}
-	d := Decide(now, envOf("alina-to-bharat"), bharatNode(t, v, nil))
+	d := decided(t, now, envOf("alina-to-bharat"), bharatNode(t, v, nil))
 	if d.Result["code"] != "envelope_invalid" || d.Result["why"] != "guest may only redeem or request" {
 		t.Errorf("first contact with send_message: %v", d.Result)
 	}
-	d = Decide(now, envOf("alina-to-bharat"), bharatNode(t, v, []Pin{pinA}))
+	d = decided(t, now, envOf("alina-to-bharat"), bharatNode(t, v, []Pin{pinA}))
 	if d.Result["code"] != "ok" || d.Result["tier"] != "contact" || d.Result["form"] != "chain" || d.Result["tool"] != "send_message" {
 		t.Errorf("pinned sender: %v", d.Result)
 	}
 	if len(d.Effects) != 1 || d.Effects[0]["op"] != "seen" {
 		t.Errorf("effects: %v", d.Effects)
 	}
-	d = Decide(now, envOf("alina-to-bharat-by-reference"), bharatNode(t, v, []Pin{pinA}))
+	d = decided(t, now, envOf("alina-to-bharat-by-reference"), bharatNode(t, v, []Pin{pinA}))
 	if d.Result["code"] != "ok" || d.Result["tier"] != "contact" || d.Result["form"] != "leaf" {
 		t.Errorf("small form against the pinned leaf: %v", d.Result)
 	}
-	d = Decide(now, envOf("alina-to-bharat-by-reference"), bharatNode(t, v, nil))
+	d = decided(t, now, envOf("alina-to-bharat-by-reference"), bharatNode(t, v, nil))
 	if d.Result["code"] != "chain_required" {
 		t.Errorf("small form against no pins: %v", d.Result)
 	}

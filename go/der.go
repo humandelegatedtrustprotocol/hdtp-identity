@@ -147,17 +147,23 @@ func derRead(buf []byte, pos int) (derNode, error) {
 		if buf[at] == 0 {
 			return derNode{}, errors.New("DER length not minimal")
 		}
-		l = 0
+		// Folded into 64 bits and compared BEFORE it becomes an `int`: four octets reach 2^32-1, which
+		// on a 32-bit build wrapped negative, passed the overrun test below and panicked the slice.
+		var long uint64
 		for i := 0; i < n; i++ {
 			if at >= len(buf) {
 				return derNode{}, errors.New("DER truncated")
 			}
-			l = l<<8 | int(buf[at])
+			long = long<<8 | uint64(buf[at])
 			at++
 		}
-		if l < 0x80 {
+		if long < 0x80 {
 			return derNode{}, errors.New("DER length not minimal")
 		}
+		if long > uint64(len(buf)-at) {
+			return derNode{}, errors.New("DER length overruns the buffer")
+		}
+		l = int(long)
 	}
 	if at+l > len(buf) {
 		return derNode{}, errors.New("DER length overruns the buffer")

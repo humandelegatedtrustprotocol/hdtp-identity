@@ -312,7 +312,7 @@ func TestSealAndOpenResult(t *testing.T) {
 		t.Fatalf("seal_request: %s", out)
 	}
 	rootA, _ := Parse(der("root_a"))
-	d := Decide(now, e, bharatNode(t, v, []Pin{{Root: FingerprintOf(rootA), Endpoint: endpointA, Leaf: B64url(der("leaf_a")), State: "active"}}))
+	d := decided(t, now, e, bharatNode(t, v, []Pin{{Root: FingerprintOf(rootA), Endpoint: endpointA, Leaf: B64url(der("leaf_a")), State: "active"}}))
 	if d.Result["code"] != "ok" || d.Result["tier"] != "contact" {
 		t.Errorf("decide on a sealed request: %v", d.Result)
 	}
@@ -357,4 +357,14 @@ func TestCallNeverPanics(t *testing.T) {
 	if !bytes.Contains(Call("no_such", nil), []byte(`"unsupported"`)) {
 		t.Error("unknown function")
 	}
+}
+
+// decided is Decide for a test whose node state is readable: an error here is the test's own setup.
+func decided(t *testing.T, now time.Time, env Envelope, node NodeState) Decision {
+	t.Helper()
+	d, err := Decide(now, env, node)
+	if err != nil {
+		t.Fatalf("Decide: the node's own state would not read: %v", err)
+	}
+	return d
 }

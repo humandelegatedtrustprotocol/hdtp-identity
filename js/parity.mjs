@@ -20,9 +20,9 @@
 // It also fails when the contract's surface grows without a case here, so the harness cannot fall
 // silently behind the thing it guards.
 import { makePort } from './port.mjs';
-import { seed, ed25519FromSeed, p256FromSeed, pkcs8Of, b64url } from '../../pact-protocol/vectors/lib/keys.mjs';
+import { seed, ed25519FromSeed, p256FromSeed, x25519FromSeed, pkcs8Of, b64url } from '../../pact-protocol/vectors/lib/keys.mjs';
 import { buildRoot, buildLeaf } from '../../pact-protocol/vectors/lib/x509.mjs';
-import { ecdsaTwin, ecdsaIsLowS, read as derRead, children as derChildren } from '../../pact-protocol/vectors/lib/der.mjs';
+import { ecdsaTwin, ecdsaIsLowS, read as derRead, children as derChildren, tlv as derTlv, seq as derSeq, set as derSet, bitstr as derBitstr, int as derInt } from '../../pact-protocol/vectors/lib/der.mjs';
 import { signDetached } from '../../pact-protocol/vectors/lib/hpke.mjs';
 
 const wasm = await makePort('wasm');
@@ -492,6 +492,85 @@ let ran = 0;
 const succeeded = (raw) =>
   raw && !raw.error && !raw.threw && raw.ok !== false && !(raw.result && raw.result.code && raw.result.code !== 'ok');
 const provenWhole = new Set();
+// ── 2026-09-21: what the Go port answered differently (review-findings plan, B) ────────────────
+//
+// Each of these was RED against the Go port before the port was changed, and that is the only
+// reason to believe it looks at what it names. The 2026-09-20 review read both sides and found
+// them; the harness had not, because every `open_result` case either failed at `cty` or succeeded,
+// no `decide` case carried a malformed member or an unreadable row of the node's own state, and
+// both CSRs were well formed.
+{
+  const callerKey = ed25519FromSeed(seed('parity/caller'));
+  const callerPkcs8 = b64url(pkcs8Of(callerKey.priv));
+  const callerSpki = wasm.call('public_key', { pkcs8: callerPkcs8 }).spki;
+  const at = (iso) => Math.floor(Date.parse(iso) / 1000);
+  const answerTo = (o = {}) => wasm.call('seal_result', { recipient_spki: callerSpki, sender_pkcs8: hostPkcs8, form: 'chain', sender_chain: [leafDer, rootDer], result: { ok: 1 }, msg_id: 'r-1', ts: at(now), ...o });
+  const open = (envelope, o = {}) => ({ envelope, my_pkcs8: callerPkcs8, msg_id: 'r-1', now, pins: [], expected_root: rootFp, expected_endpoint: ENDPOINT, ...o });
+  const reheader = (e, patch) => ({ ...e, protected: b64url(Buffer.from(JSON.stringify(Object.fromEntries(Object.entries({ ...JSON.parse(Buffer.from(e.protected, 'base64url').toString()), ...patch }).sort(([a], [b]) => (a < b ? -1 : 1)))))) });
+  const chainForm = answerTo();
+  const leafForm = answerTo({ form: 'leaf' });
+  const pinned = [{ root: rootFp, endpoint: ENDPOINT, leaf: leafDer, state: 'active' }];
+
+  // B1 — OpenResult: Rust's words, and Rust's order.
+  add('open_result with a key the envelope is not sealed to', 'open_result', open(chainForm, { my_pkcs8: rootPkcs8 }));
+  add('open_result whose header names a suite that is known and is not this key\'s', 'open_result', open(reheader(chainForm, { suite: 'PACT-SEAL-P256' })));
+  add('open_result with the wrong key AND the wrong suite: which is said first', 'open_result', open(reheader(chainForm, { suite: 'PACT-SEAL-P256' }), { my_pkcs8: rootPkcs8 }));
+  add('open_result in the leaf form, naming a leaf no pin holds', 'open_result', open(leafForm));
+  add('open_result in the leaf form, from a held leaf that has run out', 'open_result', open(answerTo({ form: 'leaf', ts: at('2027-10-01T00:00:00Z') }), { pins: pinned, now: '2027-10-01T00:00:00Z' }));
+  add('open_result in the leaf form, with a signature that is not the held leaf\'s', 'open_result', open({ ...leafForm, sig: b64url(new Uint8Array(64)) }, { pins: pinned }));
+  add('open_result in the leaf form, from a held leaf: the answer that succeeds', 'open_result', open(leafForm, { pins: pinned }));
+
+  // B2 — a member that is not base64url at all.
+  add('decide on an envelope whose enc is not base64url', 'decide', { now, envelope: { ...sealed, enc: '!!!' }, node });
+  add('decide on an envelope whose ct is not base64url', 'decide', { now, envelope: { ...sealed, ct: '!!!' }, node });
+  // A stray character beside bytes that are otherwise right. A lenient reader skips it, the signature
+  // still verifies — it covers the DECODED bytes — and the envelope is accepted: two spellings of one
+  // envelope, and a port that refuses the second while the other takes it.
+  add('decide on a real envelope whose protected carries a stray character', 'decide', { now, envelope: { ...sealed, protected: `${sealed.protected}!` }, node });
+  add('decide on a real envelope whose enc carries a stray character', 'decide', { now, envelope: { ...sealed, enc: `${sealed.enc}!` }, node });
+  add('decide on a real envelope whose sig carries a stray character', 'decide', { now, envelope: { ...sealed, sig: `${sealed.sig}!` }, node });
+  add('open_result on a real answer whose protected carries a stray character', 'open_result', open({ ...chainForm, protected: `${chainForm.protected}!` }));
+  add('open_result on a real answer whose ct carries a stray character', 'open_result', open({ ...chainForm, ct: `${chainForm.ct}!` }));
+
+  // B3 — the node's OWN state, unreadable. The seed throws; so does the core.
+  const small = wasm.call('seal_request', { recipient_leaf: leafDer, sender_pkcs8: hostPkcs8, form: 'leaf', method: 'tools/call', params: { name: 'send_message' }, msg_id: 'p-small', ts: at(now) });
+  const olderLeaf = b64url(buildLeaf({ cn: 'Alina Rao', rootCn: 'Alina Rao', root: rootKey, hostKey, endpoint: ENDPOINT, notBefore: new Date('2026-08-01T00:00:00Z'), notAfter: new Date('2027-08-01T00:00:00Z'), label: 'parity/older-leaf' }));
+  add('decide when a held key\'s own leaf will not parse', 'decide', { now, envelope: sealed, node: { ...node, keys: [{ ...node.keys[0], leaf: '!!!' }] } });
+  add('decide in the small form when a pin\'s leaf will not parse', 'decide', { now, envelope: small, node: { ...node, pins: [{ root: rootFp, endpoint: ENDPOINT, leaf: 'AAAA', state: 'active' }] } });
+  add('decide when the pinned leaf of the sender\'s root will not compare', 'decide', { now, envelope: sealed, node: { ...node, pins: [{ root: rootFp, endpoint: ENDPOINT, leaf: 'AAAA', state: 'active' }] } });
+  add('decide when a tombstone\'s instant will not parse', 'decide', { now, envelope: sealed, node: { ...node, tombstones: [{ root: rootFp, at: 'soon', leaf: olderLeaf }] } });
+  add('decide when a tombstone\'s leaf will not compare', 'decide', { now, envelope: sealed, node: { ...node, tombstones: [{ root: rootFp, at: '2026-09-10T00:00:00Z', leaf: 'AAAA' }] } });
+  add('decide with two tombstones for one root, the FIRST of them stale', 'decide', { now, envelope: sealed, node: { ...node, tombstones: [{ root: rootFp, at: '2026-01-01T00:00:00Z', leaf: olderLeaf }, { root: rootFp, at: '2026-09-10T00:00:00Z', leaf: olderLeaf }] } });
+  add('decide on a peer who returns after removal: the answer that succeeds', 'decide', { now, envelope: sealed, node: { ...node, tombstones: [{ root: rootFp, at: '2026-09-10T00:00:00Z', leaf: olderLeaf }] } });
+
+  // B4 — follow_renewed.
+  const follow = (answer) => ({ answer, pinned_root: rootFp, pinned_leaf: leafDer, dialed: ENDPOINT, now });
+  add('follow_renewed on an answer that is some other code', 'follow_renewed', follow({ code: 'something_else' }));
+  add('follow_renewed on a certificate_renewed answer with no data at all', 'follow_renewed', follow({ code: 'certificate_renewed' }));
+  add('follow_renewed on a certificate_renewed answer whose data has no chain', 'follow_renewed', follow({ code: 'certificate_renewed', data: {} }));
+  add('follow_renewed on a chain that is null', 'follow_renewed', follow({ code: 'certificate_renewed', data: { chain: null } }));
+  add('follow_renewed on a chain that is not a list', 'follow_renewed', follow({ code: 'certificate_renewed', data: { chain: 'AAAA' } }));
+  add('follow_renewed on a chain whose members are not base64url', 'follow_renewed', follow({ code: 'certificate_renewed', data: { chain: ['!!!', '!!!'] } }));
+  add('follow_renewed on a chain of none', 'follow_renewed', follow({ code: 'certificate_renewed', data: { chain: [] } }));
+  add('follow_renewed to a leaf OLDER than the one pinned', 'follow_renewed', follow({ code: 'certificate_renewed', data: { chain: [olderLeaf, rootDer] } }));
+
+  // B5 — a request a wallet is asked to SIGN. Laxer than the other port is the wrong direction.
+  const [cri, sigAlg] = derChildren(derRead(Buffer.from(csr, 'base64url')));
+  const [version, subject, spki, attributes] = derChildren(cri);
+  const signedBy = (key, info, alg = sigAlg.raw) => b64url(derSeq(info, alg, derBitstr(signDetached(key.priv, info))));
+  const atv = derChildren(derChildren(derChildren(subject)[0])[0]);
+  const threePartName = derSeq(derSet(derSeq(atv[0].raw, atv[1].raw, derTlv(0x05, Buffer.alloc(0)))));
+  add('csr_check: a commonName attribute with a third element', 'csr_check', { der: signedBy(hostKey, derSeq(version.raw, threePartName, spki.raw, attributes.raw)) });
+  add('csr_check: a CertificationRequestInfo that is a SET, not a SEQUENCE', 'csr_check', { der: signedBy(hostKey, derTlv(0x31, cri.content)) });
+  add('csr_check: a signatureAlgorithm with a trailing NULL', 'csr_check', { der: signedBy(hostKey, cri.raw, derSeq(derChildren(sigAlg)[0].raw, derTlv(0x05, Buffer.alloc(0)))) });
+  const x25519Spki = x25519FromSeed(seed('parity/x25519')).pub.export({ format: 'der', type: 'spki' });
+  add('csr_check: a key outside the profile AND a malformed attribute set: which is said first', 'csr_check', { der: signedBy(hostKey, derSeq(version.raw, subject.raw, x25519Spki, derTlv(0xa0, derInt(7)))) });
+
+  // B7 — `now` is whole seconds. Half a second past a leaf's notAfter is the same second.
+  add('validate_chain half a second after the leaf\'s last second', 'validate_chain', { chain: [leafDer, rootDer], now: '2027-09-01T00:00:00.500Z', expected_root: rootFp, expected_endpoint: ENDPOINT });
+  add('validate_chain in the leaf\'s last second, with a fraction', 'validate_chain', { chain: [leafDer, rootDer], now: '2027-08-31T23:59:59.900Z', expected_root: rootFp, expected_endpoint: ENDPOINT });
+}
+
 for (const [name, fn, args, keys] of cases) {
   if (only && !name.includes(only) && fn !== only) continue;
   ran++;

@@ -257,13 +257,13 @@ func TestLifetimeAndCallerSideChecks(t *testing.T) {
 		Keys:  []HeldKey{{Kid: Fingerprint(bharat.leafKey.Public.SPKI), Leaf: B64url(bharat.leaf), PKCS8: B64url(pkcs8Of(t, bharat.leafKey)), Current: true}},
 		Pins:  []Pin{{Root: alina.rootFP, Endpoint: reviewEndpoint, Leaf: B64url(alina.leaf), State: "active"}},
 	}
-	if d := Decide(now, *seal(ts+600, "m-1"), node); d.Result["code"] != "ok" || d.Result["tier"] != "contact" {
+	if d := decided(t, now, *seal(ts+600, "m-1"), node); d.Result["code"] != "ok" || d.Result["tier"] != "contact" {
 		t.Fatalf("a fresh envelope: %v", d.Result)
 	}
-	if d := Decide(now, *seal(ts+365*86400, "m-2"), node); d.Result["code"] != "envelope_invalid" || d.Result["why"] != "exp too far from ts" {
+	if d := decided(t, now, *seal(ts+365*86400, "m-2"), node); d.Result["code"] != "envelope_invalid" || d.Result["why"] != "exp too far from ts" {
 		t.Errorf("a year-long envelope: %v", d.Result)
 	}
-	if d := Decide(now, *seal(ts+30*86400, "m-3"), node); d.Result["code"] != "ok" {
+	if d := decided(t, now, *seal(ts+30*86400, "m-3"), node); d.Result["code"] != "ok" {
 		t.Errorf("exactly thirty days: %v", d.Result)
 	}
 
@@ -335,7 +335,10 @@ func TestIntegersAreMinimalAndSerialsStaySixtyFourBits(t *testing.T) {
 		}
 	}
 	for i := 0; i < 512; i++ {
-		s := randomSerial()
+		s, err := randomSerial()
+		if err != nil {
+			t.Fatal(err)
+		}
 		if len(s) != 8 || s[0] == 0 {
 			t.Fatalf("randomSerial gave %x, which the profile would refuse once encoded", s)
 		}
@@ -367,5 +370,72 @@ func TestEveryP256SignatureIsTheLowSTwin(t *testing.T) {
 	}
 	if _, isSig := EcdsaIsLowS([]byte{1, 2, 3}); isSig {
 		t.Error("bytes that are not an ECDSA value were judged as one")
+	}
+}
+
+// RFC 8785 prints a number as ECMAScript's Number does. The first ten rows are `canonical.rs`'s own
+// table, so the two ports are held to one list; the rest are where this port used to differ from it
+// and from the seed — Go's `%g` writes a two-digit exponent and turns to one at 1e-5, negative zero
+// printed as `-0`, and an integer past 2^53 kept digits a double does not have.
+func TestNumbersAsECMAScriptPrintsThem(t *testing.T) {
+	for _, c := range [][2]string{
+		{"1e21", "1e+21"},
+		{"1.5e300", "1.5e+300"},
+		{"1e-7", "1e-7"},
+		{"0.000001", "0.000001"},
+		{"100.0", "100"},
+		{"9223372036854775808.0", "9223372036854776000"},
+		{"1e20", "100000000000000000000"},
+		{"0.1", "0.1"},
+		{"-0.0", "0"},
+		{"42", "42"},
+		{"1e-5", "0.00001"},
+		{"0.0000001", "1e-7"},
+		{"1.25e-9", "1.25e-9"},
+		{"-1e-7", "-1e-7"},
+		{"1e100", "1e+100"},
+		{"9007199254740992", "9007199254740992"},
+		{"9007199254740993", "9007199254740992"},
+		{"-9007199254740993", "-9007199254740992"},
+		{"12345678901234567890", "12345678901234567000"},
+	} {
+		v, err := decodeJSON([]byte(c[0]))
+		if err != nil {
+			t.Fatalf("%s: %v", c[0], err)
+		}
+		if got := Canonical(v); string(got) != c[1] {
+			t.Errorf("%s canonicalises to %s, and ECMAScript prints %s", c[0], got, c[1])
+		}
+	}
+}
+
+// A four-octet DER length reaches 2^32-1. Folded into a 32-bit `int` it wrapped negative, `at+l`
+// stayed inside the buffer, and the slice panicked — from six bytes of anybody's certificate. This
+// runs on any word size; the 32-bit one is where the old reader fell over, and it is cross-compiled
+// and run under linux/386 to show so (see the review-findings plan, B8).
+func TestAFourOctetLengthIsRefusedOnAnyWordSize(t *testing.T) {
+	for _, in := range [][]byte{
+		{0x30, 0x84, 0xFF, 0xFF, 0xFF, 0xFF},
+		{0x30, 0x84, 0x80, 0x00, 0x00, 0x00, 0x01, 0x02},
+		{0x30, 0x84, 0xFF, 0xFF, 0xFF, 0xFE, 0x00},
+		// The one that PANICKED a 32-bit build: a length that stays positive, so it passed the
+		// "not minimal" test, and `at+l` wrapped instead — a negative slice bound.
+		{0x30, 0x84, 0x7F, 0xFF, 0xFF, 0xFF},
+		{0x30, 0x84, 0x7F, 0xFF, 0xFF, 0xFA, 0x01, 0x02, 0x03},
+	} {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("%x panicked the reader: %v", in, r)
+				}
+			}()
+			if _, err := derRead(in, 0); err == nil || err.Error() != "DER length overruns the buffer" {
+				t.Errorf("%x: %v", in, err)
+				return
+			}
+			if _, err := Parse(in); err == nil {
+				t.Errorf("%x parsed as a certificate", in)
+			}
+		}()
 	}
 }

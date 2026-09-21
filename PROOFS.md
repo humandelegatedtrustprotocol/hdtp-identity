@@ -7,7 +7,7 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed here that did not pass.
 
-Specification: **2.1.2**. **47** normative sentences, **314** cross-port parity cases over **38** guarded functions.
+Specification: **2.1.2**. **47** normative sentences, **349** cross-port parity cases over **38** guarded functions.
 
 ## The 47 normative sentences of the specification
 
@@ -144,7 +144,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 314 cross-port parity cases
+## The 349 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -152,7 +152,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **314** cases, **0** disagreements, **38** of **38** functions compared whole on success.
+At the run that generated this file: **349** cases, **0** disagreements, **38** of **38** functions compared whole on success.
 
 ### `address_guard` — 28 cases · whole on success
 
@@ -247,7 +247,7 @@ At the run that generated this file: **314** cases, **0** disagreements, **38** 
 - compare_leaves with nothing to work from
 - compare_leaves with pinned as null
 
-### `csr_check` — 12 cases · whole on success
+### `csr_check` — 16 cases · whole on success
 
 - csr_check of bytes that are not a request
 - csr_check of a certificate
@@ -261,6 +261,10 @@ At the run that generated this file: **314** cases, **0** disagreements, **38** 
 - csr_check with nothing to work from
 - csr_check with der as null
 - csr_check with root_spkis as null
+- csr_check: a commonName attribute with a third element
+- csr_check: a CertificationRequestInfo that is a SET, not a SEQUENCE
+- csr_check: a signatureAlgorithm with a trailing NULL
+- csr_check: a key outside the profile AND a malformed attribute set: which is said first
 
 ### `csr_new` — 5 cases · whole on success
 
@@ -270,7 +274,7 @@ At the run that generated this file: **314** cases, **0** disagreements, **38** 
 - csr_new with a dns_name that is not the host
 - csr_new with nothing to work from
 
-### `decide` — 10 cases · whole on success
+### `decide` — 22 cases · whole on success
 
 - decide on an envelope from a pinned contact
 - decide on a pinned contact's call that names no tool
@@ -282,6 +286,18 @@ At the run that generated this file: **314** cases, **0** disagreements, **38** 
 - decide on an envelope long past its exp
 - decide on an envelope whose exp is in the year 71,000
 - decide with nothing to work from
+- decide on an envelope whose enc is not base64url
+- decide on an envelope whose ct is not base64url
+- decide on a real envelope whose protected carries a stray character
+- decide on a real envelope whose enc carries a stray character
+- decide on a real envelope whose sig carries a stray character
+- decide when a held key's own leaf will not parse
+- decide in the small form when a pin's leaf will not parse
+- decide when the pinned leaf of the sender's root will not compare
+- decide when a tombstone's instant will not parse
+- decide when a tombstone's leaf will not compare
+- decide with two tombstones for one root, the FIRST of them stale
+- decide on a peer who returns after removal: the answer that succeeds
 
 ### `derive_seed` — 10 cases · whole on success
 
@@ -296,12 +312,20 @@ At the run that generated this file: **314** cases, **0** disagreements, **38** 
 - derive_seed for pact/store-key/1
 - derive_seed for pact/store-id/1
 
-### `follow_renewed` — 4 cases · whole on success
+### `follow_renewed` — 12 cases · whole on success
 
 - follow_renewed on a chain to another root
 - follow_renewed on a chain that is not one
 - follow_renewed on the same leaf
 - follow_renewed with nothing to work from
+- follow_renewed on an answer that is some other code
+- follow_renewed on a certificate_renewed answer with no data at all
+- follow_renewed on a certificate_renewed answer whose data has no chain
+- follow_renewed on a chain that is null
+- follow_renewed on a chain that is not a list
+- follow_renewed on a chain whose members are not base64url
+- follow_renewed on a chain of none
+- follow_renewed to a leaf OLDER than the one pinned
 
 ### `generate_key` — 5 cases · whole on success
 
@@ -417,11 +441,20 @@ At the run that generated this file: **314** cases, **0** disagreements, **38** 
 
 - a function nobody defines
 
-### `open_result` — 3 cases · whole on success
+### `open_result` — 12 cases · whole on success
 
 - open_result of a request envelope
 - open_result with nothing to work from
 - open_result of what seal_result made
+- open_result with a key the envelope is not sealed to
+- open_result whose header names a suite that is known and is not this key's
+- open_result with the wrong key AND the wrong suite: which is said first
+- open_result in the leaf form, naming a leaf no pin holds
+- open_result in the leaf form, from a held leaf that has run out
+- open_result in the leaf form, with a signature that is not the held leaf's
+- open_result in the leaf form, from a held leaf: the answer that succeeds
+- open_result on a real answer whose protected carries a stray character
+- open_result on a real answer whose ct carries a stray character
 
 ### `parse_certificate` — 17 cases · whole on success
 
@@ -508,7 +541,7 @@ At the run that generated this file: **314** cases, **0** disagreements, **38** 
 - suite_for an RSA key
 - suite_for with nothing to work from
 
-### `validate_chain` — 29 cases · whole on success
+### `validate_chain` — 31 cases · whole on success
 
 - validate_chain of a real chain
 - validate_chain against the root and endpoint it really has
@@ -539,6 +572,8 @@ At the run that generated this file: **314** cases, **0** disagreements, **38** 
 - validate_chain of members that are not strings
 - validate_chain with nothing to work from
 - validate_chain with chain as null
+- validate_chain half a second after the leaf's last second
+- validate_chain in the leaf's last second, with a fraction
 
 ### `vault_open` — 11 cases · whole on success
 

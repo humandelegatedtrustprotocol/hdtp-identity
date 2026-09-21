@@ -99,8 +99,12 @@ func lessUTF16(a, b string) bool {
 	return len(ua) < len(ub)
 }
 
+// canonicalNumber prints a JSON number as RFC 8785 does: as ECMAScript's Number would, which means
+// as the DOUBLE it is. An integer keeps its digits only while a double holds it exactly (up to 2^53);
+// past that the seed — JavaScript — prints the nearest double's shortest form, and so does this.
 func canonicalNumber(s string) string {
-	if i, err := strconv.ParseInt(s, 10, 64); err == nil {
+	const exact = 1 << 53
+	if i, err := strconv.ParseInt(s, 10, 64); err == nil && i >= -exact && i <= exact {
 		return strconv.FormatInt(i, 10)
 	}
 	f, err := strconv.ParseFloat(s, 64)
@@ -110,14 +114,24 @@ func canonicalNumber(s string) string {
 	return es6Number(f)
 }
 
-// es6Number is Number.prototype.toString for the finite values a header carries.
+// es6Number is Number.prototype.toString for a finite double, as `canonical.rs`'s `number` is: no
+// exponent from 1e-6 up to 1e21, and outside that one digit, an optional fraction, `e`, an explicit
+// sign and NO leading zero in the exponent. It used to hand everything that was not an integer to
+// Go's `%g`, which writes `1e-07` for ECMAScript's `1e-7` and switches to an exponent at 1e-5, where
+// ECMAScript still writes `0.00001`; and it printed negative zero as `-0`.
 func es6Number(f float64) string {
-	if f == math.Trunc(f) && math.Abs(f) < 1e21 {
+	if f == 0 {
+		return "0"
+	}
+	if abs := math.Abs(f); abs >= 1e-6 && abs < 1e21 {
 		return strconv.FormatFloat(f, 'f', -1, 64)
 	}
-	s := strconv.FormatFloat(f, 'g', -1, 64)
-	s = strings.Replace(s, "e+", "e+", 1)
-	return s
+	mantissa, exponent, _ := strings.Cut(strconv.FormatFloat(f, 'e', -1, 64), "e")
+	digits := strings.TrimLeft(exponent[1:], "0")
+	if digits == "" {
+		digits = "0"
+	}
+	return mantissa + "e" + exponent[:1] + digits
 }
 
 // writeJSONString escapes as RFC 8785 §3.2.2.2 and JSON.stringify do: quote, backslash, the short
