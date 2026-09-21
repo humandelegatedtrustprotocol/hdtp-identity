@@ -10,6 +10,7 @@ import { encodeCard } from '../../pact-protocol/vectors/lib/card.mjs';
 import { makeNode, receive } from '../../pact-protocol/vectors/lib/envelope.mjs';
 import { readFileSync } from 'node:fs';
 import { runLive, answerCode, scenarios } from './live.mjs';
+import { load } from './index.mjs';
 
 const H = 3_600_000, D = 86_400_000;
 
@@ -22,19 +23,51 @@ function fakeNode(port) {
   const LEAF = buildLeaf({ cn: 'Alina', rootCn: 'Alina', root, hostKey: host, endpoint: 'https://alina.example/mcp', notBefore: new Date(now - H), notAfter: new Date(now + 365 * D), label: 'lt/leaf' });
   const node = makeNode({ path: '/alina', leafKey: host, chain: [LEAF, ROOT], now });
   const card = encodeCard({ fn: 'Alina', cert: LEAF, seal: 'required' });
-  return { node, card, endpoint, LEAF };
+  return { node, card, endpoint, LEAF, ROOT, host };
 }
 
-test('every black-box scenario is blocked by the seed node behind an HTTP door', async () => {
+/**
+ * What an honest receiver answers a call it let through with: a RESULT, sealed to the caller's leaf
+ * key, signed by this node's leaf, carrying this node's chain (§13.2). The fake used to answer
+ * `{protected:'x',enc:'x',ct:'x',sig:'x'}` — four strings — and the driver called that "sealed", so
+ * the control proved only that the fake could spell the member names.
+ *
+ * The seed decides; the pinned core learns who the caller was (`decide` hands back the leaf it
+ * validated) and seals to that key.
+ */
+async function sealedResult(fake, envelope) {
+  const core = await load();
+  const pkcs8 = b64url(fake.host.priv.export({ format: 'der', type: 'pkcs8' }));
+  const mine = core.call('parse_certificate', { der: b64url(fake.LEAF) });
+  const now = new Date(Math.floor(Date.now() / 1000) * 1000).toISOString().replace('.000Z', 'Z');
+  const decided = core.call('decide', {
+    now, envelope,
+    node: { endpoint: 'https://alina.example/mcp', accept_new_hosts: 'auto', chain: [b64url(fake.LEAF), b64url(fake.ROOT)],
+      keys: [{ kid: mine.fingerprint, leaf: b64url(fake.LEAF), pkcs8, current: true }],
+      former: [], sibling_kids: [], pins: [], tombstones: [], former_endpoints: [], seen: [] },
+  });
+  assert.equal(decided.result?.code, 'ok', `the core and the seed disagree about the control: ${JSON.stringify(decided).slice(0, 200)}`);
+  const caller = core.call('parse_certificate', { der: decided.result.leaf });
+  const header = JSON.parse(Buffer.from(envelope.protected, 'base64url').toString());
+  const sealed = core.call('seal_result', {
+    recipient_spki: caller.spki, sender_pkcs8: pkcs8, form: 'chain', sender_chain: [b64url(fake.LEAF), b64url(fake.ROOT)],
+    result: { status: 'pending' }, msg_id: header.msg_id, ts: Math.floor(Date.now() / 1000),
+  });
+  assert.ok(!sealed.error, `seal_result: ${sealed.error}: ${sealed.why}`);
+  return sealed;
+}
+
+/** The fake behind an HTTP door. `answerOk` is what it sends for a call the seed let through. */
+async function serve(answerOk) {
   const server = createServer();
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
-  const { node, card, endpoint } = fakeNode(server.address().port);
+  const fake = fakeNode(server.address().port);
   server.on('request', (req, res) => {
-    if (req.method === 'GET' && req.url.endsWith('/card.vcf')) { res.setHeader('content-type', 'text/vcard'); res.end(card); return; }
+    if (req.method === 'GET' && req.url.endsWith('/card.vcf')) { res.setHeader('content-type', 'text/vcard'); res.end(fake.card); return; }
     let body = '';
     req.on('data', (c) => { body += c; });
-    req.on('end', () => {
-      node.now = Date.now();
+    req.on('end', async () => {
+      fake.node.now = Date.now();
       const rpc = JSON.parse(body);
       res.setHeader('content-type', 'application/json');
       // A stateless receiver: it answers the MCP handshake and hands back no session id, which is
@@ -42,15 +75,20 @@ test('every black-box scenario is blocked by the seed node behind an HTTP door',
       // is proven against that one by aiming it there.)
       if (rpc.method === 'initialize') { res.end(JSON.stringify({ jsonrpc: '2.0', id: rpc.id, result: { protocolVersion: '2025-06-18', capabilities: {}, serverInfo: { name: 'seed', version: '1' } } })); return; }
       if (rpc.method !== 'tools/call') { res.statusCode = 202; res.end(); return; }
-      const answer = receive(node, rpc.params.arguments);
-      if (answer.code === 'ok') res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { content: [{ type: 'text', text: JSON.stringify({ protected: 'x', enc: 'x', ct: 'x', sig: 'x' }) }] } }));
+      const answer = receive(fake.node, rpc.params.arguments);
+      if (answer.code === 'ok') res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { content: [{ type: 'text', text: JSON.stringify(await answerOk(fake, rpc.params.arguments)) }] } }));
       else res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: -32000, message: answer.code, data: { code: answer.code, why: answer.why } } }));
     });
   });
   const lines = [];
   // The seed's card intake refuses an http endpoint only at the address guard, which the fake does not run; the adapter dials what it was given.
-  const out = await runLive({ endpoint, fetchImpl: (u, init) => fetch(u.replace('https://alina.example/mcp', endpoint), init), log: (l) => lines.push(l) });
+  const out = await runLive({ endpoint: fake.endpoint, fetchImpl: (u, init) => fetch(u.replace('https://alina.example/mcp', fake.endpoint), init), log: (l) => lines.push(l) });
   server.close();
+  return { out, lines };
+}
+
+test('every black-box scenario is blocked by the seed node behind an HTTP door', async () => {
+  const { out, lines } = await serve(sealedResult);
   assert.equal(out.reproduces, 0, lines.join('\n'));
   // A FLOOR, not a count. This was `=== 10`, and it locked a stale number in the day the live
   // battery grew to 26 (2026-09-18): the test failed from then on, and nothing ran it — its only
@@ -61,7 +99,29 @@ test('every black-box scenario is blocked by the seed node behind an HTTP door',
   // The total comes from the seed, so this cannot lock a stale number in: what it asserts is that
   // the two add up.
   assert.ok(out.seedScenarios >= out.results.length, 'the seed has at least the scenarios a live run covers');
-  assert.ok(out.results.every((r) => r.verdict === 'blocked'));
+  assert.ok(out.results.every((r) => r.verdict === 'blocked'), lines.join('\n'));
+});
+
+// The control is the one call that must get THROUGH, and it was judged by the look of its answer.
+// This is the fake as it was until 2026-09-21: four strings where an envelope should be.
+test('a control answered with something that only looks sealed is not a control that passed', async () => {
+  const { out, lines } = await serve(async () => ({ protected: 'x', enc: 'x', ct: 'x', sig: 'x' }));
+  const control = out.results.at(-1);
+  assert.equal(control.got, 'sealed', 'the cheap reading still calls it sealed, which is why the control cannot stop there');
+  assert.equal(control.verdict, 'CONTROL UNOPENED', lines.join('\n'));
+  assert.equal(out.controlUnopened, 1);
+  assert.ok(out.results.slice(0, -1).every((r) => r.verdict === 'blocked'), 'nothing else changes');
+});
+
+// Two drivers, one rule: the Rust one opens its control's answer too, and gives the failure the same name.
+test('the Rust driver opens its control as this one does', () => {
+  const rust = readFileSync(new URL('../crates/pact/src/vectors.rs', import.meta.url), 'utf8');
+  const js = readFileSync(new URL('./live.mjs', import.meta.url), 'utf8');
+  for (const [name, src] of [['crates/pact/src/vectors.rs', rust], ['js/live.mjs', js]]) {
+    assert.ok(src.includes('CONTROL UNOPENED'), `${name} has no verdict for a control whose answer does not open`);
+  }
+  assert.match(rust, /control_opened\(&raw, &host_m,/, 'the Rust control is no longer opened with the key the driver holds');
+  assert.match(js, /await controlOpened\(first\.text,/, 'the JS control is no longer opened');
 });
 
 test('answerCode reads every shape an endpoint answers in', () => {

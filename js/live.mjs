@@ -18,6 +18,7 @@ import { ed25519FromSeed, b64url, fromB64url } from '../../pact-protocol/vectors
 import { buildRoot, buildLeaf } from '../../pact-protocol/vectors/lib/x509.mjs';
 import { encodeCard, decodeCard } from '../../pact-protocol/vectors/lib/card.mjs';
 import { sealEnvelope } from '../../pact-protocol/vectors/lib/envelope.mjs';
+import { load } from './index.mjs';
 
 const H = 3_600_000, D = 86_400_000;
 
@@ -43,13 +44,59 @@ export function seedScenarioCount() {
  * (`pact vectors intrude`) has read all of these since 2026-09-18; this one read two, which was
  * enough for the hosted platform and the seed's fake and for nothing else.
  */
+/** The JSON-RPC body of an answer given as text: plain JSON, or an event stream's `data:` lines. */
+function rpcBody(text) {
+  const t = text.trimStart();
+  const payload = t.startsWith('event:') || t.startsWith('data:')
+    ? text.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim()).join('')
+    : text;
+  try { return { body: JSON.parse(payload) }; } catch { return { start: payload.slice(0, 60) }; }
+}
+
+const looksSealed = (r) => !!r && ['protected', 'enc', 'ct', 'sig'].every((k) => typeof r[k] === 'string' && r[k] !== '');
+
+/** The envelope a tool answered with, if it answered with something shaped like one. */
+export function answeredEnvelope(body) {
+  if (typeof body === 'string') body = rpcBody(body).body;
+  for (const item of body?.result?.content ?? []) {
+    if (typeof item?.text !== 'string') continue;
+    let r; try { r = JSON.parse(item.text); } catch { continue; }
+    if (looksSealed(r)) return r;
+  }
+  return null;
+}
+
+/**
+ * What the CONTROL has to show. `answerCode` says `sealed` for anything SHAPED like an envelope —
+ * four non-empty strings — which is the right price for twenty-seven scenarios where a false
+ * "sealed" costs nothing. For the one call that must get THROUGH it is no evidence at all: a
+ * receiver, or a carrier in front of it, answering `{"protected":"a","enc":"b","ct":"c","sig":"d"}`
+ * scored the control as passed, while this driver held the key that would have said otherwise.
+ *
+ * So the control OPENS what it is answered with, as any caller would (§13.2), through the pinned
+ * core: sealed to Mallory's leaf key, a result, for THIS call, inside the window, signed by a leaf
+ * that chains to the target's root at the target's address — and carrying a result, not a sealed
+ * refusal. Returns null when it does, and why not otherwise. The Rust driver does the same
+ * (`control_opened`), and js/live.test.mjs holds the two to each other.
+ */
+export async function controlOpened(answer, { pkcs8, msgId, now, root, endpoint }) {
+  const envelope = answeredEnvelope(answer);
+  if (!envelope) return 'the answer carries no envelope';
+  const core = await load();
+  const at = new Date(Math.floor(now / 1000) * 1000).toISOString().replace('.000Z', 'Z');
+  const opened = core.call('open_result', { envelope, my_pkcs8: pkcs8, msg_id: msgId, now: at, pins: [], expected_root: root, expected_endpoint: endpoint });
+  // A failure of the boundary is `{ error: <code>, why }`; an envelope that OPENS is `{ ok: true, … }`
+  // carrying `result` — or `error`, when what was sealed inside is a refusal.
+  if (opened.ok !== true) return `${opened.error}: ${opened.why}`;
+  if ('error' in opened) return `it opens, and what is inside is a refusal: ${JSON.stringify(opened.error)}`;
+  return 'result' in opened ? null : 'it opens, and carries no result';
+}
+
 export function answerCode(body) {
   if (typeof body === 'string') {
-    const t = body.trimStart();
-    const payload = t.startsWith('event:') || t.startsWith('data:')
-      ? body.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim()).join('')
-      : body;
-    try { body = JSON.parse(payload); } catch { return `unknown:not-json(${payload.slice(0, 60)})`; }
+    const read = rpcBody(body);
+    if (!read.body) return `unknown:not-json(${read.start})`;
+    body = read.body;
   }
   // A JSON-RPC `error.code` is a NUMBER, and every caller of this treats the answer as a string.
   // Returning it raw threw `code.startsWith is not a function` out of `post()`, killed the run as an
@@ -65,7 +112,7 @@ export function answerCode(body) {
     let r; try { r = JSON.parse(item.text); } catch { continue; }
     // All FOUR members, each a non-empty string — as the Rust driver requires. Two string members,
     // possibly empty, scored the CONTROL as passed: `{"protected":"","ct":""}` was "sealed".
-    if (r && ['protected', 'enc', 'ct', 'sig'].every((k) => typeof r[k] === 'string' && r[k] !== '')) return 'sealed';
+    if (looksSealed(r)) return 'sealed';
     if (r && typeof r.code === 'string') return r.code;
     if (r && r.error) return typeof r.error.code === 'string' ? r.error.code : `unknown:jsonrpc-${r.error.code ?? 'error'}`;
   }
@@ -111,6 +158,11 @@ export function scenarios({ targetLeaf, now = Date.now() }) {
   const env = (o) => sealEnvelope({ senderKey: hostM, senderChain: chainM, recipientLeaf: targetLeaf, ts: nowS, msgId: `live-${++n}-${now}`, ...o });
   const message = (o = {}) => env({ params: { name: 'send_message', arguments: { msg_id: 'm', text: 'hello' } }, ...o });
   const request = (o = {}) => env({ params: { name: 'request_contact', arguments: { card, note: 'hi' } }, ...o });
+  const controlEnvelope = request();
+  const control = {
+    pkcs8: b64url(hostM.priv.export({ format: 'der', type: 'pkcs8' })),
+    msgId: JSON.parse(fromB64url(controlEnvelope.protected).toString()).msg_id,
+  };
   const tamper = (e) => ({ ...e, sig: b64url(Buffer.from([1, 2, 3])) });
   // `sig` covers `protected ‖ enc ‖ ct` with nothing between them, so a byte moved
   // across the enc/ct boundary leaves the signed bytes identical: what refuses it is
@@ -169,7 +221,7 @@ export function scenarios({ targetLeaf, now = Date.now() }) {
     // what a receiver that refuses EVERYTHING gives; this is the one well-formed call from a
     // stranger that must get through the same door — sealed, by the target, to her key. It
     // leaves a pending request behind, which is why nothing may come after it.
-    { name: 'CONTROL: a stranger asking for contact with a card that is her leaf', envelope: request(), expect: 'sealed', note: 'leaves a contact request on the target' },
+    { name: 'CONTROL: a stranger asking for contact with a card that is her leaf', envelope: controlEnvelope, expect: 'sealed', control, note: 'leaves a contact request on the target' },
     // Every entry carries the ATTACKER's root, because "she is new every run" is otherwise
     // untestable from outside: her chain rides inside the ciphertext, and the signature over it
     // differs between two calls whatever her long-term keys are (HPKE's ephemeral is fresh each
@@ -221,7 +273,7 @@ export async function initialize(endpoint, fetchImpl = fetch) {
 export async function post(endpoint, envelope, fetchImpl = fetch, session = null) {
   const res = await rpc(endpoint, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'sealed_call', arguments: envelope } }, fetchImpl, session);
   const code = answerCode(res.text);
-  return { status: res.status, code: code.startsWith('unknown:not-json') && res.status >= 400 ? `http_${res.status}` : code };
+  return { status: res.status, text: res.text, code: code.startsWith('unknown:not-json') && res.status >= 400 ? `http_${res.status}` : code };
 }
 
 /** An answer that is no PACT answer at all: the scenario never reached the layer it tests. */
@@ -246,16 +298,25 @@ export async function runLive({ endpoint, card = null, fetchImpl = fetch, now = 
     // A refused CONTROL is the opposite of an intrusion: the one call that must get through was
     // blocked, which is what a receiver refusing everything does. It was scored `REPRODUCES` —
     // "something got in" — here, after the Rust driver had been given its own verdict for it.
-    const verdict = got === s.expect ? 'blocked' : unreached(got) ? 'UNREACHED' : s.expect === 'sealed' ? 'CONTROL REFUSED' : 'REPRODUCES';
-    results.push({ name: s.name, expect: s.expect, got, verdict });
+    let verdict = got === s.expect ? 'blocked' : unreached(got) ? 'UNREACHED' : s.expect === 'sealed' ? 'CONTROL REFUSED' : 'REPRODUCES';
+    // …and an answer that LOOKS sealed is opened, with the key this driver has held all along. Only
+    // the expected `sealed` is worth opening: a refusal and an unreached run have said what they are.
+    let unopened = null;
+    if (s.control && verdict === 'blocked') {
+      unopened = await controlOpened(first.text, { ...s.control, now, root: target.root, endpoint: target.endpoint });
+      if (unopened) verdict = 'CONTROL UNOPENED';
+    }
+    results.push({ name: s.name, expect: s.expect, got, verdict, ...(unopened ? { unopened } : {}) });
     log(`  ${verdict.padEnd(10)} ${s.name} → ${got}${s.note ? ` (${s.note})` : ''}`);
+    if (unopened) log(`  ${''.padEnd(10)} …and what it was answered with does not open: ${unopened}`);
   }
   const reproduces = results.filter((r) => r.verdict === 'REPRODUCES').length;
   const unreachedCount = results.filter((r) => r.verdict === 'UNREACHED').length;
   const controlRefused = results.filter((r) => r.verdict === 'CONTROL REFUSED').length;
+  const controlUnopened = results.filter((r) => r.verdict === 'CONTROL UNOPENED').length;
   const total = seedScenarioCount();
-  log(`\n${results.length} scenarios against ${target.endpoint}: ${results.length - reproduces - unreachedCount - controlRefused} blocked, ${reproduces} reproduce, ${unreachedCount} never reached a PACT answer${controlRefused ? ', and the CONTROL was refused: this receiver refuses a legitimate call too' : ''}; ${Math.max(0, total - results.length)} of the seed's ${total} were not run here`);
-  return { results, reproduces, unreached: unreachedCount, controlRefused, skipped: total - results.length, seedScenarios: total };
+  log(`\n${results.length} scenarios against ${target.endpoint}: ${results.length - reproduces - unreachedCount - controlRefused - controlUnopened} blocked, ${reproduces} reproduce, ${unreachedCount} never reached a PACT answer${controlRefused ? ', and the CONTROL was refused: this receiver refuses a legitimate call too' : ''}${controlUnopened ? ", and the CONTROL's answer looked sealed and did not open: nothing here shows a call can get through" : ''}; ${Math.max(0, total - results.length)} of the seed's ${total} were not run here`);
+  return { results, reproduces, unreached: unreachedCount, controlRefused, controlUnopened, skipped: total - results.length, seedScenarios: total };
 }
 
 const readCard = (file) => (file ? readFileSync(file, 'utf8') : null);
@@ -276,8 +337,8 @@ export async function cli(argv) {
     if (!cardFile) { console.error('--insecure turns off certificate verification, so the card must come from a file: pass --card <file>'); return 2; }
     process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
   }
-  const { reproduces, unreached: missed, controlRefused } = await runLive({ endpoint, card: readCard(cardFile) });
-  return reproduces || missed || controlRefused ? 1 : 0;
+  const { reproduces, unreached: missed, controlRefused, controlUnopened } = await runLive({ endpoint, card: readCard(cardFile) });
+  return reproduces || missed || controlRefused || controlUnopened ? 1 : 0;
 }
 
 // `pathToFileURL`, not `URL#pathname`: a pathname is percent-encoded and argv is not, so from a

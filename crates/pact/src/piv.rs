@@ -180,7 +180,7 @@ pub fn pin_block(pin: &str) -> Res<[u8; 8]> {
 
 /// The PIN, from a file for a script or from the terminal for a person. The file is held to the
 /// same rule the vault's passphrase file is: nobody else may read it.
-pub fn pin() -> Res<String> {
+pub fn pin() -> Res<zeroize::Zeroizing<String>> {
     if let Ok(path) = std::env::var("PACT_PIN_FILE") {
         #[cfg(unix)]
         {
@@ -190,17 +190,48 @@ pub fn pin() -> Res<String> {
                 return fail(format!("{path}: readable by others (mode {:o}); make it 0600", mode & 0o777));
             }
         }
-        let text = std::fs::read_to_string(&path).map_err(|e| Fail(format!("{path}: {e}")))?;
-        let p = text.trim_end_matches(['\n', '\r']).to_string();
+        let text = zeroize::Zeroizing::new(std::fs::read_to_string(&path).map_err(|e| Fail(format!("{path}: {e}")))?);
+        let p = zeroize::Zeroizing::new(text.trim_end_matches(['\n', '\r']).to_string());
         if p.is_empty() {
             return fail(format!("{path}: empty"));
         }
         return Ok(p);
     }
-    rpassword::prompt_password("PIV PIN: ").map_err(|e| Fail(format!("PIN: {e}")))
+    Ok(zeroize::Zeroizing::new(rpassword::prompt_password("PIV PIN: ").map_err(|e| Fail(format!("PIN: {e}")))?))
 }
 
 // ── the card itself ───────────────────────────────────────────────────────────────────────────
+
+/// What one answer may take. A PIV certificate object is about 3 KiB — a dozen short APDUs — so both
+/// are generous for a card and small for a device that has stopped being one.
+pub const MAX_RESPONSE_ROUNDS: usize = 64;
+pub const MAX_RESPONSE_BYTES: usize = 64 * 1024;
+
+/// Follows `61 xx` with GET RESPONSE until the card is done. PIV certificate objects are routinely
+/// larger than one short APDU can carry.
+///
+/// `more` sends one GET RESPONSE asking for the number of bytes the card said were waiting, and
+/// returns what came back with its status word. It is a parameter so that the loop can be run
+/// against a transport that is not a card — which is the only way to meet a hostile one in a test.
+pub fn gather(first: (Vec<u8>, u16), mut more: impl FnMut(u8) -> Res<(Vec<u8>, u16)>) -> Res<(Vec<u8>, u16)> {
+    let (mut data, mut sw) = first;
+    let mut rounds = 0;
+    while sw >> 8 == 0x61 {
+        rounds += 1;
+        if rounds > MAX_RESPONSE_ROUNDS {
+            return fail(format!(
+                "the card is still answering after {MAX_RESPONSE_ROUNDS} GET RESPONSE rounds: this is not a PIV card's answer"
+            ));
+        }
+        let (chunk, next) = more((sw & 0xFF) as u8)?;
+        if data.len() + chunk.len() > MAX_RESPONSE_BYTES {
+            return fail(format!("the card's answer is over {MAX_RESPONSE_BYTES} bytes: this is not a PIV card's answer"));
+        }
+        data.extend_from_slice(&chunk);
+        sw = next;
+    }
+    Ok((data, sw))
+}
 
 #[cfg(feature = "piv")]
 mod real {
@@ -224,15 +255,9 @@ mod real {
         Ok((out[..out.len() - 2].to_vec(), sw))
     }
 
-    /// A command and its answer, following `61 xx` with GET RESPONSE until the card is done. PIV
-    /// certificate objects are routinely larger than one short APDU can carry.
+    /// A command and its answer, whole: `gather` follows `61 xx` to the end.
     fn send(card: &pcsc::Card, apdu: &[u8], what: &str, slot: &str) -> Res<Vec<u8>> {
-        let (mut data, mut sw) = transmit(card, apdu)?;
-        while sw >> 8 == 0x61 {
-            let (more, next) = transmit(card, &[0x00, 0xC0, 0x00, 0x00, (sw & 0xFF) as u8])?;
-            data.extend_from_slice(&more);
-            sw = next;
-        }
+        let (data, sw) = super::gather(transmit(card, apdu)?, |waiting| transmit(card, &[0x00, 0xC0, 0x00, 0x00, waiting]))?;
         if sw != 0x9000 {
             return fail(format!("{what}: {}", status_meaning(sw, slot)));
         }
@@ -293,9 +318,11 @@ mod real {
         }
 
         fn verified(&self) -> Res<()> {
-            let block = pin_block(&pin()?)?;
-            let mut apdu = vec![0x00, 0x20, 0x00, 0x80, 0x08];
-            apdu.extend_from_slice(&block);
+            // The PIN exists three times on its way to the card — as typed, as the padded block, and
+            // inside the APDU — and each copy is overwritten when this returns.
+            let block = zeroize::Zeroizing::new(pin_block(&pin()?)?);
+            let mut apdu = zeroize::Zeroizing::new(vec![0x00, 0x20, 0x00, 0x80, 0x08]);
+            apdu.extend_from_slice(&block[..]);
             send(&self.card.borrow(), &apdu, "the PIN", &self.info.slot).map(|_| ())
         }
     }
@@ -393,6 +420,14 @@ pub mod fake {
             card(Some(PrivateKey::generate(Alg::P256).expect("a P-256 key")), serial, "p256", None)
         }
         /// A slot holding a key this profile does not allow — an RSA one, as a card would say it.
+        /// A slot whose key is Ed25519: a well-formed public key the profile allows and a card-held
+        /// root does not. (The fake still signs with P-256; the guard refuses before anything is signed.)
+        pub fn reports_ed25519() -> FakeCard {
+            let mut c = FakeCard::p256("ed25519-slot");
+            c.reports = vec![PrivateKey::generate(Alg::Ed25519).expect("a key").public()];
+            c
+        }
+
         pub fn rsa() -> FakeCard {
             card(None, "1", "rsa2048", Some(status_meaning(0x6A80, "9c")))
         }
@@ -545,6 +580,50 @@ mod tests {
         assert_eq!(pin_block("12345678").unwrap(), *b"12345678");
         assert!(pin_block("12345").is_err());
         assert!(pin_block("123456789").is_err());
+    }
+
+    // A token is attacker-controlled the moment a hostile one is plugged in, and the loop that
+    // follows `61 xx` had no end: a device answering "255 more bytes" for ever hung `pact
+    // card-status` and grew its buffer until the process was killed.
+    #[test]
+    fn a_card_that_never_finishes_answering_is_refused_not_waited_for() {
+        let mut asked = 0usize;
+        let got = gather((vec![0u8; 255], 0x61FF), |_| {
+            asked += 1;
+            assert!(asked < 10_000, "still asking after {asked} rounds: the loop has no bound");
+            Ok((vec![0u8; 255], 0x61FF))
+        });
+        let why = got.expect_err("an endless answer must be refused").0;
+        assert!(why.contains("GET RESPONSE"), "{why}");
+        assert!(asked <= MAX_RESPONSE_ROUNDS, "asked {asked} times");
+
+        // …and one that answers in few rounds but enormous ones.
+        let mut asked = 0usize;
+        let got = gather((Vec::new(), 0x6100), |_| {
+            asked += 1;
+            Ok((vec![0u8; 60_000], 0x6100))
+        });
+        let why = got.expect_err("an enormous answer must be refused").0;
+        assert!(why.contains("bytes"), "{why}");
+        assert!(asked <= 2, "asked {asked} times");
+    }
+
+    #[test]
+    fn an_honest_chained_answer_is_gathered_whole() {
+        // A 3 KiB certificate object in short APDUs: what a real card does.
+        let mut left = 3000usize;
+        let take = |left: &mut usize| {
+            let n = (*left).min(255);
+            *left -= n;
+            (vec![7u8; n], if *left == 0 { 0x9000 } else { 0x6100 | (*left).min(255) as u16 })
+        };
+        let first = take(&mut left);
+        let (data, sw) = gather(first, |waiting| {
+            assert_eq!(usize::from(waiting), left.min(255), "GET RESPONSE asks for what the card said was waiting");
+            Ok(take(&mut left))
+        })
+        .unwrap();
+        assert_eq!((data.len(), sw), (3000, 0x9000));
     }
 
     #[test]

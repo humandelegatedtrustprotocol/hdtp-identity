@@ -6,6 +6,7 @@ use serde_json::Value;
 use std::fs;
 use std::io::{self, BufRead, Read, Write};
 use std::path::{Path, PathBuf};
+use zeroize::{Zeroize, Zeroizing};
 
 /// One failure: a line for the person, and the process exits 1.
 #[derive(Debug)]
@@ -24,12 +25,30 @@ pub fn fail<T>(msg: impl Into<String>) -> Res<T> {
 }
 
 /// The core through its one boundary; an answer carrying `error` becomes a failure here.
-pub fn core(name: &str, args: Value) -> Res<Value> {
-    let out: Value = serde_json::from_str(&pact_identity::call(name, &args.to_string())).map_err(|e| Fail(format!("{name}: {e}")))?;
+///
+/// For the two vault calls, what crosses here is the passphrase and every root key the vault holds
+/// — as the arguments, as their serialised text, and (for `vault_open`) as the answer's text. The
+/// core zeroizes its own copies; these three were this side's, and were dropped as they stood.
+pub fn core(name: &str, mut args: Value) -> Res<Value> {
+    let text = Zeroizing::new(args.to_string());
+    wipe(&mut args);
+    let answer = Zeroizing::new(pact_identity::call(name, &text));
+    let out: Value = serde_json::from_str(&answer).map_err(|e| Fail(format!("{name}: {e}")))?;
     if let Some(code) = out.get("error").and_then(|e| e.as_str()) {
         return fail(format!("{}: {}", code, out.get("why").and_then(|w| w.as_str()).unwrap_or("")));
     }
     Ok(out)
+}
+
+/// Overwrites every string in a JSON value before it is freed. Dropping a `Value` frees its buffers
+/// as they are; a passphrase or a PKCS #8 inside one stays readable in the heap until reused.
+pub fn wipe(v: &mut Value) {
+    match v {
+        Value::String(s) => s.zeroize(),
+        Value::Array(a) => a.iter_mut().for_each(wipe),
+        Value::Object(o) => o.values_mut().for_each(wipe),
+        _ => {}
+    }
 }
 
 pub fn read_input(path: &str) -> Res<Vec<u8>> {
@@ -104,7 +123,7 @@ pub fn write_private(path: &Path, bytes: &[u8]) -> Res<()> {
         let _ = fs::remove_file(&tmp);
         return fail(format!("{}: {e}", path.display()));
     }
-    Ok(())
+    sync_parent(path)
 }
 
 /// Writes a file only its owner can read, and only where there is no file: the caller has decided
@@ -119,7 +138,30 @@ pub fn write_new_private(path: &Path, bytes: &[u8]) -> Res<()> {
     fill_new(path, bytes).map_err(|e| match e.kind() {
         io::ErrorKind::AlreadyExists => Fail(format!("{}: exists; nothing is written over it", path.display())),
         _ => Fail(format!("{}: {e}", path.display())),
-    })
+    })?;
+    sync_parent(path)
+}
+
+/// Makes a file's NAME durable. `sync_all` on the file makes its bytes durable and says nothing
+/// about the directory entry that leads to them, so a new vault could be reported as written and be
+/// absent after a power loss — and `id create` tells the person that what it just wrote cannot be
+/// recovered. ext4 in its default mode usually saves the entry anyway; APFS, XFS and btrfs promise
+/// nothing.
+///
+/// A failure is reported and the file is LEFT: it may be the only copy of a root key.
+pub fn sync_parent(path: &Path) -> Res<()> {
+    #[cfg(unix)]
+    {
+        let dir = path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
+        fs::File::open(dir).and_then(|d| d.sync_all()).map_err(|e| {
+            Fail(format!(
+                "{}: written, but its directory {} could not be synced ({e}); copy the file somewhere safe now",
+                path.display(),
+                dir.display()
+            ))
+        })?;
+    }
+    Ok(())
 }
 
 /// Creates a file and fills it, owner-only, and only where there is no file. `create_new` rather
@@ -170,7 +212,7 @@ pub fn write_output(path: Option<&str>, text: &str) -> Res<()> {
 
 /// The passphrase, from the terminal — never from an argument. `PACT_PASSPHRASE_FILE` serves
 /// scripts, read once, and refused when anyone but its owner can read it.
-pub fn passphrase(confirm: bool) -> Res<String> {
+pub fn passphrase(confirm: bool) -> Res<Zeroizing<String>> {
     if let Ok(path) = std::env::var("PACT_PASSPHRASE_FILE") {
         #[cfg(unix)]
         {
@@ -180,20 +222,20 @@ pub fn passphrase(confirm: bool) -> Res<String> {
                 return fail(format!("{path}: readable by others (mode {:o}); make it 0600", mode & 0o777));
             }
         }
-        let text = fs::read_to_string(&path).map_err(|e| Fail(format!("{path}: {e}")))?;
-        let p = text.trim_end_matches(['\n', '\r']).to_string();
+        let text = Zeroizing::new(fs::read_to_string(&path).map_err(|e| Fail(format!("{path}: {e}")))?);
+        let p = Zeroizing::new(text.trim_end_matches(['\n', '\r']).to_string());
         if p.is_empty() {
             return fail(format!("{path}: empty"));
         }
         return Ok(p);
     }
-    let first = rpassword::prompt_password("Passphrase: ").map_err(|e| Fail(format!("passphrase: {e}")))?;
+    let first = Zeroizing::new(rpassword::prompt_password("Passphrase: ").map_err(|e| Fail(format!("passphrase: {e}")))?);
     if first.is_empty() {
         return fail("an empty passphrase protects nothing");
     }
     if confirm {
-        let again = rpassword::prompt_password("Passphrase again: ").map_err(|e| Fail(format!("passphrase: {e}")))?;
-        if again != first {
+        let again = Zeroizing::new(rpassword::prompt_password("Passphrase again: ").map_err(|e| Fail(format!("passphrase: {e}")))?);
+        if *again != *first {
             return fail("the passphrases differ");
         }
     }
@@ -245,6 +287,57 @@ pub fn parse_valid(s: &str) -> Res<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("pact-io-{name}-{}-{}", std::process::id(), unique_tmp(Path::new("x")).display()));
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    // Dropping a serde_json::Value frees its strings as they stand. `wipe` is what the two vault
+    // calls and the Vault's own Drop rely on to overwrite them first.
+    #[test]
+    fn wipe_overwrites_every_string_wherever_it_sits() {
+        let mut v = serde_json::json!({
+            "passphrase": "correct horse",
+            "plaintext": { "roots": [{ "pkcs8": "MC4CAQ", "name": "Alina" }], "n": 3, "ok": true, "none": null },
+        });
+        wipe(&mut v);
+        let mut left = Vec::new();
+        fn strings<'a>(v: &'a Value, out: &mut Vec<&'a str>) {
+            match v {
+                Value::String(s) => out.push(s),
+                Value::Array(a) => a.iter().for_each(|x| strings(x, out)),
+                Value::Object(o) => o.values().for_each(|x| strings(x, out)),
+                _ => {}
+            }
+        }
+        strings(&v, &mut left);
+        assert_eq!(left.len(), 3, "the three strings are still members");
+        assert!(left.iter().all(|s| s.is_empty()), "{left:?}");
+        assert_eq!((v["plaintext"]["n"].as_i64(), v["plaintext"]["ok"].as_bool()), (Some(3), Some(true)));
+    }
+
+    // What can be shown of a directory sync without pulling the plug: that it really opens the
+    // directory the file is in (a parent that is not there is an error, not a shrug), and that
+    // both write paths reach it — a file written under a directory that has since gone reports it.
+    #[test]
+    fn the_directory_is_really_synced_and_a_failure_is_said() {
+        let d = scratch("sync");
+        let f = d.join("vault.json");
+        write_new_private(&f, b"{}").unwrap();
+        sync_parent(&f).unwrap();
+        write_private(&f, b"{\"a\":1}").unwrap();
+        assert_eq!(fs::read(&f).unwrap(), b"{\"a\":1}");
+
+        #[cfg(unix)]
+        {
+            let gone = d.join("no-such-dir").join("vault.json");
+            let why = sync_parent(&gone).expect_err("a parent that is not there cannot be synced").0;
+            assert!(why.contains("could not be synced"), "{why}");
+        }
+        fs::remove_dir_all(&d).unwrap();
+    }
 
     #[test]
     fn pem_round_trips_and_der_passes_through() {
