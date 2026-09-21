@@ -69,6 +69,7 @@ var unfoldRE = regexp.MustCompile("\r?\n[ \t]")
 // DecodeCard is intake per §3: refuses what has no root to pin or no address to reach; an expired leaf
 // is not a refusal.
 func DecodeCard(text string, now time.Time) (*Card, error) {
+	now = now.Truncate(time.Second)
 	unfolded := unfoldRE.ReplaceAllString(text, "")
 	props := map[string][]string{}
 	var order []string

@@ -253,9 +253,42 @@ func headerTypesOK(h map[string]any) bool {
 }
 
 // Decide is receive() of the seed, without the mutation.
-func Decide(now time.Time, env Envelope, node NodeState) Decision {
+//
+// The error is for the NODE'S OWN state, never for the envelope: a held key's leaf, a pin's leaf or a
+// tombstone that will not read. The seed throws on those and the Rust core returns Err. This port
+// used to skip the row and decide without it — so one unparseable instant turned a peer returning
+// after removal into a plain guest, and one unparseable pin answered `chain_required` to a contact.
+// A decision made on state the node could not read is not a decision; the host is told instead.
+func Decide(now time.Time, env Envelope, node NodeState) (Decision, error) {
+	var unreadable error
+	d := decide(now.Truncate(time.Second), env, node, &unreadable)
+	if unreadable != nil {
+		return Decision{}, unreadable
+	}
+	return d, nil
+}
+
+// unreadableState records the first piece of host state that would not read, in the words the core
+// uses for the same bytes (CONTRACT §0: both are `parse`).
+func unreadableState(into *error, err error) Decision {
+	var p parseError
+	if !errors.As(err, &p) {
+		err = parseError{err.Error()}
+	}
+	*into = err
+	return Decision{}
+}
+
+func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Decision {
 	effects := []map[string]any{}
-	aad := FromB64url(env.Protected)
+	// Every member is base64url and nothing else. The lenient reader skips what it does not know, so
+	// `protected` with a stray character decoded to the same bytes, the signature — which covers the
+	// DECODED bytes — still verified, and this port accepted a second spelling of an envelope the core
+	// refuses.
+	aad, err := decodeB64url(env.Protected)
+	if err != nil {
+		return invalid("protected is not JSON")
+	}
 	hv, err := decodeJSON(aad)
 	if err != nil {
 		return invalid("protected is not JSON")
@@ -281,9 +314,13 @@ func Decide(now time.Time, env Envelope, node NodeState) Decision {
 		if k.Kid != kid {
 			continue
 		}
-		leaf, err := Parse(FromB64url(k.Leaf))
+		leafDER, err := decodeB64url(k.Leaf)
 		if err != nil {
-			continue
+			return unreadableState(unreadable, err)
+		}
+		leaf, err := Parse(leafDER)
+		if err != nil {
+			return unreadableState(unreadable, err)
 		}
 		if k.Current || !now.After(leaf.NotAfter) {
 			held, heldLeaf = k, leaf
@@ -314,7 +351,11 @@ func Decide(now time.Time, env Envelope, node NodeState) Decision {
 	if err != nil {
 		return invalid("does not open")
 	}
-	enc, ct := FromB64url(env.Enc), FromB64url(env.Ct)
+	enc, errEnc := decodeB64url(env.Enc)
+	ct, errCt := decodeB64url(env.Ct)
+	if errEnc != nil || errCt != nil {
+		return invalid("does not open")
+	}
 	// `sig` covers the three members concatenated with nothing between them, so the suite's own `enc`
 	// length is what fixes the boundary: without it a byte moved from `enc` into `ct` leaves the signed
 	// bytes identical.
@@ -342,7 +383,8 @@ func Decide(now time.Time, env Envelope, node NodeState) Decision {
 		return invalid("plaintext shape")
 	}
 	signed := concat(aad, enc, ct)
-	sig := FromB64url(env.Sig)
+	// An undecodable signature is no signature: it fails below, in the words of the form it came in.
+	sig, _ := decodeB64url(env.Sig)
 	params, _ := body["params"].(map[string]any)
 	tool, hasTool := "", false
 	if params != nil {
@@ -418,9 +460,13 @@ func Decide(now time.Time, env Envelope, node NodeState) Decision {
 			if p.State == "blocked" {
 				continue
 			}
-			leaf, err := Parse(FromB64url(p.Leaf))
+			leafDER, err := decodeB64url(p.Leaf)
 			if err != nil {
-				continue
+				return unreadableState(unreadable, err)
+			}
+			leaf, err := Parse(leafDER)
+			if err != nil {
+				return unreadableState(unreadable, err)
 			}
 			if Fingerprint(leaf.SPKI) == ref {
 				hit, hitLeaf = p, leaf
@@ -529,27 +575,44 @@ func Decide(now time.Time, env Envelope, node NodeState) Decision {
 		}
 	}
 	if pin == nil {
+		// The FIRST tombstone for this root, as the core reads it; the seed keeps one per root, so a
+		// second is a host's mistake and not a second chance. This loop used to try every one.
 		for _, t := range node.Tombstones {
 			if t.Root != root {
 				continue
 			}
 			at, ok := parseInstant(t.At)
-			if !ok || now.Sub(at) >= Tombstone {
-				continue
+			if !ok {
+				return unreadableState(unreadable, parseError{"not an RFC 3339 instant: " + t.At})
 			}
-			if cmp, err := CompareLeaves(FromB64url(t.Leaf), chain[0]); err == nil && cmp == "newer" {
-				effects = append(effects, map[string]any{"op": "pending", "root": root, "endpoint": endpoint, "why": "returned after removal", "leaf": B64url(chain[0])})
-				return result("pending_new_address", root, endpoint, "chain", map[string]any{"forced": "tombstone", "decision": "ask"})
+			if now.Sub(at) < Tombstone {
+				was, err := decodeB64url(t.Leaf)
+				if err != nil {
+					return unreadableState(unreadable, err)
+				}
+				cmp, err := CompareLeaves(was, chain[0])
+				if err != nil {
+					return unreadableState(unreadable, err)
+				}
+				if cmp == "newer" {
+					effects = append(effects, map[string]any{"op": "pending", "root": root, "endpoint": endpoint, "why": "returned after removal", "leaf": B64url(chain[0])})
+					return result("pending_new_address", root, endpoint, "chain", map[string]any{"forced": "tombstone", "decision": "ask"})
+				}
 			}
+			break
 		}
 		return asGuest("unknown root")
 	}
 	if pin.State == "blocked" {
 		return asGuest("blocked")
 	}
-	cmp, err := CompareLeaves(FromB64url(pin.Leaf), chain[0])
+	pinnedDER, err := decodeB64url(pin.Leaf)
 	if err != nil {
-		return invalid("chain rule 1: " + err.Error())
+		return unreadableState(unreadable, err)
+	}
+	cmp, err := CompareLeaves(pinnedDER, chain[0])
+	if err != nil {
+		return unreadableState(unreadable, err)
 	}
 	if cmp == "superseded" {
 		return asGuest("superseded leaf")
@@ -612,7 +675,11 @@ type Opened struct {
 // OpenResult is §13.2 for the receiving caller: decode, open, validate the chain or find the named leaf
 // among its pins, verify the signature and correlate. Every failure is envelope_invalid.
 func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
-	aad := FromB64url(env.Protected)
+	o.Now = o.Now.Truncate(time.Second)
+	aad, err := decodeB64url(env.Protected)
+	if err != nil {
+		return nil, errors.New("protected is not JSON")
+	}
 	hv, err := decodeJSON(aad)
 	if err != nil {
 		return nil, errors.New("protected is not JSON")
@@ -624,14 +691,20 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 	if !headerTypesOK(header) {
 		return nil, errors.New("header member types")
 	}
+	// Three questions in the core's order and the core's words: is this a version and a suite anyone
+	// speaks, is it sealed to THIS key, does the suite fit this key. They were two questions here —
+	// "version or suite" also meant "a suite that is known and is not mine" — asked before the kid, so
+	// an envelope wrong in both ways was refused for a different reason by each port.
 	v, _ := numberOf(header["v"])
 	suite, _ := header["suite"].(string)
-	mine, _ := SuiteForKey(o.Recipient.Public)
-	if v != 2 || suite != mine {
+	if v != 2 || !SuiteKnown(suite) {
 		return nil, errors.New("version or suite")
 	}
 	if kid, _ := header["kid"].(string); kid != Fingerprint(o.Recipient.Public.SPKI) {
-		return nil, errors.New("not sealed to this key")
+		return nil, errors.New("kid is not this key")
+	}
+	if mine, _ := SuiteForKey(o.Recipient.Public); suite != mine {
+		return nil, errors.New("suite does not fit the key")
 	}
 	if cty, _ := header["cty"].(string); cty != CtyResult {
 		return nil, errors.New("not a result")
@@ -647,9 +720,17 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 	if exp-ts > MaxLifetimeSeconds {
 		return nil, errors.New("exp too far from ts")
 	}
-	enc, ct := FromB64url(env.Enc), FromB64url(env.Ct)
+	enc, errEnc := decodeB64url(env.Enc)
+	ct, errCt := decodeB64url(env.Ct)
+	if errEnc != nil || errCt != nil {
+		return nil, errors.New("does not open")
+	}
 	if len(enc) != SuiteNpk(suite) {
 		return nil, errors.New("encapsulated key is not the suite's length")
+	}
+	sig, err := decodeB64url(env.Sig)
+	if err != nil {
+		return nil, errors.New("signature")
 	}
 	plaintext, err := Open(suite, o.Recipient, []byte(InfoV2), aad, enc, ct)
 	if err != nil {
@@ -674,22 +755,30 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 		return nil, errors.New("plaintext members")
 	}
 	signed := concat(aad, enc, ct)
-	sig := FromB64url(env.Sig)
 	if ref, ok := body["leaf"].(string); ok {
 		out.Form = "leaf"
 		for _, p := range o.Pins {
 			if p.State == "blocked" {
 				continue
 			}
-			leaf, err := Parse(FromB64url(p.Leaf))
-			if err != nil || Fingerprint(leaf.SPKI) != ref {
+			// A pin that will not read is the caller's own state gone wrong, and is said as such
+			// (`parse`), not stepped over on the way to "unknown leaf".
+			leafDER, err := decodeB64url(p.Leaf)
+			if err != nil {
+				return nil, err
+			}
+			leaf, err := Parse(leafDER)
+			if err != nil {
+				return nil, parseError{err.Error()}
+			}
+			if Fingerprint(leaf.SPKI) != ref {
 				continue
 			}
 			if o.Now.After(leaf.NotAfter) {
-				return nil, errors.New("the named leaf has expired")
+				return nil, errors.New("held leaf has expired")
 			}
 			if !VerifyDetached(leaf.PublicKey, signed, sig) {
-				return nil, errors.New("signature is not the named leaf's key")
+				return nil, errors.New("signature is not the held leaf's key")
 			}
 			if o.ExpectedRoot != "" && p.Root != o.ExpectedRoot {
 				return nil, errors.New("root is not the one expected")
@@ -700,7 +789,7 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 			out.Root, out.Endpoint = p.Root, p.Endpoint
 			return &out, nil
 		}
-		return nil, errors.New("leaf not held")
+		return nil, errors.New("unknown leaf")
 	}
 	chainAny, ok := body["chain"].([]any)
 	if !ok {
@@ -751,6 +840,7 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 // FollowRenewed is §14.4 on the caller's side: follow a certificate_renewed answer only when its chain
 // validates to the pinned root at the dialed address and is newer than or equal to the pin.
 func FollowRenewed(answerChain [][]byte, pinnedRoot string, pinnedLeaf []byte, dialed string, now time.Time) (bool, string, []byte) {
+	now = now.Truncate(time.Second)
 	vr := ValidateChain(answerChain, ChainOpts{Now: now, ExpectedRoot: pinnedRoot, ExpectedEndpoint: dialed})
 	if !vr.OK {
 		return false, "chain rule " + itoa(vr.Rule) + ": " + vr.Reason, nil
@@ -760,7 +850,7 @@ func FollowRenewed(answerChain [][]byte, pinnedRoot string, pinnedLeaf []byte, d
 		return false, err.Error(), nil
 	}
 	if cmp == "superseded" {
-		return false, "older than the pinned leaf", nil
+		return false, "older than the pin", nil
 	}
 	if cmp == "conflict" {
 		return false, "a different leaf with the same notBefore", nil
