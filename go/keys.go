@@ -63,19 +63,23 @@ type PrivateKey struct {
 // B64url encodes without padding, the JSON form of every byte string in the contract.
 func B64url(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
 
-// FromB64url decodes leniently, as Node's Buffer.from(s, 'base64url') does: characters outside the
-// alphabet are skipped, padding is ignored, and a trailing partial group is dropped.
-func FromB64url(s string) []byte {
+// b64Index maps a byte to its six bits, or -1. Built once: `FromB64url` rebuilt it on every call.
+var b64Index = func() (idx [256]int8) {
 	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
-	var idx [256]int8
 	for i := range idx {
 		idx[i] = -1
 	}
 	for i := 0; i < len(alphabet); i++ {
 		idx[alphabet[i]] = int8(i)
 	}
-	idx['+'] = 62
-	idx['/'] = 63
+	idx['+'], idx['/'] = 62, 63
+	return idx
+}()
+
+// FromB64url decodes leniently, as Node's Buffer.from(s, 'base64url') does: characters outside the
+// alphabet are skipped, padding is ignored, and a trailing partial group is dropped.
+func FromB64url(s string) []byte {
+	idx := &b64Index
 	out := make([]byte, 0, len(s)*3/4)
 	var acc uint32
 	bits := 0

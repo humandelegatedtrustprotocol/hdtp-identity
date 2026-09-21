@@ -68,12 +68,16 @@ func SerialOf(label string) []byte { return sha256Sum([]byte("serial/" + label))
 // beginning 0x00 would encode to seven significant bytes and be refused for being under 64 bits.
 // Drawing again is the unbiased way to keep all eight significant; it costs one extra draw once in
 // every 256 certificates.
-func randomSerial() []byte {
+func randomSerial() ([]byte, error) {
 	for {
 		b := make([]byte, 8)
-		_, _ = rand.Read(b)
+		// The error is said, as the core says it. Discarded, a failed read left eight zero bytes to
+		// be tried again for ever — or, had the loop been written differently, used.
+		if _, err := rand.Read(b); err != nil {
+			return nil, err
+		}
 		if b[0] != 0 {
-			return b
+			return b, nil
 		}
 	}
 }
@@ -86,9 +90,11 @@ type RootOpts struct {
 	Serial    []byte
 }
 
-func rootTBS(cn string, pub *PublicKey, notBefore time.Time, serial []byte) (tbs, alg []byte) {
+func rootTBS(cn string, pub *PublicKey, notBefore time.Time, serial []byte) (tbs, alg []byte, err error) {
 	if serial == nil {
-		serial = randomSerial()
+		if serial, err = randomSerial(); err != nil {
+			return nil, nil, err
+		}
 	}
 	alg = sigAlgFor(pub.Alg)
 	tbs = seq(
@@ -99,11 +105,11 @@ func rootTBS(cn string, pub *PublicKey, notBefore time.Time, serial []byte) (tbs
 			extension(OIDSubjectKeyID, false, octet(KeyID(pub.SPKI))),
 		)),
 	)
-	return tbs, alg
+	return tbs, alg, nil
 }
 
 // RootTBS is the external-signing seam: the bytes a root key must sign, and the algorithm identifier.
-func RootTBS(cn string, pub *PublicKey, notBefore time.Time, serial []byte) (tbs []byte, alg []byte) {
+func RootTBS(cn string, pub *PublicKey, notBefore time.Time, serial []byte) (tbs []byte, alg []byte, err error) {
 	return rootTBS(cn, pub, notBefore, serial)
 }
 
@@ -124,7 +130,10 @@ func Assemble(tbs, alg, sig []byte) []byte {
 
 // BuildRoot signs a root with its own key.
 func BuildRoot(o RootOpts) ([]byte, error) {
-	tbs, alg := rootTBS(o.CN, o.Key.Public, o.NotBefore, o.Serial)
+	tbs, alg, err := rootTBS(o.CN, o.Key.Public, o.NotBefore, o.Serial)
+	if err != nil {
+		return nil, err
+	}
 	sig, err := SignDetached(o.Key, tbs)
 	if err != nil {
 		return nil, err
@@ -159,10 +168,12 @@ type LeafOpts struct {
 	AlgOID     string
 }
 
-func leafTBS(o LeafOpts, rootPub *PublicKey) (tbs, alg []byte) {
+func leafTBS(o LeafOpts, rootPub *PublicKey) (tbs, alg []byte, err error) {
 	serial := o.Serial
 	if serial == nil {
-		serial = randomSerial()
+		if serial, err = randomSerial(); err != nil {
+			return nil, nil, err
+		}
 	}
 	id := KeyID(o.HostPub.SPKI)
 	issuerID := o.AKI
@@ -214,15 +225,18 @@ func leafTBS(o LeafOpts, rootPub *PublicKey) (tbs, alg []byte) {
 		explicit(0, derIntN(2)), derInt(serial), alg, nameCN(o.RootCN), seq(derTime(o.NotBefore), derTime(o.NotAfter)), nameCN(o.CN), o.HostPub.SPKI,
 		explicit(3, seq(exts...)),
 	)
-	return tbs, alg
+	return tbs, alg, nil
 }
 
 // LeafTBS is the seam for a leaf: what the root must sign, from the root's public key alone.
-func LeafTBS(o LeafOpts) (tbs, alg []byte) { return leafTBS(o, o.RootPub) }
+func LeafTBS(o LeafOpts) (tbs, alg []byte, err error) { return leafTBS(o, o.RootPub) }
 
 // BuildLeaf issues a leaf under the root key.
 func BuildLeaf(o LeafOpts) ([]byte, error) {
-	tbs, alg := leafTBS(o, o.RootKey.Public)
+	tbs, alg, err := leafTBS(o, o.RootKey.Public)
+	if err != nil {
+		return nil, err
+	}
 	sig, err := SignDetached(o.RootKey, tbs)
 	if err != nil {
 		return nil, err
@@ -452,9 +466,15 @@ func Parse(der []byte) (*Cert, error) {
 				if !derIntMinimal(pl) || len(pl) > 8 {
 					return nil, errors.New("INTEGER not minimal")
 				}
-				v := 0
+				// Eight octets fold into 64 bits, as the core's `i64` does, and only then into an `int`:
+				// on a 32-bit build the old fold wrapped, and a huge pathLen read as a small one.
+				var wide int64
 				for _, b := range pl {
-					v = v<<8 | int(b)
+					wide = wide<<8 | int64(b)
+				}
+				v := int(wide)
+				if int64(v) != wide {
+					return nil, errors.New("INTEGER out of range")
 				}
 				out.PathLen = &v
 			}
@@ -676,6 +696,9 @@ func refuse(rule int, reason string) ChainResult { return ChainResult{Rule: rule
 
 // ValidateChain is §14.2, refusing at the first failure and naming the rule.
 func ValidateChain(chain [][]byte, o ChainOpts) ChainResult {
+	// An instant is whole seconds, as it is in the core and on the wire. A node hands this
+	// `time.Now()`, and with its fraction kept a leaf ran out up to a second earlier here than there.
+	o.Now = o.Now.Truncate(time.Second)
 	if len(chain) != 2 {
 		return refuse(1, fmt.Sprintf("chain of %d", len(chain)))
 	}

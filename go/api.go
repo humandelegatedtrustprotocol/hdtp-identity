@@ -61,7 +61,7 @@ func timeIn(s string) (time.Time, error) {
 	if err != nil {
 		return time.Time{}, errors.New("not an RFC 3339 instant: " + s)
 	}
-	return t, nil
+	return t.Truncate(time.Second), nil
 }
 
 // A caller's arguments that will not read are a caller mistake, so they answer `bad_request` here
@@ -479,7 +479,10 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 		if err != nil {
 			return failErr(codeArgs, err)
 		}
-		tbs, alg := RootTBS(a.CN, pub, nb, serial)
+		tbs, alg, err := RootTBS(a.CN, pub, nb, serial)
+		if err != nil {
+			return failErr("internal", err)
+		}
 		return ok(map[string]any{"tbs": B64url(tbs), "sig_alg": B64url(alg)})
 	},
 	"assemble_root": assembleFn,
@@ -518,7 +521,10 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 			return failErr(codeFor(err, "parse"), err)
 		}
 		lo.RootPub = rootPub
-		tbs, alg := LeafTBS(lo)
+		tbs, alg, err := LeafTBS(lo)
+		if err != nil {
+			return failErr("internal", err)
+		}
 		return ok(map[string]any{"tbs": B64url(tbs), "sig_alg": B64url(alg)})
 	},
 	"parse_certificate": func(args json.RawMessage) json.RawMessage {
@@ -939,7 +945,7 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 		}
 		opened, err := OpenResult(*a.Envelope, OpenOpts{Recipient: priv, MsgID: a.MsgID, Now: now, Pins: a.Pins, ExpectedRoot: a.ExpectedRoot, ExpectedEndpoint: a.ExpectedEndpoint})
 		if err != nil {
-			return failErr("envelope_invalid", err)
+			return failErr(codeFor(err, "envelope_invalid"), err)
 		}
 		out := map[string]any{"ok": true, "root": opened.Root, "endpoint": opened.Endpoint, "form": opened.Form}
 		if opened.Result != nil {
@@ -958,7 +964,10 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 			Answer struct {
 				Code string `json:"code"`
 				Data struct {
-					Chain []B64 `json:"chain"`
+					// Raw, because ABSENT and EMPTY are different answers (CONTRACT §0): no `chain`
+					// member — or one that is not a list of base64url strings — is "no chain", and
+					// `[]` is a chain of 0 that rule 1 refuses. Decoded as a slice, both were nil.
+					Chain json.RawMessage `json:"chain"`
 				} `json:"data"`
 			} `json:"answer"`
 			PinnedRoot *string `json:"pinned_root"`
@@ -985,9 +994,13 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 			return failErr("parse", err)
 		}
 		if a.Answer.Code != "certificate_renewed" {
-			return ok(map[string]any{"follow": false, "why": "not a certificate_renewed answer"})
+			return ok(map[string]any{"follow": false, "why": "not certificate_renewed"})
 		}
-		follow, why, leaf := FollowRenewed(chainOf(a.Answer.Data.Chain), pinnedRoot, a.PinnedLeaf, dialed, now)
+		var answered []B64
+		if raw := bytes.TrimSpace(a.Answer.Data.Chain); len(raw) == 0 || raw[0] != '[' || json.Unmarshal(raw, &answered) != nil {
+			return ok(map[string]any{"follow": false, "why": "no chain"})
+		}
+		follow, why, leaf := FollowRenewed(chainOf(answered), pinnedRoot, a.PinnedLeaf, dialed, now)
 		if !follow {
 			return ok(map[string]any{"follow": false, "why": why})
 		}
@@ -1015,7 +1028,11 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 		if err != nil {
 			return failErr("parse", err)
 		}
-		return ok(Decide(now, *a.Envelope, *a.Node))
+		d, err := Decide(now, *a.Envelope, *a.Node)
+		if err != nil {
+			return failErr(codeFor(err, "parse"), err)
+		}
+		return ok(d)
 	},
 
 	// §6 vault

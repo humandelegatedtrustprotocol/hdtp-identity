@@ -32,6 +32,42 @@ func CSRNew(cn string, host *PrivateKey, endpoint, dnsName string) ([]byte, erro
 	return seq(info, sigAlgFor(host.Alg), bitstr(sig, 0)), nil
 }
 
+// csrNameOf is `csr.rs`'s `x509_name`: one RDN, one attribute, EXACTLY two elements — the commonName
+// OID and a UTF8String. The certificate reader's `nameOf` takes "at least two", which is its own
+// question; a request is held to the builder's shape because a wallet is about to sign it.
+func csrNameOf(node derNode) (string, error) {
+	const shape = "request is not in the profile"
+	rdns, err := derChildren(node)
+	if err != nil {
+		return "", err
+	}
+	if len(rdns) != 1 {
+		return "", errors.New(shape)
+	}
+	atvs, err := derChildren(rdns[0])
+	if err != nil {
+		return "", err
+	}
+	if len(atvs) != 1 {
+		return "", errors.New(shape)
+	}
+	parts, err := derChildren(atvs[0])
+	if err != nil {
+		return "", err
+	}
+	if len(parts) != 2 {
+		return "", errors.New(shape)
+	}
+	cnOid, err := readOidStrict(parts[0])
+	if err != nil {
+		return "", err
+	}
+	if cnOid != OIDCommonName || parts[1].tag != 0x0c {
+		return "", errors.New(shape)
+	}
+	return string(parts[1].content), nil
+}
+
 // CSRInfo is what a wallet learns from a request it accepted.
 type CSRInfo struct {
 	OK          bool
@@ -56,16 +92,29 @@ func CSRCheck(der []byte, rootSPKIs [][]byte) CSRInfo {
 	if top.tag != 0x30 || top.end != len(der) {
 		return csrRefuse("request is not in the profile")
 	}
+	// From here to the algorithm, this is `csr.rs`'s `parse` line for line: where it propagates the
+	// DER reader's error this does, and where it answers "not in the profile" this does. It was
+	// looser in three places a request could reach — the two parts of the CertificationRequest were
+	// never required to be SEQUENCEs, a commonName attribute could carry a third element, and the
+	// signatureAlgorithm could carry parameters — and a request is what a HOST hands a WALLET to
+	// sign, so laxer than the other port is the wrong direction for the port that issues.
+	const shape = "request is not in the profile"
 	parts, err := derChildren(top)
-	if err != nil || len(parts) != 3 || parts[2].tag != 0x03 || len(parts[2].content) < 1 || parts[2].content[0] != 0 {
-		return csrRefuse("request is not in the profile")
+	if err != nil {
+		return csrRefuse(err.Error())
+	}
+	if len(parts) != 3 || parts[0].tag != 0x30 || parts[1].tag != 0x30 || parts[2].tag != 0x03 || len(parts[2].content) < 1 || parts[2].content[0] != 0 {
+		return csrRefuse(shape)
 	}
 	info, alg, sig := parts[0], parts[1], parts[2]
 	f, err := derChildren(info)
-	if err != nil || len(f) != 4 || f[0].tag != 0x02 || !bytes.Equal(f[0].content, []byte{0}) || f[3].tag != 0xa0 {
-		return csrRefuse("request is not in the profile")
+	if err != nil {
+		return csrRefuse(err.Error())
 	}
-	cn, err := nameOf(f[1])
+	if len(f) != 4 || f[0].tag != 0x02 || !bytes.Equal(f[0].content, []byte{0}) || f[1].tag != 0x30 || f[2].tag != 0x30 || f[3].tag != 0xa0 {
+		return csrRefuse(shape)
+	}
+	cn, err := csrNameOf(f[1])
 	if err != nil {
 		return csrRefuse(err.Error())
 	}
@@ -73,69 +122,102 @@ func CSRCheck(der []byte, rootSPKIs [][]byte) CSRInfo {
 	if err != nil {
 		return csrRefuse(err.Error())
 	}
-	if _, err := AlgorithmOf(pub); err != nil {
-		return csrRefuse("request key algorithm not in the profile")
-	}
 	attrs, err := derChildren(f[3])
-	if err != nil || len(attrs) != 1 {
-		return csrRefuse("request is not in the profile")
+	if err != nil {
+		return csrRefuse(err.Error())
+	}
+	if len(attrs) != 1 || attrs[0].tag != 0x30 {
+		return csrRefuse(shape)
 	}
 	attr, err := derChildren(attrs[0])
-	if err != nil || len(attr) != 2 {
-		return csrRefuse("request is not in the profile")
+	if err != nil {
+		return csrRefuse(err.Error())
 	}
-	attrOid, oidErr := readOidStrict(attr[0])
-	if oidErr != nil || attrOid != oidExtensionRequest || attr[1].tag != 0x31 {
-		return csrRefuse("request is not in the profile")
+	if len(attr) != 2 {
+		return csrRefuse(shape)
+	}
+	attrOid, err := readOidStrict(attr[0])
+	if err != nil {
+		return csrRefuse(err.Error())
+	}
+	if attrOid != oidExtensionRequest || attr[1].tag != 0x31 {
+		return csrRefuse(shape)
 	}
 	values, err := derChildren(attr[1])
-	if err != nil || len(values) != 1 {
-		return csrRefuse("request is not in the profile")
+	if err != nil {
+		return csrRefuse(err.Error())
+	}
+	if len(values) != 1 || values[0].tag != 0x30 {
+		return csrRefuse(shape)
 	}
 	exts, err := derChildren(values[0])
-	if err != nil || len(exts) != 1 {
-		return csrRefuse("request is not in the profile")
+	if err != nil {
+		return csrRefuse(err.Error())
+	}
+	if len(exts) != 1 || exts[0].tag != 0x30 {
+		return csrRefuse(shape)
 	}
 	ext, err := derChildren(exts[0])
-	if err != nil || len(ext) != 2 {
-		return csrRefuse("request is not in the profile")
+	if err != nil {
+		return csrRefuse(err.Error())
 	}
-	extOid, extOidErr := readOidStrict(ext[0])
-	if extOidErr != nil || extOid != OIDSubjectAltName || ext[1].tag != 0x04 {
-		return csrRefuse("request is not in the profile")
+	if len(ext) != 2 {
+		return csrRefuse(shape)
+	}
+	extOid, err := readOidStrict(ext[0])
+	if err != nil {
+		return csrRefuse(err.Error())
+	}
+	if extOid != OIDSubjectAltName || ext[1].tag != 0x04 {
+		return csrRefuse(shape)
 	}
 	san, err := derRead(ext[1].content, 0)
-	if err != nil || san.tag != 0x30 || san.end != len(ext[1].content) {
-		return csrRefuse("request is not in the profile")
+	if err != nil {
+		return csrRefuse(err.Error())
+	}
+	if san.tag != 0x30 || san.end != len(ext[1].content) {
+		return csrRefuse(shape)
 	}
 	names, err := derChildren(san)
 	if err != nil {
-		return csrRefuse("request is not in the profile")
+		return csrRefuse(err.Error())
 	}
 	var uris, dns []string
 	for _, n := range names {
-		switch n.tag {
-		case 0x86:
+		switch {
+		case n.tag == 0x86 && len(uris) == 0:
 			uris = append(uris, string(n.content))
-		case 0x82:
+		case n.tag == 0x82 && len(dns) == 0:
 			dns = append(dns, string(n.content))
 		default:
-			return csrRefuse("request is not in the profile")
+			return csrRefuse(shape)
 		}
 	}
-	if len(uris) != 1 || len(dns) > 1 {
-		return csrRefuse("request is not in the profile")
+	if len(uris) != 1 {
+		return csrRefuse(shape)
 	}
 	algParts, err := derChildren(alg)
-	if err != nil || len(algParts) < 1 {
-		return csrRefuse("request is not in the profile")
+	if err != nil {
+		return csrRefuse(err.Error())
+	}
+	if len(algParts) != 1 {
+		return csrRefuse(shape)
+	}
+	csrAlgOid, err := readOidStrict(algParts[0])
+	if err != nil {
+		return csrRefuse(err.Error())
+	}
+	// …and only now, with the whole request read, the questions `csr.rs`'s `check` asks, in its order.
+	// The key's algorithm used to be judged straight after the key was parsed, so a request wrong in
+	// two ways was refused for a different one by each port.
+	if _, err := AlgorithmOf(pub); err != nil {
+		return csrRefuse("request key algorithm not in the profile")
 	}
 	expected := OIDEcdsaSHA256
 	if pub.Alg == AlgEd25519 {
 		expected = OIDEd25519
 	}
-	csrAlgOid, csrAlgErr := readOidStrict(algParts[0])
-	if csrAlgErr != nil || csrAlgOid != expected || !VerifyDetached(pub, info.raw, sig.content[1:]) {
+	if csrAlgOid != expected || !VerifyDetached(pub, info.raw, sig.content[1:]) {
 		return csrRefuse("the request's signature does not verify: no proof of possession")
 	}
 	id := KeyID(pub.SPKI)
@@ -226,6 +308,9 @@ func IssueTBSFromCSR(csr []byte, o IssueOpts) (Issued, error) {
 	if err != nil {
 		return Issued{}, err
 	}
-	tbs, alg := LeafTBS(lo)
+	tbs, alg, err := LeafTBS(lo)
+	if err != nil {
+		return Issued{}, err
+	}
 	return Issued{TBS: tbs, Alg: alg, Endpoint: lo.Endpoint, NotBefore: lo.NotBefore, NotAfter: lo.NotAfter}, nil
 }
