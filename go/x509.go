@@ -655,7 +655,9 @@ func ProfileError(c *Cert, kind string) string {
 	if crit[OIDSubjectAltName] || c.OtherNames > 0 || len(c.DNS) > 1 {
 		return "leaf subjectAltName carries a name type the profile does not"
 	}
-	if crit[OIDAuthorityKeyID] || c.AKI == nil || c.AKIExtra {
+	// A key identifier is the 32-byte SHA-256 of a SubjectPublicKeyInfo (§14.1): the subject one was
+	// held to that, and this one was only asked to be there.
+	if crit[OIDAuthorityKeyID] || len(c.AKI) != 32 || c.AKIExtra {
 		return "leaf authorityKeyIdentifier is not a key identifier alone"
 	}
 	return ""
@@ -755,17 +757,30 @@ func ValidateChain(chain [][]byte, o ChainOpts) ChainResult {
 	return ChainResult{OK: true, Leaf: leaf, Root: root, LeafKey: leaf.PublicKey, RootFingerprint: rootFingerprint, Endpoint: endpoint}
 }
 
-// hostOf returns the authority of a URL already in normal form (no userinfo, no port).
+// hostOf returns the HOST of a URL already in normal form: its authority without the port. (The normal
+// form has no userinfo, and MAY have a port other than 443.) It returned the whole authority, under a
+// comment saying there was no port, so on any address but :443 a request asking for the dNSName §14.1
+// permits was refused and rule 5 would have refused the leaf. An IPv6 literal keeps its brackets, as
+// in the core: it is never a dNSName, and what matters is that one spelling is compared with itself.
 func hostOf(endpoint string) string {
 	rest := strings.TrimPrefix(endpoint, "https://")
-	if i := strings.IndexByte(rest, '/'); i >= 0 {
+	if i := strings.IndexAny(rest, "/?#"); i >= 0 {
+		rest = rest[:i]
+	}
+	if strings.HasPrefix(rest, "[") {
+		if i := strings.IndexByte(rest, ']'); i >= 0 {
+			return rest[:i+1]
+		}
+		return rest
+	}
+	if i := strings.IndexByte(rest, ':'); i >= 0 {
 		return rest[:i]
 	}
 	return rest
 }
 
 // IsNormalHTTPS is the normal form of §14.1: what the string must already be, so nothing is normalised
-// at comparison time — https, lowercase host, no userinfo, port, query or fragment, a non-empty path
+// at comparison time — https, lowercase host, no userinfo, no DEFAULT port, no query or fragment, a non-empty path
 // with no trailing slash, no dot segments, and percent-encoding uppercase and minimal.
 func IsNormalHTTPS(s string) bool {
 	if !strings.HasPrefix(s, "https://") {

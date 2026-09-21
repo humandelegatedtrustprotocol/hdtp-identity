@@ -6,7 +6,7 @@ use crate::card;
 use crate::hpke::{self, suite_for, Suite};
 use crate::keys::{PrivateKey, PublicKey};
 use crate::time::{format_rfc3339, parse_rfc3339};
-use crate::util::{b64u, err, from_b64u, Error, Result};
+use crate::util::{b64u, err, from_b64u, wire_b64u, Error, Result};
 use crate::x509::{self, compare_leaves, parse, validate_chain, ChainResult};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -194,7 +194,7 @@ fn members(v: &Value) -> String {
 }
 
 fn decode_header(protected: &str) -> Result<(Vec<u8>, Map<String, Value>)> {
-    let aad = from_b64u(protected).map_err(|_| Error::new("envelope_invalid", "protected is not JSON"))?;
+    let aad = wire_b64u(protected).map_err(|_| Error::new("envelope_invalid", "protected is not JSON"))?;
     let h: Value = serde_json::from_slice(&aad).map_err(|_| Error::new("envelope_invalid", "protected is not JSON"))?;
     match h {
         Value::Object(o) => Ok((aad, o)),
@@ -223,6 +223,40 @@ fn header_checks(h: &Map<String, Value>) -> Result<Suite> {
     }
 }
 
+/// The pin that holds the leaf a small-form envelope names, among those that are not blocked.
+///
+/// The name arrives from somebody who has proved nothing yet, and finding it used to mean parsing
+/// EVERY pinned leaf and hashing its key: N X.509 parses and N SHA-256s per envelope on a node with N
+/// contacts, before freshness, before replay — and again for the same envelope sent twice. A host
+/// already knows each pin's leaf fingerprint (`decide` hands it back when it pins), so a pin MAY
+/// carry it: then the match is a string comparison and only the pin that matched is parsed. The match
+/// is still held to its own leaf, because a fingerprint beside a certificate is a claim about it.
+/// A pin without the member is read as before, so an older host loses nothing but the saving.
+fn pin_holding<'a, P>(
+    pins: impl Iterator<Item = &'a P>,
+    named: &str,
+    parts: impl Fn(&'a P) -> (&'a str, Option<&'a str>),
+) -> Result<Option<(&'a P, x509::Cert)>>
+where
+    P: 'a,
+{
+    for p in pins {
+        let (leaf_b64, claimed) = parts(p);
+        if claimed.is_some_and(|c| c != named) {
+            continue;
+        }
+        let leaf = parse(&from_b64u(leaf_b64)?)?;
+        let actual = leaf.public_key.fingerprint();
+        if claimed.is_some() && actual != named {
+            return err("parse", "a pin's leaf_fingerprint is not its leaf's");
+        }
+        if actual == named {
+            return Ok(Some((p, leaf)));
+        }
+    }
+    Ok(None)
+}
+
 /// A caller's pin, as `open_result` needs it.
 #[derive(Deserialize, Clone, Debug)]
 pub struct CallerPin {
@@ -231,6 +265,9 @@ pub struct CallerPin {
     pub leaf: String,
     #[serde(default = "active")]
     pub state: String,
+    /// The fingerprint of `leaf`'s key, when the host keeps it — see `pin_holding`.
+    #[serde(default)]
+    pub leaf_fingerprint: Option<String>,
 }
 
 fn active() -> String {
@@ -275,12 +312,12 @@ pub fn open_result(a: OpenResultArgs<'_>) -> Result<Value> {
         },
         _ => return invalid("outside the time window"),
     }
-    let enc = from_b64u(&a.envelope.enc).map_err(|_| Error::new("envelope_invalid", "does not open"))?;
-    let ct = from_b64u(&a.envelope.ct).map_err(|_| Error::new("envelope_invalid", "does not open"))?;
+    let enc = wire_b64u(&a.envelope.enc).map_err(|_| Error::new("envelope_invalid", "does not open"))?;
+    let ct = wire_b64u(&a.envelope.ct).map_err(|_| Error::new("envelope_invalid", "does not open"))?;
     if enc.len() != suite.npk() {
         return err("envelope_invalid", "encapsulated key is not the suite's length");
     }
-    let sig = from_b64u(&a.envelope.sig).map_err(|_| Error::new("envelope_invalid", "signature"))?;
+    let sig = wire_b64u(&a.envelope.sig).map_err(|_| Error::new("envelope_invalid", "signature"))?;
     let plaintext = hpke::open(suite, a.my_key, INFO_V2, &aad, &enc, &ct).map_err(|_| Error::new("envelope_invalid", "does not open"))?;
     let body: Value = serde_json::from_slice(&plaintext).map_err(|_| Error::new("envelope_invalid", "does not open"))?;
     let m = members(&body);
@@ -324,14 +361,8 @@ pub fn open_result(a: OpenResultArgs<'_>) -> Result<Value> {
         out.insert("form".into(), Value::String("chain".into()));
     } else {
         let Some(named) = body["leaf"].as_str() else { return invalid("plaintext shape") };
-        let mut found = None;
-        for p in a.pins.iter().filter(|p| p.state != "blocked") {
-            let leaf = parse(&from_b64u(&p.leaf)?)?;
-            if leaf.public_key.fingerprint() == named {
-                found = Some((p, leaf));
-                break;
-            }
-        }
+        let found =
+            pin_holding(a.pins.iter().filter(|p| p.state != "blocked"), named, |p| (p.leaf.as_str(), p.leaf_fingerprint.as_deref()))?;
         let Some((p, leaf)) = found else { return invalid("unknown leaf") };
         if a.now > leaf.not_after {
             return invalid("held leaf has expired");
@@ -414,6 +445,9 @@ pub struct Pin {
     pub leaf: String,
     #[serde(default = "active")]
     pub state: String,
+    /// The fingerprint of `leaf`'s key, when the host keeps it — see `pin_holding`.
+    #[serde(default)]
+    pub leaf_fingerprint: Option<String>,
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -554,7 +588,7 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
     }
     let key = PrivateKey::from_pkcs8(&Zeroizing::new(from_b64u(&held.pkcs8)?))?;
 
-    let (Ok(enc), Ok(ct)) = (from_b64u(&e.enc), from_b64u(&e.ct)) else { return Ok(invalid("does not open")) };
+    let (Ok(enc), Ok(ct)) = (wire_b64u(&e.enc), wire_b64u(&e.ct)) else { return Ok(invalid("does not open")) };
     // `sig` covers the three members concatenated with nothing between them, so the suite's own `enc`
     // length is what fixes the boundary: without it a byte moved from `enc` into `ct` leaves the
     // signed bytes identical.
@@ -576,7 +610,7 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
     let mut signed = aad.clone();
     signed.extend_from_slice(&enc);
     signed.extend_from_slice(&ct);
-    let sig = from_b64u(&e.sig).unwrap_or_default();
+    let sig = wire_b64u(&e.sig).unwrap_or_default();
     let tool: Option<String> = body["params"].get("name").and_then(|n| n.as_str()).map(|s| s.to_string());
     let tool_ref = tool.as_deref();
     let msg_id = h.get("msg_id").and_then(|x| x.as_str()).unwrap_or("").to_string();
@@ -628,14 +662,8 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
     if m == "leaf,method,params" {
         let Some(named) = body["leaf"].as_str() else { return Ok(invalid("plaintext shape")) };
         let chain_required = done(json!({ "code": "chain_required" }));
-        let mut hit = None;
-        for p in node.pins.iter().filter(|p| p.state != "blocked") {
-            let leaf = parse(&from_b64u(&p.leaf)?)?;
-            if leaf.public_key.fingerprint() == named {
-                hit = Some((p, leaf));
-                break;
-            }
-        }
+        let hit =
+            pin_holding(node.pins.iter().filter(|p| p.state != "blocked"), named, |p| (p.leaf.as_str(), p.leaf_fingerprint.as_deref()))?;
         let Some((p, leaf)) = hit else { return Ok(chain_required) };
         if now > leaf.not_after {
             return Ok(chain_required); // expiry darkens the small form as it darkens the chain
@@ -760,10 +788,6 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
 /// The suite a recipient's SubjectPublicKeyInfo takes, by name.
 pub fn suite_name(spki: &[u8]) -> Result<&'static str> {
     Ok(suite_for(&PublicKey::from_spki(spki)?).id())
-}
-
-pub fn fingerprint_of_leaf(leaf_der: &[u8]) -> Result<String> {
-    Ok(x509::parse(leaf_der)?.public_key.fingerprint())
 }
 
 #[cfg(test)]

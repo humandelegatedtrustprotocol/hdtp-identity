@@ -476,8 +476,13 @@ fn a_result_seals_back_and_opens_on_the_caller_side() {
         expected_endpoint: None,
     });
     assert_eq!(bad.unwrap_err().why, "msg_id does not correlate");
-    let pins =
-        vec![envelope::CallerPin { root: root_b.clone(), endpoint: ENDPOINT_B.into(), leaf: b64u(&der["leaf_b"]), state: "active".into() }];
+    let pins = vec![envelope::CallerPin {
+        root: root_b.clone(),
+        endpoint: ENDPOINT_B.into(),
+        leaf: b64u(&der["leaf_b"]),
+        state: "active".into(),
+        leaf_fingerprint: None,
+    }];
     let small = envelope::seal_result(envelope::SealResult {
         recipient: &alina.public(),
         sender: bharat,

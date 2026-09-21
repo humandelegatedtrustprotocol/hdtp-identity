@@ -1001,7 +1001,7 @@ pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now
     // door: sealed, by the target, to her key. It leaves a pending request behind — after it
     // Mallory is no stranger — which is why nothing may come after it, and why her keys are new
     // every run.
-    let card_m = pact_identity::card::encode("Mallory", &leaf_m, Some("required"), &[]);
+    let card_m = pact_identity::card::encode("Mallory", &leaf_m, Some("required"), &[]).map_err(|e| Fail(e.why))?;
     let request = json!({ "name": "request_contact", "arguments": { "card": card_m, "note": "hi" } });
     let control_wire = seal(Form::Chain, &chain_m, request)?;
     let control_id = from_b64u(control_wire["protected"].as_str().unwrap_or(""))

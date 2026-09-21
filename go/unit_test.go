@@ -250,7 +250,10 @@ func TestCardFoldsOnUTF16CodeUnits(t *testing.T) {
 func TestCardRoundTrip(t *testing.T) {
 	v := loadVectors(t)
 	leaf := hexBytes(t, v.Certificates["leaf_a"].DerHex)
-	card := EncodeCard("Alina Rao", leaf, "required", nil)
+	card, err := EncodeCard("Alina Rao", leaf, "required", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, line := range strings.Split(card, "\r\n") {
 		if len(line) > 75 {
 			t.Errorf("line over 75 octets: %d", len(line))
@@ -267,7 +270,11 @@ func TestCardRoundTrip(t *testing.T) {
 		t.Errorf("no version: %v", err)
 	}
 	expired := hexBytes(t, v.Certificates["leaf_a_expired"].DerHex)
-	c, err = DecodeCard(EncodeCard("Alina Rao", expired, "", nil), mustTime(t, v.Now))
+	expiredCard, err := EncodeCard("Alina Rao", expired, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err = DecodeCard(expiredCard, mustTime(t, v.Now))
 	if err != nil || !c.Expired || c.Seal != "none" {
 		t.Errorf("expired card: %v %+v", err, c)
 	}

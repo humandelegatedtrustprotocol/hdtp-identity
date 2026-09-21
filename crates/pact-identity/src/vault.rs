@@ -154,12 +154,23 @@ pub fn open(passphrase: &str, vault: &Value) -> Result<Value> {
 pub fn wallet_issue(plaintext: &Value, root_fingerprint: &str, csr_der: &[u8], now: i64, valid_days: i64, moving: bool) -> Result<Value> {
     let roots = plaintext.get("roots").and_then(|r| r.as_array()).cloned().unwrap_or_default();
     let ledger = plaintext.get("ledger").and_then(|r| r.as_array()).cloned().unwrap_or_default();
-    let root_spkis: Vec<Vec<u8>> = roots
+    // EVERY root this vault holds, and a root is held as its certificate: a software root has a
+    // `pkcs8` beside it and a card-held one has not. This read `pkcs8` alone, so a request carrying a
+    // CARD-held sibling's key was not "a request whose key is a root" (§9) and was given a leaf. The
+    // `pkcs8` reading stays, for a root entry that has lost its certificate.
+    let mut root_spkis: Vec<Vec<u8>> = roots
         .iter()
-        .filter_map(|r| r.get("pkcs8").and_then(|p| p.as_str()))
-        .filter_map(|p| from_b64u(p).ok().map(Zeroizing::new))
-        .filter_map(|p| PrivateKey::from_pkcs8(&p).ok().map(|k| k.public().spki().to_vec()))
+        .filter_map(|r| r.get("cert").and_then(|c| c.as_str()))
+        .filter_map(|c| from_b64u(c).ok())
+        .filter_map(|der| crate::x509::parse(&der).ok().map(|cert| cert.spki.clone()))
         .collect();
+    root_spkis.extend(
+        roots
+            .iter()
+            .filter_map(|r| r.get("pkcs8").and_then(|p| p.as_str()))
+            .filter_map(|p| from_b64u(p).ok().map(Zeroizing::new))
+            .filter_map(|p| PrivateKey::from_pkcs8(&p).ok().map(|k| k.public().spki().to_vec())),
+    );
     let Some(root) = roots.iter().find(|r| r.get("fingerprint").and_then(|f| f.as_str()) == Some(root_fingerprint)) else {
         return err("bad_request", "no such root in the vault");
     };

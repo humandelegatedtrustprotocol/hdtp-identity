@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -15,7 +16,7 @@ import (
 // track the Rust core; the module version is this port's.
 const (
 	ModuleVersion = "0.1.0"
-	SpecVersion   = "2.1.2"
+	SpecVersion   = "2.1.3"
 )
 
 type apiError struct {
@@ -53,13 +54,16 @@ func daysOr(v *int) (int, error) {
 	return *v, nil
 }
 
-func timeIn(s string) (time.Time, error) {
-	if s == "" {
-		return time.Time{}, errors.New("an instant is required")
+// timeIn reads a REQUIRED instant. Absent, it is `<name> is required` and `bad_request`, as every
+// other absent member is (CONTRACT §0) and as the core says it; this port said "an instant is
+// required" and called it `parse`, in every function that takes one. Present and unreadable is `parse`.
+func timeIn(s *string, name string) (time.Time, error) {
+	if s == nil {
+		return time.Time{}, errArg(name + " is required")
 	}
-	t, err := time.Parse(time.RFC3339, s)
+	t, err := time.Parse(time.RFC3339, *s)
 	if err != nil {
-		return time.Time{}, errors.New("not an RFC 3339 instant: " + s)
+		return time.Time{}, parseError{"not an RFC 3339 instant: " + *s}
 	}
 	return t.Truncate(time.Second), nil
 }
@@ -101,7 +105,19 @@ func decodeArgs(args json.RawMessage, into any) error {
 	if len(args) == 0 {
 		args = []byte("{}")
 	}
-	return json.Unmarshal(args, into)
+	err := json.Unmarshal(args, into)
+	// A member of the wrong JSON type. encoding/json says so in its own words — "json: cannot unmarshal
+	// string into Go struct field sealArgs.sender_chain of type []pactidentity.B64" — which the other
+	// port cannot reproduce and CONTRACT §0 says it will not have to. The core reads a member with an
+	// accessor that finds nothing of the type it wants and answers `<name> is required`; so does this.
+	var mismatch *json.UnmarshalTypeError
+	if errors.As(err, &mismatch) {
+		if mismatch.Field != "" && !strings.Contains(mismatch.Field, ".") {
+			return errArg(mismatch.Field + " is required")
+		}
+		return errArg("arguments do not read")
+	}
+	return err
 }
 
 // privIn and pubIn take the member's own name so an absent key is reported the way the caller wrote
@@ -431,10 +447,10 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 	// §2 certificates
 	"build_root": func(args json.RawMessage) json.RawMessage {
 		var a struct {
-			CN        string `json:"cn"`
-			PKCS8     B64    `json:"pkcs8"`
-			NotBefore string `json:"not_before"`
-			Serial    B64    `json:"serial"`
+			CN        string  `json:"cn"`
+			PKCS8     B64     `json:"pkcs8"`
+			NotBefore *string `json:"not_before"`
+			Serial    B64     `json:"serial"`
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return failErr(codeFor(err, codeArgs), err)
@@ -443,9 +459,9 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 		if err != nil {
 			return failErr(codeFor(err, "parse"), err)
 		}
-		nb, err := timeIn(a.NotBefore)
+		nb, err := timeIn(a.NotBefore, "not_before")
 		if err != nil {
-			return failErr("parse", err)
+			return failErr(codeFor(err, "parse"), err)
 		}
 		serial, err := serialIn(a.Serial)
 		if err != nil {
@@ -459,10 +475,10 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 	},
 	"root_tbs": func(args json.RawMessage) json.RawMessage {
 		var a struct {
-			CN        string `json:"cn"`
-			SPKI      B64    `json:"spki"`
-			NotBefore string `json:"not_before"`
-			Serial    B64    `json:"serial"`
+			CN        string  `json:"cn"`
+			SPKI      B64     `json:"spki"`
+			NotBefore *string `json:"not_before"`
+			Serial    B64     `json:"serial"`
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return failErr(codeFor(err, codeArgs), err)
@@ -471,9 +487,9 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 		if err != nil {
 			return failErr(codeFor(err, "parse"), err)
 		}
-		nb, err := timeIn(a.NotBefore)
+		nb, err := timeIn(a.NotBefore, "not_before")
 		if err != nil {
-			return failErr("parse", err)
+			return failErr(codeFor(err, "parse"), err)
 		}
 		serial, err := serialIn(a.Serial)
 		if err != nil {
@@ -566,10 +582,10 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 	},
 	"validate_chain": func(args json.RawMessage) json.RawMessage {
 		var a struct {
-			Chain            []B64  `json:"chain"`
-			Now              string `json:"now"`
-			ExpectedRoot     string `json:"expected_root"`
-			ExpectedEndpoint string `json:"expected_endpoint"`
+			Chain            []B64   `json:"chain"`
+			Now              *string `json:"now"`
+			ExpectedRoot     string  `json:"expected_root"`
+			ExpectedEndpoint string  `json:"expected_endpoint"`
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return failErr(codeFor(err, codeArgs), err)
@@ -577,9 +593,9 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 		if a.Chain == nil {
 			return failErr(codeArgs, errArg("chain is required"))
 		}
-		now, err := timeIn(a.Now)
+		now, err := timeIn(a.Now, "now")
 		if err != nil {
-			return failErr("parse", err)
+			return failErr(codeFor(err, "parse"), err)
 		}
 		return ok(chainOut(ValidateChain(chainOf(a.Chain), ChainOpts{Now: now, ExpectedRoot: a.ExpectedRoot, ExpectedEndpoint: a.ExpectedEndpoint})))
 	},
@@ -763,12 +779,16 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 		if err := need(a.Cert, "cert"); err != nil {
 			return failErr(codeArgs, err)
 		}
-		return ok(map[string]any{"vcard": EncodeCard(fn, a.Cert, a.Seal, a.Extra)})
+		vcard, err := EncodeCard(fn, a.Cert, a.Seal, a.Extra)
+		if err != nil {
+			return failErr(codeFor(err, codeArgs), err)
+		}
+		return ok(map[string]any{"vcard": vcard})
 	},
 	"card_decode": func(args json.RawMessage) json.RawMessage {
 		var a struct {
 			VCard *string `json:"vcard"`
-			Now   string  `json:"now"`
+			Now   *string `json:"now"`
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return failErr(codeFor(err, codeArgs), err)
@@ -777,9 +797,9 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 		if err != nil {
 			return failErr(codeArgs, err)
 		}
-		now, err := timeIn(a.Now)
+		now, err := timeIn(a.Now, "now")
 		if err != nil {
-			return failErr("parse", err)
+			return failErr(codeFor(err, "parse"), err)
 		}
 		c, err := DecodeCard(vcard, now)
 		if err != nil {
@@ -924,7 +944,7 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 			Envelope         *Envelope `json:"envelope"`
 			MyPKCS8          B64       `json:"my_pkcs8"`
 			MsgID            string    `json:"msg_id"`
-			Now              string    `json:"now"`
+			Now              *string   `json:"now"`
 			Pins             []Pin     `json:"pins"`
 			ExpectedRoot     string    `json:"expected_root"`
 			ExpectedEndpoint string    `json:"expected_endpoint"`
@@ -939,9 +959,9 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 		if err != nil {
 			return failErr(codeFor(err, "parse"), err)
 		}
-		now, err := timeIn(a.Now)
+		now, err := timeIn(a.Now, "now")
 		if err != nil {
-			return failErr("parse", err)
+			return failErr(codeFor(err, "parse"), err)
 		}
 		opened, err := OpenResult(*a.Envelope, OpenOpts{Recipient: priv, MsgID: a.MsgID, Now: now, Pins: a.Pins, ExpectedRoot: a.ExpectedRoot, ExpectedEndpoint: a.ExpectedEndpoint})
 		if err != nil {
@@ -973,7 +993,7 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 			PinnedRoot *string `json:"pinned_root"`
 			PinnedLeaf B64     `json:"pinned_leaf"`
 			Dialed     *string `json:"dialed"`
-			Now        string  `json:"now"`
+			Now        *string `json:"now"`
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return failErr(codeFor(err, codeArgs), err)
@@ -989,9 +1009,9 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 		if err != nil {
 			return failErr(codeArgs, err)
 		}
-		now, err := timeIn(a.Now)
+		now, err := timeIn(a.Now, "now")
 		if err != nil {
-			return failErr("parse", err)
+			return failErr(codeFor(err, "parse"), err)
 		}
 		if a.Answer.Code != "certificate_renewed" {
 			return ok(map[string]any{"follow": false, "why": "not certificate_renewed"})
@@ -1008,7 +1028,7 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 	},
 	"decide": func(args json.RawMessage) json.RawMessage {
 		var a struct {
-			Now      string     `json:"now"`
+			Now      *string    `json:"now"`
 			Envelope *Envelope  `json:"envelope"`
 			Node     *NodeState `json:"node"`
 		}
@@ -1024,9 +1044,9 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 		if a.Envelope == nil {
 			return failErr(codeArgs, errArg("envelope is required"))
 		}
-		now, err := timeIn(a.Now)
+		now, err := timeIn(a.Now, "now")
 		if err != nil {
-			return failErr("parse", err)
+			return failErr(codeFor(err, "parse"), err)
 		}
 		d, err := Decide(now, *a.Envelope, *a.Node)
 		if err != nil {
@@ -1093,7 +1113,7 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 			VaultPlaintext  VaultPlaintext `json:"vault_plaintext"`
 			RootFingerprint *string        `json:"root_fingerprint"`
 			CSR             B64            `json:"csr"`
-			Now             string         `json:"now"`
+			Now             *string        `json:"now"`
 			ValidDays       *int           `json:"valid_days"`
 			Move            bool           `json:"move"`
 		}
@@ -1107,9 +1127,9 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 		if err := need(a.CSR, "csr"); err != nil {
 			return failErr(codeArgs, err)
 		}
-		now, err := timeIn(a.Now)
+		now, err := timeIn(a.Now, "now")
 		if err != nil {
-			return failErr("parse", err)
+			return failErr(codeFor(err, "parse"), err)
 		}
 		days, err := daysOr(a.ValidDays)
 		if err != nil {
@@ -1182,16 +1202,16 @@ func declaredAlg(tbs []byte) ([]byte, error) {
 }
 
 type leafArgs struct {
-	CN        string `json:"cn"`
-	RootCN    string `json:"root_cn"`
-	RootPKCS8 B64    `json:"root_pkcs8"`
-	RootSPKI  B64    `json:"root_spki"`
-	HostSPKI  B64    `json:"host_spki"`
-	Endpoint  string `json:"endpoint"`
-	DNSName   string `json:"dns_name"`
-	NotBefore string `json:"not_before"`
-	NotAfter  string `json:"not_after"`
-	Serial    B64    `json:"serial"`
+	CN        string  `json:"cn"`
+	RootCN    string  `json:"root_cn"`
+	RootPKCS8 B64     `json:"root_pkcs8"`
+	RootSPKI  B64     `json:"root_spki"`
+	HostSPKI  B64     `json:"host_spki"`
+	Endpoint  string  `json:"endpoint"`
+	DNSName   string  `json:"dns_name"`
+	NotBefore *string `json:"not_before"`
+	NotAfter  *string `json:"not_after"`
+	Serial    B64     `json:"serial"`
 }
 
 func (a leafArgs) opts() (LeafOpts, error) {
@@ -1199,11 +1219,11 @@ func (a leafArgs) opts() (LeafOpts, error) {
 	if err != nil {
 		return LeafOpts{}, err
 	}
-	nb, err := timeIn(a.NotBefore)
+	nb, err := timeIn(a.NotBefore, "not_before")
 	if err != nil {
 		return LeafOpts{}, err
 	}
-	na, err := timeIn(a.NotAfter)
+	na, err := timeIn(a.NotAfter, "not_after")
 	if err != nil {
 		return LeafOpts{}, err
 	}
@@ -1221,19 +1241,19 @@ func (a leafArgs) opts() (LeafOpts, error) {
 }
 
 type issueArgs struct {
-	CSR               B64    `json:"csr"`
-	RootCN            string `json:"root_cn"`
-	RootPKCS8         B64    `json:"root_pkcs8"`
-	RootSPKI          B64    `json:"root_spki"`
-	RootSPKIs         []B64  `json:"root_spkis"`
-	Now               string `json:"now"`
-	PreviousNotBefore string `json:"previous_not_before"`
+	CSR               B64     `json:"csr"`
+	RootCN            string  `json:"root_cn"`
+	RootPKCS8         B64     `json:"root_pkcs8"`
+	RootSPKI          B64     `json:"root_spki"`
+	RootSPKIs         []B64   `json:"root_spkis"`
+	Now               *string `json:"now"`
+	PreviousNotBefore *string `json:"previous_not_before"`
 	// A pointer so an absent member takes the default and an explicit 0 is refused, as in Rust.
 	ValidDays *int `json:"valid_days"`
 }
 
 func (a issueArgs) opts() (IssueOpts, error) {
-	now, err := timeIn(a.Now)
+	now, err := timeIn(a.Now, "now")
 	if err != nil {
 		return IssueOpts{}, err
 	}
@@ -1242,8 +1262,8 @@ func (a issueArgs) opts() (IssueOpts, error) {
 		return IssueOpts{}, err
 	}
 	o := IssueOpts{RootCN: a.RootCN, RootSPKIs: chainOf(a.RootSPKIs), Now: now, ValidDays: days}
-	if a.PreviousNotBefore != "" {
-		p, err := timeIn(a.PreviousNotBefore)
+	if a.PreviousNotBefore != nil {
+		p, err := timeIn(a.PreviousNotBefore, "previous_not_before")
 		if err != nil {
 			return IssueOpts{}, err
 		}

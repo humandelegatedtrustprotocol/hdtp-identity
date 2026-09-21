@@ -202,7 +202,9 @@ func ParsePKCS8(der []byte) (*PrivateKey, error) {
 		return nil, err
 	}
 	switch {
-	case oid == oidEd25519:
+	// RFC 8410: an Ed25519 AlgorithmIdentifier has NO parameters. ParseSPKI has always held a public
+	// key to that; a private key with a NULL after the OID was read anyway.
+	case oid == oidEd25519 && len(alg) == 1:
 		inner, err := derRead(f[2].content, 0)
 		if err != nil {
 			return nil, err
