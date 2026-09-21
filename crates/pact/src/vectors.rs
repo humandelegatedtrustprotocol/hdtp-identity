@@ -502,14 +502,65 @@ pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
 
 /// What a JSON-RPC answer says, reduced to the one word the scenarios judge by: a spec error code,
 /// `sealed` for a result envelope, or `unknown:<shape>`.
-pub fn answer_code(text: &str) -> String {
+/// The JSON-RPC body of an answer, whether it came as JSON or as an event stream's `data:` lines.
+fn rpc_body(text: &str) -> std::result::Result<Value, String> {
     let payload = if text.trim_start().starts_with("event:") || text.trim_start().starts_with("data:") {
         text.lines().filter_map(|l| l.strip_prefix("data:")).map(|l| l.trim()).collect::<Vec<_>>().join("")
     } else {
         text.to_string()
     };
-    let Ok(v) = serde_json::from_str::<Value>(&payload) else {
-        return format!("unknown:not-json({})", payload.chars().take(60).collect::<String>());
+    serde_json::from_str::<Value>(&payload).map_err(|_| payload.chars().take(60).collect::<String>())
+}
+
+/// Every content item of a tool answer that is itself JSON.
+fn tool_texts(v: &Value) -> Vec<Value> {
+    v["result"]["content"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|c| c["text"].as_str()).filter_map(|t| serde_json::from_str(t).ok()).collect())
+        .unwrap_or_default()
+}
+
+/// What the CONTROL has to show. `answer_code` says `sealed` for anything SHAPED like an envelope —
+/// four non-empty strings — which is the right price for twenty-seven scenarios where a false
+/// "sealed" costs nothing. For the one call that must get THROUGH it is no evidence at all: a
+/// receiver, or a carrier in front of it, answering `{"protected":"a","enc":"b","ct":"c","sig":"d"}`
+/// scored the control as passed, and the driver was holding the key that would have said otherwise.
+///
+/// So the control OPENS what it is answered with, as any caller would (§13.2): sealed to Mallory's
+/// leaf key, a result, for THIS call, inside the window, signed by a leaf that chains to the
+/// target's root at the target's address — and carrying a result, not a sealed refusal.
+pub fn control_opened(
+    text: &str,
+    my_key: &PrivateKey,
+    msg_id: &str,
+    now: i64,
+    root: &str,
+    endpoint: &str,
+) -> std::result::Result<(), String> {
+    let v = rpc_body(text).map_err(|s| format!("the answer is not JSON ({s})"))?;
+    let Some(wire) = tool_texts(&v).into_iter().find_map(|inner| serde_json::from_value::<envelope::Wire>(inner).ok()) else {
+        return Err("the answer carries no envelope".into());
+    };
+    let opened = envelope::open_result(envelope::OpenResultArgs {
+        envelope: &wire,
+        my_key,
+        msg_id,
+        now,
+        pins: &[],
+        expected_root: Some(root),
+        expected_endpoint: Some(endpoint),
+    })
+    .map_err(|e| format!("{}: {}", e.code, e.why))?;
+    match opened.get("error") {
+        Some(e) => Err(format!("it opens, and what is inside is a refusal: {e}")),
+        None => Ok(()),
+    }
+}
+
+pub fn answer_code(text: &str) -> String {
+    let v = match rpc_body(text) {
+        Ok(v) => v,
+        Err(start) => return format!("unknown:not-json({start})"),
     };
     if let Some(code) = v["error"]["data"]["code"].as_str() {
         return code.into();
@@ -517,11 +568,7 @@ pub fn answer_code(text: &str) -> String {
     if let Some(code) = v["error"]["code"].as_str() {
         return code.into();
     }
-    let texts: Vec<Value> = v["result"]["content"]
-        .as_array()
-        .map(|a| a.iter().filter_map(|c| c["text"].as_str()).filter_map(|t| serde_json::from_str(t).ok()).collect())
-        .unwrap_or_default();
-    for inner in texts {
+    for inner in tool_texts(&v) {
         // All FOUR members, each a non-empty string. This asked only whether `protected` and `ct`
         // existed, so `{"protected":"","ct":""}` scored the CONTROL as passed -- and the control is
         // the one scenario whose whole job is to prove a well-formed call gets through.
@@ -617,7 +664,7 @@ fn initialize(endpoint: &str, insecure: bool) -> Res<Option<String>> {
     Ok(session)
 }
 
-fn sealed_call(endpoint: &str, wire: &Value, id: u32, session: Option<&str>, insecure: bool) -> Res<String> {
+fn sealed_call(endpoint: &str, wire: &Value, id: u32, session: Option<&str>, insecure: bool) -> Res<(String, String)> {
     let body = json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call", "params": { "name": "sealed_call", "arguments": wire } });
     let (text, _, status) = post(endpoint, &body.to_string(), session, insecure)?;
     let code = answer_code(&text);
@@ -626,9 +673,9 @@ fn sealed_call(endpoint: &str, wire: &Value, id: u32, session: Option<&str>, ins
     // `unknown:not-json(...)` -- classified UNREACHED correctly, but unable to say why, and the
     // `http_` arm of the verdict test below was dead code in this port.
     if code.starts_with("unknown:not-json") && status >= 400 {
-        return Ok(format!("http_{status}"));
+        return Ok((format!("http_{status}"), text));
     }
-    Ok(code)
+    Ok((code, text))
 }
 
 pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now: Option<&str>) -> Res<i32> {
@@ -756,9 +803,9 @@ pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now
     // reference node, every one an `http_400` from a missing handshake.
     let mut results: Vec<(String, String, &'static str)> = Vec::new();
     let mut posted = 0u32;
-    let mut run = |name: &str, wire: Value, expect: &str| -> Res<()> {
+    let mut run = |name: &str, wire: Value, expect: &str| -> Res<String> {
         posted += 1;
-        let got = sealed_call(&endpoint, &wire, posted, session.as_deref(), allow_insecure)?;
+        let (got, raw) = sealed_call(&endpoint, &wire, posted, session.as_deref(), allow_insecure)?;
         let verdict = if got == expect {
             "blocked"
         } else if got.starts_with("unknown") || got.starts_with("http_") {
@@ -774,7 +821,7 @@ pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now
         };
         println!("  {verdict:<10} {name}: {got}");
         results.push((name.into(), got, verdict));
-        Ok(())
+        Ok(raw)
     };
 
     // Everything an honest sealer will not build, hand-rolled — and SEALED UNDER what it forges.
@@ -956,20 +1003,44 @@ pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now
     // every run.
     let card_m = pact_identity::card::encode("Mallory", &leaf_m, Some("required"), &[]);
     let request = json!({ "name": "request_contact", "arguments": { "card": card_m, "note": "hi" } });
-    run("CONTROL: a stranger asking for contact with a card that is her leaf", seal(Form::Chain, &chain_m, request)?, "sealed")?;
+    let control_wire = seal(Form::Chain, &chain_m, request)?;
+    let control_id = from_b64u(control_wire["protected"].as_str().unwrap_or(""))
+        .ok()
+        .and_then(|h| serde_json::from_slice::<Value>(&h).ok())
+        .and_then(|h| h["msg_id"].as_str().map(String::from))
+        .unwrap_or_default();
+    let raw = run("CONTROL: a stranger asking for contact with a card that is her leaf", control_wire, "sealed")?;
+    // …and an answer that LOOKS sealed is opened, with the key this driver has been holding all
+    // along. Only a verdict of `blocked` (the expected `sealed`) is worth opening: a refusal and an
+    // unreached run have said what they are already.
+    if results.last().is_some_and(|(_, _, v)| *v == "blocked") {
+        let (root, at) = (card["root"].as_str().unwrap_or(""), card["endpoint"].as_str().unwrap_or(""));
+        if let Err(why) = control_opened(&raw, &host_m, &control_id, now, root, at) {
+            println!("  {:<10} …and what it was answered with does not open: {why}", "");
+            if let Some(last) = results.last_mut() {
+                last.2 = "CONTROL UNOPENED";
+            }
+        }
+    }
 
     let reproduce = results.iter().filter(|(_, _, v)| *v == "REPRODUCES").count();
     let unreached = results.iter().filter(|(_, _, v)| *v == "UNREACHED").count();
     let control = results.iter().filter(|(_, _, v)| *v == "CONTROL REFUSED").count();
+    let unopened = results.iter().filter(|(_, _, v)| *v == "CONTROL UNOPENED").count();
     println!(
-        "{} scenarios: {} blocked, {} reproduce, {} never reached a PACT answer{}",
+        "{} scenarios: {} blocked, {} reproduce, {} never reached a PACT answer{}{}",
         results.len(),
-        results.len() - reproduce - unreached - control,
+        results.len() - reproduce - unreached - control - unopened,
         reproduce,
         unreached,
-        if control > 0 { ", and the CONTROL was refused: this receiver refuses a legitimate call too" } else { "" }
+        if control > 0 { ", and the CONTROL was refused: this receiver refuses a legitimate call too" } else { "" },
+        if unopened > 0 {
+            ", and the CONTROL's answer looked sealed and did not open: nothing here shows a call can get through"
+        } else {
+            ""
+        }
     );
-    Ok(if reproduce + unreached + control > 0 { 1 } else { 0 })
+    Ok(if reproduce + unreached + control + unopened > 0 { 1 } else { 0 })
 }
 
 #[cfg(test)]
@@ -994,6 +1065,89 @@ mod tests {
         );
         assert_eq!(answer_code("event: message\ndata: {\"result\":{\"code\":\"certificate_renewed\"}}\n\n"), "certificate_renewed");
         assert!(answer_code("<html>").starts_with("unknown:"));
+    }
+
+    // The control is the one scenario that must get THROUGH, and it was judged by the look of its
+    // answer. The first case below is the very stub `answers_reduce_to_one_word` calls "sealed".
+    #[test]
+    fn the_control_is_passed_by_an_envelope_that_opens_and_by_nothing_that_only_looks_like_one() {
+        const NOW: i64 = 1_789_000_000;
+        const AT: &str = "https://target.example/mcp";
+        let wrap = |inner: &Value| {
+            json!({ "jsonrpc": "2.0", "id": 1, "result": { "content": [{ "type": "text", "text": inner.to_string() }] } }).to_string()
+        };
+
+        // The target, and Mallory's host key: the control's call is sealed to the target, and its
+        // answer is sealed back to her.
+        let (root_t, host_t, host_m) = (
+            PrivateKey::generate(Alg::Ed25519).unwrap(),
+            PrivateKey::generate(Alg::Ed25519).unwrap(),
+            PrivateKey::generate(Alg::Ed25519).unwrap(),
+        );
+        let root_t_der = x509::build_root("Target", &root_t, NOW - 3600, &x509::serial_of("control/root")).unwrap();
+        let (issuer, host_pub) = (root_t.public(), host_t.public());
+        let leaf_t = x509::build_leaf(
+            &LeafSpec {
+                cn: "Target",
+                root_cn: "Target",
+                issuer: &issuer,
+                host_key: &host_pub,
+                uris: vec![AT.into()],
+                dns_name: None,
+                not_before: NOW - 3600,
+                not_after: NOW + 86_400,
+                serial: x509::serial_of("control/leaf"),
+                ca: false,
+                usage: None,
+                aki: None,
+                extra: Vec::new(),
+                alg_oid: None,
+            },
+            &root_t,
+        )
+        .unwrap();
+        let root_fp = issuer.fingerprint();
+        let answer = |msg_id: &str, result: Option<Value>, error: Option<Value>, to: &PrivateKey| {
+            let wire = envelope::seal_result(envelope::SealResult {
+                recipient: &to.public(),
+                sender: &host_t,
+                form: Form::Chain,
+                sender_chain: Some(&[leaf_t.clone(), root_t_der.clone()]),
+                result,
+                error,
+                msg_id: msg_id.into(),
+                ts: NOW,
+                exp: Some(NOW + 600),
+                ephemeral_seed: None,
+            })
+            .unwrap();
+            wrap(&serde_json::to_value(wire).unwrap())
+        };
+
+        // What passed before: four non-empty strings.
+        let stub = wrap(&json!({ "protected": "a", "enc": "b", "ct": "c", "sig": "d" }));
+        assert_eq!(answer_code(&stub), "sealed", "the cheap reading still calls this sealed, which is why the control cannot use it");
+        assert!(control_opened(&stub, &host_m, "c1", NOW, &root_fp, AT).is_err());
+
+        // What must pass: a result, for this call, sealed to her, from the target.
+        let good = answer("c1", Some(json!({ "status": "pending" })), None, &host_m);
+        control_opened(&good, &host_m, "c1", NOW, &root_fp, AT).expect("a real sealed result opens");
+
+        // And each way a REAL envelope can still be the wrong one.
+        let refuses = |text: &str, id: &str, root: &str, at: &str, what: &str| {
+            assert!(control_opened(text, &host_m, id, NOW, root, at).is_err(), "{what} was accepted as the control's answer");
+        };
+        refuses(&good, "another-call", &root_fp, AT, "an answer to a different call");
+        refuses(&good, "c1", &host_m.public().fingerprint(), AT, "an answer from somebody who is not the target's root");
+        refuses(&good, "c1", &root_fp, "https://elsewhere.example/mcp", "an answer from a leaf for another address");
+        refuses(
+            &answer("c1", Some(json!({ "status": "pending" })), None, &host_t),
+            "c1",
+            &root_fp,
+            AT,
+            "an answer sealed to somebody else",
+        );
+        refuses(&answer("c1", None, Some(json!({ "code": "rate_limited" })), &host_m), "c1", &root_fp, AT, "a sealed REFUSAL");
     }
 
     #[test]
