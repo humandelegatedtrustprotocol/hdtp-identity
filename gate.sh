@@ -55,7 +55,11 @@ step "The intrusion scenarios, both ports, against the seed's verdicts"
 node js/intrude.mjs
 node js/intrude.mjs --port go
 
-step "The two ports answer a caller alike"
+step "The contract's own validator, and CONTRACT.md rendered from the contract file"
+node --test contract/schema.test.mjs
+node contract/render.mjs --check
+
+step "The two ports answer a caller alike, and both answer as contract/contract.json says"
 node js/parity.mjs
 node --test --test-timeout=60000 js/live.test.mjs
 

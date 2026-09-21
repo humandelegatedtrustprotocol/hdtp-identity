@@ -61,6 +61,16 @@ L.push(`Specification: **${specVersion}**. `
   + `**${musts.length}** normative sentences, **${parity.cases}** cross-port parity cases over `
   + `**${parity.functions}** guarded functions.`);
 L.push('');
+// The contract's own numbers, from the same run. A count of "answers validated" is two per case
+// — one port each — and is the measure of the check the ports cannot pass by agreeing with each
+// other, so it is worth recording as its own line rather than folded into the case count.
+const c = parity.contract;
+L.push(`Every answer of both ports is validated against \`${c.file}\` (**${c.methods}** functions, `
+  + `spec ${c.spec}): **${c.answers_validated}** answers held to the shape it declares, `
+  + `**${c.off_contract}** did not. Of **${c.declared_error_codes}** declared error codes, `
+  + `**${c.declared_error_codes - c.codes_never_produced.length}** were produced by a case here; the `
+  + `rest are declared for a caller's benefit and no argument in this suite reaches them.`);
+L.push('');
 
 // ── the MUSTs ─────────────────────────────────────────────────────────────────────────
 const inRepo = musts.filter((m) => (map[m.id]?.held_by ?? []).length).length;

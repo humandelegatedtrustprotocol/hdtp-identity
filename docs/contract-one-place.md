@@ -1,7 +1,29 @@
 # The contract in one place
 
 A proposal, written 2026-09-20; its numbers were measured again on 2026-09-21, against PACT 2.1.2.
-**Status: a proposal. Nothing here is built.** Phases 1 and 2 wait for the owner's decision.
+
+**Status, 2026-09-21: Phases 1 and 2 are built.** `contract/contract.json` is the file, 39 methods
+over 34 domain types; `CONTRACT.md` is rendered from it and `contract/render.mjs --check` fails when
+it is stale; `js/parity.mjs` takes its surface from the contract as well as from both dispatchers,
+and validates every answer of both ports against the `result` schema, with a failure held to the
+codes its method declares. Two deviations from what is proposed below, each deliberate:
+
+- **The validator is not a stock one.** `js/` has no dependencies and nothing to install them with,
+  and one package to check forty schemas is not the reason to start. `contract/schema.mjs` is a
+  validator for exactly the keywords the contract uses; what makes that safe rather than merely
+  smaller is that `compile` REFUSES a keyword it does not implement, so a schema cannot state a
+  constraint nothing holds, and `contract/schema.test.mjs` holds each keyword to a value that must
+  fail it.
+- **The params direction is one-way.** An accepted call is validated against its `params` schema;
+  nothing asserts that every call the schema admits is accepted, because the cases that would show
+  it are refusals by design.
+
+It found two places where both ports accept a value the contract does not describe:
+`profile_error`'s `kind` (anything but `"root"` is read as a leaf) and `card_encode`'s `seal` (a
+non-empty value is written into the card as given). Both are the Rust core, so narrowing them costs
+a re-pin, and they are recorded as Phase 4's first candidates rather than widened silently.
+
+Phases 3, 4 and 5 are not built.
 
 The ask: bring the contract into one place, the way OpenAPI or protocol buffers do, so native code
 can be built on top of it.
