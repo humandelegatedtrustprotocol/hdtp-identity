@@ -13,20 +13,20 @@ use pact_identity::util::{b64u, from_b64u};
 use pact_identity::x509;
 use serde_json::{json, Value};
 use std::path::Path;
-use zeroize::Zeroize;
+use zeroize::Zeroizing;
 
 struct Vault {
     path: String,
-    passphrase: String,
+    passphrase: Zeroizing<String>,
     plaintext: Value,
 }
 
-// What the vault held in memory is cleared when the command is done with it: the passphrase
-// zeroized, the plaintext — root keys among it — dropped to Null so its buffers are freed.
+// What the vault held in memory is cleared when the command is done with it: the passphrase by its
+// type, and every string of the plaintext — root keys among them — overwritten before it is freed.
+// (It used to be dropped to Null, which frees the buffers as they stand.)
 impl Drop for Vault {
     fn drop(&mut self) {
-        self.passphrase.zeroize();
-        self.plaintext = Value::Null;
+        crate::io::wipe(&mut self.plaintext);
     }
 }
 
@@ -34,12 +34,12 @@ fn open_vault(path: &str, confirm_passphrase: bool) -> Res<Vault> {
     let raw = read_input(path)?;
     let doc: Value = serde_json::from_slice(&raw).map_err(|e| Fail(format!("{path}: not a vault document ({e})")))?;
     let passphrase = passphrase(confirm_passphrase)?;
-    let plaintext = core("vault_open", json!({ "passphrase": passphrase, "vault": doc }))?["plaintext"].take();
+    let plaintext = core("vault_open", json!({ "passphrase": passphrase.as_str(), "vault": doc }))?["plaintext"].take();
     Ok(Vault { path: path.to_string(), passphrase, plaintext })
 }
 
 fn sealed_bytes(v: &Vault) -> Res<Vec<u8>> {
-    let sealed = core("vault_seal", json!({ "passphrase": v.passphrase, "plaintext": v.plaintext }))?["vault"].take();
+    let sealed = core("vault_seal", json!({ "passphrase": v.passphrase.as_str(), "plaintext": v.plaintext }))?["vault"].take();
     Ok(format!("{}\n", serde_json::to_string_pretty(&sealed)?).into_bytes())
 }
 
@@ -117,7 +117,10 @@ fn match_root(root: &Value, card: &dyn CardSigner) -> Res<()> {
 /// certificate signature and no captured signature is this one: it begins with ASCII text, and a
 /// TBSCertificate begins with 0x30.
 fn card_proves_it_holds(card: &dyn CardSigner, key: &pact_identity::keys::PublicKey) -> Res<()> {
-    let nonce = x509::random_serial().map_err(|e| Fail(e.why))?;
+    // 32 random bytes of its own, as §2.2 asks of the analogous root-possession proof. It used to
+    // borrow the certificate-SERIAL generator, which makes 8: enough here, since the domain prefix
+    // does the real work, and the wrong number to have on loan.
+    let nonce = pact_identity::util::random(32).map_err(|e| Fail(e.why))?;
     let mut challenge = b"PACT card-attach proof v1\n".to_vec();
     challenge.extend_from_slice(key.fingerprint().as_bytes());
     challenge.push(b'\n');
@@ -196,15 +199,29 @@ fn root_key(root: &Value) -> Res<pact_identity::keys::PublicKey> {
 /// not a formality: a PIV slot's certificate and its key are not made to agree by anything, so a
 /// card can pass the check with one key and sign with another, and what would come back is a leaf
 /// naming this root as its issuer that no contact could ever validate.
-fn issue_on_card(card: &dyn CardSigner, root: &Value, csr_der: &[u8], now: i64, previous: Option<i64>, valid_days: i64) -> Res<Value> {
+fn issue_on_card(
+    card: &dyn CardSigner,
+    root: &Value,
+    vault_roots: &[Value],
+    csr_der: &[u8],
+    now: i64,
+    previous: Option<i64>,
+    valid_days: i64,
+) -> Res<Value> {
     let pinned = root_key(root)?;
     // The card in hand is this root's card. `id_issue` asked already; asking here too is what makes
     // this function safe to call from anywhere, which is how the gap above it arrived.
     match_root(root, card)?;
+    // §9 refuses a request whose key is a root — ANY root this wallet holds, not only the one that
+    // is issuing. The software path hands the core every root in the vault; this one handed it only
+    // `root_spki`, so a request carrying a sibling identity's root key was given a leaf. Each root's
+    // key is read from its certificate, which a card-held root has and a private key it has not.
+    let every_root = vault_roots.iter().map(|r| root_key(r).map(|k| b64u(k.spki()))).collect::<Res<Vec<String>>>()?;
     let mut args = json!({
         "csr": b64u(csr_der),
         "root_cn": root["cn"].as_str().unwrap_or(""),
         "root_spki": b64u(pinned.spki()),
+        "root_spkis": every_root,
         "now": instant(now),
         "valid_days": valid_days,
     });
@@ -438,7 +455,7 @@ pub fn id_issue(a: IssueArgs<'_>) -> Res<i32> {
         // question below, not this one. With PACT_PASSPHRASE_FILE the file is read again, so the
         // re-check proves the file still opens the vault rather than asking a person.
         let again = passphrase(false)?;
-        if again != v.passphrase {
+        if *again != *v.passphrase {
             return fail("the passphrase does not match: nothing signed");
         }
     }
@@ -474,7 +491,7 @@ pub fn id_issue(a: IssueArgs<'_>) -> Res<i32> {
             if let Some(why) = live_leaf_refusal(&mine, &request.endpoint, now, a.moving) {
                 return fail(format!("bad_request: {why}"));
             }
-            let mut out = issue_on_card(c.as_ref(), &root, &csr_der, now, previous, a.valid_days)?;
+            let mut out = issue_on_card(c.as_ref(), &root, &roots(&v.plaintext), &csr_der, now, previous, a.valid_days)?;
             out["ledger_entry"] = json!({
                 "root": fp,
                 "leaf": out["der"].clone(),
@@ -591,7 +608,7 @@ pub fn id_backup(vault: &str, to: &str, force: bool) -> Res<i32> {
     }
     let back = read_input(to)?;
     let doc: Value = serde_json::from_slice(&back)?;
-    core("vault_open", json!({ "passphrase": v.passphrase, "vault": doc }))?;
+    core("vault_open", json!({ "passphrase": v.passphrase.as_str(), "vault": doc }))?;
     eprintln!("copied {vault} to {to}; the copy opens");
     Ok(0)
 }
@@ -602,9 +619,7 @@ pub fn id_restore(from: &str, vault: &str) -> Res<i32> {
     }
     check_writable(Some(vault))?;
     let v = open_vault(from, false)?;
-    write_new_private(Path::new(vault), &read_input(from)?)?;
-    let doc: Value = serde_json::from_slice(&read_input(vault)?)?;
-    core("vault_open", json!({ "passphrase": v.passphrase, "vault": doc }))?;
+    land_and_prove(Path::new(vault), &read_input(from)?, &v.passphrase)?;
     eprintln!(
         "restored {from} to {vault}: {} identities, {} leaves, {} contacts",
         roots(&v.plaintext).len(),
@@ -612,6 +627,28 @@ pub fn id_restore(from: &str, vault: &str) -> Res<i32> {
         v.plaintext["contacts"].as_array().map_or(0, |a| a.len())
     );
     Ok(0)
+}
+
+/// Writes a vault where there is none and proves that what is now ON DISK opens. A vault that does
+/// not prove is taken away again: it used to stay, and the next restore to the same path was then
+/// refused — "exists" — by a file of unknown validity that the failed run had put there itself.
+/// Only a file this call created is removed; `write_new_private` fails, and nothing is touched,
+/// when the name was already taken.
+fn land_and_prove(vault: &Path, bytes: &[u8], passphrase: &str) -> Res<()> {
+    write_new_private(vault, bytes)?;
+    let proven = (|| -> Res<()> {
+        let doc: Value = serde_json::from_slice(&read_input(&vault.to_string_lossy())?)?;
+        core("vault_open", json!({ "passphrase": passphrase, "vault": doc }))?;
+        Ok(())
+    })();
+    proven.map_err(|e| {
+        let _ = std::fs::remove_file(vault);
+        Fail(format!(
+            "{}: written, and what was written did not open ({}); it has been removed, so the restore can be run again",
+            vault.display(),
+            e.0
+        ))
+    })
 }
 
 pub fn contacts_export(vault: &str) -> Res<i32> {
@@ -722,6 +759,32 @@ pub fn contacts_import(vault: &str, file: &str, yes: bool) -> Res<i32> {
 }
 
 #[cfg(test)]
+mod restore_tests {
+    use super::*;
+
+    // `id restore` writes the vault and THEN proves it opens. When the proof failed the file stayed,
+    // so the next restore to that path was refused — "exists" — by a file of unknown validity that
+    // the failed run had put there itself.
+    #[test]
+    fn a_restore_that_does_not_prove_leaves_nothing_behind() {
+        let dir = std::env::temp_dir().join(format!("pact-restore-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let sealed = core("vault_seal", json!({ "passphrase": "right", "plaintext": { "v": 1, "roots": [], "ledger": [], "contacts": [] }, "kdf": { "name": "argon2id", "m_kib": 8192, "t": 1, "p": 1 } })).unwrap()["vault"].take();
+        let bytes = serde_json::to_vec(&sealed).unwrap();
+
+        let path = dir.join("vault.json");
+        let why = land_and_prove(&path, &bytes, "wrong").expect_err("the wrong passphrase proves nothing").0;
+        assert!(!path.exists(), "the unproven vault was left at {}: {why}", path.display());
+
+        // …so the same path can be restored to again, and a vault that does prove stays.
+        land_and_prove(&path, &bytes, "right").unwrap();
+        assert!(path.exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}
+
+#[cfg(test)]
 mod card_tests {
     //! A card-held root, proven without a card: the fake signs a digest exactly as PIV's GENERAL
     //! AUTHENTICATE does, so everything above the trait — the seam, the profile, the rules, the
@@ -770,7 +833,7 @@ mod card_tests {
     fn a_leaf_the_card_signed_validates_to_that_root_at_its_endpoint() {
         let card = FakeCard::p256("7777");
         let (cert, root) = root_of(&card).expect("a root");
-        let out = issue_on_card(&card, &root, &a_request(ENDPOINT), NOW, None, 365).expect("a leaf");
+        let out = issue_on_card(&card, &root, std::slice::from_ref(&root), &a_request(ENDPOINT), NOW, None, 365).expect("a leaf");
         let r = core(
             "validate_chain",
             json!({ "chain": [out["der"].clone(), b64u(&cert)], "now": instant(NOW), "expected_root": root["fingerprint"], "expected_endpoint": ENDPOINT }),
@@ -790,14 +853,39 @@ mod card_tests {
         let e = root_from_card(&FakeCard::empty_slot(), "Alina Rao", NOW).map(|_| ()).unwrap_err();
         assert!(e.0.contains("no certificate"), "{}", e.0);
 
-        // A slot holding an RSA key: the card refuses the parameters, and the message says the
-        // profile signs with P-256.
+        // A slot holding an RSA key: the CARD refuses the parameters (6A80), and that message says
+        // the profile signs with P-256. This is not the wallet's own guard — see the test below.
         let e = root_from_card(&FakeCard::rsa(), "Alina Rao", NOW).map(|_| ()).unwrap_err();
         assert!(e.0.contains("P-256"), "{}", e.0);
 
         // A wrong PIN comes back with the tries left, because that is what a person needs next.
-        let e = issue_on_card(&FakeCard::wrong_pin_for(&honest), &root, &csr, NOW, None, 365).unwrap_err();
+        let e = issue_on_card(&FakeCard::wrong_pin_for(&honest), &root, std::slice::from_ref(&root), &csr, NOW, None, 365).unwrap_err();
         assert!(e.0.contains("wrong PIN") && e.0.contains("2 tries left"), "{}", e.0);
+    }
+
+    // The guard on a card-held root's algorithm had no test. The one above that names P-256 passes
+    // on the CARD's refusal of RSA parameters (status 6A80, whose text also says P-256) and never
+    // reaches the guard; a slot that reports an Ed25519 key — which a newer PIV token can — does.
+    #[test]
+    fn a_card_reporting_an_ed25519_key_is_refused_by_the_guard_itself() {
+        let e = root_from_card(&FakeCard::reports_ed25519(), "Alina Rao", NOW).map(|_| ()).unwrap_err();
+        assert!(e.0.contains("that slot holds a ed25519 key") && e.0.contains("a card-held root is P-256"), "{}", e.0);
+    }
+
+    // §9: a wallet refuses a request whose key is a root. The software path hands the core every
+    // root in the vault; the card path handed it only the root that was issuing, so on a card-held
+    // identity a request carrying a SIBLING root's key was given a leaf.
+    #[test]
+    fn a_request_carrying_a_sibling_roots_key_is_refused_on_the_card_path_too() {
+        let card = FakeCard::p256("7777");
+        let root = root_of(&card).expect("a root").1;
+        let sibling_key = PrivateKey::generate(Alg::Ed25519).expect("a key");
+        let sibling_cert = x509::build_root("Alina at work", &sibling_key, NOW, &x509::serial_of("sibling")).expect("a root");
+        let sibling = json!({ "fingerprint": sibling_key.public().fingerprint(), "cn": "Alina at work", "cert": b64u(&sibling_cert) });
+        let csr = csr_mod::csr_new("A Host", &sibling_key, ENDPOINT, None).expect("a request");
+
+        let e = issue_on_card(&card, &root, &[root.clone(), sibling], &csr, NOW, None, 365).map(|_| ()).unwrap_err();
+        assert!(e.0.contains("the request's key is a root"), "{}", e.0);
     }
 
     #[test]
@@ -865,7 +953,7 @@ mod card_tests {
         // Every check that reads the certificate passes: the certificate is this root's.
         match_root(&root, &hostile).expect("the certificate in the slot is this identity's root");
         // The signature is the only thing that tells, and it is checked before anything is built.
-        let e = issue_on_card(&hostile, &root, &a_request(ENDPOINT), NOW, None, 365).map(|_| ()).unwrap_err();
+        let e = issue_on_card(&hostile, &root, std::slice::from_ref(&root), &a_request(ENDPOINT), NOW, None, 365).map(|_| ()).unwrap_err();
         assert!(e.0.contains("does not verify"), "{}", e.0);
     }
 
@@ -877,7 +965,7 @@ mod card_tests {
         let honest = FakeCard::p256("7777");
         let (cert, root) = root_of(&honest).expect("a root");
         let hostile = FakeCard::swapped_after(&honest, 1);
-        match issue_on_card(&hostile, &root, &a_request(ENDPOINT), NOW, None, 365) {
+        match issue_on_card(&hostile, &root, std::slice::from_ref(&root), &a_request(ENDPOINT), NOW, None, 365) {
             Err(e) => assert!(e.0.contains("does not verify"), "{}", e.0),
             Ok(out) => {
                 // What was assembled, and what it is worth, before failing — the defect is the
@@ -899,7 +987,7 @@ mod card_tests {
         let honest = FakeCard::p256("7777");
         let (_, root) = root_of(&honest).expect("a root");
         let gone = FakeCard::vanishes_after(1);
-        let e = issue_on_card(&gone, &root, &a_request(ENDPOINT), NOW, None, 365).map(|_| ()).unwrap_err();
+        let e = issue_on_card(&gone, &root, std::slice::from_ref(&root), &a_request(ENDPOINT), NOW, None, 365).map(|_| ()).unwrap_err();
         assert!(e.0.contains("no longer in") || e.0.contains("a different card"), "{}", e.0);
         // And a card gone before the first word is the same refusal, not a panic.
         let e = root_from_card(&FakeCard::vanishes_after(0), "Alina Rao", NOW).map(|_| ()).unwrap_err();
@@ -934,7 +1022,8 @@ mod card_tests {
         edited["cert"] = stranger["cert"].clone();
         let e = root_key(&edited).map(|_| ()).unwrap_err();
         assert!(e.0.contains("the vault has been edited"), "{}", e.0);
-        let e = issue_on_card(&honest, &edited, &a_request(ENDPOINT), NOW, None, 365).map(|_| ()).unwrap_err();
+        let e =
+            issue_on_card(&honest, &edited, std::slice::from_ref(&edited), &a_request(ENDPOINT), NOW, None, 365).map(|_| ()).unwrap_err();
         assert!(e.0.contains("the vault has been edited"), "{}", e.0);
     }
 }
