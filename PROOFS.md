@@ -7,11 +7,11 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed here that did not pass.
 
-Specification: **2.1.2**. **47** normative sentences, **349** cross-port parity cases over **38** guarded functions.
+Specification: **2.1.3**. **49** normative sentences, **420** cross-port parity cases over **38** guarded functions.
 
-## The 47 normative sentences of the specification
+## The 49 normative sentences of the specification
 
-A sentence carrying MUST, MUST NOT or REQUIRED, one row each, in document order. **34** are
+A sentence carrying MUST, MUST NOT or REQUIRED, one row each, in document order. **36** are
 held by a test or an intrusion scenario in this repository; **13** belong to a wallet, a host
 or a node, and name the artefact that holds them there — checked against the sibling repository
 whenever it is on disk. A row with nothing in its last column would fail `js/musts.mjs`.
@@ -47,8 +47,9 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 | # | The sentence | Held by |
 |---|---|---|
 | `3.#1` | A receiving implementation MUST NOT treat `FN` as identifying, and SHOULD NOT present it as a contact's whole identity: where two pinned contacts render alike, show the fingerprint alongside. | `gateway:TestCollidingNamesCarryTheirFingerprint`, `gateway:TestLookAlikeNamesCollideToo`, `gateway:TestNoPeerFacingSurfaceCanSetAPetname` |
-| `3.#2` | A receiver MUST reject a card without `X-PACT-CERT`, one whose certificate does not parse as §14.1 describes — no issuer key identifier, no endpoint or several, a validity longer than 398 days — and a card whose `X-PACT-VERSION` names a major version it does not implement, each with `bad_request`. | `scenario:a card without a certificate`, `scenario:two X-PACT-CERT properties`, `scenario:a card of the retired generation` |
+| `3.#2` | A receiver MUST reject a card without `X-PACT-CERT`, one whose certificate does not parse as §14.1 describes — no issuer key identifier or one that is not the 32 bytes a key identifier is, no endpoint or several, a validity longer than 398 days — and a card whose `X-PACT-VERSION` names a major version it does not implement, each with `bad_request`. | `scenario:a card without a certificate`, `scenario:two X-PACT-CERT properties`, `scenario:a card of the retired generation`, `scenario:a card whose leaf names its issuer in three bytes` |
 | `3.#3` | A receiver MUST also refuse, at intake and again before every dial, an endpoint whose host resolves to a loopback, link-local or private address — the resolve-and-vet guard §6.2 applies to media URLs — unless the owner has configured that network on purpose, and a guest's endpoint that names the receiver's own address, which no honest card carries. | `go:TestAddressGuardRefusesEverySpellingOfLoopback`, `go:TestAddressGuard`, `rust:guards`, `scenario:a guest whose leaf names the receiver's own address` |
+| `3.#4` | A writer MUST NOT put a control character into a card — in `FN`, in `X-PACT-SEAL`, or in a property it adds: a card is lines, a line break writes a property of the writer's choosing, and a reader takes the first of a name, so a name of `x`, a line break and `X-PACT-SEAL:none` made a card that requires sealing into one that does not. | `rust:nothing_that_goes_into_a_card_may_carry_a_line_break`, `go:TestNothingThatGoesIntoACardMayCarryALineBreak` |
 
 ### 4. Invites
 
@@ -85,11 +86,12 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 | # | The sentence | Held by |
 |---|---|---|
 | `13.1#1` | base64url HPKE encapsulated key, of exactly the suite's `Npk` (RFC 9180 §7.1): 65 bytes for `PACT-SEAL-P256`, an uncompressed P-256 point, and 32 for `PACT-SEAL-X25519`. A receiver MUST refuse any other length (`envelope_invalid`) — `sig` covers the three members concatenated with nothing between them, so the suite's own length is what fixes the boundary; without it a byte moved from the end of `enc` to the front of `ct` leaves the signed bytes identical | `scenario:a byte moved from the encapsulated key into the ciphertext`, `go:TestSmallOrderPointsAndSPKIBits` |
-| `13.1#2` | The suite follows the recipient's key and nothing else: a receiver MUST refuse an envelope whose `suite` is not the one its key takes (`envelope_invalid`), so no choice is left on the wire for a sender to make badly. | `scenario:the wrong suite for the recipient's key` |
-| `13.1#3` | The HPKE `info` parameter is the ASCII string `PACT-SEAL-v2`, and an envelope sealed under any other info string MUST NOT open. | `scenario:sealed with a stale info string` |
-| `13.1#4` | The HPKE ephemeral MUST be fresh for every envelope — a reused one repeats the key and the nonce, and two ciphertexts under them leak the XOR of their plaintexts — and both sides MUST refuse an all-zero DH output, which a low-order X25519 point produces (RFC 9180 §7.1.4). | `scenario:HPKE ephemeral reuse leaks the XOR of two plaintexts; production sealing cannot take a seed` |
-| `13.1#5` | `msg_id` is REQUIRED and MUST be non-empty — replay protection keyed on an empty string protects nothing. | `scenario:an empty msg_id` |
-| `13.1#6` | A protected header carrying a member not listed for its `v`, or one whose type is not the one listed — `v`, `ts` and `exp` are JSON integers, `suite`, `kid`, `msg_id` and `cty` JSON strings — MUST be rejected (`envelope_invalid`): the header is the AAD, and two implementations that disagree about what was signed cannot interoperate. | `scenario:a header with an extra member`, `scenario:a header without suite`, `scenario:a header whose ts and exp are strings`, `scenario:a v: 1 header, the retired generation` |
+| `13.1#2` | Each of the four members is base64url (RFC 4648 §5) without padding, in its one canonical spelling, and a receiver MUST refuse (`envelope_invalid`) a member written any other way: with a character outside that alphabet — padding, whitespace and the standard alphabet's `+` and `/` among them — or with a last character whose unused bits are not zero. | `scenario:a real envelope whose protected carries a stray character`, `scenario:a real envelope whose enc is padded`, `scenario:a real envelope whose ct has a line break in it`, `scenario:a real envelope whose signature is spelled with its spare bits set` |
+| `13.1#3` | The suite follows the recipient's key and nothing else: a receiver MUST refuse an envelope whose `suite` is not the one its key takes (`envelope_invalid`), so no choice is left on the wire for a sender to make badly. | `scenario:the wrong suite for the recipient's key` |
+| `13.1#4` | The HPKE `info` parameter is the ASCII string `PACT-SEAL-v2`, and an envelope sealed under any other info string MUST NOT open. | `scenario:sealed with a stale info string` |
+| `13.1#5` | The HPKE ephemeral MUST be fresh for every envelope — a reused one repeats the key and the nonce, and two ciphertexts under them leak the XOR of their plaintexts — and both sides MUST refuse an all-zero DH output, which a low-order X25519 point produces (RFC 9180 §7.1.4). | `scenario:HPKE ephemeral reuse leaks the XOR of two plaintexts; production sealing cannot take a seed` |
+| `13.1#6` | `msg_id` is REQUIRED and MUST be non-empty — replay protection keyed on an empty string protects nothing. | `scenario:an empty msg_id` |
+| `13.1#7` | A protected header carrying a member not listed for its `v`, or one whose type is not the one listed — `v`, `ts` and `exp` are JSON integers, `suite`, `kid`, `msg_id` and `cty` JSON strings — MUST be rejected (`envelope_invalid`): the header is the AAD, and two implementations that disagree about what was signed cannot interoperate. | `scenario:a header with an extra member`, `scenario:a header without suite`, `scenario:a header whose ts and exp are strings`, `scenario:a v: 1 header, the retired generation` |
 
 ### 13.2 The `sealed_call` tool
 
@@ -144,7 +146,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 349 cross-port parity cases
+## The 420 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -152,9 +154,9 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **349** cases, **0** disagreements, **38** of **38** functions compared whole on success.
+At the run that generated this file: **420** cases, **0** disagreements, **38** of **38** functions compared whole on success.
 
-### `address_guard` — 28 cases · whole on success
+### `address_guard` — 32 cases · whole on success
 
 - address_guard https://255.255.255.255/mcp
 - address_guard https://127.0.0.1/mcp
@@ -184,6 +186,10 @@ At the run that generated this file: **349** cases, **0** disagreements, **38** 
 - address_guard on a contact naming us
 - address_guard with no endpoint
 - address_guard with nothing to work from
+- address_guard https://[64:ff9b::7f00:1]/mcp
+- address_guard https://[2002:c0a8:101::1]/mcp
+- address_guard https://[64:ff9b::808:808]/mcp
+- address_guard https://[2606:4700:4700::1111]/mcp
 
 ### `assemble_leaf` — 6 cases · whole on success
 
@@ -200,7 +206,7 @@ At the run that generated this file: **349** cases, **0** disagreements, **38** 
 - assemble_root with nothing to work from
 - assemble_root
 
-### `build_leaf` — 6 cases · whole on success
+### `build_leaf` — 7 cases · whole on success
 
 - build_leaf
 - build_leaf over 398 days
@@ -208,6 +214,7 @@ At the run that generated this file: **349** cases, **0** disagreements, **38** 
 - build_leaf naming https://127.0.0.1/mcp
 - build_leaf naming http://a.example/x
 - build_leaf naming https://a.example/x/
+- build_leaf with no not_before
 
 ### `build_root` — 5 cases · whole on success
 
@@ -217,7 +224,7 @@ At the run that generated this file: **349** cases, **0** disagreements, **38** 
 - build_root with an instant that is not one
 - build_root with nothing to work from
 
-### `card_decode` — 9 cases · whole on success
+### `card_decode` — 11 cases · whole on success
 
 - card_decode of a card carrying that leaf
 - card_decode of a real card
@@ -228,8 +235,10 @@ At the run that generated this file: **349** cases, **0** disagreements, **38** 
 - card_decode of a card whose certificate is not one
 - card_decode after the leaf expired
 - card_decode with nothing to work from
+- card_decode with no now
+- card_decode of a card whose leaf names its issuer in three bytes
 
-### `card_encode` — 7 cases · whole on success
+### `card_encode` — 13 cases · whole on success
 
 - card_encode
 - card_encode with a name outside ASCII
@@ -238,6 +247,12 @@ At the run that generated this file: **349** cases, **0** disagreements, **38** 
 - card_encode with a seal nobody has
 - card_encode of a certificate that is not one
 - card_encode with nothing to work from
+- card_encode: a name with CR LF
+- card_encode: a name with a bare LF
+- card_encode: a name with a NUL
+- card_encode: a seal with CR LF
+- card_encode: an extra line with CR LF
+- card_encode: a name with a comma and a semicolon
 
 ### `compare_leaves` — 5 cases · whole on success
 
@@ -247,7 +262,7 @@ At the run that generated this file: **349** cases, **0** disagreements, **38** 
 - compare_leaves with nothing to work from
 - compare_leaves with pinned as null
 
-### `csr_check` — 16 cases · whole on success
+### `csr_check` — 18 cases · whole on success
 
 - csr_check of bytes that are not a request
 - csr_check of a certificate
@@ -265,6 +280,8 @@ At the run that generated this file: **349** cases, **0** disagreements, **38** 
 - csr_check: a CertificationRequestInfo that is a SET, not a SEQUENCE
 - csr_check: a signatureAlgorithm with a trailing NULL
 - csr_check: a key outside the profile AND a malformed attribute set: which is said first
+- csr_check on another port, asking for the host's dNSName
+- csr_check on another port, asking for some other dNSName
 
 ### `csr_new` — 5 cases · whole on success
 
@@ -274,7 +291,7 @@ At the run that generated this file: **349** cases, **0** disagreements, **38** 
 - csr_new with a dns_name that is not the host
 - csr_new with nothing to work from
 
-### `decide` — 22 cases · whole on success
+### `decide` — 45 cases · whole on success
 
 - decide on an envelope from a pinned contact
 - decide on a pinned contact's call that names no tool
@@ -291,6 +308,24 @@ At the run that generated this file: **349** cases, **0** disagreements, **38** 
 - decide on a real envelope whose protected carries a stray character
 - decide on a real envelope whose enc carries a stray character
 - decide on a real envelope whose sig carries a stray character
+- decide on a real envelope whose protected is padded
+- decide on a real envelope whose protected has a line break in it
+- decide on a real envelope whose protected has a space in it
+- decide on a real envelope whose enc is padded
+- decide on a real envelope whose enc has a line break in it
+- decide on a real envelope whose enc has a space in it
+- decide on a real envelope whose ct is padded
+- decide on a real envelope whose ct uses the standard alphabet
+- decide on a real envelope whose ct has a line break in it
+- decide on a real envelope whose ct has a space in it
+- decide on a real envelope whose sig is padded
+- decide on a real envelope whose sig uses the standard alphabet
+- decide on a real envelope whose sig has a line break in it
+- decide on a real envelope whose sig has a space in it
+- decide on a real envelope whose protected is spelled with its spare bits set
+- decide on a real envelope whose enc is spelled with its spare bits set
+- decide on a real envelope whose ct is spelled with its spare bits set
+- decide on a real envelope whose sig is spelled with its spare bits set
 - decide when a held key's own leaf will not parse
 - decide in the small form when a pin's leaf will not parse
 - decide when the pinned leaf of the sender's root will not compare
@@ -298,6 +333,11 @@ At the run that generated this file: **349** cases, **0** disagreements, **38** 
 - decide when a tombstone's leaf will not compare
 - decide with two tombstones for one root, the FIRST of them stale
 - decide on a peer who returns after removal: the answer that succeeds
+- decide with no now
+- decide, small form: the pin names its leaf
+- decide, small form: an unreadable pin that names some OTHER leaf is never parsed
+- decide, small form: an unreadable pin that names no leaf has to be parsed
+- decide, small form: a pin whose named leaf is not its leaf
 
 ### `derive_seed` — 10 cases · whole on success
 
@@ -312,7 +352,7 @@ At the run that generated this file: **349** cases, **0** disagreements, **38** 
 - derive_seed for pact/store-key/1
 - derive_seed for pact/store-id/1
 
-### `follow_renewed` — 12 cases · whole on success
+### `follow_renewed` — 13 cases · whole on success
 
 - follow_renewed on a chain to another root
 - follow_renewed on a chain that is not one
@@ -326,6 +366,7 @@ At the run that generated this file: **349** cases, **0** disagreements, **38** 
 - follow_renewed on a chain whose members are not base64url
 - follow_renewed on a chain of none
 - follow_renewed to a leaf OLDER than the one pinned
+- follow_renewed with no now
 
 ### `generate_key` — 5 cases · whole on success
 
@@ -347,7 +388,7 @@ At the run that generated this file: **349** cases, **0** disagreements, **38** 
 - hpke_seal with nothing to work from
 - hpke_seal
 
-### `ip_is_private` — 12 cases · whole on success
+### `ip_is_private` — 25 cases · whole on success
 
 - ip_is_private "10.0.0.1"
 - ip_is_private "8.8.8.8"
@@ -361,6 +402,19 @@ At the run that generated this file: **349** cases, **0** disagreements, **38** 
 - ip_is_private "224.0.0.1"
 - ip_is_private "255.255.255.255"
 - ip_is_private with nothing to work from
+- ip_is_private 64:ff9b::7f00:1
+- ip_is_private 64:ff9b::a9fe:a9fe
+- ip_is_private 64:ff9b::808:808
+- ip_is_private 64:ff9b:1::1
+- ip_is_private 2002:7f00:1::1
+- ip_is_private 2002:808:808::1
+- ip_is_private fec0::1
+- ip_is_private ::7f00:1
+- ip_is_private ::808:808
+- ip_is_private 2606:4700:4700::1111
+- ip_is_private ::ffff:127.0.0.1
+- ip_is_private ::1
+- ip_is_private ::
 
 ### `is_normal_https` — 26 cases · whole on success
 
@@ -391,7 +445,7 @@ At the run that generated this file: **349** cases, **0** disagreements, **38** 
 - is_normal_https with no url
 - is_normal_https with nothing to work from
 
-### `issue_from_csr` — 7 cases · whole on success
+### `issue_from_csr` — 8 cases · whole on success
 
 - issue_from_csr with an explicit zero validity
 - issue_from_csr over 398 days
@@ -400,6 +454,7 @@ At the run that generated this file: **349** cases, **0** disagreements, **38** 
 - issue_from_csr refusing the root's own key
 - issue_from_csr
 - issue_from_csr refusing a root given as a key id
+- issue_from_csr with no now
 
 ### `issue_tbs_from_csr` — 1 case · whole on success
 
@@ -441,7 +496,7 @@ At the run that generated this file: **349** cases, **0** disagreements, **38** 
 
 - a function nobody defines
 
-### `open_result` — 12 cases · whole on success
+### `open_result` — 17 cases · whole on success
 
 - open_result of a request envelope
 - open_result with nothing to work from
@@ -455,8 +510,13 @@ At the run that generated this file: **349** cases, **0** disagreements, **38** 
 - open_result in the leaf form, from a held leaf: the answer that succeeds
 - open_result on a real answer whose protected carries a stray character
 - open_result on a real answer whose ct carries a stray character
+- open_result on a real answer whose enc is padded
+- open_result on a real answer whose sig has a line break in it
+- open_result with no now
+- open_result, leaf form: the pin names its leaf
+- open_result, leaf form: a pin whose named leaf is not its leaf
 
-### `parse_certificate` — 17 cases · whole on success
+### `parse_certificate` — 18 cases · whole on success
 
 - parse_certificate of a root
 - parse_certificate of a leaf
@@ -475,6 +535,7 @@ At the run that generated this file: **349** cases, **0** disagreements, **38** 
 - parse_certificate of a leaf with a 129-bit OID arc
 - parse_certificate with nothing to work from
 - parse_certificate with der as null
+- parse_certificate of a leaf naming its issuer in three bytes
 
 ### `prf_salt` — 1 case · whole on success
 
@@ -490,7 +551,7 @@ At the run that generated this file: **349** cases, **0** disagreements, **38** 
 - profile_error of a leaf read as a leaf
 - profile_error of a root read as a root
 
-### `public_key` — 6 cases · whole on success
+### `public_key` — 7 cases · whole on success
 
 - public_key of a key that is not one
 - public_key with no argument
@@ -498,6 +559,7 @@ At the run that generated this file: **349** cases, **0** disagreements, **38** 
 - public_key with nothing to work from
 - public_key
 - public_key of a P-256 key
+- public_key from an Ed25519 PKCS #8 whose algorithm carries a NULL
 
 ### `root_tbs` — 3 cases · whole on success
 
@@ -505,7 +567,7 @@ At the run that generated this file: **349** cases, **0** disagreements, **38** 
 - root_tbs with no key
 - root_tbs with a serial that is too long
 
-### `seal_request` — 9 cases · whole on success
+### `seal_request` — 12 cases · whole on success
 
 - seal_request with no recipient
 - seal_request with a form nobody has
@@ -516,22 +578,27 @@ At the run that generated this file: **349** cases, **0** disagreements, **38** 
 - seal_request with no msg_id at all
 - seal_request with an ephemeral_seed, which neither port takes
 - seal_request with nothing to work from
+- seal_request in the chain form with no sender_chain
+- seal_request whose sender_chain is not base64url
+- seal_request whose sender_chain is not a list
 
-### `seal_result` — 5 cases · whole on success
+### `seal_result` — 6 cases · whole on success
 
 - seal_result
 - seal_result with no recipient
 - seal_result with neither a result nor an error
 - seal_result with nothing to work from
 - seal_result of a real result
+- seal_result whose sender_chain is not base64url
 
-### `sign` — 5 cases · whole on success
+### `sign` — 6 cases · whole on success
 
 - sign with a public key
 - sign with no data
 - sign with nothing to work from
 - sign
 - sign with a P-256 key
+- sign with an Ed25519 PKCS #8 whose algorithm carries a NULL
 
 ### `suite_for` — 5 cases · whole on success
 
@@ -541,7 +608,7 @@ At the run that generated this file: **349** cases, **0** disagreements, **38** 
 - suite_for an RSA key
 - suite_for with nothing to work from
 
-### `validate_chain` — 31 cases · whole on success
+### `validate_chain` — 36 cases · whole on success
 
 - validate_chain of a real chain
 - validate_chain against the root and endpoint it really has
@@ -572,6 +639,11 @@ At the run that generated this file: **349** cases, **0** disagreements, **38** 
 - validate_chain of members that are not strings
 - validate_chain with nothing to work from
 - validate_chain with chain as null
+- validate_chain with no now
+- validate_chain with a now that is there and is not an instant
+- validate_chain with a now that is empty
+- validate_chain of a leaf naming its issuer in three bytes
+- validate_chain of a leaf on another port carrying its host's dNSName
 - validate_chain half a second after the leaf's last second
 - validate_chain in the leaf's last second, with a fraction
 
@@ -610,7 +682,7 @@ At the run that generated this file: **349** cases, **0** disagreements, **38** 
 - verify with nothing to work from
 - verify a signature the other port made
 
-### `wallet_issue` — 7 cases · whole on success
+### `wallet_issue` — 8 cases · whole on success
 
 - wallet_issue
 - wallet_issue for a root the vault does not hold
@@ -619,3 +691,4 @@ At the run that generated this file: **349** cases, **0** disagreements, **38** 
 - wallet_issue as a move
 - wallet_issue with an empty vault
 - wallet_issue with nothing to work from
+- wallet_issue: a request carrying a CARD-held sibling root's key

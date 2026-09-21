@@ -94,12 +94,13 @@
     ]
   },
   "3.#2": {
-    "hash": "18bd00ec1f88",
+    "hash": "5c80de714a23",
     "text": "A receiver MUST reject a card without `X-PACT-CERT`, one whose certificate does not parse as §14.1 describes —",
     "held_by": [
       "scenario:a card without a certificate",
       "scenario:two X-PACT-CERT properties",
-      "scenario:a card of the retired generation"
+      "scenario:a card of the retired generation",
+      "scenario:a card whose leaf names its issuer in three bytes"
     ]
   },
   "3.#3": {
@@ -110,6 +111,14 @@
       "go:TestAddressGuard",
       "rust:guards",
       "scenario:a guest whose leaf names the receiver's own address"
+    ]
+  },
+  "3.#4": {
+    "hash": "341778cf5c81",
+    "text": "A writer MUST NOT put a control character into a card — in `FN`, in `X-PACT-SEAL`, or in a property it adds: a",
+    "held_by": [
+      "rust:nothing_that_goes_into_a_card_may_carry_a_line_break",
+      "go:TestNothingThatGoesIntoACardMayCarryALineBreak"
     ]
   },
   "4.#1": {
@@ -155,7 +164,7 @@
   },
   "9.#1": {
     "hash": "63b8673a7797",
-    "text": "A leaf's key does not outlive its leaf: a host MUST stop using the key of a leaf that has expired and MUST destr",
+    "text": "A leaf's key does not outlive its leaf: a host MUST stop using the key of a leaf that has expired and MUST des",
     "elsewhere": "node",
     "why": "holding and destroying a leaf's key is the host's act. pact-gateway stops offering the key on the read path from notAfter and destroys both copies — the ledger row's and the account's — at start, on the hourly sweep and on adoption, stops serving the account, and audits it (TestAnExpiredCurrentLeafLosesItsKeyInBothPlaces, TestALeafThatRunsOutStopsBeingServedAndLosesItsKey); pact-cloud does the same on the first request past the date, answers `unavailable` rather than signing with anything, and a renewal still installs (leaf-expiry.test.ts). Until 2026-09-19 both retired superseded leaves only, so the key of a leaf nobody renewed was held and used for as long as the process lived",
     "elsewhere_names": [
@@ -166,7 +175,7 @@
   },
   "9.#2": {
     "hash": "874aaad41c95",
-    "text": "**Moving** is the person issuing a leaf to the new host, the data carried across as an archive — contacts, mes",
+    "text": "**Moving** is the person issuing a leaf to the new host, the data carried across as an archive — the person's ",
     "elsewhere": "node",
     "why": "both halves are a host's. The host that MAKES an archive writes a person's contacts and conversations and nothing else, and no key of any kind: pact-gateway's export is written through its Store interface, so it holds what it asks for, and the test searches the archive's BYTES for a planted leaf key, ledger key, setting, token, invite and integration endpoint (TestAnExportCarriesContactsAndChatsAndNothingElse); pact-cloud's builder selects from an allow-list of tables and columns and its export is searched the same way (leave-20.test.ts). The host that IMPORTS one refuses key material and everything else it does not recognise — a member, a kind of line, a single field — before a write: pact-gateway (TestAnImportRefusesAnythingAnExportDoesNotCarry), pact-cloud (import-20.test.ts). And the two formats are proven against each other: the node's suite runs the cloud's converter and imports the file it wrote (TestTheCloudsLeaveFileImports)",
     "elsewhere_names": [
@@ -214,34 +223,44 @@
     ]
   },
   "13.1#2": {
+    "hash": "fbd78ad60926",
+    "text": "Each of the four members is base64url (RFC 4648 §5) without padding, in its one canonical spelling, and a rece",
+    "held_by": [
+      "scenario:a real envelope whose protected carries a stray character",
+      "scenario:a real envelope whose enc is padded",
+      "scenario:a real envelope whose ct has a line break in it",
+      "scenario:a real envelope whose signature is spelled with its spare bits set"
+    ]
+  },
+  "13.1#3": {
     "hash": "647a7e313ce6",
     "text": "The suite follows the recipient's key and nothing else: a receiver MUST refuse an envelope whose `suite` is no",
     "held_by": [
       "scenario:the wrong suite for the recipient's key"
     ]
   },
-  "13.1#3": {
+  "13.1#4": {
     "hash": "4e3d2bfcb19f",
     "text": "The HPKE `info` parameter is the ASCII string `PACT-SEAL-v2`, and an envelope sealed under any other info stri",
     "held_by": [
       "scenario:sealed with a stale info string"
     ]
   },
-  "13.1#4": {
+  "13.1#5": {
     "hash": "7ff47a8bc4dd",
     "text": "The HPKE ephemeral MUST be fresh for every envelope — a reused one repeats the key and the nonce, and two ciph",
     "held_by": [
       "scenario:HPKE ephemeral reuse leaks the XOR of two plaintexts; production sealing cannot take a seed"
     ]
   },
-  "13.1#5": {
+  "13.1#6": {
     "hash": "a74d0872b680",
     "text": "`msg_id` is REQUIRED and MUST be non-empty — replay protection keyed on an empty string protects nothing.",
     "held_by": [
       "scenario:an empty msg_id"
     ]
   },
-  "13.1#6": {
+  "13.1#7": {
     "hash": "1797d1ad09e4",
     "text": "A protected header carrying a member not listed for its `v`, or one whose type is not the one listed — `v`, `t",
     "held_by": [
@@ -402,7 +421,7 @@
   },
   "14.3#1": {
     "hash": "91521d109630",
-    "text": "A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request.",
+    "text": "A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an una",
     "held_by": [],
     "elsewhere": "node",
     "elsewhere_names": [

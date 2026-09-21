@@ -69,7 +69,27 @@ func decodeB64url(s string) ([]byte, error) {
 		}
 		return r
 	}, s)
-	out, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(cleaned, "="))
+	// Strict: the UNUSED low bits of a last character must be zero, as the core's decoder requires.
+	// Without it `…QQ` and `…QR` are one byte string, the signature — which covers the decoded bytes —
+	// verifies over both, and this port accepted a second spelling of an envelope the core refuses.
+	out, err := base64.RawURLEncoding.Strict().DecodeString(strings.TrimRight(cleaned, "="))
+	if err != nil {
+		return nil, parseError{"not base64url"}
+	}
+	return out, nil
+}
+
+// wireB64url reads a member of an envelope as it travels: unpadded base64url in its ONE canonical
+// spelling (§13.1), as the core's `wire_b64u` does. decodeB64url is for what a caller hands the
+// boundary and forgives padding, the standard alphabet and whitespace; none of that may be forgiven
+// on the wire, because `sig` covers the DECODED bytes and every spelling a reader accepts is another
+// envelope that verifies. encoding/base64 silently skips CR and LF even in strict mode, so they are
+// refused by hand.
+func wireB64url(s string) ([]byte, error) {
+	if strings.ContainsAny(s, "\r\n") {
+		return nil, parseError{"not base64url"}
+	}
+	out, err := base64.RawURLEncoding.Strict().DecodeString(s)
 	if err != nil {
 		return nil, parseError{"not base64url"}
 	}

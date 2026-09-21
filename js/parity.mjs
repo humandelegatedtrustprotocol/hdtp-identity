@@ -531,6 +531,30 @@ const provenWhole = new Set();
   add('decide on a real envelope whose sig carries a stray character', 'decide', { now, envelope: { ...sealed, sig: `${sealed.sig}!` }, node });
   add('open_result on a real answer whose protected carries a stray character', 'open_result', open({ ...chainForm, protected: `${chainForm.protected}!` }));
   add('open_result on a real answer whose ct carries a stray character', 'open_result', open({ ...chainForm, ct: `${chainForm.ct}!` }));
+  // …and the quieter second spelling: a last character whose UNUSED low bits are set. It decodes to the
+  // same bytes in a reader that does not look, so the signature verifies over them.
+  const A64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+  const respell = (s) => {
+    const spare = [0, 0, 4, 2][s.length % 4]; // unused bits in the last character of an unpadded string
+    const i = A64.indexOf(s.at(-1));
+    return spare && (i & ((1 << spare) - 1)) === 0 ? s.slice(0, -1) + A64[i | 1] : null;
+  };
+  // The other spellings a forgiving reader takes: padding, the standard alphabet, whitespace. Both
+  // ports forgave these in an envelope, consistently — and an envelope member has ONE spelling (§13.1).
+  const pad = (s) => s + '='.repeat((4 - (s.length % 4)) % 4);
+  const std = (s) => s.replace(/-/g, '+').replace(/_/g, '/');
+  for (const member of ['protected', 'enc', 'ct', 'sig']) {
+    if (pad(sealed[member]) !== sealed[member]) add(`decide on a real envelope whose ${member} is padded`, 'decide', { now, envelope: { ...sealed, [member]: pad(sealed[member]) }, node });
+    if (std(sealed[member]) !== sealed[member]) add(`decide on a real envelope whose ${member} uses the standard alphabet`, 'decide', { now, envelope: { ...sealed, [member]: std(sealed[member]) }, node });
+    add(`decide on a real envelope whose ${member} has a line break in it`, 'decide', { now, envelope: { ...sealed, [member]: `${sealed[member].slice(0, 8)}\n${sealed[member].slice(8)}` }, node });
+    add(`decide on a real envelope whose ${member} has a space in it`, 'decide', { now, envelope: { ...sealed, [member]: `${sealed[member].slice(0, 8)} ${sealed[member].slice(8)}` }, node });
+  }
+  add('open_result on a real answer whose enc is padded', 'open_result', open({ ...chainForm, enc: pad(chainForm.enc) }));
+  add('open_result on a real answer whose sig has a line break in it', 'open_result', open({ ...chainForm, sig: `${chainForm.sig.slice(0, 8)}\n${chainForm.sig.slice(8)}` }));
+  for (const member of ['protected', 'enc', 'ct', 'sig']) {
+    const again = respell(sealed[member]);
+    if (again) add(`decide on a real envelope whose ${member} is spelled with its spare bits set`, 'decide', { now, envelope: { ...sealed, [member]: again }, node });
+  }
 
   // B3 — the node's OWN state, unreadable. The seed throws; so does the core.
   const small = wasm.call('seal_request', { recipient_leaf: leafDer, sender_pkcs8: hostPkcs8, form: 'leaf', method: 'tools/call', params: { name: 'send_message' }, msg_id: 'p-small', ts: at(now) });
@@ -565,6 +589,74 @@ const provenWhole = new Set();
   add('csr_check: a signatureAlgorithm with a trailing NULL', 'csr_check', { der: signedBy(hostKey, cri.raw, derSeq(derChildren(sigAlg)[0].raw, derTlv(0x05, Buffer.alloc(0)))) });
   const x25519Spki = x25519FromSeed(seed('parity/x25519')).pub.export({ format: 'der', type: 'spki' });
   add('csr_check: a key outside the profile AND a malformed attribute set: which is said first', 'csr_check', { der: signedBy(hostKey, derSeq(version.raw, subject.raw, x25519Spki, derTlv(0xa0, derInt(7)))) });
+
+  // A member that is ABSENT is `<name> is required` and `bad_request`, whatever its type. For an
+  // instant the Go port said "an instant is required" and called it `parse` — in every function that
+  // takes one — and no case here had ever left `now` out.
+  add('validate_chain with no now', 'validate_chain', { chain: [leafDer, rootDer] });
+  add('decide with no now', 'decide', { envelope: sealed, node });
+  add('open_result with no now', 'open_result', { ...open(chainForm), now: undefined });
+  add('follow_renewed with no now', 'follow_renewed', { ...follow({ code: 'certificate_renewed', data: { chain: [leafDer, rootDer] } }), now: undefined });
+  add('card_decode with no now', 'card_decode', { vcard: card });
+  add('issue_from_csr with no now', 'issue_from_csr', { csr, root_pkcs8: rootPkcs8, root_cn: 'Alina Rao' });
+  add('build_leaf with no not_before', 'build_leaf', { cn: 'Alina Rao', root_cn: 'Alina Rao', root_pkcs8: rootPkcs8, host_spki: hostSpki, endpoint: ENDPOINT, not_after: '2027-09-01T00:00:00Z' });
+  add('validate_chain with a now that is there and is not an instant', 'validate_chain', { chain: [leafDer, rootDer], now: 'soon' });
+  add('validate_chain with a now that is empty', 'validate_chain', { chain: [leafDer, rootDer], now: '' });
+
+  // C9 — a chain that is THERE and will not read is not a chain that was left out.
+  const sealing = (o) => ({ recipient_leaf: leafDer, sender_pkcs8: hostPkcs8, form: 'chain', method: 'tools/call', params: {}, msg_id: 'c9', ts: at(now), ephemeral_seed: b64url(seed('parity/c9')), ...o });
+  add('seal_request in the chain form with no sender_chain', 'seal_request', sealing({}));
+  add('seal_request whose sender_chain is not base64url', 'seal_request', sealing({ sender_chain: ['!!!', '!!!'] }));
+  add('seal_request whose sender_chain is not a list', 'seal_request', sealing({ sender_chain: 'AAAA' }));
+  add('seal_result whose sender_chain is not base64url', 'seal_result', { recipient_spki: callerSpki, sender_pkcs8: hostPkcs8, form: 'chain', sender_chain: ['!!!'], result: {}, msg_id: 'c9', ts: at(now) });
+
+  // C8 — RFC 8410: an Ed25519 AlgorithmIdentifier carries no parameters, in a private key either.
+  {
+    const [pv, , pk] = derChildren(derRead(Buffer.from(hostPkcs8, 'base64url')));
+    const oidOnly = derChildren(derChildren(derRead(Buffer.from(hostPkcs8, 'base64url')))[1])[0];
+    const withNull = b64url(derSeq(pv.raw, derSeq(oidOnly.raw, derTlv(0x05, Buffer.alloc(0))), pk.raw));
+    add('public_key from an Ed25519 PKCS #8 whose algorithm carries a NULL', 'public_key', { pkcs8: withNull });
+    add('sign with an Ed25519 PKCS #8 whose algorithm carries a NULL', 'sign', { pkcs8: withNull, data: b64url(Buffer.from('x')) });
+  }
+
+  // ── C: what reached the pinned core. Both ports were wrong the SAME way on most of these, so parity
+  // could not have seen them; each port's own tests were red first, and these hold the two together.
+  {
+    const shortAki = b64url(buildLeaf({ cn: 'Alina Rao', rootCn: 'Alina Rao', root: rootKey, hostKey, endpoint: ENDPOINT, notBefore: new Date('2026-09-01T00:00:00Z'), notAfter: new Date('2027-09-01T00:00:00Z'), aki: Buffer.from([1, 2, 3]), label: 'parity/short-aki' }));
+    add('parse_certificate of a leaf naming its issuer in three bytes', 'parse_certificate', { der: shortAki });
+    add('validate_chain of a leaf naming its issuer in three bytes', 'validate_chain', { chain: [shortAki, rootDer], now });
+    add('card_decode of a card whose leaf names its issuer in three bytes', 'card_decode', { vcard: wasm.call('card_encode', { fn: 'Alina Rao', cert: shortAki }).vcard, now });
+
+    for (const ip of ['64:ff9b::7f00:1', '64:ff9b::a9fe:a9fe', '64:ff9b::808:808', '64:ff9b:1::1', '2002:7f00:1::1', '2002:808:808::1', 'fec0::1', '::7f00:1', '::808:808', '2606:4700:4700::1111', '::ffff:127.0.0.1', '::1', '::'])
+      add(`ip_is_private ${ip}`, 'ip_is_private', { ip });
+    for (const endpoint of ['https://[64:ff9b::7f00:1]/mcp', 'https://[2002:c0a8:101::1]/mcp', 'https://[64:ff9b::808:808]/mcp', 'https://[2606:4700:4700::1111]/mcp'])
+      add(`address_guard ${endpoint}`, 'address_guard', { endpoint, guest: true });
+
+    const E8443 = 'https://agent.alina.example:8443/mcp';
+    const csr8443 = wasm.call('csr_new', { cn: 'Alina Rao', host_pkcs8: hostPkcs8, endpoint: E8443, dns_name: 'agent.alina.example' }).der;
+    add('csr_check on another port, asking for the host\'s dNSName', 'csr_check', { der: csr8443 });
+    add('csr_check on another port, asking for some other dNSName', 'csr_check', { der: wasm.call('csr_new', { cn: 'Alina Rao', host_pkcs8: hostPkcs8, endpoint: E8443, dns_name: 'agent.mallory.example' }).der });
+    const leaf8443 = b64url(buildLeaf({ cn: 'Alina Rao', rootCn: 'Alina Rao', root: rootKey, hostKey, endpoint: E8443, dnsName: 'agent.alina.example', notBefore: new Date('2026-09-01T00:00:00Z'), notAfter: new Date('2027-09-01T00:00:00Z'), label: 'parity/8443' }));
+    add('validate_chain of a leaf on another port carrying its host\'s dNSName', 'validate_chain', { chain: [leaf8443, rootDer], now, expected_endpoint: E8443 });
+
+    for (const [what, args] of [['a name with CR LF', { fn: 'x\r\nX-PACT-SEAL:none', cert: leafDer, seal: 'required' }], ['a name with a bare LF', { fn: 'x\nX-PACT-SEAL:none', cert: leafDer }], ['a name with a NUL', { fn: 'x\u0000y', cert: leafDer }], ['a seal with CR LF', { fn: 'x', cert: leafDer, seal: 'required\r\nX-PACT-VERSION:3' }], ['an extra line with CR LF', { fn: 'x', cert: leafDer, extra: ['X-A:1\r\nX-PACT-SEAL:none'] }], ['a name with a comma and a semicolon', { fn: 'Rao, Alina; of Pune', cert: leafDer, seal: 'required' }]])
+      add(`card_encode: ${what}`, 'card_encode', args);
+
+    const named = wasm.call('key_info', { spki: hostSpki }).fingerprint;
+    const mine = { root: rootFp, endpoint: ENDPOINT, leaf: leafDer, state: 'active' };
+    const bad = { root: 'sha256:a-row-gone-bad', endpoint: 'https://ghost.example/mcp', leaf: 'AAAA', state: 'active' };
+    add('decide, small form: the pin names its leaf', 'decide', { now, envelope: small, node: { ...node, pins: [{ ...mine, leaf_fingerprint: named }] } });
+    add('decide, small form: an unreadable pin that names some OTHER leaf is never parsed', 'decide', { now, envelope: small, node: { ...node, pins: [{ ...bad, leaf_fingerprint: 'sha256:somebody-else' }, { ...mine, leaf_fingerprint: named }] } });
+    add('decide, small form: an unreadable pin that names no leaf has to be parsed', 'decide', { now, envelope: small, node: { ...node, pins: [bad, { ...mine, leaf_fingerprint: named }] } });
+    add('decide, small form: a pin whose named leaf is not its leaf', 'decide', { now, envelope: small, node: { ...node, pins: [{ ...mine, leaf: rootDer, leaf_fingerprint: named }] } });
+    add('open_result, leaf form: the pin names its leaf', 'open_result', open(leafForm, { pins: [{ ...mine, leaf_fingerprint: named }] }));
+    add('open_result, leaf form: a pin whose named leaf is not its leaf', 'open_result', open(leafForm, { pins: [{ ...mine, leaf: rootDer, leaf_fingerprint: named }] }));
+
+    const sibling = p256FromSeed(seed('parity/card-held-sibling'));
+    const siblingDer = b64url(buildRoot({ cn: 'Alina at work', key: sibling, notBefore: new Date('2026-09-01T00:00:00Z'), label: 'parity/sibling' }));
+    const siblingCsr = wasm.call('csr_new', { cn: 'A Host', host_pkcs8: b64url(pkcs8Of(sibling.priv)), endpoint: ENDPOINT }).der;
+    add('wallet_issue: a request carrying a CARD-held sibling root\'s key', 'wallet_issue', { vault_plaintext: { ...vault, roots: [...vault.roots, { fingerprint: wasm.call('parse_certificate', { der: siblingDer }).fingerprint, cn: 'Alina at work', cert: siblingDer, holder: { kind: 'piv' } }] }, root_fingerprint: rootFp, csr: siblingCsr, now });
+  }
 
   // B7 — `now` is whole seconds. Half a second past a leaf's notAfter is the same second.
   add('validate_chain half a second after the leaf\'s last second', 'validate_chain', { chain: [leafDer, rootDer], now: '2027-09-01T00:00:00.500Z', expected_root: rootFp, expected_endpoint: ENDPOINT });

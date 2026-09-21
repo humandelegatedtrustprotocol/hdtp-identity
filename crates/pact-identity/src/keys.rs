@@ -212,7 +212,9 @@ impl PrivateKey {
             return err("parse", "PKCS #8 algorithm");
         }
         match read_oid_strict(&alg[0])?.as_str() {
-            OID_ED25519 => {
+            // RFC 8410: an Ed25519 AlgorithmIdentifier has NO parameters. `from_spki` has always held
+            // a public key to that; a private key with a NULL after the OID was read anyway.
+            OID_ED25519 if alg.len() == 1 => {
                 let inner = read(f[2].content, 0)?;
                 if inner.tag != 0x04 || inner.end != f[2].content.len() {
                     return err("parse", "Ed25519 private key shape");

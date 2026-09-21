@@ -45,7 +45,17 @@ fn write(v: &Value, out: &mut String) {
 /// a fraction, the shortest round-trip form otherwise, and the exponent form — `1e+21`, `1e-7` —
 /// past 1e21 and under 1e-6. Integers serde keeps as integers print as they are.
 fn number(n: &serde_json::Number) -> String {
-    if !n.is_f64() {
+    // RFC 8785 prints a number as ECMAScript's Number does — as the DOUBLE it is. An integer keeps its
+    // digits only while a double holds it exactly, which is up to 2^53. Past that serde still has the
+    // digits and this printed them, where the seed — JavaScript, and the authority — prints the
+    // nearest double: 9007199254740993 is 9007199254740992 there, and was not here.
+    const EXACT: u64 = 1 << 53;
+    let exact = match (n.as_i64(), n.as_u64()) {
+        (Some(i), _) => i.unsigned_abs() <= EXACT,
+        (None, Some(u)) => u <= EXACT,
+        _ => false,
+    };
+    if exact {
         return n.to_string();
     }
     let f = n.as_f64().unwrap_or(0.0);
@@ -112,6 +122,16 @@ mod tests {
             ("0.1", "0.1"),
             ("-0.0", "0"),
             ("42", "42"),
+            // …and the rows the Go port's table has carried since 2026-09-21: the two are one list.
+            ("1e-5", "0.00001"),
+            ("0.0000001", "1e-7"),
+            ("1.25e-9", "1.25e-9"),
+            ("-1e-7", "-1e-7"),
+            ("1e100", "1e+100"),
+            ("9007199254740992", "9007199254740992"),
+            ("9007199254740993", "9007199254740992"),
+            ("-9007199254740993", "-9007199254740992"),
+            ("12345678901234567890", "12345678901234567000"),
         ];
         for (input, want) in cases {
             let v: Value = serde_json::from_str(input).unwrap();

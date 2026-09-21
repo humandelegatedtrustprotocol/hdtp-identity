@@ -48,6 +48,17 @@ pub fn from_b64u(s: &str) -> Result<Vec<u8>> {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(trimmed).map_err(|_| Error::new("parse", "not base64url"))
 }
 
+/// A member of an envelope, as it travels: unpadded base64url in its ONE canonical spelling (§13.1).
+///
+/// `from_b64u` is for what a caller hands the boundary, and is forgiving on purpose — padding, the
+/// standard alphabet, whitespace. None of that may be forgiven on the wire: `sig` covers the DECODED
+/// bytes, so every extra spelling a reader accepts is another envelope that verifies, and two readers
+/// that forgive different things disagree about which envelopes exist. The Go port forgave a stray
+/// character and a set spare bit, and accepted what this core refused.
+pub fn wire_b64u(s: &str) -> Result<Vec<u8>> {
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(s).map_err(|_| Error::new("parse", "not base64url"))
+}
+
 pub fn sha256(b: &[u8]) -> [u8; 32] {
     let mut h = Sha256::new();
     h.update(b);
