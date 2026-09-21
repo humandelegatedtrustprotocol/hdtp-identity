@@ -54,7 +54,9 @@ and on the `v: 1` vectors in SPEC.md Appendix B.
 | `verify` | `{"spki", "data", "sig"}` | `{"valid": bool}` |
 
 `sign` is the leaf key's one signing primitive; a host signs exactly four structures with it
-(SPEC §13.5) and the CLI refuses any other use.
+(SPEC §13.5). The CLI exposes no signing command and no pass-through to `call`, so there is no other
+use to make of it there — by omission, not by a guard: nobody should add a `pact sign` believing one
+exists.
 
 ## 2. Certificates (SPEC §14.1–§14.3)
 
@@ -69,7 +71,7 @@ and on the `v: 1` vectors in SPEC.md Appendix B.
 | `validate_chain` | `{"chain": [leaf, root], "now", "expected_root"?, "expected_endpoint"?}` | accept: `{"ok": true, "leaf_spki", "leaf_fingerprint", "root_fingerprint", "endpoint", "not_before", "not_after", "alg"}`; refuse: `{"ok": false, "rule": 1..5, "reason"}` |
 | `compare_leaves` | `{"pinned", "presented"}` | `{"order": "same"\|"newer"\|"superseded"\|"conflict"}` |
 | `is_normal_https` | `{"url"}` | `{"normal": bool}` |
-| `address_guard` | `{"endpoint", "self_endpoint"?, "guest": bool}` | `{"ok": true}` or `{"ok": false, "why"}` — refuses a host that is a loopback, link-local, private, unspecified or CGNAT literal (`localhost`, `*.localhost`, `127/8`, `10/8`, `172.16/12`, `192.168/16`, `169.254/16`, `100.64/10`, `0.0.0.0`, `::1`, `::`, `fc00::/7`, `fe80::/10`, IPv4-mapped forms), and, for a guest, an endpoint equal to `self_endpoint`. DNS resolution is the host's; `ip_is_private` is exposed so the host applies the same predicate to what it resolves |
+| `address_guard` | `{"endpoint", "self_endpoint"?, "guest": bool}` | `{"ok": true}` or `{"ok": false, "why"}` — refuses a host that is a loopback, link-local, private, unspecified or CGNAT literal (`localhost`, `*.localhost`, `127/8`, `10/8`, `172.16/12`, `192.168/16`, `169.254/16`, `100.64/10`, `0.0.0.0`, `::1`, `::`, `fc00::/7`, `fe80::/10`, deprecated site-local `fec0::/10`, NAT64's local-use `64:ff9b:1::/48`), an IPv6 literal that EMBEDS such an IPv4 address — IPv4-mapped, IPv4-compatible `::/96`, NAT64 `64:ff9b::/96`, 6to4 `2002::/16` — because a translator dials the address inside (`[64:ff9b::7f00:1]` is loopback on a NAT64 network, and a literal has no name to resolve, so this is the whole guard), and, for a guest, an endpoint equal to `self_endpoint`. DNS resolution is the host's; `ip_is_private` is exposed so the host applies the same predicate to what it resolves |
 | `ip_is_private` | `{"ip"}` | `{"private": bool}` |
 
 Serial numbers: random 8 bytes by default; when `serial` is supplied it is used as given, which is
@@ -101,12 +103,14 @@ Strict DER, nothing trailing.
 
 | Function | Input | Output |
 |---|---|---|
-| `card_encode` | `{"fn", "cert", "seal"?: "none"\|"optional"\|"required", "extra"?: [lines]}` | `{"vcard"}` — folded per RFC 6350 at 75 octets, CRLF, exactly as `card.mjs` |
+| `card_encode` | `{"fn", "cert", "seal"?: "none"\|"optional"\|"required", "extra"?: [lines]}` | `{"vcard"}` — folded per RFC 6350 at 75 octets, CRLF, exactly as `card.mjs`; or `{"error": "bad_request", "why": "<fn\|seal\|extra> carries a control character"}`: a card is lines, and a line break in anything a caller supplies writes a property of the caller's choosing (SPEC §3) |
 | `card_decode` | `{"vcard", "now"}` | `{"fn", "version": 2, "seal", "cert", "root", "endpoint", "expired": bool, "ignored": [names], "bytes": int, "leaf": the certificate read back, as `parse_certificate` answers it}` or `{"error": "bad_request", "why"}` with the exact `why` strings of `card.mjs` |
 
 `card_decode` is intake: it refuses no version, a version it does not implement, zero or several
-certificates, a certificate that does not parse, no issuer key identifier, no endpoint or several, or a
-validity over 398 days; an expired leaf is reported, not refused. The address guard is a separate call
+certificates, a certificate that does not parse, no issuer key identifier or one that is not 32
+bytes (it is what `root` is made from, and `root` is what a person is shown), no endpoint or several,
+or a validity over 398 days; an expired leaf is reported, not refused. `now` is REQUIRED: it is what
+`expired` means, and absent it used to be 1970, so every card answered `expired: false`. The address guard is a separate call
 the host makes with its own endpoint in hand.
 
 ## 5. Envelopes (SPEC §13)
@@ -117,6 +121,23 @@ recipient converted by the RFC 7748 §4.1 and RFC 8032 §5.1.5 maps. HPKE Base m
 `info` = `PACT-SEAL-v2`. All-zero DH output refused. The
 header is the AAD, canonicalised per RFC 8785; the signature is over `protected ‖ enc ‖ ct`.
 
+**A member of an envelope has ONE spelling** (SPEC §13.1): unpadded base64url, canonical. `decide`
+and `open_result` read `protected`, `enc`, `ct` and `sig` with a reader that refuses everything else —
+a character outside the alphabet, padding, whitespace, the standard alphabet's `+` and `/`, a last
+character with a spare bit set — because `sig` covers the DECODED bytes and every spelling a reader
+forgives is another envelope that verifies. This is NOT the rule for an argument a caller hands the
+boundary (§0), which stays forgiving about padding and alphabet; it is the rule for what travels.
+An unreadable `protected` is `protected is not JSON`, `enc` or `ct` is `does not open`, and a `sig`
+that does not read is no signature and fails as one (`open_result`: `signature`).
+
+**A pin MAY say which leaf it holds** (`leaf_fingerprint`). A small-form envelope names a leaf, and
+finding the pin that holds it meant parsing every pinned leaf, for a sender who has proved nothing.
+With the member, the match is a string comparison and only the pin that matched is parsed; the match
+is held to its own leaf (`parse` / `a pin's leaf_fingerprint is not its leaf's`). Without it the pins
+are read as before, so an older host loses only the saving. A pin, a held key or a tombstone that
+will not read is an ERROR of the call (`parse`), never a row stepped over: a decision made on state
+the node could not read is not a decision.
+
 | Function | Input | Output |
 |---|---|---|
 | `suite_for` | `{"spki"}` | `{"suite"}` |
@@ -124,7 +145,7 @@ header is the AAD, canonicalised per RFC 8785; the signature is over `protected 
 | `hpke_open` | `{"suite", "recipient_pkcs8", "info", "aad", "enc", "ct"}` | `{"plaintext"}` |
 | `seal_request` | `{"recipient_leaf", "sender_pkcs8", "form": "chain"\|"leaf", "sender_chain"?: [leaf, root], "method", "params", "msg_id", "ts", "exp"?: ts+600, "cty"?: call, "ephemeral_seed"?}` | `{"protected", "enc", "ct", "sig"}` |
 | `seal_result` | `{"recipient_spki", "sender_pkcs8", "form", "sender_chain"?, "result"?, "error"?, "msg_id", "ts", "exp"?, "ephemeral_seed"?}` | the envelope, `cty: application/pact-result+json` |
-| `open_result` | `{"envelope", "my_pkcs8", "msg_id", "now", "pins": [{"root", "endpoint", "leaf", "state"}], "expected_root"?, "expected_endpoint"?}` | `{"ok": true, "result"?, "error"?, "root", "endpoint", "form", "leaf_update"?: b64url}` or `{"error": "envelope_invalid", "why"}` — the caller side of §13.2: opens, requires `result` xor `error` plus one of `chain`/`leaf`, validates the chain to `expected_root` and `expected_endpoint` or finds the named leaf among `pins`, refuses a superseded leaf, verifies `sig`, checks `cty` and `msg_id` |
+| `open_result` | `{"envelope", "my_pkcs8", "msg_id", "now", "pins": [{"root", "endpoint", "leaf", "state", "leaf_fingerprint"?}], "expected_root"?, "expected_endpoint"?}` | `{"ok": true, "result"?, "error"?, "root", "endpoint", "form", "leaf_update"?: b64url}` or `{"error": "envelope_invalid", "why"}` — the caller side of §13.2: opens, requires `result` xor `error` plus one of `chain`/`leaf`, validates the chain to `expected_root` and `expected_endpoint` or finds the named leaf among `pins`, refuses a superseded leaf, verifies `sig`, checks `cty` and `msg_id` |
 | `follow_renewed` | `{"answer": {"code": "certificate_renewed", "data": {"chain"}}, "pinned_root", "pinned_leaf", "dialed", "now"}` | `{"follow": bool, "why"?, "leaf"?} ` — §14.4: validate to the pinned root and the dialed address, and follow only when the chain is newer than or equal to the pin |
 
 **Plaintext shapes.** A request plaintext is `{"method", "params", "chain" | "leaf"}`. A result
@@ -151,7 +172,7 @@ Input:
     "keys": [{"kid": "sha256:…", "leaf": "<leaf der>", "pkcs8": "…", "current": true}],
     "former": ["sha256:…"],
     "sibling_kids": ["sha256:…"],
-    "pins": [{"root": "sha256:…", "endpoint": "https://…", "leaf": "<leaf der>", "state": "active" | "pending_out" | "blocked"}],
+    "pins": [{"root": "sha256:…", "endpoint": "https://…", "leaf": "<leaf der>", "state": "active" | "pending_out" | "blocked", "leaf_fingerprint"?: "sha256:…"}],
     "tombstones": [{"root": "sha256:…", "leaf": "<leaf der>", "at": "2026-…"}],
     "former_endpoints": [{"root": "sha256:…", "endpoint": "https://…", "at": "2026-…"}],
     "seen": ["msg-id", "…"]

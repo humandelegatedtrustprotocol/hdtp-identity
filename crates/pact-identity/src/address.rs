@@ -16,12 +16,37 @@ fn v4_private(ip: Ipv4Addr) -> bool {
         || (o[0] == 100 && (64..128).contains(&o[1]))
 }
 
+/// An IPv6 address that is not a public one — or that EMBEDS an IPv4 address which is not.
+///
+/// For a literal there is no name to resolve, so this predicate is the whole guard, and it knew one
+/// embedding: IPv4-mapped. A translator dials the address INSIDE these too, so each is judged by it:
+///
+/// - `64:ff9b::/96`, the NAT64 well-known prefix (RFC 6052): `[64:ff9b::7f00:1]` is 127.0.0.1 on any
+///   NAT64 network, which is the ordinary shape of an IPv6-only cloud host;
+/// - `64:ff9b:1::/48`, NAT64's LOCAL-use prefix (RFC 8215): never a public address, whatever it holds;
+/// - `2002::/16`, 6to4 (RFC 3056): the IPv4 address is the next 32 bits;
+/// - `::/96`, IPv4-compatible (deprecated): refused until now only because `is_normal_https` happens
+///   not to round-trip Rust's spelling of it, which is an accident and not a guard;
+/// - `fec0::/10`, site-local (deprecated), beside unique-local and link-local.
 fn v6_private(ip: Ipv6Addr) -> bool {
     if let Some(v4) = ip.to_ipv4_mapped() {
         return v4_private(v4);
     }
     let s = ip.segments();
-    ip.is_loopback() || ip.is_unspecified() || ip.is_multicast() || (s[0] & 0xfe00) == 0xfc00 || (s[0] & 0xffc0) == 0xfe80
+    let embedded = |hi: u16, lo: u16| v4_private(Ipv4Addr::new((hi >> 8) as u8, hi as u8, (lo >> 8) as u8, lo as u8));
+    if ip.is_loopback() || ip.is_unspecified() || ip.is_multicast() {
+        return true;
+    }
+    if s[0] == 0x0064 && s[1] == 0xff9b {
+        return s[2] != 0 || s[3] != 0 || s[4] != 0 || s[5] != 0 || embedded(s[6], s[7]);
+    }
+    if s[0] == 0x2002 {
+        return embedded(s[1], s[2]);
+    }
+    if s[..6].iter().all(|x| *x == 0) {
+        return embedded(s[6], s[7]);
+    }
+    (s[0] & 0xfe00) == 0xfc00 || (s[0] & 0xffc0) == 0xfe80 || (s[0] & 0xffc0) == 0xfec0
 }
 
 pub fn ip_is_private(ip: &str) -> bool {

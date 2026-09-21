@@ -152,6 +152,41 @@ type Pin struct {
 	Endpoint string `json:"endpoint"`
 	Leaf     string `json:"leaf"`
 	State    string `json:"state"`
+	// LeafFingerprint is the fingerprint of Leaf's key, when the host keeps it: see pinHolding.
+	LeafFingerprint string `json:"leaf_fingerprint,omitempty"`
+}
+
+// pinHolding finds the pin that holds the leaf a small-form envelope names, among those not blocked.
+//
+// The name arrives from somebody who has proved nothing yet, and finding it used to mean parsing
+// EVERY pinned leaf and hashing its key — N X.509 parses per envelope on a node with N contacts,
+// before freshness and before replay. A pin MAY say which leaf it holds; then the match is a string
+// comparison and only the pin that matched is parsed. The match is still held to its own leaf: a
+// fingerprint beside a certificate is a claim about it. A pin without the member is read as before.
+// As `envelope.rs`'s `pin_holding`, including its words.
+func pinHolding(pins []Pin, named string) (*Pin, *Cert, error) {
+	for i := range pins {
+		p := &pins[i]
+		if p.State == "blocked" || (p.LeafFingerprint != "" && p.LeafFingerprint != named) {
+			continue
+		}
+		leafDER, err := decodeB64url(p.Leaf)
+		if err != nil {
+			return nil, nil, err
+		}
+		leaf, err := Parse(leafDER)
+		if err != nil {
+			return nil, nil, parseError{err.Error()}
+		}
+		actual := Fingerprint(leaf.SPKI)
+		if p.LeafFingerprint != "" && actual != named {
+			return nil, nil, parseError{"a pin's leaf_fingerprint is not its leaf's"}
+		}
+		if actual == named {
+			return p, leaf, nil
+		}
+	}
+	return nil, nil, nil
 }
 
 // HeldKey is a leaf this endpoint holds for the identity served at the path.
@@ -285,7 +320,7 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 	// `protected` with a stray character decoded to the same bytes, the signature — which covers the
 	// DECODED bytes — still verified, and this port accepted a second spelling of an envelope the core
 	// refuses.
-	aad, err := decodeB64url(env.Protected)
+	aad, err := wireB64url(env.Protected)
 	if err != nil {
 		return invalid("protected is not JSON")
 	}
@@ -351,8 +386,8 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 	if err != nil {
 		return invalid("does not open")
 	}
-	enc, errEnc := decodeB64url(env.Enc)
-	ct, errCt := decodeB64url(env.Ct)
+	enc, errEnc := wireB64url(env.Enc)
+	ct, errCt := wireB64url(env.Ct)
 	if errEnc != nil || errCt != nil {
 		return invalid("does not open")
 	}
@@ -384,7 +419,7 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 	}
 	signed := concat(aad, enc, ct)
 	// An undecodable signature is no signature: it fails below, in the words of the form it came in.
-	sig, _ := decodeB64url(env.Sig)
+	sig, _ := wireB64url(env.Sig)
 	params, _ := body["params"].(map[string]any)
 	tool, hasTool := "", false
 	if params != nil {
@@ -453,25 +488,9 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 			return invalid("plaintext shape")
 		}
 		chainRequired := Decision{Result: map[string]any{"code": "chain_required"}, Effects: effects}
-		var hit *Pin
-		var hitLeaf *Cert
-		for i := range node.Pins {
-			p := &node.Pins[i]
-			if p.State == "blocked" {
-				continue
-			}
-			leafDER, err := decodeB64url(p.Leaf)
-			if err != nil {
-				return unreadableState(unreadable, err)
-			}
-			leaf, err := Parse(leafDER)
-			if err != nil {
-				return unreadableState(unreadable, err)
-			}
-			if Fingerprint(leaf.SPKI) == ref {
-				hit, hitLeaf = p, leaf
-				break
-			}
+		hit, hitLeaf, err := pinHolding(node.Pins, ref)
+		if err != nil {
+			return unreadableState(unreadable, err)
 		}
 		if hit == nil {
 			return chainRequired
@@ -676,7 +695,7 @@ type Opened struct {
 // among its pins, verify the signature and correlate. Every failure is envelope_invalid.
 func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 	o.Now = o.Now.Truncate(time.Second)
-	aad, err := decodeB64url(env.Protected)
+	aad, err := wireB64url(env.Protected)
 	if err != nil {
 		return nil, errors.New("protected is not JSON")
 	}
@@ -720,15 +739,15 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 	if exp-ts > MaxLifetimeSeconds {
 		return nil, errors.New("exp too far from ts")
 	}
-	enc, errEnc := decodeB64url(env.Enc)
-	ct, errCt := decodeB64url(env.Ct)
+	enc, errEnc := wireB64url(env.Enc)
+	ct, errCt := wireB64url(env.Ct)
 	if errEnc != nil || errCt != nil {
 		return nil, errors.New("does not open")
 	}
 	if len(enc) != SuiteNpk(suite) {
 		return nil, errors.New("encapsulated key is not the suite's length")
 	}
-	sig, err := decodeB64url(env.Sig)
+	sig, err := wireB64url(env.Sig)
 	if err != nil {
 		return nil, errors.New("signature")
 	}
@@ -757,39 +776,29 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 	signed := concat(aad, enc, ct)
 	if ref, ok := body["leaf"].(string); ok {
 		out.Form = "leaf"
-		for _, p := range o.Pins {
-			if p.State == "blocked" {
-				continue
-			}
-			// A pin that will not read is the caller's own state gone wrong, and is said as such
-			// (`parse`), not stepped over on the way to "unknown leaf".
-			leafDER, err := decodeB64url(p.Leaf)
-			if err != nil {
-				return nil, err
-			}
-			leaf, err := Parse(leafDER)
-			if err != nil {
-				return nil, parseError{err.Error()}
-			}
-			if Fingerprint(leaf.SPKI) != ref {
-				continue
-			}
-			if o.Now.After(leaf.NotAfter) {
-				return nil, errors.New("held leaf has expired")
-			}
-			if !VerifyDetached(leaf.PublicKey, signed, sig) {
-				return nil, errors.New("signature is not the held leaf's key")
-			}
-			if o.ExpectedRoot != "" && p.Root != o.ExpectedRoot {
-				return nil, errors.New("root is not the one expected")
-			}
-			if o.ExpectedEndpoint != "" && p.Endpoint != o.ExpectedEndpoint {
-				return nil, errors.New("endpoint differs from the one in question")
-			}
-			out.Root, out.Endpoint = p.Root, p.Endpoint
-			return &out, nil
+		// A pin that will not read is the caller's own state gone wrong, and is said as such (`parse`),
+		// not stepped over on the way to "unknown leaf". pinHolding parses only the pin that matches.
+		p, leaf, err := pinHolding(o.Pins, ref)
+		if err != nil {
+			return nil, err
 		}
-		return nil, errors.New("unknown leaf")
+		if p == nil {
+			return nil, errors.New("unknown leaf")
+		}
+		if o.Now.After(leaf.NotAfter) {
+			return nil, errors.New("held leaf has expired")
+		}
+		if !VerifyDetached(leaf.PublicKey, signed, sig) {
+			return nil, errors.New("signature is not the held leaf's key")
+		}
+		if o.ExpectedRoot != "" && p.Root != o.ExpectedRoot {
+			return nil, errors.New("root is not the one expected")
+		}
+		if o.ExpectedEndpoint != "" && p.Endpoint != o.ExpectedEndpoint {
+			return nil, errors.New("endpoint differs from the one in question")
+		}
+		out.Root, out.Endpoint = p.Root, p.Endpoint
+		return &out, nil
 	}
 	chainAny, ok := body["chain"].([]any)
 	if !ok {

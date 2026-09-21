@@ -30,6 +30,34 @@ func IPIsPrivate(ip string) bool {
 		return false
 	}
 	a = a.Unmap()
+	// An IPv6 literal that EMBEDS an IPv4 address is judged by it, because a translator will dial it:
+	// the NAT64 well-known prefix 64:ff9b::/96 (`[64:ff9b::7f00:1]` is 127.0.0.1 on any NAT64 network),
+	// 6to4 2002::/16, and the deprecated IPv4-compatible ::/96. NAT64's LOCAL-use prefix 64:ff9b:1::/48
+	// and deprecated site-local fec0::/10 are never public whatever they hold. As `address.rs`.
+	if a.Is6() {
+		b := a.As16()
+		inside := func(i int) bool { return IPIsPrivate(netip.AddrFrom4([4]byte{b[i], b[i+1], b[i+2], b[i+3]}).String()) }
+		zero := func(from, to int) bool {
+			for _, x := range b[from:to] {
+				if x != 0 {
+					return false
+				}
+			}
+			return true
+		}
+		switch {
+		case a.IsLoopback() || a.IsUnspecified():
+			return true
+		case b[0] == 0x00 && b[1] == 0x64 && b[2] == 0xff && b[3] == 0x9b:
+			return !zero(4, 12) || inside(12)
+		case b[0] == 0x20 && b[1] == 0x02:
+			return inside(2)
+		case zero(0, 12):
+			return inside(12)
+		case b[0] == 0xfe && b[1]&0xc0 == 0xc0:
+			return true
+		}
+	}
 	if a.IsLoopback() || a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() || a.IsPrivate() || a.IsUnspecified() || a.IsMulticast() {
 		return true
 	}

@@ -18,7 +18,7 @@ use zeroize::Zeroizing;
 /// It read `2.0.0-draft` for days after the draft shipped as 2.0.0, and through 2.1.0, because a
 /// literal in a dispatch arm has nothing to fail against. `tests/vectors.rs` now compares it with
 /// the version line of the document the vectors are read from, so the two cannot part quietly.
-pub const SPEC_VERSION: &str = "2.1.2";
+pub const SPEC_VERSION: &str = "2.1.3";
 
 /// A required string member that carries an identifier: present, and not empty. §13's `msg_id` is
 /// what pairs a result with its request, so the empty string is not a value it can take — one port
@@ -78,6 +78,15 @@ fn opt_chain(a: &Value, k: &str) -> Result<Vec<Vec<u8>>> {
         return Ok(Vec::new());
     }
     chain(a, k)
+}
+/// A chain that may be left out, and may not be left out by being WRONG: `chain(..).ok()` turned a
+/// `sender_chain` that was there and would not read into one that was absent, so the caller was told
+/// "the chain form needs sender_chain" about a chain it had sent.
+fn present_chain(a: &Value, k: &str) -> Result<Option<Vec<Vec<u8>>>> {
+    match a.get(k) {
+        None | Some(Value::Null) => Ok(None),
+        Some(_) => chain(a, k).map(Some),
+    }
 }
 fn chain(a: &Value, k: &str) -> Result<Vec<Vec<u8>>> {
     let Some(items) = a.get(k).and_then(|v| v.as_array()) else { return err("bad_request", format!("{k} is required")) };
@@ -299,10 +308,12 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
                 .and_then(|e| e.as_array())
                 .map(|items| items.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
                 .unwrap_or_default();
-            json!({ "vcard": card::encode(s(a, "fn")?, &bytes(a, "cert")?, opt_s(a, "seal"), &extra) })
+            json!({ "vcard": card::encode(s(a, "fn")?, &bytes(a, "cert")?, opt_s(a, "seal"), &extra)? })
         }
         "card_decode" => {
-            let now = opt_instant(a, "now")?.unwrap_or(0);
+            // `now` is what `expired` MEANS. It was optional, and absent it was 1970: every card ever
+            // made decoded, and answered `expired: false`.
+            let now = instant(a, "now")?;
             let text = s(a, "vcard")?;
             let c = card::decode(text, now)?;
             json!({ "fn": c.fn_, "version": 2, "seal": c.seal, "cert": b64u(&c.cert), "root": c.root, "endpoint": c.endpoint, "expired": c.expired, "ignored": c.ignored, "bytes": text.len(), "leaf": cert_json(&c.leaf) })
@@ -337,7 +348,7 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
         "seal_request" => {
             let leaf = x509::parse(&bytes(a, "recipient_leaf")?)?;
             let sender = private(a, "sender_pkcs8")?;
-            let sender_chain = chain(a, "sender_chain").ok();
+            let sender_chain = present_chain(a, "sender_chain")?;
             let wire = envelope::seal_request(SealRequest {
                 recipient: &leaf.public_key,
                 sender: &sender,
@@ -356,7 +367,7 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
         "seal_result" => {
             let recipient = public(a, "recipient_spki")?;
             let sender = private(a, "sender_pkcs8")?;
-            let sender_chain = chain(a, "sender_chain").ok();
+            let sender_chain = present_chain(a, "sender_chain")?;
             let wire = envelope::seal_result(SealResult {
                 recipient: &recipient,
                 sender: &sender,
@@ -398,7 +409,7 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
             // A missing `node` is not a decision against an empty node, and the member is named the
             // way the caller wrote it rather than the way serde reports a missing field — the Go port
             // cannot reproduce another library's wording, and CONTRACT §0 promises it will not have to.
-            for k in ["node", "envelope"] {
+            for k in ["node", "envelope", "now"] {
                 if a.get(k).is_none_or(Value::is_null) {
                     return err("bad_request", format!("{k} is required"));
                 }

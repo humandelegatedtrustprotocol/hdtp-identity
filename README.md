@@ -29,19 +29,21 @@ sh js/reproduce.sh              # the canonical build OF HEAD, in a container na
                                 # commit changed a build input, and only once that input is committed)
 node js/verify.mjs              # recomputes the SHA-256 of js/pkg-* against the manifest: passes after a --pin,
                                 # and not after a build.sh, whose bytes are this machine's (see below)
-node js/check.mjs               # Appendix B through the Wasm bindings, vectors read from SPEC.md: 114/114
-node js/intrude.mjs             # the 124 intrusion scenarios with the Wasm core as the defender, compared verdict by
-                                # verdict with the seed's run: 120 blocked, 4 residual by decision, 0 reproduce
+node js/check.mjs               # Appendix B through the Wasm bindings, vectors read from SPEC.md: 116/116
+node js/intrude.mjs             # the 130 intrusion scenarios with the Wasm core as the defender, compared verdict by
+                                # verdict with the seed's run: 126 blocked, 4 residual by decision, 0 reproduce
 node js/intrude.mjs --port go   # the same against go/bin/pact-identity-go
 node js/live.mjs --endpoint https://host/slug [--card card.vcf] [--insecure]   # --insecure REQUIRES --card
                                 # the 28 black-box scenarios aimed at a LIVE endpoint, judged by the answer's code;
                                 # `pact vectors intrude --against … [--card …] [--allow-insecure]` is the same 28 from
                                 # the Rust CLI, and js/live.test.mjs holds the two lists to each other. The last
-                                # scenario is a control that must get THROUGH; it leaves a pending request behind
+                                # scenario is a control that must get THROUGH — and whose ANSWER each driver opens with the
+                                # attacker's own key, because four strings shaped like an envelope are not one; it
+                                # leaves a pending request behind
 node js/musts.mjs               # every MUST in pact-protocol/SPEC.md names something that holds it, or says who does
 node js/record.mjs             # regenerate PROOFS.md: every MUST with its holder, every parity case (it prints both counts)
 node js/record.mjs --check     # ...and fail if it is stale (what gate.sh runs)
-                                # and why: 47 MUSTs, 34 held here, 13 declared elsewhere
+                                # and why: 49 MUSTs, 36 held here, 13 declared elsewhere
 ```
 
 Toolchain: Rust 1.92, `wasm-pack` 0.15 (installs a matching `wasm-bindgen`), the

@@ -439,3 +439,25 @@ func TestAFourOctetLengthIsRefusedOnAnyWordSize(t *testing.T) {
 		}()
 	}
 }
+
+// §3 (2.1.3): a writer puts no control character into a card. A card is LINES: a line break in a name,
+// the seal policy or an extra line writes a property of the writer's choosing, and the decoder reads
+// the FIRST of a name, so this card required sealing and said it did not.
+func TestNothingThatGoesIntoACardMayCarryALineBreak(t *testing.T) {
+	leaf := []byte{0x30, 0x00}
+	for what, in := range map[string][3]any{
+		"a name with CR LF":        {"x\r\nX-PACT-SEAL:none", "required", []string(nil)},
+		"a name with a bare LF":    {"x\nX-PACT-SEAL:none", "", []string(nil)},
+		"a name with a NUL":        {"x\x00y", "", []string(nil)},
+		"a seal with CR LF":        {"x", "required\r\nX-PACT-VERSION:3", []string(nil)},
+		"an extra line with CR LF": {"x", "", []string{"X-A:1\r\nX-PACT-SEAL:none"}},
+	} {
+		if card, err := EncodeCard(in[0].(string), leaf, in[1].(string), in[2].([]string)); err == nil {
+			t.Errorf("%s was written into a card:\n%s", what, card)
+		}
+	}
+	card, err := EncodeCard("Rao, Alina; of Pune", leaf, "required", []string{"X-PACT-FUTURE:1"})
+	if err != nil || !strings.Contains(card, "FN:Rao, Alina; of Pune\r\n") || !strings.Contains(card, "X-PACT-SEAL:required\r\n") {
+		t.Fatalf("an honest card: %v\n%s", err, card)
+	}
+}

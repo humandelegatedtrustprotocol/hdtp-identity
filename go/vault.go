@@ -286,6 +286,12 @@ func WalletIssue(plain VaultPlaintext, rootFingerprint string, csr []byte, now t
 		if r.Fingerprint == rootFingerprint {
 			root = r
 		}
+		// EVERY root this vault holds, and a root is held as its certificate: a software root has a
+		// `pkcs8` beside it and a card-held one has not. Reading `pkcs8` alone left a card-held
+		// sibling out of "a request whose key is a root" (§9), and such a request was given a leaf.
+		if cert, err := Parse(FromB64url(r.Cert)); err == nil {
+			rootSPKIs = append(rootSPKIs, cert.SPKI)
+		}
 		if priv, err := ParsePKCS8(FromB64url(r.PKCS8)); err == nil {
 			rootSPKIs = append(rootSPKIs, priv.Public.SPKI)
 		}

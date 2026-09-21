@@ -494,7 +494,10 @@ pub fn profile_error(c: &Cert, kind: &str) -> Option<String> {
     if crit(OID_SAN) != Some(false) || c.other_names > 0 || c.dns.len() > 1 {
         return Some("leaf subjectAltName carries a name type the profile does not".into());
     }
-    if crit(OID_AKI) != Some(false) || c.aki.is_none() || c.aki_extra {
+    // …and a key identifier is the 32-byte SHA-256 of a SubjectPublicKeyInfo (§14.1). The subject one
+    // was held to that above; this one was only asked to be THERE, so a leaf could name an issuer in
+    // three bytes — and a card would show those three bytes to a person as the identity to pin.
+    if crit(OID_AKI) != Some(false) || c.aki.as_deref().map(<[u8]>::len) != Some(32) || c.aki_extra {
         return Some("leaf authorityKeyIdentifier is not a key identifier alone".into());
     }
     None
@@ -528,10 +531,21 @@ fn refuse(rule: u8, reason: impl Into<String>) -> ChainResult {
     ChainResult::Refused { rule, reason: reason.into() }
 }
 
-/// The host of a normal-form https URL: the authority, which carries no userinfo and no port.
+/// The host of a normal-form https URL: the authority without its port. (The normal form carries
+/// no userinfo, and MAY carry a port other than 443 — `is_normal_https` allows it on purpose.)
+///
+/// This returned the whole authority, under a comment saying a normal form has no port. A dNSName
+/// cannot carry one, so on any address but :443 the wallet refused a request that asked for the
+/// dNSName §14.1 permits, and rule 5 would have refused the leaf: the feature did not exist there.
+/// An IPv6 literal keeps its brackets; it is never a dNSName, and what matters is that one spelling
+/// is compared with itself.
 pub fn host_of(endpoint: &str) -> &str {
     let rest = endpoint.strip_prefix("https://").unwrap_or(endpoint);
-    rest.split(['/', '?', '#']).next().unwrap_or("")
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    match authority.strip_prefix('[').and_then(|inner| inner.find(']')) {
+        Some(close) => &authority[..close + 2],
+        None => authority.split(':').next().unwrap_or(""),
+    }
 }
 
 /// §14.2, refusing at the first failure and naming the rule.

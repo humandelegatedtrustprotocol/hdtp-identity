@@ -42,7 +42,18 @@ fn assemble(lines: Vec<String>) -> String {
     out
 }
 
-pub fn encode(fn_: &str, cert: &[u8], seal: Option<&str>, extra: &[String]) -> String {
+/// A card is LINES, and everything a caller supplies is written into one. A control character in any
+/// of it — a name, the seal policy, an extra line — is refused: a line break writes a property of the
+/// writer's choosing, and the decoder reads the FIRST of a name, so `FN` "x\r\nX-PACT-SEAL:none" made a
+/// card that requires sealing into one that does not. A name with a line break in it is not a name.
+/// (§3 puts the duty to SANITISE a name at the point of display; this is the other end, where a card
+/// is made, and a card that says something its maker did not write is not a display problem.)
+pub fn encode(fn_: &str, cert: &[u8], seal: Option<&str>, extra: &[String]) -> Result<String> {
+    for (what, text) in [("fn", fn_), ("seal", seal.unwrap_or(""))].into_iter().chain(extra.iter().map(|e| ("extra", e.as_str()))) {
+        if text.chars().any(char::is_control) {
+            return err("bad_request", format!("{what} carries a control character"));
+        }
+    }
     let mut lines = vec![
         "BEGIN:VCARD".to_string(),
         "VERSION:4.0".to_string(),
@@ -55,7 +66,7 @@ pub fn encode(fn_: &str, cert: &[u8], seal: Option<&str>, extra: &[String]) -> S
         lines.push(format!("X-PACT-SEAL:{s}"));
     }
     lines.push("END:VCARD".to_string());
-    assemble(lines)
+    Ok(assemble(lines))
 }
 
 pub struct Card {
@@ -131,6 +142,12 @@ pub fn decode(text: &str, now: i64) -> Result<Card> {
         Err(e) => return bad(format!("certificate does not parse: {}", e.why)),
     };
     let Some(aki) = &leaf.aki else { return bad("no issuer key identifier".into()) };
+    // What is about to be shown to a person as the identity to pin is this value, so it has to BE a
+    // key identifier: 32 bytes (§14.1). Three bytes used to come out as `sha256:AQID` — a contact no
+    // chain could ever satisfy, under a fingerprint that is not one.
+    if aki.len() != 32 {
+        return bad("issuer key identifier is not 32 bytes".into());
+    }
     if leaf.uris.len() != 1 {
         return bad(format!("{} endpoints", leaf.uris.len()));
     }

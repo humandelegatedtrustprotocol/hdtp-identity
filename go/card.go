@@ -7,11 +7,24 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf16"
 )
 
-// EncodeCard writes a 2.0 card. seal is "" for none; extra lines go between the certificate and the seal.
-func EncodeCard(fn string, cert []byte, seal string, extra []string) string {
+// seal is "" for none; extra lines go between the certificate and the seal.
+//
+// EncodeCard writes a card, and refuses a control character in anything it is handed: a card is
+// LINES, and a line break in a name, the seal policy or an extra line writes a property of the
+// writer's choosing. The decoder reads the FIRST of a name, so `FN` "x\r\nX-PACT-SEAL:none" made a
+// card that requires sealing into one that does not.
+func EncodeCard(fn string, cert []byte, seal string, extra []string) (string, error) {
+	for _, part := range append([][2]string{{"fn", fn}, {"seal", seal}}, extraParts(extra)...) {
+		for _, r := range part[1] {
+			if unicode.IsControl(r) {
+				return "", argError{part[0] + " carries a control character"}
+			}
+		}
+	}
 	lines := []string{"BEGIN:VCARD", "VERSION:4.0", "FN:" + fn, "X-PACT-VERSION:2", "X-PACT-CERT:" + B64url(cert)}
 	lines = append(lines, extra...)
 	if seal != "" {
@@ -21,7 +34,15 @@ func EncodeCard(fn string, cert []byte, seal string, extra []string) string {
 	for i, l := range lines {
 		lines[i] = fold(l)
 	}
-	return strings.Join(lines, "\r\n") + "\r\n"
+	return strings.Join(lines, "\r\n") + "\r\n", nil
+}
+
+func extraParts(extra []string) [][2]string {
+	out := make([][2]string, 0, len(extra))
+	for _, e := range extra {
+		out = append(out, [2]string{"extra", e})
+	}
+	return out
 }
 
 func fold(line string) string {
@@ -111,6 +132,11 @@ func DecodeCard(text string, now time.Time) (*Card, error) {
 	}
 	if leaf.AKI == nil {
 		return nil, CardError{"no issuer key identifier"}
+	}
+	// What is about to be shown to a person as the identity to pin is this value, so it has to BE a
+	// key identifier: 32 bytes (§14.1). Three bytes used to come out as `sha256:AQID`.
+	if len(leaf.AKI) != 32 {
+		return nil, CardError{"issuer key identifier is not 32 bytes"}
 	}
 	if len(leaf.URIs) != 1 {
 		return nil, CardError{fmt.Sprintf("%d endpoints", len(leaf.URIs))}

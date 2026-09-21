@@ -500,7 +500,7 @@ fn a_card_and_a_certificate_read_back() {
         .assert()
         .success()
         .stdout(predicate::str::contains("kind        leaf").and(predicate::str::contains("profile     exact")));
-    let card = pact_identity::card::encode("Alina Rao", &leaf, Some("required"), &["X-PACT-FUTURE:1".to_string()]);
+    let card = pact_identity::card::encode("Alina Rao", &leaf, Some("required"), &["X-PACT-FUTURE:1".to_string()]).expect("a card");
     let card_path = dir.path().join("alina.vcf");
     fs::write(&card_path, card).unwrap();
     pact().args(["card", "show", "--now", "2026-09-13T12:00:00Z"]).arg(&card_path).assert().success().stdout(
