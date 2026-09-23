@@ -175,16 +175,6 @@ func needStr(s *string, name string) (string, error) {
 	return *s, nil
 }
 
-// chainIn decodes a list of base64url members the way the wire does, for a test or a caller holding
-// strings rather than the boundary's B64. The boundary itself decodes strictly (b64.go).
-func chainIn(chain []string) [][]byte {
-	out := make([][]byte, 0, len(chain))
-	for _, c := range chain {
-		out = append(out, FromB64url(c))
-	}
-	return out
-}
-
 func keyOut(priv *PrivateKey) (map[string]any, error) {
 	pkcs8, err := priv.PKCS8()
 	if err != nil {
@@ -283,15 +273,6 @@ func Call(name string, args json.RawMessage) (out json.RawMessage) {
 		return fail(codeArgs, "args is a JSON object")
 	}
 	return fn(args)
-}
-
-// Functions lists the contract's names, for a caller that wants to check coverage.
-func Functions() []string {
-	out := make([]string, 0, len(functions))
-	for k := range functions {
-		out = append(out, k)
-	}
-	return out
 }
 
 var functions = map[string]func(json.RawMessage) json.RawMessage{

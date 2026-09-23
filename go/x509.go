@@ -59,9 +59,6 @@ func keyUsageBits(bits []int) []byte {
 	return bitstr([]byte{b}, unused)
 }
 
-// SerialOf is the vectors' serial: SHA-256("serial/" + label), first 8 bytes.
-func SerialOf(label string) []byte { return sha256Sum([]byte("serial/" + label))[:8] }
-
 // randomSerial draws eight random bytes with a non-zero first byte.
 //
 // The profile wants a positive serial of 64–160 bits, and derInt is now canonical — so a value
