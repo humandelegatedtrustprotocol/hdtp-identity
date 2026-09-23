@@ -174,13 +174,6 @@ func VaultSeal(passphrase string, plaintext []byte, kdf *KDF, salt, nonce []byte
 	return &v, nil
 }
 
-// VaultOpen decrypts a typed document; a wrong passphrase and a tampered document are one message.
-func VaultOpen(passphrase string, v Vault) ([]byte, error) {
-	doc := vaultDoc(v)
-	doc["ct"] = v.Ct
-	return VaultOpenDoc(passphrase, doc)
-}
-
 // VaultOpenDoc decrypts the document as received: the AAD is every member but ct, canonicalised,
 // so a member added after sealing — or one changed — fails to open, exactly as in the Rust core.
 func VaultOpenDoc(passphrase string, doc map[string]any) ([]byte, error) {
