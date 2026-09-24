@@ -2,6 +2,8 @@ package pactidentity
 
 // The cryptography review of 2026-09-14, as tests: each finding it made against this port is a
 // case that failed before the fix and passes after it, mirroring crates/pact-identity/tests/review.rs.
+// P-21 of the 2026-09-23 review is held here the same way, at the end, mirroring
+// crates/pact-identity/tests/findings.rs instead.
 
 import (
 	"bytes"
