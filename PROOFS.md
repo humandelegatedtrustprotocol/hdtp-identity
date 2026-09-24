@@ -7,9 +7,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed here that did not pass.
 
-Specification: **2.1.3**. **49** normative sentences, **419** cross-port parity cases over **38** guarded functions.
+Specification: **2.1.3**. **49** normative sentences, **425** cross-port parity cases over **38** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**39** functions, spec 2.1.3): **838** answers held to the shape it declares, **0** did not. Of **77** declared error codes, **62** were produced by a case here; the rest are declared for a caller's benefit and no argument in this suite reaches them.
+Every answer of both ports is validated against `contract/contract.json` (**39** functions, spec 2.1.3): **850** answers held to the shape it declares, **0** did not. Of **77** declared error codes, **62** were produced by a case here; the rest are declared for a caller's benefit and no argument in this suite reaches them.
 
 ## The 49 normative sentences of the specification
 
@@ -148,7 +148,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 419 cross-port parity cases
+## The 425 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -156,7 +156,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **419** cases, **0** disagreements, **38** of **38** functions compared whole on success.
+At the run that generated this file: **425** cases, **0** disagreements, **38** of **38** functions compared whole on success.
 
 ### `address_guard` — 32 cases · whole on success
 
@@ -293,7 +293,7 @@ At the run that generated this file: **419** cases, **0** disagreements, **38** 
 - csr_new with a dns_name that is not the host
 - csr_new with nothing to work from
 
-### `decide` — 44 cases · whole on success
+### `decide` — 50 cases · whole on success
 
 - decide on an envelope from a pinned contact
 - decide on a pinned contact's call that names no tool
@@ -339,6 +339,12 @@ At the run that generated this file: **419** cases, **0** disagreements, **38** 
 - decide, small form: an unreadable pin that names some OTHER leaf is never parsed
 - decide, small form: an unreadable pin that names no leaf has to be parsed
 - decide, small form: a pin whose named leaf is not its leaf
+- decide: a pending_out contact's sealed tools/list, small form
+- decide: a pending_out contact's sealed send_message waits, small form
+- decide: a pending_out contact's sealed tools/list, chain form
+- decide: a pending_out contact's sealed send_message waits, chain form
+- decide: a pending_out contact's sealed tools/list, chain form, the pin moving
+- decide: a pending_out contact's sealed send_message waits, chain form, the pin moving
 
 ### `derive_seed` — 10 cases · whole on success
 
