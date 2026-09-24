@@ -7,13 +7,13 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed here that did not pass.
 
-Specification: **2.1.3**. **49** normative sentences, **425** cross-port parity cases over **38** guarded functions.
+Specification: **2.1.3**. **50** normative sentences, **425** cross-port parity cases over **38** guarded functions.
 
 Every answer of both ports is validated against `contract/contract.json` (**39** functions, spec 2.1.3): **850** answers held to the shape it declares, **0** did not. Of **77** declared error codes, **62** were produced by a case here; the rest are declared for a caller's benefit and no argument in this suite reaches them.
 
-## The 49 normative sentences of the specification
+## The 50 normative sentences of the specification
 
-A sentence carrying MUST, MUST NOT or REQUIRED, one row each, in document order. **36** are
+A sentence carrying MUST, MUST NOT or REQUIRED, one row each, in document order. **37** are
 held by a test or an intrusion scenario in this repository; **13** belong to a wallet, a host
 or a node, and name the artefact that holds them there — checked against the sibling repository
 whenever it is on disk. A row with nothing in its last column would fail `js/musts.mjs`.
@@ -65,12 +65,18 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `5.2#1` | "pending"}` any stranger gets, while nothing is recorded and the owner is never bothered: blocked MUST be indistinguishable from never-met (§12). | `scenario:a blocked sender is answered exactly as an unknown one`, `scenario:a blocked contact naming its leaf is answered as a stranger would be` |
 
+### 6.1 Tiers
+
+| # | The sentence | Held by |
+|---|---|---|
+| `6.1#1` | A caller at the pending tier MAY list its tools: its `tools/list` MUST answer at the pending tier, naming `contact_accepted` and `contact_rejected`, and every other call from it MUST answer `pending_approval` until the owner decides. | `scenario:a contact still pending_out lists the pending tier (baseline)`, `scenario:a contact still pending_out cannot message before accepting`, `rust:a_pending_contacts_sealed_listing_answers_at_the_pending_tier`, `go:TestAPendingContactsSealedListingAnswersAtThePendingTier` |
+
 ### 6.2 Core tools
 
 | # | The sentence | Held by |
 |---|---|---|
 | `6.2#1` | A `msg_id` MUST be a non-empty string — idempotency keyed on nothing protects nothing. | `scenario:an empty msg_id` |
-| `6.2#2` | `ok` — a card refresh, or `status: pending` from a new address under `ask` (§5.3). The caller's chain is the authority: the card's certificate MUST equal the chain's leaf | `scenario:a guest whose card carries a different certificate than the chain` |
+| `6.2#2` | `ok` — a card refresh, or `status: pending` from a new address under `ask` (§5.3). The caller's chain is the authority: the card's certificate MUST equal the chain's leaf, and a card that names another root or carries a certificate that is not that leaf MUST be refused `bad_request`, the card-intake code of §3 | `scenario:a guest whose card carries a different certificate than the chain`, `gateway:TestACardThatDisagreesWithTheProofIsABadRequest`, `cloud:gateway/test/public-surface-20.test.ts` |
 | `6.2#3` | `get_status` answers from that fixed four-value vocabulary; an implementation whose upstream presence source knows richer states MUST map any state not listed to `busy`. | `gateway:TestOwnerPresenceTracksLiveSessionsOnly` |
 
 ### 9. Hosting
