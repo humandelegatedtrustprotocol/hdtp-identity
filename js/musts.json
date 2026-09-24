@@ -139,6 +139,16 @@
       "scenario:a blocked contact naming its leaf is answered as a stranger would be"
     ]
   },
+  "6.1#1": {
+    "hash": "28207ba3c071",
+    "text": "A caller at the pending tier MAY list its tools: its `tools/list` MUST answer at the pending tier, naming `con",
+    "held_by": [
+      "scenario:a contact still pending_out lists the pending tier (baseline)",
+      "scenario:a contact still pending_out cannot message before accepting",
+      "rust:a_pending_contacts_sealed_listing_answers_at_the_pending_tier",
+      "go:TestAPendingContactsSealedListingAnswersAtThePendingTier"
+    ]
+  },
   "6.2#1": {
     "hash": "30771afd931f",
     "text": "A `msg_id` MUST be a non-empty string — idempotency keyed on nothing protects nothing.",
@@ -147,10 +157,15 @@
     ]
   },
   "6.2#2": {
-    "hash": "df2809328df0",
+    "hash": "bb79bfc5aece",
     "text": "`ok` — a card refresh, or `status: pending` from a new address under `ask` (§5.3). The caller's chain is the a",
     "held_by": [
       "scenario:a guest whose card carries a different certificate than the chain"
+    ],
+    "why": "the certificate equality is this library's guest binding (the scenario); the refusal CODE is a host's answer from update_contact: the node answers bad_request (TestACardThatDisagreesWithTheProofIsABadRequest) and so does the cloud (public-surface-20.test.ts), review P-24",
+    "elsewhere_names": [
+      "gateway:TestACardThatDisagreesWithTheProofIsABadRequest",
+      "cloud:gateway/test/public-surface-20.test.ts"
     ]
   },
   "6.2#3": {
