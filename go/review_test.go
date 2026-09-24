@@ -461,3 +461,60 @@ func TestNothingThatGoesIntoACardMayCarryALineBreak(t *testing.T) {
 		t.Fatalf("an honest card: %v\n%s", err, card)
 	}
 }
+
+// P-21 (review of 2026-09-23) — a contact I asked, still `pending_out`, lists my tools: `tools/list`
+// returns what the caller's tier may use (§6) and a sealed call is dispatched in the tier the proven
+// identity earns (§13.2). A listing names no tool, so it never matched `contact_accepted` or
+// `contact_rejected` and was answered `pending_approval` — in the small form, in the chain form, and
+// on the path where the pin moves on the way through. The controls are the calls that must still
+// wait. Mirrors a_pending_contacts_sealed_listing_answers_at_the_pending_tier in tests/findings.rs.
+func TestAPendingContactsSealedListingAnswersAtThePendingTier(t *testing.T) {
+	const movedEndpoint = "https://alina.pact.contact/alina/mcp"
+	v := loadVectors(t)
+	c := theCast(t)
+	now := mustTime(t, v.Now)
+	der := func(n string) []byte { return hexBytes(t, v.Certificates[n].DerHex) }
+	rootA, _ := Parse(der("root_a"))
+	// Alina's next host: the same root, a newer leaf, another address (§5.3 under `auto`).
+	moved, err := BuildLeaf(LeafOpts{CN: "Alina Rao", RootCN: "Alina Rao", RootKey: c.rootA, HostPub: c.leafANext.Public, Endpoint: movedEndpoint, NotBefore: mustTime(t, "2026-09-10T00:00:00Z"), NotAfter: mustTime(t, "2027-09-10T00:00:00Z"), Serial: SerialOf("p21/moved")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := bharatNode(t, v, []Pin{{Root: FingerprintOf(rootA), Endpoint: endpointA, Leaf: B64url(der("leaf_a")), State: "pending_out"}})
+	decide := func(senderLeaf []byte, senderKey, method, params string) Decision {
+		args := map[string]any{"recipient_leaf": B64url(der("leaf_b")), "sender_pkcs8": B64url(hexBytes(t, v.LeafKeys[senderKey])), "form": "leaf",
+			"method": method, "params": json.RawMessage(params), "msg_id": "p21", "ts": now.Unix()}
+		if senderLeaf != nil {
+			args["form"] = "chain"
+			args["sender_chain"] = []string{B64url(senderLeaf), B64url(der("root_a"))}
+		}
+		var e Envelope
+		if out := Call("seal_request", mustJSON(args)); json.Unmarshal(out, &e) != nil || e.Ct == "" {
+			t.Fatalf("seal_request: %s", out)
+		}
+		return decided(t, now, e, node)
+	}
+	for _, s := range []struct {
+		what, key, endpoint string
+		leaf                []byte
+	}{
+		{"small form", "leaf_a", endpointA, nil},
+		{"chain form", "leaf_a", endpointA, der("leaf_a")},
+		{"chain form, moved", "leaf_a_next", movedEndpoint, moved},
+	} {
+		d := decide(s.leaf, s.key, "tools/list", `{}`)
+		if d.Result["code"] != "ok" || d.Result["tier"] != "pending" || d.Result["endpoint"] != s.endpoint {
+			t.Errorf("%s, tools/list: %v", s.what, d.Result)
+		}
+		if d = decide(s.leaf, s.key, "tools/call", `{"name":"contact_accepted"}`); d.Result["code"] != "ok" || d.Result["tier"] != "pending" {
+			t.Errorf("%s, contact_accepted: %v", s.what, d.Result)
+		}
+		// The controls: what the pending tier does not have still waits.
+		if d = decide(s.leaf, s.key, "tools/call", `{"name":"send_message"}`); d.Result["code"] != "pending_approval" {
+			t.Errorf("%s, send_message: %v", s.what, d.Result)
+		}
+		if d = decide(s.leaf, s.key, "tools/call", `{}`); d.Result["code"] != "pending_approval" {
+			t.Errorf("%s, a call that names no tool: %v", s.what, d.Result)
+		}
+	}
+}

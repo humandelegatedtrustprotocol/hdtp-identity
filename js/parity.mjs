@@ -678,6 +678,31 @@ const provenWhole = new Set();
   add('validate_chain in the leaf\'s last second, with a fraction', 'validate_chain', { chain: [leafDer, rootDer], now: '2027-08-31T23:59:59.900Z', expected_root: rootFp, expected_endpoint: ENDPOINT });
 }
 
+// ── P-21 (review of 2026-09-23): a pending contact's sealed listing ────────────────────────────
+//
+// `tools/list` returns what the caller's tier may use (SPEC §6), and a sealed call is dispatched in
+// the tier the proven identity earns (§13.2). A listing names no tool, so both ports answered it
+// `pending_approval` at a `pending_out` pin, and agreed with each other doing it: a comparison of two
+// ports cannot see a rule both break. So these cases carry what the spec says the answer IS, and the
+// run below holds both ports to it — in the small form, the chain form, and the path where the pin
+// moves on the way through (§5.3 under `auto`). The controls are the calls that must still wait.
+const expected = new Map();
+{
+  const at = (iso) => Math.floor(Date.parse(iso) / 1000);
+  const MOVED = 'https://alina.pact.contact/alina/mcp';
+  const movedLeaf = b64url(buildLeaf({ cn: 'Alina Rao', rootCn: 'Alina Rao', root: rootKey, hostKey, endpoint: MOVED, notBefore: new Date('2026-09-10T00:00:00Z'), notAfter: new Date('2027-09-10T00:00:00Z'), label: 'parity/p21/moved' }));
+  const pendingOut = { ...node, pins: [{ root: rootFp, endpoint: ENDPOINT, leaf: leafDer, state: 'pending_out' }] };
+  const seal = (form, chainLeaf, method, params) => wasm.call('seal_request', { recipient_leaf: leafDer, sender_pkcs8: hostPkcs8, form, ...(form === 'chain' ? { sender_chain: [chainLeaf, rootDer] } : {}), method, params, msg_id: 'p-21', ts: at(now) });
+  for (const [what, form, chainLeaf, endpoint] of [['small form', 'leaf', null, ENDPOINT], ['chain form', 'chain', leafDer, ENDPOINT], ['chain form, the pin moving', 'chain', movedLeaf, MOVED]]) {
+    const listing = `decide: a pending_out contact's sealed tools/list, ${what}`;
+    add(listing, 'decide', { now, envelope: seal(form, chainLeaf, 'tools/list', {}), node: pendingOut });
+    expected.set(listing, { code: 'ok', tier: 'pending', endpoint });
+    const control = `decide: a pending_out contact's sealed send_message waits, ${what}`;
+    add(control, 'decide', { now, envelope: seal(form, chainLeaf, 'tools/call', { name: 'send_message' }), node: pendingOut });
+    expected.set(control, { code: 'pending_approval' });
+  }
+}
+
 for (const [name, fn, args, keys] of cases) {
   if (only && !name.includes(only) && fn !== only) continue;
   ran++;
@@ -693,6 +718,14 @@ for (const [name, fn, args, keys] of cases) {
       console.log(`  OFF THE CONTRACT  ${name}  (${port})`);
       for (const w of wrong.slice(0, 4)) console.log(`    ${w}`);
     }
+  }
+  // A case that carries the spec's answer is held to it, and counts once however many ports miss it.
+  const want = expected.get(name);
+  const missed = want ? [['wasm', raw], ['go', rawGo]].filter(([, got]) => Object.entries(want).some(([k, v]) => got?.result?.[k] !== v)) : [];
+  for (const [port, got] of missed) console.log(`  NOT AS THE SPEC SAYS  ${name}  (${port}): want ${JSON.stringify(want)}, got ${JSON.stringify(got?.result)}`);
+  if (missed.length) {
+    bad++;
+    continue;
   }
   const a = pick(raw, keys, wasm);
   const b = pick(rawGo, keys, go);

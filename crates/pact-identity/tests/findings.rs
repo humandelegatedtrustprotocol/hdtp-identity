@@ -255,3 +255,68 @@ fn a_pin_that_names_its_leaf_is_matched_by_name_and_only_the_match_is_parsed() {
     let d = decide(json!([lying]));
     assert_eq!((d["error"].as_str(), d["why"].as_str()), (Some("parse"), Some("a pin's leaf_fingerprint is not its leaf's")), "{d}");
 }
+
+// P-21 (review of 2026-09-23) — a contact I asked, still `pending_out`, lists my tools: `tools/list`
+// returns what the caller's tier may use (§6) and a sealed call is dispatched in the tier the proven
+// identity earns (§13.2). A listing names no tool, so it never matched `contact_accepted` or
+// `contact_rejected` and was answered `pending_approval` — in the small form, in the chain form, and
+// on the path where the pin moves on the way through. The controls are the calls that must still wait.
+#[test]
+fn a_pending_contacts_sealed_listing_answers_at_the_pending_tier() {
+    const E_B: &str = "https://agent.bharat.example/mcp";
+    const E_N: &str = "https://alina.pact.contact/alina/mcp";
+    let (me, them) = (cast(), cast());
+    let (my_leaf, their_leaf) = (leaf(&me, E_B, None, None), leaf(&them, E_A, None, None));
+    // Their next host: the same root, a newer leaf, another address (§5.3 under `auto`).
+    let (issuer, host_pub) = (them.root.public(), them.host.public());
+    let moved_leaf = x509::build_leaf(
+        &LeafSpec {
+            cn: "Alina Rao",
+            root_cn: "Alina Rao",
+            issuer: &issuer,
+            host_key: &host_pub,
+            uris: vec![E_N.into()],
+            dns_name: None,
+            not_before: NOW - 1800,
+            not_after: NOW + 86_400,
+            serial: x509::serial_of("findings/p21/moved"),
+            ca: false,
+            usage: None,
+            aki: None,
+            extra: Vec::new(),
+            alg_oid: None,
+        },
+        &them.root,
+    )
+    .unwrap();
+    let node = json!({ "endpoint": E_B, "accept_new_hosts": "auto", "chain": [b64u(&my_leaf), b64u(&me.root_der)],
+        "keys": [{ "kid": me.host.public().fingerprint(), "leaf": b64u(&my_leaf), "pkcs8": b64u(&me.host.to_pkcs8()), "current": true }],
+        "former": [], "sibling_kids": [], "tombstones": [], "former_endpoints": [], "seen": [],
+        "pins": [{ "root": them.root.public().fingerprint(), "endpoint": E_A, "leaf": b64u(&their_leaf), "state": "pending_out" }] });
+    let decide = |sender_leaf: Option<&[u8]>, method: &str, params: Value| {
+        let mut args = json!({ "recipient_leaf": b64u(&my_leaf), "sender_pkcs8": b64u(&them.host.to_pkcs8()), "form": "leaf",
+            "method": method, "params": params, "msg_id": "p21", "ts": NOW });
+        if let Some(l) = sender_leaf {
+            args["form"] = json!("chain");
+            args["sender_chain"] = json!([b64u(l), b64u(&them.root_der)]);
+        }
+        let d = call("decide", json!({ "now": NOW_RFC, "envelope": call("seal_request", args), "node": node }));
+        (d["result"]["code"].as_str().map(String::from), d["result"]["tier"].as_str().map(String::from), d)
+    };
+    let pending = (Some("ok".to_string()), Some("pending".to_string()));
+    let waits = (Some("pending_approval".to_string()), None);
+    for (sender, what) in [(None, "small form"), (Some(&their_leaf[..]), "chain form"), (Some(&moved_leaf[..]), "chain form, moved")] {
+        let (code, tier, d) = decide(sender, "tools/list", json!({}));
+        assert_eq!((code, tier), pending, "{what}, tools/list: {d}");
+        // The moved case really took the path where the pin moves: the answer is at the new address.
+        let at = if what.ends_with("moved") { E_N } else { E_A };
+        assert_eq!(d["result"]["endpoint"], at, "{what}: {d}");
+        let (code, tier, d) = decide(sender, "tools/call", json!({ "name": "contact_accepted" }));
+        assert_eq!((code, tier), pending, "{what}, contact_accepted: {d}");
+        // The controls: what the pending tier does not have still waits.
+        let (code, tier, d) = decide(sender, "tools/call", json!({ "name": "send_message" }));
+        assert_eq!((code, tier), waits, "{what}, send_message: {d}");
+        let (code, tier, d) = decide(sender, "tools/call", json!({}));
+        assert_eq!((code, tier), waits, "{what}, a call that names no tool: {d}");
+    }
+}
