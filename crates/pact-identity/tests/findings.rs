@@ -1,5 +1,6 @@
-//! The review findings of 2026-09-20 that reached the pinned core, each held at the boundary a host
-//! actually calls. Every test here was RED against the core as it was (the review-findings plan, C).
+//! The review findings that reached the pinned core — those of 2026-09-20 (the review-findings plan,
+//! C) and, since, P-21 of 2026-09-23 — each held at the boundary a host actually calls. Every test
+//! here was RED against the core as it was.
 
 use pact_identity::keys::{Alg, PrivateKey};
 use pact_identity::x509::{self, LeafSpec};
