@@ -612,7 +612,12 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
     signed.extend_from_slice(&ct);
     let sig = wire_b64u(&e.sig).unwrap_or_default();
     let tool: Option<String> = body["params"].get("name").and_then(|n| n.as_str()).map(|s| s.to_string());
+    // What a `pending_out` pin may do: call one of the pending tier's tools (§6.1, §6.2), or list them.
+    // A listing names no tool; `tools/list` returns what the caller's tier may use (§6), and a sealed
+    // call is dispatched in the tier the proven identity earns (§13.2) — so a pending contact's sealed
+    // listing answers at the pending tier. Anything else waits for the approval.
     let tool_ref = tool.as_deref();
+    let pending_allows = method == "tools/list" || tool_ref.map(|t| PENDING_TOOLS.contains(&t)).unwrap_or(false);
     let msg_id = h.get("msg_id").and_then(|x| x.as_str()).unwrap_or("").to_string();
     let fresh = Freshness { h: &h, now, seen: &node.seen };
 
@@ -645,7 +650,7 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
     };
     let pending_or = |tier_ok: DecideOutput, state: &str| -> DecideOutput {
         if state == "pending_out" {
-            if tool_ref.map(|t| PENDING_TOOLS.contains(&t)).unwrap_or(false) {
+            if pending_allows {
                 let mut r = tier_ok;
                 r.result["tier"] = json!("pending");
                 r
@@ -775,7 +780,7 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
         effects.push(json!({ "op": "event", "event": "renewal", "root": root }));
     }
     let r = ok("contact", &root, &endpoint, "chain", &leaf_b64, Map::new(), effects);
-    if p.state == "pending_out" && !tool_ref.map(|t| PENDING_TOOLS.contains(&t)).unwrap_or(false) {
+    if p.state == "pending_out" && !pending_allows {
         // The pin moved (a peer may move between my request and their answer) but the call waits.
         return Ok(DecideOutput {
             result: json!({ "code": "pending_approval" }),

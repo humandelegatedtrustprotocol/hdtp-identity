@@ -205,7 +205,9 @@ decodes, its certificate byte-equals the chain's leaf, the endpoint is not this 
 or a former endpoint within 30 days; root pinned and blocked → guest; superseded → guest; conflict →
 `envelope_invalid`; another endpoint → `ask` pending or `auto` re-pin with the former endpoint recorded
 and a `new_address` event; newer at the pinned endpoint → `pin_update` and a `renewal` event; then
-`pending_out` allows `contact_accepted`/`contact_rejected` only, else `pending_approval`; else contact.
+`pending_out` allows `tools/list` and `contact_accepted`/`contact_rejected` at tier `pending` (a listing
+names no tool, and answers at the tier the caller earns, SPEC §6, §13.2), else `pending_approval`; else
+contact.
 
 A `pending_new_address` result is the host's to answer as SPEC §5.3 words it: the `update_contact` that
 brought the new address answers `{"status": "pending"}`; every other call from that address, until the

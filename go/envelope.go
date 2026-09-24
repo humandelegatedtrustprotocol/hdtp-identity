@@ -425,6 +425,11 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 	if params != nil {
 		tool, hasTool = params["name"].(string)
 	}
+	// What a `pending_out` pin may do: call one of the pending tier's tools (§6.1, §6.2), or list them.
+	// A listing names no tool; `tools/list` returns what the caller's tier may use (§6), and a sealed
+	// call is dispatched in the tier the proven identity earns (§13.2) — so a pending contact's sealed
+	// listing answers at the pending tier. Anything else waits for the approval.
+	pendingAllows := method == "tools/list" || pendingTools[tool]
 
 	nowS := float64(now.Unix())
 	freshness := func() *Decision {
@@ -506,7 +511,7 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 		}
 		leafB64 = hit.Leaf
 		if hit.State == "pending_out" {
-			if pendingTools[tool] {
+			if pendingAllows {
 				return result("pending", hit.Root, hit.Endpoint, "leaf", nil)
 			}
 			return pendingApproval()
@@ -661,7 +666,7 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 		)
 	}
 	if pin.State == "pending_out" {
-		if pendingTools[tool] {
+		if pendingAllows {
 			return result("pending", root, pinnedEndpoint, "chain", nil)
 		}
 		return pendingApproval()
