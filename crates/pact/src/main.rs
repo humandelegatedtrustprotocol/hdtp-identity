@@ -519,6 +519,25 @@ mod tests {
             }
         }
         assert!(checked > 5, "the scan found only {checked} command mentions, so it has stopped reading them");
+
+        // The list above is written by hand, so a new source file would go unscanned without this:
+        // every .rs file under src/ must be on it.
+        fn walk(dir: &std::path::Path, base: &std::path::Path, out: &mut Vec<String>) {
+            for entry in std::fs::read_dir(dir).expect("read src") {
+                let path = entry.expect("entry").path();
+                if path.is_dir() {
+                    walk(&path, base, out);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    out.push(path.strip_prefix(base).expect("under src").to_string_lossy().replace('\\', "/"));
+                }
+            }
+        }
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut on_disk = Vec::new();
+        walk(&src, &src, &mut on_disk);
+        let listed: Vec<&str> = sources.iter().map(|(name, _)| *name).collect();
+        let unlisted: Vec<&String> = on_disk.iter().filter(|f| !listed.contains(&f.as_str())).collect();
+        assert!(unlisted.is_empty(), "source files the command scan does not read: {unlisted:?}");
     }
 
     /// `pact <word> [<word>]` where the mention is advice: inside backticks, or the indented line of
