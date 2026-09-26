@@ -236,7 +236,6 @@ At the run that generated this file: **458** cases, **0** disagreements, **38** 
 
 ### `card_decode` — 11 cases · whole on success
 
-- card_decode of a card carrying that leaf
 - card_decode of a real card
 - card_decode of an empty card
 - card_decode of nothing at all
@@ -244,6 +243,7 @@ At the run that generated this file: **458** cases, **0** disagreements, **38** 
 - card_decode of a card with two certificates
 - card_decode of a card whose certificate is not one
 - card_decode after the leaf expired
+- card_decode of a card carrying that leaf
 - card_decode with nothing to work from
 - card_decode with no now
 - card_decode of a card whose leaf names its issuer in three bytes
