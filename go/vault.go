@@ -9,7 +9,10 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
+	"sort"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/argon2"
@@ -154,6 +157,113 @@ func plaintextV(plaintext []byte) int64 {
 
 var errEarlierGeneration = errors.New("this vault was written by an earlier wallet and is not opened: there is no conversion")
 
+const generationWhy = "a vault plaintext is v 2: the root, or the record"
+
+var (
+	fileMembers   = []string{"v", "roots", "prf", "passkey"}
+	recordMembers = []string{"v", "roots", "ledger", "contacts", "passkey", "backup_verified_at"}
+	entryRequired = []string{"root", "endpoint", "not_before", "not_after", "issued_at"}
+	entryMembers  = []string{"root", "endpoint", "not_before", "not_after", "issued_at", "origin"}
+	entryInstants = map[string]bool{"not_before": true, "not_after": true, "issued_at": true}
+)
+
+// stranger is the first member, in sorted order, that allowed does not name: sorted, so the two
+// ports name the same one whatever order their maps iterate in.
+func stranger(doc map[string]any, allowed []string) string {
+	var extra []string
+	for k := range doc {
+		found := false
+		for _, a := range allowed {
+			if a == k {
+				found = true
+			}
+		}
+		if !found {
+			extra = append(extra, k)
+		}
+	}
+	sort.Strings(extra)
+	if len(extra) == 0 {
+		return ""
+	}
+	return extra[0]
+}
+
+// CheckFile holds the file's plaintext to CONTRACT §6, as the Rust core's check_file does, in the
+// same order and the same words. Held where the rules read it, not at seal and open, which carry the
+// documents a live wallet already keeps.
+func CheckFile(raw json.RawMessage) error {
+	v, err := decodeJSON(raw)
+	doc, isDoc := v.(map[string]any)
+	if len(raw) == 0 || err != nil || !isDoc {
+		return errors.New("vault_plaintext is required: the root lives there")
+	}
+	_, ledger := doc["ledger"]
+	_, contacts := doc["contacts"]
+	if ledger || contacts {
+		return errors.New("a vault holds the root and nothing else: its ledger and contacts belong in the record")
+	}
+	if plaintextV(raw) != PlaintextV {
+		return errors.New(generationWhy)
+	}
+	if k := stranger(doc, fileMembers); k != "" {
+		return errors.New("vault_plaintext holds v, roots, prf and passkey, and nothing else: " + k)
+	}
+	return nil
+}
+
+// CheckRecord holds the record's plaintext to CONTRACT §6, every ledger entry included. An entry
+// that does not read is refused, never skipped: skipped, it could be the live leaf, and one live leaf
+// per identity would fail open. Every entry is read, not only one root's.
+func CheckRecord(raw json.RawMessage) error {
+	v, err := decodeJSON(raw)
+	doc, isDoc := v.(map[string]any)
+	if len(raw) == 0 || err != nil || !isDoc {
+		return errors.New("record_plaintext is required: the ledger lives there")
+	}
+	if plaintextV(raw) != PlaintextV {
+		return errors.New(generationWhy)
+	}
+	if k := stranger(doc, recordMembers); k != "" {
+		return errors.New("record_plaintext holds v, roots, ledger, contacts, passkey and backup_verified_at, and nothing else: " + k)
+	}
+	ledger, has := doc["ledger"]
+	if !has {
+		return nil
+	}
+	entries, isList := ledger.([]any)
+	if !isList {
+		return errors.New("the record's ledger is a list")
+	}
+	for i, e := range entries {
+		o, isObj := e.(map[string]any)
+		if !isObj {
+			return fmt.Errorf("the record's ledger entry %d does not read", i)
+		}
+		unread := func(m string) error { return fmt.Errorf("the record's ledger entry %d does not read: %s", i, m) }
+		for _, m := range entryRequired {
+			text, isText := o[m].(string)
+			if !isText {
+				return unread(m)
+			}
+			if entryInstants[m] {
+				if _, ok := parseInstant(text); !ok {
+					return unread(m)
+				}
+			}
+		}
+		if origin, has := o["origin"]; has {
+			if _, isText := origin.(string); !isText {
+				return unread("origin")
+			}
+		}
+		if k := stranger(o, entryMembers); k != "" {
+			return unread(k)
+		}
+	}
+	return nil
+}
+
 // VaultSeal encrypts plaintext under the passphrase. salt and nonce are drawn when nil (tests pass them).
 func VaultSeal(passphrase string, plaintext []byte, kdf *KDF, salt, nonce []byte) (*Vault, error) {
 	if plaintextV(plaintext) != PlaintextV {
@@ -247,6 +357,10 @@ func VaultOpenDoc(passphrase string, doc map[string]any) ([]byte, error) {
 	if err != nil {
 		return nil, errVault
 	}
+	// A plaintext that is not JSON is damage, as the Rust core has it — not an earlier wallet's.
+	if !json.Valid(pt) {
+		return nil, errVault
+	}
 	if plaintextV(pt) != PlaintextV {
 		return nil, errEarlierGeneration
 	}
@@ -257,9 +371,13 @@ func VaultOpenDoc(passphrase string, doc map[string]any) ([]byte, error) {
 type VaultRoot struct {
 	Fingerprint string `json:"fingerprint"`
 	CN          string `json:"cn"`
-	PKCS8       string `json:"pkcs8"`
-	Cert        string `json:"cert"`
-	Created     string `json:"created"`
+	Alg         string `json:"alg,omitempty"`
+	// PKCS8 is the root's key, absent for a root generated on a card; Holder names the card, and an
+	// entry may carry both (a key imported to a card and kept).
+	PKCS8   string          `json:"pkcs8,omitempty"`
+	Holder  json.RawMessage `json:"holder,omitempty"`
+	Cert    string          `json:"cert"`
+	Created string          `json:"created"`
 	// ReboundAt marks a root re-bound to a new credential after the first was lost (SPEC §9): the
 	// record then keeps this entry's key, and no other's.
 	ReboundAt int64 `json:"rebound_at,omitempty"`
@@ -280,9 +398,10 @@ type LedgerEntry struct {
 type VaultContact struct {
 	Root     string `json:"root"`
 	Endpoint string `json:"endpoint"`
-	Name     string `json:"name"`
+	Name     string `json:"name,omitempty"`
 	Leaf     string `json:"leaf,omitempty"`
-	Added    string `json:"added"`
+	RootCert string `json:"root_cert,omitempty"`
+	Added    string `json:"added,omitempty"`
 }
 
 // VaultPasskey names the credential a derived root belongs to (SPEC §2.1); not secret.
@@ -344,6 +463,9 @@ func WalletIssue(plain VaultPlaintext, record RecordPlaintext, rootFingerprint s
 	if root == nil {
 		return nil, errors.New("no such root in the vault")
 	}
+	if root.PKCS8 == "" {
+		return nil, errors.New("this root is held on a card: wallet_issue signs only with a key the vault holds")
+	}
 	rootKey, err := ParsePKCS8(FromB64url(root.PKCS8))
 	if err != nil {
 		return nil, errors.New("the root key does not parse")
@@ -358,6 +480,12 @@ func WalletIssue(plain VaultPlaintext, record RecordPlaintext, rootFingerprint s
 	var newest *LedgerEntry
 	for i := range record.Ledger {
 		e := &record.Ledger[i]
+		// Every entry read, as CheckRecord reads it, for a caller that reached here without it.
+		for _, m := range [][2]string{{"root", e.Root}, {"endpoint", e.Endpoint}, {"not_before", e.NotBefore}, {"not_after", e.NotAfter}, {"issued_at", e.IssuedAt}} {
+			if _, ok := parseInstant(m[1]); m[1] == "" || (strings.HasPrefix(m[0], "not_") || m[0] == "issued_at") && !ok {
+				return nil, fmt.Errorf("the record's ledger entry %d does not read: %s", i, m[0])
+			}
+		}
 		if e.Root != rootFingerprint {
 			continue
 		}

@@ -147,6 +147,12 @@ fn open_record(v: &Vault) -> Res<Record> {
             ));
         }
     }
+    // Every entry read as the core reads it: the card path applies the one-live-leaf rule to this
+    // ledger itself, and an entry that did not read would be skipped there — failing open.
+    if let Err(e) = pact_identity::vault::check_record(&plaintext) {
+        crate::io::wipe(&mut plaintext);
+        return fail(format!("{shown}: {}", e.why));
+    }
     Ok(Record { path: shown, real: really, found: true, plaintext })
 }
 

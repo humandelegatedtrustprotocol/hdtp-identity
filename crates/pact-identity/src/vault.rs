@@ -1,6 +1,6 @@
-//! The vault (SPEC §9; CONTRACT §6): the root keys, the issued-leaf ledger and the contact book,
-//! under Argon2id and AES-256-GCM with the document's header as AAD. Shared by the sign-up
-//! ceremony and the CLI.
+//! The vault (SPEC §9; CONTRACT §6): two documents under Argon2id and AES-256-GCM with the
+//! document's header as AAD — the FILE, the root and nothing else, and the RECORD, the issued-leaf
+//! ledger and the contact book. Shared by the wallet page and the CLI.
 use crate::canonical::canonical;
 use crate::csr;
 use crate::keys::PrivateKey;
@@ -19,6 +19,75 @@ pub const PLAINTEXT_V: u64 = 2;
 
 fn plaintext_v(plaintext: &Value) -> Option<u64> {
     plaintext.get("v").and_then(|v| v.as_u64())
+}
+
+const GENERATION: &str = "a vault plaintext is v 2: the root, or the record";
+const FILE_MEMBERS: &[&str] = &["v", "roots", "prf", "passkey"];
+const RECORD_MEMBERS: &[&str] = &["v", "roots", "ledger", "contacts", "passkey", "backup_verified_at"];
+const ENTRY_REQUIRED: &[&str] = &["root", "endpoint", "not_before", "not_after", "issued_at"];
+const ENTRY_MEMBERS: &[&str] = &["root", "endpoint", "not_before", "not_after", "issued_at", "origin"];
+const ENTRY_INSTANTS: &[&str] = &["not_before", "not_after", "issued_at"];
+
+/// The first member, in sorted order, that `allowed` does not name: sorted, so that two ports that
+/// iterate a map differently name the same one.
+fn stranger(doc: &Map<String, Value>, allowed: &[&str]) -> Option<String> {
+    let mut extra: Vec<&String> = doc.keys().filter(|k| !allowed.contains(&k.as_str())).collect();
+    extra.sort();
+    extra.first().map(|k| k.to_string())
+}
+
+/// The file's plaintext as CONTRACT §6 has it, or the refusal that names what is wrong with it.
+/// Held here, where the rules read it, and not at `seal`/`open`: those carry the documents a live
+/// wallet already keeps, and a stricter open would lock a person out of one.
+pub fn check_file(vault: &Value) -> Result<()> {
+    let Some(doc) = vault.as_object() else { return err("bad_request", "vault_plaintext is required: the root lives there") };
+    if doc.contains_key("ledger") || doc.contains_key("contacts") {
+        return err("bad_request", "a vault holds the root and nothing else: its ledger and contacts belong in the record");
+    }
+    if plaintext_v(vault) != Some(PLAINTEXT_V) {
+        return err("bad_request", GENERATION);
+    }
+    if let Some(k) = stranger(doc, FILE_MEMBERS) {
+        return err("bad_request", format!("vault_plaintext holds v, roots, prf and passkey, and nothing else: {k}"));
+    }
+    Ok(())
+}
+
+/// The record's plaintext as CONTRACT §6 has it, every ledger entry included. An entry that does not
+/// read is refused, never skipped: skipped, it could be the live leaf, and one live leaf per identity
+/// (SPEC §9) would fail open. Every entry is read, not only one root's — an unreadable `root` is how
+/// an entry would hide from that filter. The CLI's card path, which reads the ledger itself, calls
+/// this too.
+pub fn check_record(record: &Value) -> Result<()> {
+    let Some(doc) = record.as_object() else { return err("bad_request", "record_plaintext is required: the ledger lives there") };
+    if plaintext_v(record) != Some(PLAINTEXT_V) {
+        return err("bad_request", GENERATION);
+    }
+    if let Some(k) = stranger(doc, RECORD_MEMBERS) {
+        return err(
+            "bad_request",
+            format!("record_plaintext holds v, roots, ledger, contacts, passkey and backup_verified_at, and nothing else: {k}"),
+        );
+    }
+    let Some(ledger) = doc.get("ledger") else { return Ok(()) };
+    let Some(entries) = ledger.as_array() else { return err("bad_request", "the record's ledger is a list") };
+    for (i, e) in entries.iter().enumerate() {
+        let Some(o) = e.as_object() else { return err("bad_request", format!("the record's ledger entry {i} does not read")) };
+        let unread = |m: &str| err("bad_request", format!("the record's ledger entry {i} does not read: {m}"));
+        for m in ENTRY_REQUIRED {
+            let Some(text) = o.get(*m).and_then(|v| v.as_str()) else { return unread(m) };
+            if ENTRY_INSTANTS.contains(m) && parse_rfc3339(text).is_err() {
+                return unread(m);
+            }
+        }
+        if o.get("origin").is_some_and(|v| !v.is_string()) {
+            return unread("origin");
+        }
+        if let Some(k) = stranger(o, ENTRY_MEMBERS) {
+            return unread(&k);
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -102,13 +171,20 @@ fn header(kdf: Kdf, salt: &[u8], nonce: &[u8]) -> Map<String, Value> {
 }
 
 pub fn seal(passphrase: &str, plaintext: &Value, kdf: Option<Kdf>, salt: Option<Vec<u8>>, nonce: Option<Vec<u8>>) -> Result<Value> {
+    check_sealable(passphrase, plaintext)?;
+    seal_any(passphrase, plaintext, kdf, salt, nonce)
+}
+
+/// What `seal` refuses before it reads a KDF: the passphrase, then the generation (CONTRACT §0, the
+/// order a function needs its members). The KDF is read after, so the two ports name the same one.
+pub fn check_sealable(passphrase: &str, plaintext: &Value) -> Result<()> {
     if passphrase.is_empty() {
         return err("bad_request", "empty passphrase");
     }
     if plaintext_v(plaintext) != Some(PLAINTEXT_V) {
-        return err("bad_request", "a vault plaintext is v 2: the root, or the record");
+        return err("bad_request", GENERATION);
     }
-    seal_any(passphrase, plaintext, kdf, salt, nonce)
+    Ok(())
 }
 
 /// The sealing itself, with no opinion about the plaintext: `seal` holds the generation, and the
@@ -185,12 +261,8 @@ pub fn wallet_issue(
     valid_days: i64,
     moving: bool,
 ) -> Result<Value> {
-    if vault.get("ledger").is_some() || vault.get("contacts").is_some() {
-        return err("bad_request", "a vault holds the root and nothing else: its ledger and contacts belong in the record");
-    }
-    if !record.is_object() {
-        return err("bad_request", "record_plaintext is required: the ledger lives there");
-    }
+    check_file(vault)?;
+    check_record(record)?;
     let roots = vault.get("roots").and_then(|r| r.as_array()).cloned().unwrap_or_default();
     let ledger = record.get("ledger").and_then(|r| r.as_array()).cloned().unwrap_or_default();
     // EVERY root this vault holds, and a root is held as its certificate: a software root has a
@@ -213,7 +285,10 @@ pub fn wallet_issue(
     let Some(root) = roots.iter().find(|r| r.get("fingerprint").and_then(|f| f.as_str()) == Some(root_fingerprint)) else {
         return err("bad_request", "no such root in the vault");
     };
-    let root_key = PrivateKey::from_pkcs8(&Zeroizing::new(from_b64u(root.get("pkcs8").and_then(|p| p.as_str()).unwrap_or(""))?))?;
+    let Some(pkcs8) = root.get("pkcs8").and_then(|p| p.as_str()) else {
+        return err("bad_request", "this root is held on a card: wallet_issue signs only with a key the vault holds");
+    };
+    let root_key = PrivateKey::from_pkcs8(&Zeroizing::new(from_b64u(pkcs8)?))?;
     let root_cn = root.get("cn").and_then(|c| c.as_str()).unwrap_or("");
     let request = csr::check(csr_der, &root_spkis)?;
     let host = x509::host_of(&request.endpoint).to_string();

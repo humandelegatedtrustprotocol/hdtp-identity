@@ -67,6 +67,18 @@ fn int(a: &Value, k: &str) -> Result<i64> {
 fn opt_int(a: &Value, k: &str) -> Option<i64> {
     a.get(k).and_then(|v| v.as_i64())
 }
+/// `valid_days`, read with the arguments (CONTRACT §0): absent is a year; present and not an integer
+/// is a member of the wrong type, `valid_days is required`, and never a year it was not asked for.
+fn valid_days(a: &Value) -> Result<i64> {
+    let days = match a.get("valid_days") {
+        None | Some(Value::Null) => 365,
+        Some(v) => v.as_i64().ok_or_else(|| Error::new("bad_request", "valid_days is required"))?,
+    };
+    if !(1..=x509::MAX_LEAF_DAYS).contains(&days) {
+        return err("bad_request", "validity must be between one and 398 days");
+    }
+    Ok(days)
+}
 fn boolean(a: &Value, k: &str) -> bool {
     a.get(k).and_then(|v| v.as_bool()).unwrap_or(false)
 }
@@ -275,14 +287,7 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
             let mut roots = opt_chain(a, "root_spkis")?;
             roots.push(root.public().spki().to_vec());
             let req = csr::check(&bytes(a, "csr")?, &roots)?;
-            let i = csr::issue(
-                &req,
-                s(a, "root_cn")?,
-                &root,
-                instant(a, "now")?,
-                opt_instant(a, "previous_not_before")?,
-                opt_int(a, "valid_days").unwrap_or(365),
-            )?;
+            let i = csr::issue(&req, s(a, "root_cn")?, &root, instant(a, "now")?, opt_instant(a, "previous_not_before")?, valid_days(a)?)?;
             json!({ "der": b64u(&i.der), "endpoint": req.endpoint, "not_before": format_rfc3339(i.not_before), "not_after": format_rfc3339(i.not_after) })
         }
         "issue_tbs_from_csr" => {
@@ -290,14 +295,8 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
             let mut roots = opt_chain(a, "root_spkis")?;
             roots.push(root.spki().to_vec());
             let req = csr::check(&bytes(a, "csr")?, &roots)?;
-            let (u, nb, na) = csr::issue_tbs(
-                &req,
-                s(a, "root_cn")?,
-                &root,
-                instant(a, "now")?,
-                opt_instant(a, "previous_not_before")?,
-                opt_int(a, "valid_days").unwrap_or(365),
-            )?;
+            let (u, nb, na) =
+                csr::issue_tbs(&req, s(a, "root_cn")?, &root, instant(a, "now")?, opt_instant(a, "previous_not_before")?, valid_days(a)?)?;
             json!({ "tbs": b64u(&u.tbs), "sig_alg": b64u(&x509::sig_alg(&u.sig_alg)), "endpoint": req.endpoint, "not_before": format_rfc3339(nb), "not_after": format_rfc3339(na) })
         }
 
@@ -421,20 +420,23 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
 
         // §6 vault
         "vault_seal" => {
-            // ONE parser, shared with `vault_open`, so the bounds cannot diverge between sealing and
-            // opening and `name` is checked on both. This built the struct inline: it never looked at
-            // `name` (so `{"name":"scrypt"}` sealed with Argon2id and said nothing, while `vault_open`
-            // refused that name), it had no floor, and it cast with `as`.
-            let kdf = match a.get("kdf") {
-                None | Some(Value::Null) => None,
-                Some(_) => Some(vault::kdf_from_args(a.get("kdf"))?),
-            };
+            // In the order the function needs them (CONTRACT §0): the passphrase, the plaintext and
+            // its generation, and only then the KDF — read before, a v 1 plaintext under a KDF out
+            // of range was named for the KDF here and for its generation in the other port.
+            let passphrase = s(a, "passphrase")?;
             // Sealing an absent plaintext sealed the JSON literal `null` and handed back a
             // well-formed vault with nothing in it — a file a person would keep, and restore from.
             let Some(plaintext) = a.get("plaintext").filter(|v| !v.is_null()) else {
                 return err("bad_request", "plaintext is required");
             };
-            json!({ "vault": vault::seal(s(a, "passphrase")?, plaintext, kdf, opt_bytes(a, "salt")?, opt_bytes(a, "nonce")?)? })
+            vault::check_sealable(passphrase, plaintext)?;
+            // ONE parser, shared with `vault_open`, so the bounds cannot diverge between sealing and
+            // opening and `name` is checked on both.
+            let kdf = match a.get("kdf") {
+                None | Some(Value::Null) => None,
+                Some(_) => Some(vault::kdf_from_args(a.get("kdf"))?),
+            };
+            json!({ "vault": vault::seal(passphrase, plaintext, kdf, opt_bytes(a, "salt")?, opt_bytes(a, "nonce")?)? })
         }
         "vault_open" => {
             let Some(doc) = a.get("vault").filter(|v| !v.is_null()) else {
@@ -448,7 +450,7 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
             s(a, "root_fingerprint")?,
             &bytes(a, "csr")?,
             instant(a, "now")?,
-            opt_int(a, "valid_days").unwrap_or(365),
+            valid_days(a)?,
             boolean(a, "move"),
         )?,
 
@@ -533,7 +535,9 @@ END:VCARD
             r#"{"name":"argon2id","m_kib":4294967304,"t":3,"p":1}"#,
             r#"{"name":"scrypt","m_kib":65536,"t":3,"p":1}"#,
         ] {
-            let args = format!(r#"{{"passphrase":"x","plaintext":{{"v":1}},"kdf":{kdf}}}"#);
+            // A plaintext `vault_seal` would seal: the KDF is read after the generation (CONTRACT §0),
+            // so a `v` of 1 here would be refused for itself and this would test nothing about the KDF.
+            let args = format!(r#"{{"passphrase":"x","plaintext":{{"v":2}},"kdf":{kdf}}}"#);
             let out: Value = serde_json::from_str(&call("vault_seal", &args)).unwrap();
             assert_eq!(out["error"], "vault", "vault_seal with {kdf} answered {out}");
             let doc = format!(

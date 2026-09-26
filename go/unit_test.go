@@ -400,3 +400,28 @@ func decided(t *testing.T, now time.Time, env Envelope, node NodeState) Decision
 	}
 	return d
 }
+
+// A plaintext that decrypts and is not JSON is damage, as the Rust core answers it (its open reads
+// the bytes as JSON and says "the passphrase is wrong or the vault is damaged"), not a document an
+// earlier wallet wrote. This port said the second (the review of PR #29, C11).
+func TestAPlaintextThatIsNotJSONIsDamageNotAnEarlierWallet(t *testing.T) {
+	sealed, err := vaultSealAny("a passphrase", []byte("not json"), &KDF{Name: "argon2id", MKiB: 8192, T: 1, P: 1}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(sealed)
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VaultOpenDoc("a passphrase", doc); err != errVault {
+		t.Fatalf("a plaintext that is not JSON opened as %v, want %v", err, errVault)
+	}
+	// The control: JSON with no generation is still an earlier wallet's, in both ports.
+	old, _ := vaultSealAny("a passphrase", []byte(`{"roots":[]}`), &KDF{Name: "argon2id", MKiB: 8192, T: 1, P: 1}, nil, nil)
+	raw, _ = json.Marshal(old)
+	_ = json.Unmarshal(raw, &doc)
+	if _, err := VaultOpenDoc("a passphrase", doc); err != errEarlierGeneration {
+		t.Fatalf("a plaintext with no generation opened as %v, want %v", err, errEarlierGeneration)
+	}
+}
