@@ -45,6 +45,18 @@ fn record_of(vault: &std::path::Path) -> std::path::PathBuf {
     vault.with_file_name(format!("{stem}.pact-record.json"))
 }
 
+/// A sealed file opened as the core opens it, under the test's passphrase: what it holds, to judge.
+fn open_sealed(path: &Path) -> serde_json::Value {
+    let doc: serde_json::Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+    let answer: serde_json::Value = serde_json::from_str(&pact_identity::call(
+        "vault_open",
+        &serde_json::json!({ "passphrase": "correct horse battery staple", "vault": doc }).to_string(),
+    ))
+    .unwrap();
+    assert!(answer.get("error").is_none(), "{} does not open: {answer}", path.display());
+    answer["plaintext"].clone()
+}
+
 #[test]
 fn a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates() {
     let dir = tempfile::tempdir().unwrap();
@@ -109,7 +121,16 @@ fn a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates() {
         .stderr(predicate::str::contains("NEW HOST"));
     // The signing wrote the record and never the vault: the file a person keeps is the one they were given.
     assert_eq!(fs::read(&vault).unwrap(), vault_as_made, "the vault is written once");
-    assert!(!fs::read_to_string(&record).unwrap().contains("pkcs8"), "the record at rest shows no key material");
+    // What each file holds, opened (SPEC §9): the vault the root and nothing else, the record the
+    // ledger and the contacts and no key. (A search of the ciphertext for "pkcs8" could not fail.)
+    let held = open_sealed(&vault);
+    let members: Vec<&str> = held.as_object().unwrap().keys().map(String::as_str).collect();
+    assert_eq!(members, ["v", "roots"], "the vault is the root and nothing else");
+    assert!(held["roots"][0]["pkcs8"].is_string(), "the vault carries the root's key");
+    let kept = open_sealed(&record);
+    assert!(kept["roots"].as_array().is_none_or(|r| r.iter().all(|e| e.get("pkcs8").is_none())), "the record holds no key: {kept}");
+    assert_eq!(kept["ledger"].as_array().map(Vec::len), Some(1), "the record holds the signing's ledger entry");
+    assert!(kept["ledger"][0].get("leaf").is_none(), "a ledger entry is the endpoint and the dates, never the leaf");
     pact()
         .args(["chain", "check", "--expect-endpoint", "https://agent.alina.example/mcp", "--expect-root", &root_fp, "--chain"])
         .arg(&chain)
@@ -603,4 +624,124 @@ fn live_card_signs_a_root_and_a_leaf() {
     // And the vault never held the key.
     let text = std::fs::read_to_string(&vault).expect("the vault");
     assert!(!text.contains("pkcs8"), "a card-held root leaves no key in the vault");
+}
+
+/// The two files of one identity are found together, kept together and never taken for each other
+/// (the review of PR #29: C1, C2, C3, C7, C21, S1, S2; the owner's D2).
+#[test]
+fn the_two_files_are_found_together_and_never_mistaken() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    let pass = passphrase_file(d, 0o600);
+    let sub = |n: &str| {
+        let p = d.join(n);
+        fs::create_dir_all(&p).unwrap();
+        p
+    };
+    let (a, b, c, e, f, g) = (sub("a"), sub("b"), sub("c"), sub("e"), sub("f"), sub("g"));
+    let key = d.join("host.key");
+    pact().args(["key", "new", "--alg", "ed25519", "--out"]).arg(&key).assert().success();
+    let csr = |name: &str, endpoint: &str| {
+        let p = d.join(name);
+        pact().args(["csr", "new", "--endpoint", endpoint, "--dns", "--key"]).arg(&key).arg("--out").arg(&p).assert().success();
+        p
+    };
+    let (home, away) = (csr("home.csr", "https://agent.alina.example/mcp"), csr("away.csr", "https://alina.pact.contact/alina/mcp"));
+    let as_pact = || {
+        let mut cmd = pact();
+        cmd.env("PACT_PASSPHRASE_FILE", &pass);
+        cmd
+    };
+    let issue = |csr: &Path, vault: &Path| {
+        let mut cmd = as_pact();
+        cmd.args(["id", "issue", "--yes", "--csr"]).arg(csr).arg("--vault").arg(vault);
+        cmd
+    };
+
+    let vault = a.join("alina.pact-vault.json");
+    let record = record_of(&vault);
+    as_pact().args(["id", "create", "--name", "Alina Rao", "--vault"]).arg(&vault).assert().success();
+    issue(&home, &vault).assert().success();
+    let record_bytes = fs::read(&record).unwrap();
+
+    // S2, C21: through a link to the vault, the record is the one beside the file it leads to, so a
+    // second endpoint is the move it is — not a second live leaf from an empty ledger at the link.
+    #[cfg(unix)]
+    {
+        let link = b.join("alina.json");
+        std::os::unix::fs::symlink(&vault, &link).unwrap();
+        issue(&away, &link).assert().failure().stderr(predicate::str::contains("a leaf is live"));
+        assert!(!record_of(&link).exists(), "a second record was started beside the link");
+        as_pact().args(["id", "ledger", "--vault"]).arg(&link).assert().success().stdout(predicate::str::contains("agent.alina.example"));
+    }
+
+    // C2: a mistyped vault is not an identity with no leaves.
+    as_pact()
+        .args(["id", "ledger", "--vault"])
+        .arg(a.join("alnia.pact-vault.json"))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no vault there"));
+    as_pact()
+        .args(["contacts", "export", "--vault"])
+        .arg(a.join("alnia.pact-vault.json"))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no vault there"));
+
+    // C3: a backup onto the identity's own files is refused, even with --force, and nothing moves.
+    for to in [&record, &vault] {
+        as_pact()
+            .args(["id", "backup", "--force", "--vault"])
+            .arg(&vault)
+            .arg("--to")
+            .arg(to)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("a backup goes somewhere other"));
+    }
+    assert_eq!(fs::read(&record).unwrap(), record_bytes, "the record was replaced");
+
+    // C7: a vault's bytes at the record's name are refused as not a record, before anything is signed.
+    let cv = c.join("x.pact-vault.json");
+    fs::copy(&vault, &cv).unwrap();
+    fs::copy(&vault, record_of(&cv)).unwrap();
+    issue(&away, &cv).assert().failure().stdout(predicate::str::is_empty()).stderr(predicate::str::contains("not a record"));
+
+    // D2 (owner, 2026-09-26): a vault with no record beside it issues a replacement, says so before
+    // it signs, and starts the record with that leaf.
+    let alone = e.join("k.pact-vault.json");
+    fs::copy(&vault, &alone).unwrap();
+    issue(&away, &alone).assert().success().stderr(
+        predicate::str::contains("replaces")
+            .and(predicate::str::contains("no ledger here"))
+            .and(predicate::str::contains("NEW HOST").not()),
+    );
+    assert_eq!(open_sealed(&record_of(&alone))["ledger"].as_array().map(Vec::len), Some(1), "the record starts with the leaf");
+
+    // C1: a record is never started under a passphrase nothing checked.
+    let other = f.join("other");
+    fs::write(&other, "not the passphrase\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&other, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let lone = f.join("k.pact-vault.json");
+    fs::copy(&vault, &lone).unwrap();
+    let book = f.join("book.json");
+    fs::write(&book, "[]").unwrap();
+    pact().env("PACT_PASSPHRASE_FILE", &other).args(["contacts", "import", "--yes", "--vault"]).arg(&lone).arg(&book).assert().failure();
+    assert!(!record_of(&lone).exists(), "a record was sealed under the wrong passphrase");
+
+    // S1: a record that cannot be written takes the vault with it, so the rerun is not refused.
+    #[cfg(unix)]
+    {
+        let made = g.join("n.pact-vault.json");
+        std::os::unix::fs::symlink(g.join("nowhere"), record_of(&made)).unwrap();
+        as_pact().args(["id", "create", "--name", "N", "--vault"]).arg(&made).assert().failure();
+        assert!(!made.exists(), "a vault was left without its record");
+        fs::remove_file(record_of(&made)).unwrap();
+        as_pact().args(["id", "create", "--name", "N", "--vault"]).arg(&made).assert().success();
+    }
 }

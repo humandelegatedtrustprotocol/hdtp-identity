@@ -7,9 +7,14 @@ self-hoster needs nothing installed beside it. Two halves:
   `key new`, `vectors gen|check|intrude`. Every verdict is the core's; the terminal formats it.
 - **The wallet.** `id create|issue|renew|ledger|show|backup|restore`, `contacts export|import`.
   An identity is two files under one passphrase (SPEC §9): the **vault**, `<name>.pact-vault.json`,
-  the root and nothing else, written when the identity is made and never again — the copy a person
-  keeps; and its **record**, `<name>.pact-record.json`, the ledger and the contact book, which every
-  signing writes. A vault brought somewhere without its record starts one with an empty ledger.
+  the root and nothing else, written when the identity is made and again only when a card takes
+  its root (`card-attach`) — the copy a person keeps; and its **record**, `<name>.pact-record.json`,
+  the ledger and the contact book, which every signing writes. Both are found at the vault's real
+  location (through a link, beside the file it leads to), and made, backed up and restored
+  together or not at all. A vault with no record beside it has no ledger there, so the leaf it
+  issues next is a replacement of whatever was live, said before it is signed, and the record
+  starts with it. Every command that reads the record opens the vault first, so a mistyped path
+  or a wrong passphrase is refused rather than read as an empty book.
   The rules of SPEC §9 are enforced by the core's `wallet_issue` — proof of possession on every
   request, a root's own key refused, one live leaf per identity (a second endpoint is a move and
   must be asked for as one), `notBefore` monotonic over the ledger, at most 398 days — and the
