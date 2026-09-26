@@ -47,6 +47,22 @@ step "Go port: vet, tests, adapter"
 step "The pin is of THIS commit, and the Wasm build in this tree is the pinned one"
 node js/verify.mjs
 
+# Every JS suite below writes one result file (js/results.mjs: id, verdict, reason, ms per case) into
+# target/gate-results, wiped here so nothing in it predates this run; the last step prints a line per
+# suite and fails if a suite wrote none. The seed's intrusion run is kept there too (js/seed.mjs), so
+# the four suites that read it run it once.
+PACT_RESULTS="$(pwd)/target/gate-results"
+PACT_RUN="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+export PACT_RESULTS PACT_RUN
+rm -rf "$PACT_RESULTS"
+mkdir -p "$PACT_RESULTS"
+node_tests() { # <suite> <files…>: node --test, with the spec reporter here and a result file there
+  suite="$1"; shift
+  PACT_SUITE="$suite" node --test --test-timeout=60000 \
+    --test-reporter=spec --test-reporter-destination=stdout \
+    --test-reporter=./js/test-reporter.mjs --test-reporter-destination="$PACT_RESULTS/$suite.json" "$@"
+}
+
 step "Appendix B through the bindings, and through the Go port"
 node js/check.mjs
 node js/check.mjs --port go
@@ -56,19 +72,24 @@ node js/intrude.mjs
 node js/intrude.mjs --port go
 
 step "The contract's own validator, and CONTRACT.md rendered from the contract file"
-node --test contract/schema.test.mjs
+node_tests contract-tests contract/schema.test.mjs
 node contract/render.mjs --check
 
 step "The two ports answer a caller alike, and both answer as contract/contract.json says"
-node js/parity.mjs
-node --test --test-timeout=60000 js/live.test.mjs js/port.test.mjs js/surface.test.mjs js/cases.test.mjs js/seed.test.mjs
+node js/parity.mjs --manifest "$PACT_RESULTS/parity-manifest.json"
+
+step "The harness's own tests: the live battery against the seed's node, the Go adapter, the readers"
+node_tests js-tests js/*.test.mjs
 
 step "Every MUST in the specification names something that holds it, and the record is current"
 node js/musts.mjs
-node js/record.mjs --check
+node js/record.mjs --check --manifest "$PACT_RESULTS/parity-manifest.json"
 
 step "The seed itself still proves the spec"
 ( cd ../pact-protocol && node vectors/check.mjs )
 node js/seed.mjs
+
+step "One line per suite, from its result file"
+node js/results.mjs --summary check-wasm check-go intrude-wasm intrude-go contract-tests parity js-tests musts
 
 printf '\ngate: ok\n'
