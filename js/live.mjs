@@ -68,7 +68,7 @@ export function answeredEnvelope(body) {
 
 /**
  * What the CONTROL has to show. `answerCode` says `sealed` for anything SHAPED like an envelope —
- * four non-empty strings — which is the right price for twenty-seven scenarios where a false
+ * four non-empty strings — which is the right price for every other scenario, where a false
  * "sealed" costs nothing. For the one call that must get THROUGH it is no evidence at all: a
  * receiver, or a carrier in front of it, answering `{"protected":"a","enc":"b","ct":"c","sig":"d"}`
  * scored the control as passed, while this driver held the key that would have said otherwise.
@@ -121,33 +121,56 @@ export function answerCode(body) {
   return body?.result ? 'result' : 'unknown';
 }
 
-/** §13.3's skew window, and the margin a LIVE run adds to it. */
-const WINDOW = 300, MARGIN = 30;
+/**
+ * The battery as data: js/live-scenarios.json names every scenario, its order, the code it must be
+ * answered with, which one is the CONTROL and the skew window. This driver and the Rust one
+ * (`pact vectors intrude`, which reads the same file through `include_str!`) only BUILD the envelope
+ * for an id; js/live.test.mjs and the crate's tests hold both to the file.
+ */
+export const BATTERY = checkBattery(JSON.parse(readFileSync(new URL('./live-scenarios.json', import.meta.url), 'utf8')));
 
 /**
- * The scenarios, in an order that matters, by an attacker nobody has met.
+ * What the file must be for a run to mean anything: ids that are unique, codes that are strings, and
+ * exactly one CONTROL, last — after it the attacker is pending on the target and no stranger.
+ */
+export function checkBattery(b) {
+  const list = b?.scenarios;
+  if (!Array.isArray(list) || !list.length) throw new Error('js/live-scenarios.json: no scenarios');
+  if (!Number.isInteger(b.window_s) || !Number.isInteger(b.margin_s)) throw new Error('js/live-scenarios.json: window_s and margin_s must be whole seconds');
+  const ids = new Set();
+  for (const s of list) {
+    if (typeof s.id !== 'string' || typeof s.name !== 'string' || typeof s.expect !== 'string') throw new Error(`js/live-scenarios.json: every scenario has a string id, name and expect: ${JSON.stringify(s)}`);
+    if (ids.has(s.id)) throw new Error(`js/live-scenarios.json: the id ${s.id} is used twice`);
+    ids.add(s.id);
+  }
+  const controls = list.filter((s) => s.control);
+  if (controls.length !== 1) throw new Error(`js/live-scenarios.json: exactly one scenario must be the control; ${controls.length} are`);
+  if (list.at(-1) !== controls[0]) throw new Error('js/live-scenarios.json: the control must be last, because after it the attacker is no stranger');
+  return b;
+}
+
+/**
+ * The scenarios, in the file's order, by an attacker nobody has met.
  *
  * Three things here were wrong until 2026-09-20, and every one of them passed against the seed's
  * fake node and failed against a real one — which nothing had been aimed at since the list grew:
  *
  *  - **Mallory is new every run.** Her keys came from a fixed seed, so she was the same person each
- *    time, and the control below leaves her request PENDING on the target: from the second run on
- *    she was no stranger anywhere this had been aimed, and "a stranger in the small form" was
- *    answered as the pending contact she had become.
- *  - **The control runs LAST.** It sat ninth of twenty-seven, so the eighteen scenarios after it
- *    were not a stranger's either; two of them (a replayed small form, a sealed tools/list) were
- *    answered with a sealed refusal — correctly — and reported as intrusions that reproduce.
+ *    time, and the control leaves her request PENDING on the target: from the second run on she was
+ *    no stranger anywhere this had been aimed, and "a stranger in the small form" was answered as the
+ *    pending contact she had become.
+ *  - **The control runs LAST.** It sat ninth, so the scenarios after it were not a stranger's either;
+ *    two of them (a replayed small form, a sealed tools/list) were answered with a sealed refusal —
+ *    correctly — and reported as intrusions that reproduce. The file's order is checked on load.
  *  - **The skew scenarios carry a margin.** "301 seconds in the future" was sealed when the list
  *    was built and posted seconds later, by which time it was 299 seconds in the future and inside
  *    the window: the receiver accepted it, correctly. The exact boundary (300 in, 301 out) is the
  *    offline suite's, where there is no transit and one clock. Over a network the honest claim is
- *    "well outside the window is refused", so these are 300 + 30.
- *
- * The names are the Rust driver's too (`pact vectors intrude`), and js/live.test.mjs holds the two
- * lists to each other: they drifted apart the day they were written, 27 against 26.
+ *    "well outside the window is refused", so these are `window_s + margin_s`.
  */
-export function scenarios({ targetLeaf, now = Date.now() }) {
+export function scenarios({ targetLeaf, now = Date.now(), battery = BATTERY }) {
   const nowS = Math.floor(now / 1000);
+  const skew = battery.window_s + battery.margin_s;
   const E_M = 'https://mallory.example/mcp';
   const rootM = ed25519FromSeed(randomBytes(32)), hostM = ed25519FromSeed(randomBytes(32));
   const ROOT_M = buildRoot({ cn: 'Mallory', key: rootM, notBefore: new Date(now - D), label: 'live/root_m' });
@@ -158,11 +181,6 @@ export function scenarios({ targetLeaf, now = Date.now() }) {
   const env = (o) => sealEnvelope({ senderKey: hostM, senderChain: chainM, recipientLeaf: targetLeaf, ts: nowS, msgId: `live-${++n}-${now}`, ...o });
   const message = (o = {}) => env({ params: { name: 'send_message', arguments: { msg_id: 'm', text: 'hello' } }, ...o });
   const request = (o = {}) => env({ params: { name: 'request_contact', arguments: { card, note: 'hi' } }, ...o });
-  const controlEnvelope = request();
-  const control = {
-    pkcs8: b64url(hostM.priv.export({ format: 'der', type: 'pkcs8' })),
-    msgId: JSON.parse(fromB64url(controlEnvelope.protected).toString()).msg_id,
-  };
   const tamper = (e) => ({ ...e, sig: b64url(Buffer.from([1, 2, 3])) });
   // `sig` covers `protected ‖ enc ‖ ct` with nothing between them, so a byte moved
   // across the enc/ct boundary leaves the signed bytes identical: what refuses it is
@@ -176,58 +194,62 @@ export function scenarios({ targetLeaf, now = Date.now() }) {
   const INTER_M = buildLeaf({ cn: 'Mallory', rootCn: 'Mallory', root: rootM, hostKey: rootM, endpoint: E_M, notBefore: new Date(now - D), notAfter: new Date(now + 365 * D), cA: true, usage: [5], label: 'live/inter_m' });
   const FUTURE_M = buildLeaf({ cn: 'Mallory', rootCn: 'Mallory', root: rootM, hostKey: hostM, endpoint: E_M, notBefore: new Date(now + H), notAfter: new Date(now + 300 * D), label: 'live/future_m' });
   const EXPIRED_M = buildLeaf({ cn: 'Mallory', rootCn: 'Mallory', root: rootM, hostKey: hostM, endpoint: E_M, notBefore: new Date(now - 400 * D), notAfter: new Date(now - D), label: 'live/expired_m' });
-  const INVALID = 'envelope_invalid';
-  return [
-    { name: 'a stranger in the small form, naming a leaf nobody holds', envelope: message({ reference: true }), expect: 'chain_required' },
-    { name: 'the same small-form envelope replayed', envelope: message({ reference: true }), twice: true, expect: 'chain_required' },
-    { name: 'a stranger in the full form calling a contact tool', envelope: message(), expect: INVALID },
-    { name: 'a full-form envelope whose signature was tampered', envelope: tamper(message()), expect: INVALID },
 
-    // Headers no honest sealer writes, each SEALED UNDER the forged header: rewritten afterwards,
-    // the AAD stops matching and the envelope is refused for that alone, whatever the header says.
-    { name: 'an envelope sealed to a key this endpoint never held', envelope: message({ header: { kid: 'sha256:' + b64url(Buffer.alloc(32, 7)) } }), expect: INVALID },
-    { name: 'a header carrying a member the protocol does not list', envelope: message({ header: { from: 'sha256:x' } }), expect: INVALID },
-    { name: 'a suite that is not the one the recipient key takes', envelope: message({ header: { suite: otherSuite } }), expect: INVALID },
-
-    // Chain confusion, over the wire. The offline battery proves the library
-    // refuses these shapes; these prove the DEPLOYED node runs that library on
-    // the path a stranger actually reaches, past its edge and its router.
-    { name: 'a chain of one certificate', envelope: message({ chainInside: [LEAF_M] }), expect: INVALID },
-    { name: 'an empty chain', envelope: message({ chainInside: [] }), expect: INVALID },
-    { name: 'a chain of three certificates', envelope: message({ chainInside: [LEAF_M, ROOT_M, ROOT_M] }), expect: INVALID },
-    { name: 'the chain in reverse order', envelope: message({ chainInside: [ROOT_M, LEAF_M] }), expect: INVALID },
-    { name: 'the root presented as its own leaf', envelope: message({ chainInside: [ROOT_M, ROOT_M] }), expect: INVALID },
-    { name: 'the leaf presented as its own root', envelope: message({ chainInside: [LEAF_M, LEAF_M] }), expect: INVALID },
-    { name: 'an intermediate posing as the root', envelope: message({ chainInside: [LEAF_M, INTER_M] }), expect: INVALID },
-
+  // One builder per id in the file. Headers no honest sealer writes are each SEALED UNDER the forged
+  // header: rewritten afterwards, the AAD stops matching and the envelope is refused for that alone,
+  // whatever the header says.
+  const build = {
+    'small-form-stranger': () => message({ reference: true }),
+    'small-form-replayed': () => message({ reference: true }),
+    'full-form-contact-tool': () => message(),
+    'tampered-signature': () => tamper(message()),
+    'unknown-kid': () => message({ header: { kid: 'sha256:' + b64url(Buffer.alloc(32, 7)) } }),
+    'unlisted-header-member': () => message({ header: { from: 'sha256:x' } }),
+    'wrong-suite': () => message({ header: { suite: otherSuite } }),
+    // Chain confusion, over the wire. The offline battery proves the library refuses these shapes;
+    // these prove the DEPLOYED node runs that library on the path a stranger actually reaches.
+    'chain-of-one': () => message({ chainInside: [LEAF_M] }),
+    'chain-empty': () => message({ chainInside: [] }),
+    'chain-of-three': () => message({ chainInside: [LEAF_M, ROOT_M, ROOT_M] }),
+    'chain-reversed': () => message({ chainInside: [ROOT_M, LEAF_M] }),
+    'root-as-leaf': () => message({ chainInside: [ROOT_M, ROOT_M] }),
+    'leaf-as-root': () => message({ chainInside: [LEAF_M, LEAF_M] }),
+    'intermediate-as-root': () => message({ chainInside: [LEAF_M, INTER_M] }),
     // Time, well outside the edges the receiver is supposed to hold.
-    { name: 'a leaf that is not valid yet', envelope: message({ chainInside: [FUTURE_M, ROOT_M] }), expect: INVALID },
-    { name: 'an expired leaf', envelope: message({ chainInside: [EXPIRED_M, ROOT_M] }), expect: INVALID },
-    { name: 'an envelope an hour old', envelope: message({ ts: nowS - 3600, exp: nowS - 3540 }), expect: INVALID },
-    { name: `an envelope ${WINDOW + MARGIN} seconds old`, envelope: message({ ts: nowS - WINDOW - MARGIN, exp: nowS + 300 }), expect: INVALID },
-    { name: `an envelope ${WINDOW + MARGIN} seconds in the future`, envelope: message({ ts: nowS + WINDOW + MARGIN, exp: nowS + 900 }), expect: INVALID },
-    { name: 'an envelope asking to be remembered for a year', envelope: message({ ts: nowS, exp: nowS + 365 * 86400 }), expect: INVALID },
-
+    'leaf-not-yet-valid': () => message({ chainInside: [FUTURE_M, ROOT_M] }),
+    'leaf-expired': () => message({ chainInside: [EXPIRED_M, ROOT_M] }),
+    'hour-old': () => message({ ts: nowS - 3600, exp: nowS - 3540 }),
+    'past-window': () => message({ ts: nowS - skew, exp: nowS + 300 }),
+    'future-window': () => message({ ts: nowS + skew, exp: nowS + 900 }),
+    'year-lifetime': () => message({ ts: nowS, exp: nowS + 365 * 86400 }),
     // The retired generation, refused by a node that no longer implements it.
-    { name: 'a v: 1 header, the retired generation', envelope: message({ header: { v: 1 } }), expect: INVALID },
-    { name: 'a header claiming a version that does not exist yet', envelope: message({ header: { v: 3 } }), expect: INVALID },
-    { name: 'a header whose ts and exp are strings', envelope: message({ header: { ts: String(nowS), exp: String(nowS + 600) } }), expect: INVALID },
-    { name: 'an empty msg_id', envelope: message({ msgId: '' }), expect: INVALID },
-    { name: 'a result envelope dispatched as a request', envelope: message({ cty: 'application/pact-result+json' }), expect: INVALID },
-    { name: 'a sealed tools/list from a stranger', envelope: env({ method: 'tools/list', params: {} }), expect: INVALID },
-    { name: 'a byte moved from the encapsulated key into the ciphertext', envelope: slid(message()), expect: INVALID },
-
-    // THE CONTROL, and it is last on purpose. Twenty-six answers of `envelope_invalid` are also
-    // what a receiver that refuses EVERYTHING gives; this is the one well-formed call from a
-    // stranger that must get through the same door — sealed, by the target, to her key. It
-    // leaves a pending request behind, which is why nothing may come after it.
-    { name: 'CONTROL: a stranger asking for contact with a card that is her leaf', envelope: controlEnvelope, expect: 'sealed', control, note: 'leaves a contact request on the target' },
+    'retired-v1': () => message({ header: { v: 1 } }),
+    'future-v3': () => message({ header: { v: 3 } }),
+    'string-times': () => message({ header: { ts: String(nowS), exp: String(nowS + 600) } }),
+    'empty-msg-id': () => message({ msgId: '' }),
+    'result-as-request': () => message({ cty: 'application/pact-result+json' }),
+    'stranger-tools-list': () => env({ method: 'tools/list', params: {} }),
+    'enc-byte-slid': () => slid(message()),
+    // THE CONTROL: the one well-formed call from a stranger that must get through the same door —
+    // sealed, by the target, to her key. Every other answer of the battery is also what a receiver
+    // that refuses EVERYTHING gives.
+    control: () => request(),
+  };
+  const named = new Set(battery.scenarios.map((s) => s.id));
+  const unnamed = Object.keys(build).filter((id) => !named.has(id));
+  if (unnamed.length) throw new Error(`js/live.mjs builds ${unnamed.join(', ')}, which js/live-scenarios.json does not name`);
+  return battery.scenarios.map((s) => {
+    if (!build[s.id]) throw new Error(`js/live-scenarios.json names ${s.id}, and js/live.mjs has no builder for it`);
+    const envelope = build[s.id]();
+    const control = s.control
+      ? { pkcs8: b64url(hostM.priv.export({ format: 'der', type: 'pkcs8' })), msgId: JSON.parse(fromB64url(envelope.protected).toString()).msg_id }
+      : undefined;
     // Every entry carries the ATTACKER's root, because "she is new every run" is otherwise
     // untestable from outside: her chain rides inside the ciphertext, and the signature over it
     // differs between two calls whatever her long-term keys are (HPKE's ephemeral is fresh each
     // time). A test written against `sig` therefore passed with the fixed seed this fix removed.
-    // `endpoint` used to be spread here and nothing ever read it.
-  ].map((s) => ({ ...s, attacker: b64url(ROOT_M) }));
+    return { ...s, envelope, ...(control ? { control } : {}), attacker: b64url(ROOT_M) };
+  });
 }
 
 /**
@@ -330,8 +352,8 @@ export async function cli(argv) {
   // A node on your own machine serves TLS under its own chain, which no public authority signed.
   // With the card from a FILE, what is measured does not rest on the transport: every envelope is
   // sealed to the key in that card. WITHOUT one the card is fetched over the very channel this flag
-  // stops authenticating, so whoever answers supplies the key all 28 envelopes are sealed to, and a
-  // clean "28 blocked" says nothing about the target. The Rust driver was given this refusal on
+  // stops authenticating, so whoever answers supplies the key every envelope is sealed to, and a
+  // clean "all blocked" says nothing about the target. The Rust driver was given this refusal on
   // 2026-09-20 and this one was not — the same defect, fixed in one of two copies.
   if (argv.includes('--insecure')) {
     if (!cardFile) { console.error('--insecure turns off certificate verification, so the card must come from a file: pass --card <file>'); return 2; }
