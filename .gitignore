@@ -2,4 +2,3 @@ target/
 js/pkg-*/
 js/node_modules/
 go/bin/
-js/.parity-manifest.json
