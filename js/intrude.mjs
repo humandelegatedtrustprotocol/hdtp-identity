@@ -15,6 +15,7 @@ import { makePort, portFromArgv } from './port.mjs';
 import { alina, bharat as bharatOf, mallory, CLOCK, ENDPOINTS, H, D } from './cast.mjs';
 import { makeDefender } from './defender.mjs';
 import { seedIntrusions } from './seed.mjs';
+import { recorder } from './results.mjs';
 
 if (portFromArgv() === 'live') {
   const { cli } = await import('./live.mjs');
@@ -59,9 +60,11 @@ const rule = (chain, o = {}) => { const r = validateChain(chain, { now: NOW, ...
 const results = [];
 const scenario = (category, name, expect, fn) => {
   let got;
+  const t0 = performance.now();
   try { got = fn(); } catch (e) { got = 'threw: ' + e.message; }
+  const ms = performance.now() - t0;
   const verdict = typeof expect === 'function' ? expect(got) : (got === expect ? 'blocked' : 'REPRODUCES');
-  results.push({ category, name, got: typeof got === 'string' ? got : JSON.stringify(got), verdict });
+  results.push({ category, name, got: typeof got === 'string' ? got : JSON.stringify(got), verdict, ms });
 };
 const residual = (label) => (got) => (got === label ? 'residual' : 'REPRODUCES');
 const blockedIf = (pred) => (got) => (pred(got) ? 'blocked' : 'REPRODUCES');
@@ -443,10 +446,16 @@ console.log(`\n${results.length} scenarios: ${count('blocked')} blocked, ${count
 // ── The same scenarios against the seed: every verdict must agree ───────────────
 const seedVerdicts = new Map(seedIntrusions().scenarios.map((s) => [s.name, s.verdict]));
 let differences = 0;
+const rec = recorder(`intrude-${port.kind}`);
 for (const r of results) {
   const s = seedVerdicts.get(r.name);
-  if (s === undefined) { differences++; console.log(`  seed has no scenario named: ${r.name}`); }
-  else if (s !== r.verdict) { differences++; console.log(`  DIFFERS from the seed: ${r.name}: seed ${s}, ${port.kind} ${r.verdict} (got ${r.got})`); }
+  let why = null;
+  if (s === undefined) { differences++; why = 'the seed has no scenario of this name'; console.log(`  seed has no scenario named: ${r.name}`); }
+  else if (s !== r.verdict) { differences++; why = `seed ${s}, ${port.kind} ${r.verdict} (got ${r.got})`; console.log(`  DIFFERS from the seed: ${r.name}: ${why}`); }
+  else if (r.verdict === 'REPRODUCES') why = `reproduces (got ${r.got})`;
+  rec.add(r.name, why ? 'FAIL' : 'PASS', { reason: why ?? r.verdict, ms: r.ms });
 }
+for (const name of seedVerdicts.keys()) if (!results.some((r) => r.name === name)) rec.add(name, 'FAIL', { reason: 'a seed scenario this suite does not run', ms: 0 });
+rec.write();
 console.log(`${results.length - differences}/${results.length} verdicts agree with the seed (${seedVerdicts.size} seed scenarios)`);
 process.exit(count('REPRODUCES') || differences || seedVerdicts.size !== results.length ? 1 : 0);

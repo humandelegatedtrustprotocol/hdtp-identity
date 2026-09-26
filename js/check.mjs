@@ -7,6 +7,7 @@ import { b64url, fromB64url } from '../../pact-protocol/vectors/lib/keys.mjs';
 import { makePort, portFromArgv } from './port.mjs';
 import { makeDefender } from './defender.mjs';
 import { appendixB } from './seed.mjs';
+import { recorder } from './results.mjs';
 
 const port = await makePort(portFromArgv());
 if (!port) { console.log('the Go port is not built (go/bin/pact-identity-go)'); process.exit(2); }
@@ -20,7 +21,8 @@ if (blocks.length < 1) throw new Error('Appendix B has no vector blocks');
 const [v2] = blocks;
 
 let failures = 0, checks = 0;
-const ok = (cond, what) => { checks++; if (!cond) { failures++; console.log('  FAIL ' + what); } };
+const rec = recorder(`check-${port.kind}`);
+const ok = (cond, what) => { checks++; rec.add(what, cond ? 'PASS' : 'FAIL', { reason: cond ? null : 'the check did not hold' }); if (!cond) { failures++; console.log('  FAIL ' + what); } };
 const spkiOfPkcs8 = (hexKey) => fromB64url(port.call('public_key', { pkcs8: b64url(Buffer.from(hexKey, 'hex')) }).spki);
 
 if (!v2) {
@@ -148,4 +150,5 @@ if (!v2) {
 }
 
 console.log(`${checks - failures}/${checks} checks passed`);
+rec.write();
 process.exit(failures ? 1 : 0);

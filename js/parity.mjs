@@ -33,6 +33,7 @@ import { loadContract, judge } from '../contract/contract.mjs';
 import { fixtures } from './cases/fixtures.mjs';
 import { collect } from './cases/index.mjs';
 import { rustDispatch, goDispatch } from './surface.mjs';
+import { recorder } from './results.mjs';
 
 const wasm = await makePort('wasm');
 const go = await makePort('go');
@@ -77,12 +78,16 @@ const seenCodes = new Map(); // function -> the error codes it was seen to fail 
 const succeeded = (raw) =>
   raw && !raw.error && !raw.threw && raw.ok !== false && !(raw.result && raw.result.code && raw.result.code !== 'ok');
 const provenWhole = new Set();
+const results = recorder('parity');
 
 for (const { id, fn, args, how } of cases) {
   if (only && !id.includes(only) && fn !== only) continue;
   ran++;
+  const t0 = performance.now();
   const raw = answer(wasm, fn, args);
   const rawGo = answer(go, fn, args);
+  const ms = performance.now() - t0; // the two ports' answers
+  const reasons = [];
   if ((how === '*' || typeof how === 'function') && succeeded(raw)) provenWhole.add(fn);
   for (const [port, got] of [['wasm', raw], ['go', rawGo]]) {
     if (got?.threw) continue; // a port that threw has already failed the comparison below
@@ -90,6 +95,7 @@ for (const { id, fn, args, how } of cases) {
     const wrong = judge(contract, fn, args, got, seenCodes);
     if (wrong.length) {
       offContract++;
+      reasons.push(`off the contract (${port}): ${wrong[0]}`);
       console.log(`  OFF THE CONTRACT  ${id}  (${port})`);
       for (const w of wrong.slice(0, 4)) console.log(`    ${w}`);
     }
@@ -102,18 +108,21 @@ for (const { id, fn, args, how } of cases) {
   for (const [port, got] of missed) console.log(`  NOT AS THE SPEC SAYS  ${id}  (${port}): want ${JSON.stringify(want)}, got ${JSON.stringify(judged(got))}`);
   if (missed.length) {
     bad++;
+    results.add(id, 'FAIL', { reason: [`not as the spec says (${missed.map(([p]) => p).join(', ')})`, ...reasons].join('; '), ms });
     continue;
   }
   const a = pick(raw, how, wasm);
   const b = pick(rawGo, how, go);
   if (JSON.stringify(a) !== JSON.stringify(b)) {
     bad++;
+    reasons.push('the ports differ');
     console.log(`  DIFFER  ${id}`);
     console.log(`    wasm ${JSON.stringify(a)}`);
     console.log(`    go   ${JSON.stringify(b)}`);
   } else if (process.argv.includes('--verbose')) {
     console.log(`  agree   ${id}`);
   }
+  results.add(id, reasons.length ? 'FAIL' : 'PASS', { reason: reasons.join('; ') || null, ms });
 }
 
 // ── the coverage gate ──────────────────────────────────────────────────────────────────────────
@@ -173,6 +182,10 @@ if (failing.length) {
   for (const p of failing) console.log(`    ${p}`);
 }
 if (only) console.log('\n  a filtered run: the coverage gate (every function has a case, one compared whole) was not evaluated');
+// The gate's own two verdicts, as cases of the result file, so a run of record carries them.
+results.add('the collection, and the dispatchers against the contract', problems.length ? 'FAIL' : 'PASS', { reason: problems.join('; ') || null, ms: 0 });
+results.add('the coverage gate', only ? 'SKIPPED' : coverage.length ? 'FAIL' : 'PASS', { reason: only ? 'a filtered run' : coverage.join('; ') || null, ms: 0 });
+results.write();
 
 // ── the manifest ───────────────────────────────────────────────────────────────────────────────
 //
