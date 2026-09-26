@@ -22,9 +22,12 @@ test('a suite writes its cases in the schema, and no two share an id', () => inD
   const written = JSON.parse(readFileSync(r.write(), 'utf8'));
   assert.equal(written.repo, 'pact-identity');
   assert.equal(written.suite, 'demo');
-  assert.deepEqual(written.cases.map(({ id, verdict, reason }) => ({ id, verdict, reason })), [
-    { id: 'one', verdict: 'PASS', reason: null },
-    { id: 'one #2', verdict: 'FAIL', reason: 'again' },
+  assert.equal(written.schema, 'pact-results/1');
+  for (const k of ['repo', 'suite', 'tier', 'run', 'cases', 'counts']) assert.ok(k in written, k);
+  for (const k of ['started', 'ended', 'commit', 'target']) assert.ok(k in written.run, `run.${k}`);
+  assert.deepEqual(written.cases.map(({ id, name, verdict, evidence }) => ({ id, name, verdict, evidence })), [
+    { id: 'one', name: 'one', verdict: 'PASS', evidence: [] },
+    { id: 'one #2', name: 'one #2', verdict: 'FAIL', evidence: ['again'] },
   ]);
   assert.equal(written.cases[1].ms, 3);
   assert.ok(Object.keys(written).includes('run') && Object.keys(written).includes('tier'));
@@ -43,7 +46,7 @@ test('the summary fails a promised suite with no file, a case that is not a PASS
   assert.equal(summary(dir, ['good']).ok, true);
   assert.equal(summary(dir, ['good', 'absent']).ok, false);
   assert.match(summary(dir, ['absent']).lines[0], /NO RESULT FILE/);
-  put('skipped', [{ id: 'a', verdict: 'PASS' }, { id: 'b', verdict: 'SKIPPED', reason: 'no Chrome' }]);
+  put('skipped', [{ id: 'a', verdict: 'PASS' }, { id: 'b', verdict: 'SKIPPED', evidence: ['no Chrome'] }]);
   assert.equal(summary(dir, ['skipped']).ok, false, 'a case the tier promised and skipped fails it');
   put('empty', []);
   assert.equal(summary(dir, ['empty']).ok, false);

@@ -1,9 +1,11 @@
-// One result file per suite, beside the console output, in the schema of
-// pact-gateway/docs/release/refactor-2026-09-26.md §1.3:
+// One result file per suite, beside the console output, in the one schema every runner of the
+// workspace writes (pact-gateway/docs/testing.md, "Results"):
 //
-//   { run, repo, tier, suite, cases: [{ id, verdict, reason, evidence?, ms }] }
+//   { schema: 'pact-results/1', repo, suite, tier, run: { started, ended, commit, target },
+//     cases: [{ id, name, verdict, evidence: [string], ms }], counts: { VERDICT: n } }
 //
-// `verdict` is PASS, FAIL, UNREACHED or SKIPPED; `reason` says why for anything but a plain PASS;
+// `verdict` is PASS, FAIL, UNREACHED or SKIPPED; a case that is not a plain PASS says why as its
+// first line of evidence;
 // `ms` is the case's own time where the suite times each case (parity, intrude, the node --test
 // suites) and the time since the suite's previous case otherwise (check, musts).
 //
@@ -11,6 +13,7 @@
 // target/gate-results, wipes it first, and ends with `node js/results.mjs --summary <suite…>`, which
 // prints one line per suite and fails when a suite it was promised wrote no file, or any case in one
 // is not a PASS. PACT_RUN names the run (gate.sh sets it; otherwise the time the suite started).
+import { execFileSync } from 'node:child_process';
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -31,7 +34,8 @@ export function recorder(suite, { tier = process.env.PACT_TIER ?? 'pre-push' } =
       const n = (seen.get(id) ?? 0) + 1;
       seen.set(id, n);
       const now = performance.now();
-      cases.push({ id: n > 1 ? `${id} #${n}` : id, verdict, reason, ...(evidence === undefined ? {} : { evidence }), ms: Math.round((ms ?? now - last) * 10) / 10 });
+      const key = n > 1 ? `${id} #${n}` : id;
+      cases.push({ id: key, name: key, verdict, evidence: [...(reason ? [reason] : []), ...(evidence ?? [])], ms: Math.round((ms ?? now - last) * 10) / 10 });
       last = now;
     },
     cases,
@@ -39,7 +43,11 @@ export function recorder(suite, { tier = process.env.PACT_TIER ?? 'pre-push' } =
       const dir = process.env.PACT_RESULTS;
       if (!dir) return null;
       const file = join(dir, `${suite}.json`);
-      writeFileSync(file, JSON.stringify({ run: process.env.PACT_RUN ?? started, repo: 'pact-identity', tier, suite, cases }, null, 1) + '\n');
+      let commit = '';
+      try { commit = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { /* not a checkout */ }
+      const counts = Object.fromEntries(VERDICTS.map((v) => [v, cases.filter((c) => c.verdict === v).length]).filter(([, n]) => n));
+      const doc = { schema: 'pact-results/1', repo: 'pact-identity', suite, tier, run: { started: process.env.PACT_RUN ?? started, ended: new Date().toISOString(), commit, target: '' }, cases, counts };
+      writeFileSync(file, JSON.stringify(doc, null, 1) + '\n');
       return file;
     },
   };
@@ -58,7 +66,7 @@ export function summary(dir, suites) {
     const bad = cases.length - count.PASS;
     if (!cases.length || bad) ok = false;
     lines.push(`${suite.padEnd(16)} ${String(count.PASS).padStart(4)} PASS` + VERDICTS.slice(1).map((v) => (count[v] ? `, ${count[v]} ${v}` : '')).join('') + `  (${cases.length} cases, their own times summing to ${(ms / 1000).toFixed(1)} s)` + (cases.length ? '' : '  NO CASES'));
-    for (const c of cases.filter((x) => x.verdict !== 'PASS').slice(0, 5)) lines.push(`${''.padEnd(16)}   ${c.verdict} ${c.id}${c.reason ? `: ${c.reason}` : ''}`);
+    for (const c of cases.filter((x) => x.verdict !== 'PASS').slice(0, 5)) lines.push(`${''.padEnd(16)}   ${c.verdict} ${c.id}${c.evidence?.[0] ? `: ${c.evidence[0]}` : ''}`);
   }
   return { lines, ok };
 }
