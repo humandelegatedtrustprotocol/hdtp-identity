@@ -239,15 +239,13 @@
     ]
   },
   "9.#6": {
-    "hash": "7fed1ebb6144",
+    "hash": "78b5e8f3df3f",
     "text": "The **file** is the backup of the root and nothing else — the root's private key, its certificate and, for a d",
     "held_by": [
       "rust:a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates",
-      "rust:issues_from_the_vault",
-      "go:TestWalletIssue",
-      "rust:a_record_is_named_after_its_vault"
+      "rust:issues_from_the_vault"
     ],
-    "why": "the CLI writes the vault once, the root and nothing else, and every signing writes the record beside it; the core's ledger entry is the endpoint and the dates and never the leaf, in both ports; the browser wallet (pact-cloud/gateway/src/ceremony/ceremony.js) writes the same file once and the record on every signing",
+    "why": "the CLI's end-to-end test opens both files it wrote and holds each to its shape — the vault the root (its key and certificate) and nothing else, the record the ledger with no key — and the vault's bytes are unchanged by a signing; the core refuses a vault that carries a ledger or contacts, in both ports (issues_from_the_vault, and parity's 'wallet_issue from a vault that carries a ledger'). The browser wallet (pact-cloud/gateway/src/ceremony/ceremony.js) writes the file at creation and at a re-binding only, held by its ceremony suite. A CLI seals under the person's passphrase (owner, 2026-09-26); a card taking the root is the vault's one other writing (card-attach). (Until 2026-09-26 this cited a test of the record's file NAME and a test of the ledger entry, neither of which reads the file, and a search of ciphertext for \"pkcs8\".)",
     "elsewhere_names": [
       "cloud:gateway/src/ceremony/ceremony.js"
     ]
