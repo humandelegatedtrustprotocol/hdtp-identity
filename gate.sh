@@ -61,7 +61,7 @@ node contract/render.mjs --check
 
 step "The two ports answer a caller alike, and both answer as contract/contract.json says"
 node js/parity.mjs
-node --test --test-timeout=60000 js/live.test.mjs
+node --test --test-timeout=60000 js/live.test.mjs js/port.test.mjs
 
 step "Every MUST in the specification names something that holds it, and the record is current"
 node js/musts.mjs
