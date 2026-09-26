@@ -260,6 +260,9 @@ type VaultRoot struct {
 	PKCS8       string `json:"pkcs8"`
 	Cert        string `json:"cert"`
 	Created     string `json:"created"`
+	// ReboundAt marks a root re-bound to a new credential after the first was lost (SPEC §9): the
+	// record then keeps this entry's key, and no other's.
+	ReboundAt int64 `json:"rebound_at,omitempty"`
 }
 
 // LedgerEntry is one leaf the wallet issued: the endpoint and the dates, which is what every rule

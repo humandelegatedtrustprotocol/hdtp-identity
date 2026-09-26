@@ -427,7 +427,7 @@
     },
     "VaultRoot": {
       "type": "object",
-      "description": "One identity the wallet holds. In the file it carries the root's key (`pkcs8`) or names the card that does (`holder`); in the record it carries neither, until the root is re-bound (SPEC \u00a79).",
+      "description": "One identity the wallet holds. In the file it carries the root's key (`pkcs8`) or names the card that does (`holder`); in the record it carries neither, until the root is re-bound (SPEC \u00a79): then `rebound_at` (ms) marks the entry and `pkcs8` stays with it.",
       "properties": {
         "fingerprint": { "$ref": "#/$defs/Fingerprint" },
         "cn": { "type": "string" },
@@ -435,7 +435,8 @@
         "cert": { "$ref": "#/$defs/CertDer" },
         "created": { "$ref": "#/$defs/Instant" },
         "pkcs8": { "$ref": "#/$defs/Pkcs8" },
-        "holder": { "type": "object" }
+        "holder": { "type": "object" },
+        "rebound_at": { "type": "integer", "minimum": 0 }
       },
       "required": ["fingerprint", "cn", "cert", "created"],
       "additionalProperties": false
