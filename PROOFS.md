@@ -7,14 +7,14 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed here that did not pass.
 
-Specification: **2.1.3**. **50** normative sentences, **425** cross-port parity cases over **38** guarded functions.
+Specification: **2.1.3**. **52** normative sentences, **430** cross-port parity cases over **38** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**39** functions, spec 2.1.3): **850** answers held to the shape it declares, **0** did not. Of **77** declared error codes, **62** were produced by a case here; the rest are declared for a caller's benefit and no argument in this suite reaches them.
+Every answer of both ports is validated against `contract/contract.json` (**39** functions, spec 2.1.3): **860** answers held to the shape it declares, **0** did not. Of **77** declared error codes, **62** were produced by a case here; the rest are declared for a caller's benefit and no argument in this suite reaches them.
 
-## The 50 normative sentences of the specification
+## The 52 normative sentences of the specification
 
-A sentence carrying MUST, MUST NOT or REQUIRED, one row each, in document order. **37** are
-held by a test or an intrusion scenario in this repository; **13** belong to a wallet, a host
+A sentence carrying MUST, MUST NOT or REQUIRED, one row each, in document order. **38** are
+held by a test or an intrusion scenario in this repository; **14** belong to a wallet, a host
 or a node, and name the artefact that holds them there — checked against the sibling repository
 whenever it is on disk. A row with nothing in its last column would fail `js/musts.mjs`.
 
@@ -29,10 +29,11 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 
 | # | The sentence | Held by |
 |---|---|---|
-| `2.1#1` | A wallet MUST use exactly these values. | `rust:derivation_vectors`, `go:TestDerivationVectors`, `rust:derivation_refuses_what_would_silently_differ`, `go:TestDerivationRefusesWhatWouldSilentlyDiffer` |
-| `2.1#2` | A wallet MUST NOT present this as a guarantee: whether a given provider carries the PRF secret across its own sync is that provider's property and not the protocol's, and a wallet that has not verified it SHOULD say so rather than imply otherwise. | *wallet, by declaration* |
-| `2.1#3` | A wallet holding more than one credential for its origin MUST name the intended credential when it knows which one that is, and MUST prove the derived root before signing (§2.2). | `rust:a_vault_entry_that_disagrees_with_its_own_certificate_signs_nothing`, `go:TestVaultRulesMirrorTheCore` |
-| `2.1#4` | A wallet that derives its root MUST still be able to export it (§9). | `rust:issues_from_the_vault`, `go:TestVault` |
+| `2.1#1` | A wallet that can use a WebAuthn credential MUST **derive the root's private key from one** rather than generate and store it; a wallet that cannot — a command-line tool — generates the key and keeps it as §9 says. | `cloud:gateway/src/ceremony/ceremony.js` |
+| `2.1#2` | A wallet MUST use exactly these values. | `rust:derivation_vectors`, `go:TestDerivationVectors`, `rust:derivation_refuses_what_would_silently_differ`, `go:TestDerivationRefusesWhatWouldSilentlyDiffer` |
+| `2.1#3` | A wallet MUST NOT present this as a guarantee: whether a given provider carries the PRF secret across its own sync is that provider's property and not the protocol's, and a wallet that has not verified it SHOULD say so rather than imply otherwise. | *wallet, by declaration* |
+| `2.1#4` | A wallet holding more than one credential for its origin MUST name the intended credential when it knows which one that is, and MUST prove the derived root before signing (§2.2). | `rust:a_vault_entry_that_disagrees_with_its_own_certificate_signs_nothing`, `go:TestVaultRulesMirrorTheCore` |
+| `2.1#5` | A wallet that derives its root MUST still be able to export it (§9). | `rust:issues_from_the_vault`, `go:TestVault` |
 
 ### 2.2 Proving a root before using it
 
@@ -88,6 +89,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 | `9.#3` | An address an identity has vacated MUST NOT be assigned to another identity until the last leaf issued for it has expired, so a contact that missed the move never reaches a stranger where it expects a friend. | `cloud:gateway/test/move-20.test.ts`, `cloud:gateway/test/leave-20.test.ts` |
 | `9.#4` | A host that exports an identity toward a destination that cannot carry its chain MUST say so before the export; the remedy is a destination that can. | `cloud:gateway/src/leave/convert.ts` |
 | `9.#5` | It issues one live leaf per identity at a time — a second endpoint is a move, not a second home, because contacts keep one pin and the newest leaf wins — and MUST NOT issue a second while one is live except as its replacement. | `rust:issues_from_the_vault`, `go:TestWalletIssue`, `go:TestVaultRulesMirrorTheCore` |
+| `9.#6` | The **file** is the backup of the root and nothing else — the root's private key, its certificate and, for a derived root, the PRF secret of §2.1 — sealed under a **recovery key** generated by the wallet, shown once, offered as a file, and held by nobody but the person; a wallet MUST NOT write a leaf, a ledger entry or a contact into the file, and writes it once, when the root is made, and again only when the root is re-bound. | `rust:a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates`, `rust:issues_from_the_vault`, `go:TestWalletIssue`, `rust:a_record_is_named_after_its_vault`, `cloud:gateway/src/ceremony/ceremony.js` |
 
 ### 13.1 Format
 
@@ -154,7 +156,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 425 cross-port parity cases
+## The 430 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -162,7 +164,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **425** cases, **0** disagreements, **38** of **38** functions compared whole on success.
+At the run that generated this file: **430** cases, **0** disagreements, **38** of **38** functions compared whole on success.
 
 ### `address_guard` — 32 cases · whole on success
 
@@ -674,9 +676,12 @@ At the run that generated this file: **425** cases, **0** disagreements, **38** 
 - vault_open of a document with a KDF nobody implements
 - vault_open with nothing to work from
 
-### `vault_seal` — 11 cases · whole on success
+### `vault_seal` — 14 cases · whole on success
 
 - vault_seal
+- vault_seal of a record
+- vault_seal of an earlier generation
+- vault_seal of a plaintext with no generation
 - vault_seal with a nonce that is not 12 bytes
 - vault_seal with an empty passphrase
 - vault_seal with no plaintext
@@ -695,9 +700,11 @@ At the run that generated this file: **425** cases, **0** disagreements, **38** 
 - verify with nothing to work from
 - verify a signature the other port made
 
-### `wallet_issue` — 8 cases · whole on success
+### `wallet_issue` — 10 cases · whole on success
 
 - wallet_issue
+- wallet_issue from a vault that carries a ledger
+- wallet_issue without a record
 - wallet_issue for a root the vault does not hold
 - wallet_issue of the root's own key
 - wallet_issue for a second address

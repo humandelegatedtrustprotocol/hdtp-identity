@@ -241,7 +241,7 @@ keys, or with one once a root has been re-bound:
 
 ```json
 {"v": 2,
- "roots"?: [{"fingerprint", "cn", "cert", "created", "pkcs8"?}],
+ "roots"?: [{"fingerprint", "cn", "cert", "created", "pkcs8"?, "rebound_at"?}],
  "ledger": [{"root", "endpoint", "not_before", "not_after", "issued_at", "origin"?}],
  "contacts": [{"root", "endpoint", "name", "leaf"?, "root_cert"?, "added"}],
  "passkey"?: {"credential_id"}, "backup_verified_at"?: <ms>}

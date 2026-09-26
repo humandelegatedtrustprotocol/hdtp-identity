@@ -283,7 +283,7 @@ keys, or with one once a root has been re-bound:
 
 ```json
 {"v": 2,
- "roots"?: [{"fingerprint", "cn", "cert", "created", "pkcs8"?}],
+ "roots"?: [{"fingerprint", "cn", "cert", "created", "pkcs8"?, "rebound_at"?}],
  "ledger": [{"root", "endpoint", "not_before", "not_after", "issued_at", "origin"?}],
  "contacts": [{"root", "endpoint", "name", "leaf"?, "root_cert"?, "added"}],
  "passkey"?: {"credential_id"}, "backup_verified_at"?: <ms>}
@@ -396,7 +396,7 @@ file: `Fingerprint` cannot mean `sha256:…` in one function's row and something
 | `KdfArgs` | `name`?: "argon2id", `m_kib`?: integer, `t`?: integer, `p`?: integer | The same, as an ARGUMENT to `vault_seal`: every member may be left out and takes the default (64 MiB, t 3, p 1), and what is given is held to the same range as a document's. |
 | `VaultDocument` | `format`: "pact-vault/1", `kdf`: Kdf, `salt`: B64url, `nonce`: B64url, `ct`: B64url |  |
 | `LedgerEntry` | `root`: Fingerprint, `endpoint`: string, `not_before`: Instant, `not_after`: Instant, `issued_at`: Instant, `origin`?: string | One leaf the wallet issued: the endpoint and the dates, which is what every rule reads. Never the leaf itself, which is the host's to serve and grants nothing (SPEC §9). |
-| `VaultRoot` | `fingerprint`: Fingerprint, `cn`: string, `alg`?: Alg, `cert`: CertDer, `created`: Instant, `pkcs8`?: Pkcs8, `holder`?: `{…}` | One identity the wallet holds. In the file it carries the root's key (`pkcs8`) or names the card that does (`holder`); in the record it carries neither, until the root is re-bound (SPEC §9). |
+| `VaultRoot` | `fingerprint`: Fingerprint, `cn`: string, `alg`?: Alg, `cert`: CertDer, `created`: Instant, `pkcs8`?: Pkcs8, `holder`?: `{…}`, `rebound_at`?: integer | One identity the wallet holds. In the file it carries the root's key (`pkcs8`) or names the card that does (`holder`); in the record it carries neither, until the root is re-bound (SPEC §9): then `rebound_at` (ms) marks the entry and `pkcs8` stays with it. |
 | `VaultPasskey` | `credential_id`: string | The credential a derived root belongs to (SPEC §2.1); not secret. |
 | `VaultContact` | `root`: Fingerprint, `endpoint`: string, `name`?: string, `leaf`?: CertDer, `root_cert`?: CertDer, `added`?: Instant | The wallet's own copy of one contact (SPEC §9): pinned by root, at an endpoint, under the person's name; a leaf and the root certificate when the wallet has seen them. |
 | `VaultPlaintext` | `v`: 2, `roots`: [VaultRoot], `prf`?: Seed32, `passkey`?: VaultPasskey | What the FILE seals: the root and nothing else (SPEC §9). `prf` is the §2.1 secret a derived root's record is opened with, for the wallet that has lost its credential. A `v` that is not 2 is refused at both ends and nothing converts. |
