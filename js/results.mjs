@@ -57,7 +57,7 @@ export function summary(dir, suites) {
     const ms = cases.reduce((t, c) => t + (c.ms ?? 0), 0);
     const bad = cases.length - count.PASS;
     if (!cases.length || bad) ok = false;
-    lines.push(`${suite.padEnd(16)} ${String(count.PASS).padStart(4)} PASS` + VERDICTS.slice(1).map((v) => (count[v] ? `, ${count[v]} ${v}` : '')).join('') + `  (${cases.length} cases, ${(ms / 1000).toFixed(1)} s)` + (cases.length ? '' : '  NO CASES'));
+    lines.push(`${suite.padEnd(16)} ${String(count.PASS).padStart(4)} PASS` + VERDICTS.slice(1).map((v) => (count[v] ? `, ${count[v]} ${v}` : '')).join('') + `  (${cases.length} cases, their own times summing to ${(ms / 1000).toFixed(1)} s)` + (cases.length ? '' : '  NO CASES'));
     for (const c of cases.filter((x) => x.verdict !== 'PASS').slice(0, 5)) lines.push(`${''.padEnd(16)}   ${c.verdict} ${c.id}${c.reason ? `: ${c.reason}` : ''}`);
   }
   return { lines, ok };
