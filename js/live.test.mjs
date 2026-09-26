@@ -9,7 +9,7 @@ import { buildRoot, buildLeaf } from '../../pact-protocol/vectors/lib/x509.mjs';
 import { encodeCard } from '../../pact-protocol/vectors/lib/card.mjs';
 import { makeNode, receive } from '../../pact-protocol/vectors/lib/envelope.mjs';
 import { readFileSync } from 'node:fs';
-import { runLive, answerCode, scenarios } from './live.mjs';
+import { runLive, answerCode, scenarios, BATTERY, checkBattery } from './live.mjs';
 import { load } from './index.mjs';
 
 const H = 3_600_000, D = 86_400_000;
@@ -90,11 +90,9 @@ async function serve(answerOk) {
 test('every black-box scenario is blocked by the seed node behind an HTTP door', async () => {
   const { out, lines } = await serve(sealedResult);
   assert.equal(out.reproduces, 0, lines.join('\n'));
-  // A FLOOR, not a count. This was `=== 10`, and it locked a stale number in the day the live
-  // battery grew to 26 (2026-09-18): the test failed from then on, and nothing ran it — its only
-  // runner was a CI job that never got past its first step. What a number here is for is noticing
-  // the battery SHRINK, so it may only ever be raised.
-  assert.ok(out.results.length >= 28, `the live battery ran ${out.results.length} scenarios; it has run 28`);
+  // Every scenario in the battery file ran: the count is the file's, so it cannot go stale. (It was
+  // `=== 10`, then a floor of 28 written by hand, each a number to forget when the battery changed.)
+  assert.equal(out.results.length, BATTERY.scenarios.length, lines.join('\n'));
   assert.equal(out.unreached, 0, 'every scenario reached a PACT answer');
   // The total comes from the seed, so this cannot lock a stale number in: what it asserts is that
   // the two add up.
@@ -113,17 +111,6 @@ test('a control answered with something that only looks sealed is not a control 
   assert.ok(out.results.slice(0, -1).every((r) => r.verdict === 'blocked'), 'nothing else changes');
 });
 
-// Two drivers, one rule: the Rust one opens its control's answer too, and gives the failure the same name.
-test('the Rust driver opens its control as this one does', () => {
-  const rust = readFileSync(new URL('../crates/pact/src/vectors.rs', import.meta.url), 'utf8');
-  const js = readFileSync(new URL('./live.mjs', import.meta.url), 'utf8');
-  for (const [name, src] of [['crates/pact/src/vectors.rs', rust], ['js/live.mjs', js]]) {
-    assert.ok(src.includes('CONTROL UNOPENED'), `${name} has no verdict for a control whose answer does not open`);
-  }
-  assert.match(rust, /control_opened\(&raw, &host_m,/, 'the Rust control is no longer opened with the key the driver holds');
-  assert.match(js, /await controlOpened\(first\.text,/, 'the JS control is no longer opened');
-});
-
 test('answerCode reads every shape an endpoint answers in', () => {
   assert.equal(answerCode({ error: { code: -32000, data: { code: 'chain_required' } } }), 'chain_required');
   assert.equal(answerCode({ result: { content: [{ text: JSON.stringify({ protected: 'a', enc: 'b', ct: 'c', sig: 'd' }) }] } }), 'sealed');
@@ -138,64 +125,46 @@ test('answerCode reads every shape an endpoint answers in', () => {
 
 /**
  * Two drivers aim this battery: this one, and `pact vectors intrude` in Rust. They were written in
- * one commit and differed on day one — 27 scenarios against 26, a control in one and not the other,
- * three header forgeries sealed properly here and rewritten-after-sealing there — and each was then
- * taught things the other was not (the MCP handshake reached the Rust driver and not this one, which
- * went on to report 27 of 27 intrusions against the reference node). So the two lists are held to
- * each other by name and ORDER, read out of the Rust source as text.
+ * one commit and differed on day one — 27 scenarios against 26, a control in one and not the other —
+ * and for a week they were held to each other by a regex over the Rust SOURCE, with a hand tokenizer
+ * for its arguments. The list is now one file, js/live-scenarios.json: its order, names and expected
+ * codes are data both drivers read, and each driver only builds the envelope for an id. The Rust
+ * half is held by the crate's own tests (`every_scenario_in_the_battery_file_is_one_this_driver_builds`,
+ * `the_battery_file_parses_and_its_one_control_is_last`), which `cargo test` runs in the gate.
  */
-test('the Rust driver runs the same scenarios, in the same order', () => {
-  const rust = readFileSync(new URL('../crates/pact/src/vectors.rs', import.meta.url), 'utf8');
-  const body = rust.slice(rust.indexOf('pub fn intrude('));
-  const constant = (name) => Number(new RegExp(`const ${name}: i64 = (\\d+);`).exec(body)?.[1]);
-  const seconds = constant('WINDOW') + constant('MARGIN');
-  const names = [...body.matchAll(/\brun\(\s*(?:&format!\(\s*)?"([^"]+)"/g)].map((m) => m[1].replace('{}', String(seconds)));
-  const mine = scenarios({ targetLeaf: fakeNode(1).LEAF }).map((s) => s.name);
-  assert.ok(names.length >= 28, `read ${names.length} scenario names out of the Rust driver; the extraction has stopped seeing it`);
-  assert.deepEqual(names, mine);
+test('this driver runs the battery file, in its order, expecting its codes', () => {
+  const list = scenarios({ targetLeaf: fakeNode(1).LEAF });
+  assert.deepEqual(list.map(({ id, name, expect }) => ({ id, name, expect })), BATTERY.scenarios.map(({ id, name, expect }) => ({ id, name, expect })));
 });
 
-/**
- * ...and the same EXPECTED CODE, which the name check above cannot see.
- *
- * Holding names and order still let the two drivers disagree about what each scenario should be
- * answered with: change the Rust `expect` for the small form from `chain_required` to
- * `envelope_invalid` and every gate stayed green, because only a live run against a real node would
- * notice, as a REPRODUCES with no obvious cause. The last argument of each `run(` call is that code,
- * read by walking the call's arguments at depth zero -- which survives a comma inside
- * `&format!("...{}...", WINDOW + MARGIN)` and rustfmt reflowing a call across lines.
- */
-test('the Rust driver expects the same answer for each scenario', () => {
+test('the Rust driver embeds the same battery file', () => {
+  // The one thing the crate's tests cannot say about themselves: which file they read.
   const rust = readFileSync(new URL('../crates/pact/src/vectors.rs', import.meta.url), 'utf8');
-  const body = rust.slice(rust.indexOf('pub fn intrude('));
-  const consts = Object.fromEntries(
-    [...body.matchAll(/const ([A-Z_]+): &str = "([^"]+)";/g)].map((m) => [m[1], m[2]]),
-  );
-  /** The top-level arguments of one `run(...)` call. */
-  const args = (text) => {
-    const out = [];
-    let depth = 0, quoted = false, start = 0;
-    for (let i = 0; i < text.length; i++) {
-      const c = text[i];
-      if (quoted) { if (c === '\\') i++; else if (c === '"') quoted = false; continue; }
-      if (c === '"') quoted = true;
-      else if (c === '(' || c === '[' || c === '{') depth++;
-      else if (c === ')' || c === ']' || c === '}') depth--;
-      else if (c === ',' && depth === 0) { out.push(text.slice(start, i).trim()); start = i + 1; }
-    }
-    out.push(text.slice(start).trim());
-    return out;
-  };
-  const expects = [...body.matchAll(/\brun\(([\s\S]*?)\)\?;/g)].map((m) => {
-    // rustfmt writes a TRAILING comma when it reflows a call across lines, which leaves an empty
-    // final argument; two of the 28 are written that way.
-    const last = args(m[1]).filter((a) => a !== '').at(-1);
-    const literal = /^"([^"]*)"$/.exec(last);
-    return literal ? literal[1] : (consts[last] ?? `UNRESOLVED(${last})`);
-  });
-  assert.ok(expects.length >= 28, `read ${expects.length} expected codes out of the Rust driver`);
-  assert.deepEqual(expects.filter((e) => e.startsWith('UNRESOLVED')), [], 'every expected code must resolve to a string');
-  assert.deepEqual(expects, scenarios({ targetLeaf: fakeNode(1).LEAF }).map((s) => s.expect));
+  assert.ok(rust.includes('include_str!("../../../js/live-scenarios.json")'), 'crates/pact/src/vectors.rs no longer embeds js/live-scenarios.json');
+});
+
+test('an id the file names and this driver cannot build, or the reverse, stops the run', () => {
+  const targetLeaf = fakeNode(1).LEAF;
+  const extra = { ...BATTERY, scenarios: [{ id: 'nobody-wrote-this', name: 'x', expect: 'envelope_invalid' }, ...BATTERY.scenarios] };
+  assert.throws(() => scenarios({ targetLeaf, battery: extra }), /names nobody-wrote-this, and js\/live.mjs has no builder/);
+  const fewer = { ...BATTERY, scenarios: BATTERY.scenarios.filter((s) => s.id !== 'chain-empty') };
+  assert.throws(() => scenarios({ targetLeaf, battery: fewer }), /builds chain-empty, which js\/live-scenarios.json does not name/);
+});
+
+test('the battery file is refused unless it has one control, last, and ids used once', () => {
+  const list = BATTERY.scenarios;
+  const control = list.at(-1);
+  assert.throws(() => checkBattery({ ...BATTERY, scenarios: [control, ...list.slice(0, -1)] }), /control must be last/);
+  assert.throws(() => checkBattery({ ...BATTERY, scenarios: [...list, { ...control, id: 'second' }] }), /exactly one scenario must be the control; 2 are/);
+  assert.throws(() => checkBattery({ ...BATTERY, scenarios: [list[0], ...list] }), /is used twice/);
+  assert.equal(checkBattery(BATTERY), BATTERY);
+});
+
+test('the skew scenarios are named for the window and margin they are sealed with', () => {
+  const skew = String(BATTERY.window_s + BATTERY.margin_s);
+  for (const id of ['past-window', 'future-window']) {
+    assert.ok(BATTERY.scenarios.find((s) => s.id === id).name.includes(skew), `${id} does not name ${skew} seconds`);
+  }
 });
 
 test('the control is last, because after it the attacker is no stranger', () => {
