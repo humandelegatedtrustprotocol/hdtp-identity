@@ -55,7 +55,8 @@ const rootFp = wasm.call('parse_certificate', { der: rootDer }).fingerprint;
 const csr = wasm.call('csr_new', { cn: 'Alina Rao', host_pkcs8: hostPkcs8, endpoint: ENDPOINT }).der;
 const rootCsr = wasm.call('csr_new', { cn: 'Alina Rao', host_pkcs8: rootPkcs8, endpoint: ENDPOINT }).der;
 const card = wasm.call('card_encode', { fn: 'Alina Rao', cert: leafDer, seal: 'required' }).vcard;
-const vault = { v: 1, roots: [{ fingerprint: rootFp, cn: 'Alina Rao', pkcs8: rootPkcs8, cert: rootDer, created: now }], ledger: [], contacts: [] };
+const vault = { v: 2, roots: [{ fingerprint: rootFp, cn: 'Alina Rao', pkcs8: rootPkcs8, cert: rootDer, created: now }] };
+const record = { v: 2, ledger: [], contacts: [] };
 const leafTbs = wasm.call('leaf_tbs', { cn: 'Alina Rao', root_cn: 'Alina Rao', root_spki: rootSpki, host_spki: hostSpki, endpoint: ENDPOINT, not_before: now, not_after: '2027-09-01T00:00:00Z' });
 const sealed = wasm.call('seal_request', { recipient_leaf: leafDer, sender_pkcs8: hostPkcs8, form: 'chain', sender_chain: [leafDer, rootDer], method: 'tools/call', params: { name: 'send_message' }, msg_id: 'p-1', ts: Math.floor(Date.parse(now) / 1000) });
 const sealedNoTool = wasm.call('seal_request', { recipient_leaf: leafDer, sender_pkcs8: hostPkcs8, form: 'chain', sender_chain: [leafDer, rootDer], method: 'tools/call', params: {}, msg_id: 'p-1', ts: Math.floor(Date.parse(now) / 1000) });
@@ -94,8 +95,6 @@ const withoutSerial = (member) => (answer, port) => {
   const out = { ...answer, [member]: parsedMinusSerial(port, answer[member]) };
   // A serial of 8 bytes may encode in 8 or 9, so the certificate's length moves with it.
   if (out[member]?.bytes) out[member] = { ...out[member], bytes: '<a serial\'s worth>' };
-  if (out.ledger_entry?.leaf) out.ledger_entry = { ...out.ledger_entry, leaf: parsedMinusSerial(port, out.ledger_entry.leaf) };
-  if (out.ledger_entry?.leaf?.bytes) out.ledger_entry.leaf = { ...out.ledger_entry.leaf, bytes: '<a serial\'s worth>' };
   return out;
 };
 const B64_BAD = ['!!!', '', 'AA=', 'a b c', '~~~~'];
@@ -343,10 +342,14 @@ add('follow_renewed on the same leaf', 'follow_renewed', { answer: { code: 'cert
 
 // §6 the vault
 const SALT = b64url(new Uint8Array(16).fill(3)), NONCE = b64url(new Uint8Array(12).fill(4));
-add('vault_seal', 'vault_seal', { passphrase: 'a passphrase', plaintext: { v: 1, roots: [], ledger: [], contacts: [] }, kdf: { m_kib: 8192, t: 1, p: 1 }, salt: SALT, nonce: NONCE });
-add('vault_open of what vault_seal made', 'vault_open', { passphrase: 'a passphrase', vault: wasm.call('vault_seal', { passphrase: 'a passphrase', plaintext: { v: 1, roots: [], ledger: [], contacts: [] }, kdf: { m_kib: 8192, t: 1, p: 1 }, salt: SALT, nonce: NONCE }).vault });
-add('vault_seal with a nonce that is not 12 bytes', 'vault_seal', { passphrase: 'a passphrase', plaintext: { v: 1 }, kdf: { m_kib: 8192, t: 1, p: 1 }, salt: SALT, nonce: b64url(new Uint8Array(8)) });
-add('vault_seal with an empty passphrase', 'vault_seal', { passphrase: '', plaintext: { v: 1 }, kdf: { m_kib: 8192, t: 1, p: 1 } });
+add('vault_seal', 'vault_seal', { passphrase: 'a passphrase', plaintext: { v: 2, roots: [] }, kdf: { m_kib: 8192, t: 1, p: 1 }, salt: SALT, nonce: NONCE });
+add('vault_seal of a record', 'vault_seal', { passphrase: 'a passphrase', plaintext: record, kdf: { m_kib: 8192, t: 1, p: 1 }, salt: SALT, nonce: NONCE });
+// An earlier generation is refused at both ends, in the same words, and nothing converts.
+add('vault_seal of an earlier generation', 'vault_seal', { passphrase: 'a passphrase', plaintext: { v: 1, roots: [], ledger: [], contacts: [] }, kdf: { m_kib: 8192, t: 1, p: 1 }, salt: SALT, nonce: NONCE });
+add('vault_seal of a plaintext with no generation', 'vault_seal', { passphrase: 'a passphrase', plaintext: { roots: [] }, kdf: { m_kib: 8192, t: 1, p: 1 }, salt: SALT, nonce: NONCE });
+add('vault_open of what vault_seal made', 'vault_open', { passphrase: 'a passphrase', vault: wasm.call('vault_seal', { passphrase: 'a passphrase', plaintext: { v: 2, roots: [] }, kdf: { m_kib: 8192, t: 1, p: 1 }, salt: SALT, nonce: NONCE }).vault });
+add('vault_seal with a nonce that is not 12 bytes', 'vault_seal', { passphrase: 'a passphrase', plaintext: { v: 2 }, kdf: { m_kib: 8192, t: 1, p: 1 }, salt: SALT, nonce: b64url(new Uint8Array(8)) });
+add('vault_seal with an empty passphrase', 'vault_seal', { passphrase: '', plaintext: { v: 2 }, kdf: { m_kib: 8192, t: 1, p: 1 } });
 add('vault_seal with no plaintext', 'vault_seal', { passphrase: 'a passphrase', kdf: { m_kib: 8192, t: 1, p: 1 } });
 add('vault_open with a passphrase that is wrong', 'vault_open', { passphrase: 'wrong', vault: { format: 'pact-vault/1', kdf: { name: 'argon2id', m_kib: 8192, t: 1, p: 1 }, salt: b64url(new Uint8Array(16)), nonce: b64url(new Uint8Array(12)), ct: b64url(new Uint8Array(48)) } });
 add('vault_open of a document that is not a vault', 'vault_open', { passphrase: 'x', vault: { format: 'something-else' } });
@@ -375,16 +378,19 @@ const KDF_EDGES = [
   ['a KDF nobody implements', { name: 'scrypt', m_kib: 65536, t: 3, p: 1 }],
 ];
 for (const [what, kdf] of KDF_EDGES) {
-  add(`vault_seal with ${what}`, 'vault_seal', { passphrase: 'a passphrase', plaintext: { v: 1 }, kdf, salt: SALT, nonce: NONCE });
+  add(`vault_seal with ${what}`, 'vault_seal', { passphrase: 'a passphrase', plaintext: { v: 2 }, kdf, salt: SALT, nonce: NONCE });
   add(`vault_open of a document with ${what}`, 'vault_open', { passphrase: 'a passphrase', vault: { format: 'pact-vault/1', kdf, salt: SALT, nonce: NONCE, ct: b64url(new Uint8Array(32)) } });
 }
-add('wallet_issue', 'wallet_issue', { vault_plaintext: vault, root_fingerprint: rootFp, csr, now, valid_days: 365 }, withoutSerial('der'));
-add('wallet_issue for a root the vault does not hold', 'wallet_issue', { vault_plaintext: vault, root_fingerprint: 'sha256:' + 'A'.repeat(43), csr, now });
-add('wallet_issue of the root\'s own key', 'wallet_issue', { vault_plaintext: vault, root_fingerprint: rootFp, csr: rootCsr, now });
-const moved = { ...vault, ledger: [{ root: rootFp, leaf: '', endpoint: 'https://elsewhere.example/mcp', not_before: '2026-09-10T00:00:00Z', not_after: '2027-09-10T00:00:00Z', issued_at: '2026-09-10T00:00:00Z' }] };
-add('wallet_issue for a second address', 'wallet_issue', { vault_plaintext: moved, root_fingerprint: rootFp, csr, now });
-add('wallet_issue as a move', 'wallet_issue', { vault_plaintext: moved, root_fingerprint: rootFp, csr, now, move: true }, withoutSerial('der'));
-add('wallet_issue with an empty vault', 'wallet_issue', { vault_plaintext: { v: 1, roots: [], ledger: [], contacts: [] }, root_fingerprint: rootFp, csr, now });
+add('wallet_issue', 'wallet_issue', { vault_plaintext: vault, record_plaintext: record, root_fingerprint: rootFp, csr, now, valid_days: 365 }, withoutSerial('der'));
+// A vault that carries what belongs in the record, and a missing record: refused alike.
+add('wallet_issue from a vault that carries a ledger', 'wallet_issue', { vault_plaintext: { ...vault, ledger: [], contacts: [] }, record_plaintext: record, root_fingerprint: rootFp, csr, now });
+add('wallet_issue without a record', 'wallet_issue', { vault_plaintext: vault, root_fingerprint: rootFp, csr, now });
+add('wallet_issue for a root the vault does not hold', 'wallet_issue', { vault_plaintext: vault, record_plaintext: record, root_fingerprint: 'sha256:' + 'A'.repeat(43), csr, now });
+add('wallet_issue of the root\'s own key', 'wallet_issue', { vault_plaintext: vault, record_plaintext: record, root_fingerprint: rootFp, csr: rootCsr, now });
+const moved = { ...record, ledger: [{ root: rootFp, endpoint: 'https://elsewhere.example/mcp', not_before: '2026-09-10T00:00:00Z', not_after: '2027-09-10T00:00:00Z', issued_at: '2026-09-10T00:00:00Z' }] };
+add('wallet_issue for a second address', 'wallet_issue', { vault_plaintext: vault, record_plaintext: moved, root_fingerprint: rootFp, csr, now });
+add('wallet_issue as a move', 'wallet_issue', { vault_plaintext: vault, record_plaintext: moved, root_fingerprint: rootFp, csr, now, move: true }, withoutSerial('der'));
+add('wallet_issue with an empty vault', 'wallet_issue', { vault_plaintext: { v: 2, roots: [] }, record_plaintext: record, root_fingerprint: rootFp, csr, now });
 
 // A request the seed can make and both ports must answer identically: the header carries the rules.
 add('seal_request', 'seal_request', { recipient_leaf: leafDer, sender_pkcs8: hostPkcs8, form: 'chain', sender_chain: [leafDer, rootDer], method: 'tools/call', params: { name: 'send_message' }, msg_id: 'p-2', ts: Math.floor(Date.parse(now) / 1000), ephemeral_seed: b64url(new Uint8Array(32).fill(7)) });
@@ -670,7 +676,7 @@ const provenWhole = new Set();
     const sibling = p256FromSeed(seed('parity/card-held-sibling'));
     const siblingDer = b64url(buildRoot({ cn: 'Alina at work', key: sibling, notBefore: new Date('2026-09-01T00:00:00Z'), label: 'parity/sibling' }));
     const siblingCsr = wasm.call('csr_new', { cn: 'A Host', host_pkcs8: b64url(pkcs8Of(sibling.priv)), endpoint: ENDPOINT }).der;
-    add('wallet_issue: a request carrying a CARD-held sibling root\'s key', 'wallet_issue', { vault_plaintext: { ...vault, roots: [...vault.roots, { fingerprint: wasm.call('parse_certificate', { der: siblingDer }).fingerprint, cn: 'Alina at work', cert: siblingDer, holder: { kind: 'piv' } }] }, root_fingerprint: rootFp, csr: siblingCsr, now });
+    add('wallet_issue: a request carrying a CARD-held sibling root\'s key', 'wallet_issue', { vault_plaintext: { ...vault, roots: [...vault.roots, { fingerprint: wasm.call('parse_certificate', { der: siblingDer }).fingerprint, cn: 'Alina at work', cert: siblingDer, holder: { kind: 'piv' } }] }, record_plaintext: record, root_fingerprint: rootFp, csr: siblingCsr, now });
   }
 
   // B7 — `now` is whole seconds. Half a second past a leaf's notAfter is the same second.

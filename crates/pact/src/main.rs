@@ -255,7 +255,7 @@ struct IssueCommon {
 
 #[derive(Subcommand)]
 enum IdCmd {
-    /// A new identity: a root, in a new vault under a passphrase asked twice
+    /// A new identity: a root in a new vault, and its record beside it, under a passphrase asked twice
     Create {
         /// The name contacts see; it carries no authority (SPEC §3)
         #[arg(long)]
@@ -263,12 +263,12 @@ enum IdCmd {
         /// The root's algorithm, when the root is made here
         #[arg(long, default_value = "ed25519", value_parser = ["ed25519", "p256"])]
         alg: String,
-        /// Where the vault goes; it must not exist
+        /// Where the vault goes; it must not exist, and neither may its record (<name>.pact-record.json)
         #[arg(long)]
         vault: String,
         /// Hold the root on a smartcard in this PIV slot (9c by default) instead of in the vault.
         /// The slot must already hold a P-256 key and a certificate; the key never leaves the card,
-        /// the vault keeps only the certificate and the ledger, and there is no export — lose the
+        /// the vault keeps only the certificate, and there is no export — lose the
         /// card and the identity is gone.
         #[arg(long, num_args = 0..=1, default_missing_value = piv::DEFAULT_SLOT)]
         piv: Option<String>,
@@ -294,7 +294,7 @@ enum IdCmd {
         #[command(flatten)]
         common: IssueCommon,
     },
-    /// Every leaf this vault issued
+    /// Every leaf this identity issued, read from the record beside its vault
     Ledger {
         #[arg(long)]
         vault: String,
@@ -312,7 +312,7 @@ enum IdCmd {
         #[arg(long)]
         out: Option<String>,
     },
-    /// A copy of the vault, proven to open
+    /// A copy of the vault and of its record, each proven to open
     Backup {
         #[arg(long)]
         vault: String,
@@ -322,7 +322,7 @@ enum IdCmd {
         #[arg(long)]
         force: bool,
     },
-    /// Bring a copy back to a path that is empty
+    /// Bring a copy back — the vault, and its record when the copy has one — to a path that is empty
     Restore {
         #[arg(long)]
         from: String,

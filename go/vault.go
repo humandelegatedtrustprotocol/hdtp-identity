@@ -136,8 +136,35 @@ func vaultKey(passphrase string, v Vault) ([]byte, error) {
 	return argon2.IDKey([]byte(passphrase), salt, v.KDF.T, v.KDF.MKiB, v.KDF.P, 32), nil
 }
 
+// PlaintextV is the generation both documents carry: the file (the root and nothing else) and
+// the record (the ledger and the contacts). There is no earlier one to open: a `v` that is not
+// this is refused at both ends, sealing and opening, and nothing converts.
+const PlaintextV = 2
+
+// plaintextV reads the generation off a plaintext, or -1 when it carries none.
+func plaintextV(plaintext []byte) int64 {
+	var head struct {
+		V *int64 `json:"v"`
+	}
+	if err := json.Unmarshal(plaintext, &head); err != nil || head.V == nil {
+		return -1
+	}
+	return *head.V
+}
+
+var errEarlierGeneration = errors.New("this vault was written by an earlier wallet and is not opened: there is no conversion")
+
 // VaultSeal encrypts plaintext under the passphrase. salt and nonce are drawn when nil (tests pass them).
 func VaultSeal(passphrase string, plaintext []byte, kdf *KDF, salt, nonce []byte) (*Vault, error) {
+	if plaintextV(plaintext) != PlaintextV {
+		return nil, errors.New("a vault plaintext is v 2: the root, or the record")
+	}
+	return vaultSealAny(passphrase, plaintext, kdf, salt, nonce)
+}
+
+// vaultSealAny is the sealing itself, with no opinion about the plaintext: VaultSeal holds the
+// generation, and the test of VaultOpen's refusal needs a document VaultSeal would not write.
+func vaultSealAny(passphrase string, plaintext []byte, kdf *KDF, salt, nonce []byte) (*Vault, error) {
 	if kdf == nil {
 		k := DefaultKDF
 		kdf = &k
@@ -220,6 +247,9 @@ func VaultOpenDoc(passphrase string, doc map[string]any) ([]byte, error) {
 	if err != nil {
 		return nil, errVault
 	}
+	if plaintextV(pt) != PlaintextV {
+		return nil, errEarlierGeneration
+	}
 	return pt, nil
 }
 
@@ -232,10 +262,10 @@ type VaultRoot struct {
 	Created     string `json:"created"`
 }
 
-// LedgerEntry is one leaf the wallet issued.
+// LedgerEntry is one leaf the wallet issued: the endpoint and the dates, which is what every rule
+// reads. Never the leaf itself, which is the host's to serve and grants nothing (SPEC §9).
 type LedgerEntry struct {
 	Root      string `json:"root"`
-	Leaf      string `json:"leaf"`
 	Endpoint  string `json:"endpoint"`
 	NotBefore string `json:"not_before"`
 	NotAfter  string `json:"not_after"`
@@ -252,12 +282,29 @@ type VaultContact struct {
 	Added    string `json:"added"`
 }
 
-// VaultPlaintext is what the vault protects.
+// VaultPasskey names the credential a derived root belongs to (SPEC §2.1); not secret.
+type VaultPasskey struct {
+	CredentialID string `json:"credential_id"`
+}
+
+// VaultPlaintext is what the FILE protects: the root and nothing else (SPEC §9). `PRF` is the
+// §2.1 secret a derived root's record is opened with, for the wallet that has lost its credential.
 type VaultPlaintext struct {
-	V        int            `json:"v"`
-	Roots    []VaultRoot    `json:"roots"`
-	Ledger   []LedgerEntry  `json:"ledger"`
-	Contacts []VaultContact `json:"contacts"`
+	V       int           `json:"v"`
+	Roots   []VaultRoot   `json:"roots"`
+	PRF     string        `json:"prf,omitempty"`
+	Passkey *VaultPasskey `json:"passkey,omitempty"`
+}
+
+// RecordPlaintext is what the RECORD protects: the ledger and the contact book, and the roots
+// without their keys — or with one, once a root has been re-bound (SPEC §9).
+type RecordPlaintext struct {
+	V                int            `json:"v"`
+	Roots            []VaultRoot    `json:"roots,omitempty"`
+	Ledger           []LedgerEntry  `json:"ledger"`
+	Contacts         []VaultContact `json:"contacts"`
+	Passkey          *VaultPasskey  `json:"passkey,omitempty"`
+	BackupVerifiedAt int64          `json:"backup_verified_at,omitempty"`
 }
 
 // WalletIssued is what WalletIssue returns: the leaf, the ledger entry to append, and what to show.
@@ -270,8 +317,10 @@ type WalletIssued struct {
 
 // WalletIssue applies the wallet's rules of §9 to a request: proof of possession and the root-key
 // refusal (CSRCheck with every root the wallet holds), a new host flagged, one live leaf per identity
-// unless the caller says this is a move, and notBefore monotonic over the ledger.
-func WalletIssue(plain VaultPlaintext, rootFingerprint string, csr []byte, now time.Time, validDays int, move bool) (*WalletIssued, error) {
+// unless the caller says this is a move, and notBefore monotonic over the ledger. Two documents, as
+// §9 keeps them: the vault is the root and nothing else, and the record holds the ledger this
+// reads and the entry this answers is appended to.
+func WalletIssue(plain VaultPlaintext, record RecordPlaintext, rootFingerprint string, csr []byte, now time.Time, validDays int, move bool) (*WalletIssued, error) {
 	var root *VaultRoot
 	rootSPKIs := make([][]byte, 0, len(plain.Roots))
 	for i := range plain.Roots {
@@ -304,8 +353,8 @@ func WalletIssue(plain VaultPlaintext, rootFingerprint string, csr []byte, now t
 	newHost := true
 	var previous *time.Time
 	var newest *LedgerEntry
-	for i := range plain.Ledger {
-		e := &plain.Ledger[i]
+	for i := range record.Ledger {
+		e := &record.Ledger[i]
 		if e.Root != rootFingerprint {
 			continue
 		}
@@ -334,7 +383,7 @@ func WalletIssue(plain VaultPlaintext, rootFingerprint string, csr []byte, now t
 		return nil, err
 	}
 	out := &WalletIssued{DER: issued.DER, NewHost: newHost, Entry: LedgerEntry{
-		Root: rootFingerprint, Leaf: B64url(issued.DER), Endpoint: issued.Endpoint,
+		Root: rootFingerprint, Endpoint: issued.Endpoint,
 		NotBefore: issued.NotBefore.UTC().Format(time.RFC3339), NotAfter: issued.NotAfter.UTC().Format(time.RFC3339),
 		IssuedAt: now.UTC().Format(time.RFC3339),
 	}}

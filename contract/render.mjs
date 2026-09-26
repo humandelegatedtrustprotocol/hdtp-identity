@@ -38,7 +38,9 @@ function typeWord(s, root) {
 /** `{"a", "b"?}` — the members of an object schema, optional ones marked, in the schema's order. */
 function members(s, root) {
   const resolved = s.$ref ? resolve(s.$ref, root) : s;
-  if (!resolved.properties) return typeWord(resolved, root) === 'any' ? '`{…}`' : typeWord(resolved, root);
+  // An object that declares no members is `{…}` — said here, not by asking `typeWord`, which would
+  // ask back (it renders an object through this function) until the stack ran out.
+  if (!resolved.properties) return resolved.type === 'object' || typeWord(resolved, root) === 'any' ? '`{…}`' : typeWord(resolved, root);
   const req = new Set(resolved.required ?? []);
   const parts = Object.entries(resolved.properties).map(([name, sub]) => {
     const word = typeWord(sub, root);

@@ -1,6 +1,12 @@
 //! The wallet half: a root in a vault, leaves issued from it under SPEC §9's rules, the ledger, the
 //! contact book. The rules live in the core's `wallet_issue`; this file adds the terminal's
 //! discipline — the passphrase from a prompt, the vault owner-only, nothing a root key ever printed.
+//!
+//! An identity is two files under one passphrase (SPEC §9). The **vault** is the root and nothing
+//! else — `<name>.pact-vault.json`, written when the identity is made and never again, the copy a
+//! person keeps. The **record** beside it — `<name>.pact-record.json` — is the ledger and the
+//! contact book, and is what every signing writes. A vault carried to a new machine without its
+//! record starts one with an empty ledger: that is the lost path, and there is nothing to convert.
 use crate::io::{
     check_writable, confirm, core, fail, instant, now_or, passphrase, pem, read_der, read_input, write_new_private, write_output,
     write_private, Fail, Res,
@@ -30,28 +36,90 @@ impl Drop for Vault {
     }
 }
 
+/// The record beside a vault: the ledger and the contact book, sealed under the vault's passphrase.
+struct Record {
+    path: String,
+    plaintext: Value,
+}
+
+impl Drop for Record {
+    fn drop(&mut self) {
+        crate::io::wipe(&mut self.plaintext);
+    }
+}
+
+/// Where a vault's record lives: the same name with `pact-record` for `pact-vault`, and
+/// `.pact-record.json` appended to a name that says neither. `alina.pact-vault.json` keeps its
+/// record at `alina.pact-record.json`; `v.json` at `v.pact-record.json`.
+pub fn record_path(vault: &str) -> String {
+    let stem = vault.strip_suffix(".json").unwrap_or(vault);
+    let stem = stem.strip_suffix(".pact-vault").unwrap_or(stem);
+    format!("{stem}.pact-record.json")
+}
+
+fn empty_record() -> Value {
+    json!({ "v": 2, "ledger": [], "contacts": [] })
+}
+
 fn open_vault(path: &str, confirm_passphrase: bool) -> Res<Vault> {
     let raw = read_input(path)?;
     let doc: Value = serde_json::from_slice(&raw).map_err(|e| Fail(format!("{path}: not a vault document ({e})")))?;
     let passphrase = passphrase(confirm_passphrase)?;
     let plaintext = core("vault_open", json!({ "passphrase": passphrase.as_str(), "vault": doc }))?["plaintext"].take();
+    // The core refuses an earlier generation; this refuses a document of this one that carries what
+    // belongs in the record, because nothing here would read it and a person would think it kept.
+    if plaintext.get("ledger").is_some() || plaintext.get("contacts").is_some() {
+        return fail(format!(
+            "{path}: a vault is the root and nothing else; this one carries a ledger or contacts, which belong in the record beside it"
+        ));
+    }
     Ok(Vault { path: path.to_string(), passphrase, plaintext })
 }
 
-fn sealed_bytes(v: &Vault) -> Res<Vec<u8>> {
-    let sealed = core("vault_seal", json!({ "passphrase": v.passphrase.as_str(), "plaintext": v.plaintext }))?["vault"].take();
+/// The record beside a vault, under the vault's passphrase. No file there is not an error: a vault
+/// brought to a machine without its record — the copy a person kept — starts one with an empty
+/// ledger and says so, and the first signing lands it.
+fn open_record(v: &Vault) -> Res<Record> {
+    open_record_with(&record_path(&v.path), &v.passphrase)
+}
+
+fn open_record_with(path: &str, passphrase: &str) -> Res<Record> {
+    if !Path::new(path).exists() {
+        eprintln!("no record at {path}: starting one with an empty ledger and no contacts");
+        return Ok(Record { path: path.to_string(), plaintext: empty_record() });
+    }
+    let raw = read_input(path)?;
+    let doc: Value = serde_json::from_slice(&raw).map_err(|e| Fail(format!("{path}: not a record document ({e})")))?;
+    let plaintext = core("vault_open", json!({ "passphrase": passphrase, "vault": doc }))?["plaintext"].take();
+    Ok(Record { path: path.to_string(), plaintext })
+}
+
+fn sealed_bytes(passphrase: &str, plaintext: &Value) -> Res<Vec<u8>> {
+    let sealed = core("vault_seal", json!({ "passphrase": passphrase, "plaintext": plaintext }))?["vault"].take();
     Ok(format!("{}\n", serde_json::to_string_pretty(&sealed)?).into_bytes())
 }
 
 fn save_vault(v: &Vault) -> Res<()> {
-    write_private(Path::new(&v.path), &sealed_bytes(v)?)
+    write_private(Path::new(&v.path), &sealed_bytes(&v.passphrase, &v.plaintext)?)
 }
 
 /// The first write of a new identity's vault: exclusive, because `id create` refused a path that
-/// was taken and that refusal has to still be true at the moment the file appears. Every later save
-/// replaces the vault it opened, which is what `save_vault` is for.
+/// was taken and that refusal has to still be true at the moment the file appears. A later save
+/// (`save_vault`) is a card attached: the root's entry changes, and nothing else ever does.
 fn save_new_vault(v: &Vault) -> Res<()> {
-    write_new_private(Path::new(&v.path), &sealed_bytes(v)?)
+    write_new_private(Path::new(&v.path), &sealed_bytes(&v.passphrase, &v.plaintext)?)
+}
+
+fn save_record_with(passphrase: &str, r: &Record) -> Res<()> {
+    write_private(Path::new(&r.path), &sealed_bytes(passphrase, &r.plaintext)?)
+}
+
+fn save_record(v: &Vault, r: &Record) -> Res<()> {
+    save_record_with(&v.passphrase, r)
+}
+
+fn save_new_record(v: &Vault, r: &Record) -> Res<()> {
+    write_new_private(Path::new(&r.path), &sealed_bytes(&v.passphrase, &r.plaintext)?)
 }
 
 fn roots(v: &Value) -> Vec<Value> {
@@ -246,10 +314,14 @@ fn issue_on_card(
 /// An identity whose root is a card: the certificate is built from the slot's public key and signed
 /// by the slot, so no private key exists anywhere but the card, including here.
 pub fn id_create_piv(name: &str, slot: &str, reader: Option<&str>, vault: &str) -> Res<i32> {
-    if Path::new(vault).exists() {
-        return fail(format!("{vault} exists; a second identity goes in with --vault pointing elsewhere, or is a decision for later"));
+    let record = record_path(vault);
+    for taken in [vault, record.as_str()] {
+        if Path::new(taken).exists() {
+            return fail(format!("{taken} exists; a second identity goes in with --vault pointing elsewhere, or is a decision for later"));
+        }
     }
     check_writable(Some(vault))?;
+    check_writable(Some(&record))?;
     let card = crate::piv::open(reader, slot)?;
     let info = card.describe();
     eprintln!("reader      {}", info.reader);
@@ -260,7 +332,7 @@ pub fn id_create_piv(name: &str, slot: &str, reader: Option<&str>, vault: &str) 
     let (cert, key) = root_from_card(card.as_ref(), name, now)?;
     eprintln!("root        {}", key.fingerprint());
     let plaintext = json!({
-        "v": 1,
+        "v": 2,
         "roots": [{
             "fingerprint": key.fingerprint(),
             "cn": name,
@@ -268,12 +340,12 @@ pub fn id_create_piv(name: &str, slot: &str, reader: Option<&str>, vault: &str) 
             "created": instant(now),
             "holder": { "kind": "piv", "mode": "generated", "slot": info.slot, "serial": info.serial, "reader": info.reader },
         }],
-        "ledger": [],
-        "contacts": [],
     });
-    save_new_vault(&Vault { path: vault.to_string(), passphrase: pass, plaintext })?;
+    let v = Vault { path: vault.to_string(), passphrase: pass, plaintext };
+    save_new_vault(&v)?;
+    save_new_record(&v, &Record { path: record.clone(), plaintext: empty_record() })?;
     println!("{}", key.fingerprint());
-    eprintln!("wrote {vault} (mode 0600) — the certificate and the ledger; the key stays on the card");
+    eprintln!("wrote {vault} (mode 0600) — the certificate; the key stays on the card. {record}: the ledger and the contact book");
     eprintln!("This card is the identity. The vault cannot hold the key and there is no export: lose the card and the identity is gone, exactly as a lost vault ends a software one. A second card is a second identity, not a copy.");
     Ok(0)
 }
@@ -345,8 +417,11 @@ pub fn id_create(name: &str, alg: &str, vault: &str, key_out: Option<&str>) -> R
     // Every reason this command can refuse is found before a person is asked for a passphrase and
     // before a vault exists on disk. The `--key-out` check used to sit after the vault was
     // written, which left a made identity behind and told the person it had failed.
-    if Path::new(vault).exists() {
-        return fail(format!("{vault} exists; a second identity goes in with --vault pointing elsewhere, or is a decision for later"));
+    let record = record_path(vault);
+    for taken in [vault, record.as_str()] {
+        if Path::new(taken).exists() {
+            return fail(format!("{taken} exists; a second identity goes in with --vault pointing elsewhere, or is a decision for later"));
+        }
     }
     if let Some(path) = key_out {
         if Path::new(path).exists() {
@@ -355,6 +430,7 @@ pub fn id_create(name: &str, alg: &str, vault: &str, key_out: Option<&str>) -> R
         check_writable(Some(path))?;
     }
     check_writable(Some(vault))?;
+    check_writable(Some(&record))?;
     let alg = Alg::parse(alg).map_err(|e| Fail(e.why))?;
     let pass = passphrase(true)?;
     let now = now_or(None)?;
@@ -362,15 +438,16 @@ pub fn id_create(name: &str, alg: &str, vault: &str, key_out: Option<&str>) -> R
     let cert = x509::build_root(name, &key, now, &x509::random_serial().map_err(|e| Fail(e.why))?).map_err(|e| Fail(e.why))?;
     let fp = key.public().fingerprint();
     let plaintext = json!({
-        "v": 1,
+        "v": 2,
         "roots": [{ "fingerprint": fp, "cn": name, "pkcs8": b64u(&key.to_pkcs8()), "cert": b64u(&cert), "created": instant(now) }],
-        "ledger": [],
-        "contacts": [],
     });
-    save_new_vault(&Vault { path: vault.to_string(), passphrase: pass, plaintext })?;
+    let v = Vault { path: vault.to_string(), passphrase: pass, plaintext };
+    save_new_vault(&v)?;
+    save_new_record(&v, &Record { path: record.clone(), plaintext: empty_record() })?;
     println!("{fp}");
-    eprintln!("wrote {vault} (mode 0600)");
-    eprintln!("This vault is the identity. There is no recovery: a lost vault, or a forgotten passphrase, is a lost identity. Keep a copy somewhere else (pact id backup).");
+    eprintln!("wrote {vault} (mode 0600): the root, and nothing else — this file is never written again");
+    eprintln!("wrote {record} (mode 0600): the ledger and the contact book, under the same passphrase");
+    eprintln!("The vault is the identity. There is no recovery: a lost vault, or a forgotten passphrase, is a lost identity. Keep a copy somewhere else (pact id backup).");
     if let Some(path) = key_out {
         // Exclusive, because the check above is a moment old by now: nothing else may have taken
         // this name, and nothing that did will be written over or followed.
@@ -405,7 +482,8 @@ pub fn id_issue(a: IssueArgs<'_>) -> Res<i32> {
     let csr_der = read_der(a.csr)?;
     let request = csr::parse(&csr_der).map_err(|e| Fail(format!("{}: {}", a.csr, e.why)))?;
     let now = now_or(a.now)?;
-    let mut v = open_vault(a.vault, false)?;
+    let v = open_vault(a.vault, false)?;
+    let mut rec = open_record(&v)?;
     let root = pick_root(&v.plaintext, a.root)?;
     // The entry and the certificate it keeps must be for the same key on either path, software or
     // card: a vault edited between the two would issue under a root no contact has.
@@ -416,7 +494,7 @@ pub fn id_issue(a: IssueArgs<'_>) -> Res<i32> {
     check_writable(a.out)?;
     check_writable(a.chain_out)?;
     let fp = root["fingerprint"].as_str().unwrap_or("").to_string();
-    let ledger: Vec<Value> = v.plaintext["ledger"].as_array().cloned().unwrap_or_default();
+    let ledger: Vec<Value> = rec.plaintext["ledger"].as_array().cloned().unwrap_or_default();
     let mine: Vec<&Value> = ledger.iter().filter(|l| l["root"].as_str() == Some(&fp)).collect();
     let host = x509::host_of(&request.endpoint).to_string();
     let known_endpoint = mine.iter().any(|l| l["endpoint"].as_str() == Some(request.endpoint.as_str()));
@@ -492,9 +570,9 @@ pub fn id_issue(a: IssueArgs<'_>) -> Res<i32> {
                 return fail(format!("bad_request: {why}"));
             }
             let mut out = issue_on_card(c.as_ref(), &root, &roots(&v.plaintext), &csr_der, now, previous, a.valid_days)?;
+            // The endpoint and the dates, as the core's entry: never the leaf.
             out["ledger_entry"] = json!({
                 "root": fp,
-                "leaf": out["der"].clone(),
                 "endpoint": out["endpoint"].clone(),
                 "not_before": out["not_before"].clone(),
                 "not_after": out["not_after"].clone(),
@@ -504,7 +582,7 @@ pub fn id_issue(a: IssueArgs<'_>) -> Res<i32> {
         }
         None => core(
             "wallet_issue",
-            json!({ "vault_plaintext": v.plaintext, "root_fingerprint": fp, "csr": b64u(&csr_der), "now": instant(now), "valid_days": a.valid_days, "move": a.moving }),
+            json!({ "vault_plaintext": v.plaintext, "record_plaintext": rec.plaintext, "root_fingerprint": fp, "csr": b64u(&csr_der), "now": instant(now), "valid_days": a.valid_days, "move": a.moving }),
         )?,
     };
     for w in r["warnings"].as_array().cloned().unwrap_or_default() {
@@ -514,8 +592,9 @@ pub fn id_issue(a: IssueArgs<'_>) -> Res<i32> {
     if let Some(o) = a.origin {
         entry["origin"] = json!(o);
     }
-    v.plaintext["ledger"].as_array_mut().ok_or_else(|| Fail("vault ledger".into()))?.push(entry);
-    save_vault(&v)?;
+    // The record is what a signing writes; the vault is never touched.
+    rec.plaintext["ledger"].as_array_mut().ok_or_else(|| Fail("record ledger".into()))?.push(entry);
+    save_record(&v, &rec)?;
     let leaf = from_b64u(r["der"].as_str().unwrap_or("")).map_err(|e| Fail(e.why))?;
     write_output(a.out, &pem("CERTIFICATE", &leaf))?;
     if let Some(p) = a.chain_out {
@@ -527,9 +606,11 @@ pub fn id_issue(a: IssueArgs<'_>) -> Res<i32> {
 }
 
 pub fn id_ledger(vault: &str, root: Option<&str>, json: bool) -> Res<i32> {
-    let v = open_vault(vault, false)?;
+    // The record alone: the ledger is there, and the root's key has no reason to be unsealed.
+    let pass = passphrase(false)?;
+    let r = open_record_with(&record_path(vault), &pass)?;
     let now = now_or(None)?;
-    let ledger: Vec<Value> = v.plaintext["ledger"].as_array().cloned().unwrap_or_default();
+    let ledger: Vec<Value> = r.plaintext["ledger"].as_array().cloned().unwrap_or_default();
     let filter = root.map(String::from);
     let rows: Vec<&Value> = ledger.iter().filter(|l| filter.as_deref().is_none_or(|f| l["root"].as_str() == Some(f))).collect();
     if json {
@@ -541,10 +622,12 @@ pub fn id_ledger(vault: &str, root: Option<&str>, json: bool) -> Res<i32> {
         return Ok(0);
     }
     // The current leaf of a root is the live one with the latest notBefore.
-    let current: Vec<usize> = roots(&v.plaintext)
+    let mut seen: Vec<&str> = rows.iter().filter_map(|l| l["root"].as_str()).collect();
+    seen.dedup();
+    let current: Vec<usize> = seen
         .iter()
-        .filter_map(|r| {
-            let fp = r["fingerprint"].as_str()?;
+        .filter_map(|fp| {
+            let fp = *fp;
             rows.iter()
                 .enumerate()
                 .filter(|(_, l)| {
@@ -555,21 +638,14 @@ pub fn id_ledger(vault: &str, root: Option<&str>, json: bool) -> Res<i32> {
         })
         .collect();
     for (i, l) in rows.iter().enumerate() {
-        let leaf_fp = l["leaf"]
-            .as_str()
-            .and_then(|b| from_b64u(b).ok())
-            .and_then(|d| x509::parse(&d).ok())
-            .map(|c| c.public_key.fingerprint())
-            .unwrap_or_else(|| "?".into());
         println!(
-            "{} {}  {}  {} to {}  root {}  key {}{}",
+            "{} {}  {}  {} to {}  root {}{}",
             if current.contains(&i) { "*" } else { " " },
             l["issued_at"].as_str().unwrap_or("-"),
             l["endpoint"].as_str().unwrap_or("-"),
             l["not_before"].as_str().unwrap_or("-"),
             l["not_after"].as_str().unwrap_or("-"),
             l["root"].as_str().unwrap_or("-"),
-            leaf_fp,
             l["origin"].as_str().map(|o| format!("  asked by {o}")).unwrap_or_default()
         );
     }
@@ -594,38 +670,64 @@ pub fn id_show(vault: &str, root: Option<&str>, out: Option<&str>) -> Res<i32> {
 }
 
 pub fn id_backup(vault: &str, to: &str, force: bool) -> Res<i32> {
-    if Path::new(to).exists() && !force {
-        return fail(format!("{to} exists: a backup never writes over a file (pass --force to replace it)"));
+    let (record, record_to) = (record_path(vault), record_path(to));
+    let with_record = Path::new(&record).exists();
+    for taken in [to, record_to.as_str()] {
+        if Path::new(taken).exists() && !force {
+            return fail(format!("{taken} exists: a backup never writes over a file (pass --force to replace it)"));
+        }
     }
     check_writable(Some(to))?;
+    check_writable(Some(&record_to))?;
     let v = open_vault(vault, false)?;
-    let raw = read_input(vault)?;
-    // Exclusive unless `--force` said otherwise: the check above is a moment old, and what is at
-    // that name might be the only copy of another identity.
-    match force {
-        false => write_new_private(Path::new(to), &raw)?,
-        true => write_private(Path::new(to), &raw)?,
+    // Each copy exclusive unless `--force` said otherwise: the check above is a moment old, and
+    // what is at that name might be the only copy of another identity. And each proven to open.
+    let mut pairs = vec![(vault, to)];
+    if with_record {
+        pairs.push((record.as_str(), record_to.as_str()));
     }
-    let back = read_input(to)?;
-    let doc: Value = serde_json::from_slice(&back)?;
-    core("vault_open", json!({ "passphrase": v.passphrase.as_str(), "vault": doc }))?;
+    for (from, dest) in pairs {
+        let raw = read_input(from)?;
+        match force {
+            false => write_new_private(Path::new(dest), &raw)?,
+            true => write_private(Path::new(dest), &raw)?,
+        }
+        let doc: Value = serde_json::from_slice(&read_input(dest)?)?;
+        core("vault_open", json!({ "passphrase": v.passphrase.as_str(), "vault": doc }))?;
+    }
     eprintln!("copied {vault} to {to}; the copy opens");
+    if with_record {
+        eprintln!("copied {record} to {record_to}; the copy opens");
+    } else {
+        eprintln!("no record at {record}: the ledger and the contacts were not there to copy");
+    }
     Ok(0)
 }
 
 pub fn id_restore(from: &str, vault: &str) -> Res<i32> {
-    if Path::new(vault).exists() {
-        return fail(format!("{vault} exists: restore goes to a path that is empty"));
+    let (record_from, record) = (record_path(from), record_path(vault));
+    let with_record = Path::new(&record_from).exists();
+    for taken in [vault, record.as_str()] {
+        if Path::new(taken).exists() {
+            return fail(format!("{taken} exists: restore goes to a path that is empty"));
+        }
     }
     check_writable(Some(vault))?;
+    check_writable(Some(&record))?;
     let v = open_vault(from, false)?;
     land_and_prove(Path::new(vault), &read_input(from)?, &v.passphrase)?;
-    eprintln!(
-        "restored {from} to {vault}: {} identities, {} leaves, {} contacts",
-        roots(&v.plaintext).len(),
-        v.plaintext["ledger"].as_array().map_or(0, |a| a.len()),
-        v.plaintext["contacts"].as_array().map_or(0, |a| a.len())
-    );
+    eprint!("restored {from} to {vault}: {} identities", roots(&v.plaintext).len());
+    if with_record {
+        land_and_prove(Path::new(&record), &read_input(&record_from)?, &v.passphrase)?;
+        let r = open_record_with(&record, &v.passphrase)?;
+        eprintln!(
+            "; and its record to {record}: {} leaves, {} contacts",
+            r.plaintext["ledger"].as_array().map_or(0, |a| a.len()),
+            r.plaintext["contacts"].as_array().map_or(0, |a| a.len())
+        );
+    } else {
+        eprintln!("; no record beside {from}, so the ledger starts empty at the first signing");
+    }
     Ok(0)
 }
 
@@ -652,8 +754,9 @@ fn land_and_prove(vault: &Path, bytes: &[u8], passphrase: &str) -> Res<()> {
 }
 
 pub fn contacts_export(vault: &str) -> Res<i32> {
-    let v = open_vault(vault, false)?;
-    println!("{}", serde_json::to_string_pretty(&v.plaintext["contacts"])?);
+    let pass = passphrase(false)?;
+    let r = open_record_with(&record_path(vault), &pass)?;
+    println!("{}", serde_json::to_string_pretty(&r.plaintext["contacts"])?);
     Ok(0)
 }
 
@@ -701,8 +804,9 @@ pub fn contacts_import(vault: &str, file: &str, yes: bool) -> Res<i32> {
         }
         check_root_cert(c)?;
     }
-    let mut v = open_vault(vault, false)?;
-    let mine: Vec<Value> = v.plaintext["contacts"].as_array().cloned().unwrap_or_default();
+    let pass = passphrase(false)?;
+    let mut r = open_record_with(&record_path(vault), &pass)?;
+    let mine: Vec<Value> = r.plaintext["contacts"].as_array().cloned().unwrap_or_default();
     let mut added = 0;
     let mut removed = 0;
     let mut changed = 0;
@@ -752,8 +856,8 @@ pub fn contacts_import(vault: &str, file: &str, yes: bool) -> Res<i32> {
             c
         })
         .collect();
-    v.plaintext["contacts"] = Value::Array(merged);
-    save_vault(&v)?;
+    r.plaintext["contacts"] = Value::Array(merged);
+    save_record_with(&pass, &r)?;
     eprintln!("written");
     Ok(0)
 }
@@ -770,7 +874,7 @@ mod restore_tests {
         let dir = std::env::temp_dir().join(format!("pact-restore-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let sealed = core("vault_seal", json!({ "passphrase": "right", "plaintext": { "v": 1, "roots": [], "ledger": [], "contacts": [] }, "kdf": { "name": "argon2id", "m_kib": 8192, "t": 1, "p": 1 } })).unwrap()["vault"].take();
+        let sealed = core("vault_seal", json!({ "passphrase": "right", "plaintext": { "v": 2, "roots": [] }, "kdf": { "name": "argon2id", "m_kib": 8192, "t": 1, "p": 1 } })).unwrap()["vault"].take();
         let bytes = serde_json::to_vec(&sealed).unwrap();
 
         let path = dir.join("vault.json");
@@ -781,6 +885,15 @@ mod restore_tests {
         land_and_prove(&path, &bytes, "right").unwrap();
         assert!(path.exists());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // The record's name follows the vault's, so a person who kept one file finds the other.
+    #[test]
+    fn a_record_is_named_after_its_vault() {
+        assert_eq!(record_path("alina.pact-vault.json"), "alina.pact-record.json");
+        assert_eq!(record_path("/home/a/alina.pact-vault.json"), "/home/a/alina.pact-record.json");
+        assert_eq!(record_path("v.json"), "v.pact-record.json");
+        assert_eq!(record_path("vault"), "vault.pact-record.json");
     }
 }
 
@@ -902,7 +1015,7 @@ mod card_tests {
     fn a_card_held_identity_writes_no_key_into_the_vault() {
         let card = FakeCard::p256("7777");
         let (_, root) = root_of(&card).expect("a root");
-        let plaintext = json!({ "v": 1, "roots": [root.clone()], "ledger": [], "contacts": [] });
+        let plaintext = json!({ "v": 2, "roots": [root.clone()] });
         let text = serde_json::to_string(&plaintext).expect("json");
         assert!(!text.contains("pkcs8"), "no key material anywhere in the vault: {text}");
         assert_eq!(card_holder(&root).and_then(|h| h["mode"].as_str()), Some("generated"));
@@ -922,7 +1035,7 @@ mod card_tests {
             json!({ "fingerprint": fp, "cn": "Alina Rao", "pkcs8": b64u(&key.to_pkcs8()), "cert": b64u(&cert), "created": instant(NOW) });
         let first = core(
             "wallet_issue",
-            json!({ "vault_plaintext": { "v": 1, "roots": [software.clone()], "ledger": [], "contacts": [] }, "root_fingerprint": fp, "csr": b64u(&a_request(ENDPOINT)), "now": instant(NOW), "valid_days": 365 }),
+            json!({ "vault_plaintext": { "v": 2, "roots": [software.clone()] }, "record_plaintext": { "v": 2, "ledger": [] }, "root_fingerprint": fp, "csr": b64u(&a_request(ENDPOINT)), "now": instant(NOW), "valid_days": 365 }),
         )
         .expect("a first leaf");
         let ledger = vec![first["ledger_entry"].clone()];
@@ -931,7 +1044,7 @@ mod card_tests {
         let elsewhere = "https://agent.alina.example/second/mcp";
         let core_says = core(
             "wallet_issue",
-            json!({ "vault_plaintext": { "v": 1, "roots": [software], "ledger": ledger.clone(), "contacts": [] }, "root_fingerprint": fp, "csr": b64u(&a_request(elsewhere)), "now": instant(NOW + 10), "valid_days": 365 }),
+            json!({ "vault_plaintext": { "v": 2, "roots": [software] }, "record_plaintext": { "v": 2, "ledger": ledger.clone() }, "root_fingerprint": fp, "csr": b64u(&a_request(elsewhere)), "now": instant(NOW + 10), "valid_days": 365 }),
         )
         .unwrap_err();
         let cli_says = live_leaf_refusal(&mine, elsewhere, NOW + 10, false).expect("the card path refuses too");
