@@ -6,6 +6,10 @@ self-hoster needs nothing installed beside it. Two halves:
 - **The implementer's tools.** `card show|check`, `chain check`, `cert show`, `csr new|check`,
   `key new`, `vectors gen|check|intrude`. Every verdict is the core's; the terminal formats it.
 - **The wallet.** `id create|issue|renew|ledger|show|backup|restore`, `contacts export|import`.
+  An identity is two files under one passphrase (SPEC §9): the **vault**, `<name>.pact-vault.json`,
+  the root and nothing else, written when the identity is made and never again — the copy a person
+  keeps; and its **record**, `<name>.pact-record.json`, the ledger and the contact book, which every
+  signing writes. A vault brought somewhere without its record starts one with an empty ledger.
   The rules of SPEC §9 are enforced by the core's `wallet_issue` — proof of possession on every
   request, a root's own key refused, one live leaf per identity (a second endpoint is a move and
   must be asked for as one), `notBefore` monotonic over the ledger, at most 398 days — and the
@@ -75,7 +79,7 @@ purpose:**
 | | `pact id create --piv 9c` | `--key-out`, then `pact card-attach` |
 |---|---|---|
 | Where the key was made | on the card | here, in software |
-| The vault holds | the certificate and the ledger, no key | the key, as it always has |
+| The vault holds | the certificate, no key | the key, as it always has |
 | A lost card means | **the identity is gone** — a second card is a second identity, not a spare | an inconvenience: the vault still signs |
 | A copied vault means | nothing: there is no key in it | a copied identity, as with any software root |
 

@@ -257,7 +257,7 @@ owner decides, answers `pending_approval`.
 
 ## 6. Vault (SPEC §9; the format shared by the wallet page and the CLI)
 
-A vault is one JSON document:
+A wallet keeps two sealed documents, and both are this envelope:
 
 ```json
 {"format": "pact-vault/1",
@@ -266,20 +266,38 @@ A vault is one JSON document:
 ```
 
 The key is Argon2id(passphrase, salt) → 32 bytes; the cipher is AES-256-GCM; the AAD is the RFC 8785
-canonical JSON of the document without `ct`. The plaintext is:
+canonical JSON of the document without `ct`. The **file** is the root and nothing else — the person's
+backup, sealed under the recovery key, written once when the root is made and again only when the root
+is re-bound; a wallet never writes a leaf, a ledger entry or a contact into it:
 
 ```json
-{"v": 1,
- "roots": [{"fingerprint", "cn", "pkcs8", "cert", "created"}],
- "ledger": [{"root", "leaf", "endpoint", "not_before", "not_after", "issued_at", "origin"?}],
- "contacts": [{"root", "endpoint", "name", "leaf"?, "added"}]}
+{"v": 2,
+ "roots": [{"fingerprint", "cn", "alg"?, "pkcs8" | "holder", "cert", "created"}],
+ "prf"?: "<b64url 32: the §2.1 secret, for a derived root>",
+ "passkey"?: {"credential_id"}}
 ```
+
+The **record** is the ledger and the contact book — under the store key of §2.1 for a wallet with a
+credential, beside the file under the recovery key for one without — and the roots without their
+keys, or with one once a root has been re-bound:
+
+```json
+{"v": 2,
+ "roots"?: [{"fingerprint", "cn", "cert", "created", "pkcs8"?}],
+ "ledger": [{"root", "endpoint", "not_before", "not_after", "issued_at", "origin"?}],
+ "contacts": [{"root", "endpoint", "name", "leaf"?, "root_cert"?, "added"}],
+ "passkey"?: {"credential_id"}, "backup_verified_at"?: <ms>}
+```
+
+A ledger entry is the endpoint and the dates, never the leaf: that is the host's to serve and grants
+nothing. `v` is 2 at both ends — `vault_seal` refuses anything else as `bad_request`, and `vault_open`
+refuses a document that opens to an earlier generation as `vault` — and nothing converts.
 
 | Function | Input | Output | Notes |
 |---|---|---|---|
-| `vault_seal` | `passphrase`: string, `plaintext`, `kdf`?: KdfArgs, `salt`?: B64url, `nonce`?: B64url | `vault`: VaultDocument<br>*fails:* `bad_request`, `vault` | `salt` and `nonce` are for tests only. |
-| `vault_open` | `passphrase`: string, `vault` | `plaintext`<br>*fails:* `bad_request`, `vault` | A wrong passphrase and a tampered document are one message. |
-| `wallet_issue` | `vault_plaintext`, `root_fingerprint`: string, `csr`: Csr, `now`: InstantIn, `valid_days`?: integer, `move`?: boolean | `der`: CertDer, `endpoint`: string, `not_before`: Instant, `not_after`: Instant, `ledger_entry`: LedgerEntry, `new_host`: boolean, `warnings`: [string]<br>*fails:* `bad_request`, `parse` | The wallet's rules: `csr_check` with the vault's roots as `root_spkis`; `new_host` true when no ledger entry names that endpoint's host, with the warning `new host: this endpoint's host has never been issued to`; the **live leaf is the newest one issued** (§14.3) and a second endpoint while it is unexpired is refused unless `move: true`, which instead warns `move: the live leaf at the previous endpoint is superseded once contacts see this one`; `not_before` monotonic over the ledger; `valid_days` absent means 365 and an explicit 0 is refused. |
+| `vault_seal` | `passphrase`: string, `plaintext`, `kdf`?: KdfArgs, `salt`?: B64url, `nonce`?: B64url | `vault`: VaultDocument<br>*fails:* `bad_request`, `vault` | `plaintext` is a VaultPlaintext or a RecordPlaintext, and its `v` is 2: anything else is `bad_request` (`a vault plaintext is v 2: the root, or the record`). `salt` and `nonce` are for tests only. |
+| `vault_open` | `passphrase`: string, `vault` | `plaintext`<br>*fails:* `bad_request`, `vault` | A wrong passphrase and a tampered document are one message. A document that opens to a plaintext whose `v` is not 2 was written by an earlier wallet and is refused (`vault`, `this vault was written by an earlier wallet and is not opened: there is no conversion`); nothing converts. |
+| `wallet_issue` | `vault_plaintext`: VaultPlaintext, `record_plaintext`: RecordPlaintext, `root_fingerprint`: string, `csr`: Csr, `now`: InstantIn, `valid_days`?: integer, `move`?: boolean | `der`: CertDer, `endpoint`: string, `not_before`: Instant, `not_after`: Instant, `ledger_entry`: LedgerEntry, `new_host`: boolean, `warnings`: [string]<br>*fails:* `bad_request`, `parse` | Two documents, as §9 keeps them: the vault is the root and nothing else, the record holds the ledger this reads and the entry answered is appended to. A vault carrying `ledger` or `contacts` is refused (`bad_request`, `a vault holds the root and nothing else: its ledger and contacts belong in the record`); a missing record is refused (`record_plaintext is required: the ledger lives there`). The entry answered is the endpoint and the dates, never the leaf. The wallet's rules: `csr_check` with the vault's roots as `root_spkis`; `new_host` true when no ledger entry names that endpoint's host, with the warning `new host: this endpoint's host has never been issued to`; the **live leaf is the newest one issued** (§14.3) and a second endpoint while it is unexpired is refused unless `move: true`, which instead warns `move: the live leaf at the previous endpoint is superseded once contacts see this one`; `not_before` monotonic over the ledger; `valid_days` absent means 365 and an explicit 0 is refused. |
 
 Passphrases never appear in arguments of the CLI; the wallet page holds them in memory
 only for the call, and an empty passphrase seals nothing (`bad_request`). What the core zeroizes
@@ -377,4 +395,9 @@ file: `Fingerprint` cannot mean `sha256:…` in one function's row and something
 | `Kdf` | `name`: "argon2id", `m_kib`: integer, `t`: integer, `p`: integer | The key derivation, as a vault DOCUMENT carries it: all four members, each inside its range. The ranges are checked at both ends on both paths, by one parser — an unbounded reader hands an attacker's file a 256 GiB allocation, and an unbounded writer seals a person's root behind a KDF a laptop brute-forces. A value that does not fit in 32 bits is out of range, never truncated. |
 | `KdfArgs` | `name`?: "argon2id", `m_kib`?: integer, `t`?: integer, `p`?: integer | The same, as an ARGUMENT to `vault_seal`: every member may be left out and takes the default (64 MiB, t 3, p 1), and what is given is held to the same range as a document's. |
 | `VaultDocument` | `format`: "pact-vault/1", `kdf`: Kdf, `salt`: B64url, `nonce`: B64url, `ct`: B64url |  |
-| `LedgerEntry` | `root`: Fingerprint, `leaf`: CertDer, `endpoint`: string, `not_before`: Instant, `not_after`: Instant, `issued_at`: Instant, `origin`?: string |  |
+| `LedgerEntry` | `root`: Fingerprint, `endpoint`: string, `not_before`: Instant, `not_after`: Instant, `issued_at`: Instant, `origin`?: string | One leaf the wallet issued: the endpoint and the dates, which is what every rule reads. Never the leaf itself, which is the host's to serve and grants nothing (SPEC §9). |
+| `VaultRoot` | `fingerprint`: Fingerprint, `cn`: string, `alg`?: Alg, `cert`: CertDer, `created`: Instant, `pkcs8`?: Pkcs8, `holder`?: `{…}` | One identity the wallet holds. In the file it carries the root's key (`pkcs8`) or names the card that does (`holder`); in the record it carries neither, until the root is re-bound (SPEC §9). |
+| `VaultPasskey` | `credential_id`: string | The credential a derived root belongs to (SPEC §2.1); not secret. |
+| `VaultContact` | `root`: Fingerprint, `endpoint`: string, `name`?: string, `leaf`?: CertDer, `root_cert`?: CertDer, `added`?: Instant | The wallet's own copy of one contact (SPEC §9): pinned by root, at an endpoint, under the person's name; a leaf and the root certificate when the wallet has seen them. |
+| `VaultPlaintext` | `v`: 2, `roots`: [VaultRoot], `prf`?: Seed32, `passkey`?: VaultPasskey | What the FILE seals: the root and nothing else (SPEC §9). `prf` is the §2.1 secret a derived root's record is opened with, for the wallet that has lost its credential. A `v` that is not 2 is refused at both ends and nothing converts. |
+| `RecordPlaintext` | `v`: 2, `roots`?: [VaultRoot], `ledger`?: [LedgerEntry], `contacts`?: [VaultContact], `passkey`?: VaultPasskey, `backup_verified_at`?: integer | What the RECORD seals (SPEC §9): the ledger and the contact book, the roots without their keys — or with one, once a root has been re-bound — and what the wallet page keeps beside them. Under the store key of §2.1 for a wallet with a credential; beside the file, under the recovery key, for one without. |

@@ -215,7 +215,7 @@ owner decides, answers `pending_approval`.
 
 ## 6. Vault (SPEC §9; the format shared by the wallet page and the CLI)
 
-A vault is one JSON document:
+A wallet keeps two sealed documents, and both are this envelope:
 
 ```json
 {"format": "pact-vault/1",
@@ -224,14 +224,32 @@ A vault is one JSON document:
 ```
 
 The key is Argon2id(passphrase, salt) → 32 bytes; the cipher is AES-256-GCM; the AAD is the RFC 8785
-canonical JSON of the document without `ct`. The plaintext is:
+canonical JSON of the document without `ct`. The **file** is the root and nothing else — the person's
+backup, sealed under the recovery key, written once when the root is made and again only when the root
+is re-bound; a wallet never writes a leaf, a ledger entry or a contact into it:
 
 ```json
-{"v": 1,
- "roots": [{"fingerprint", "cn", "pkcs8", "cert", "created"}],
- "ledger": [{"root", "leaf", "endpoint", "not_before", "not_after", "issued_at", "origin"?}],
- "contacts": [{"root", "endpoint", "name", "leaf"?, "added"}]}
+{"v": 2,
+ "roots": [{"fingerprint", "cn", "alg"?, "pkcs8" | "holder", "cert", "created"}],
+ "prf"?: "<b64url 32: the §2.1 secret, for a derived root>",
+ "passkey"?: {"credential_id"}}
 ```
+
+The **record** is the ledger and the contact book — under the store key of §2.1 for a wallet with a
+credential, beside the file under the recovery key for one without — and the roots without their
+keys, or with one once a root has been re-bound:
+
+```json
+{"v": 2,
+ "roots"?: [{"fingerprint", "cn", "cert", "created", "pkcs8"?}],
+ "ledger": [{"root", "endpoint", "not_before", "not_after", "issued_at", "origin"?}],
+ "contacts": [{"root", "endpoint", "name", "leaf"?, "root_cert"?, "added"}],
+ "passkey"?: {"credential_id"}, "backup_verified_at"?: <ms>}
+```
+
+A ledger entry is the endpoint and the dates, never the leaf: that is the host's to serve and grants
+nothing. `v` is 2 at both ends — `vault_seal` refuses anything else as `bad_request`, and `vault_open`
+refuses a document that opens to an earlier generation as `vault` — and nothing converts.
 
 {{table:vault}}
 

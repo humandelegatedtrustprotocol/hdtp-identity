@@ -36,6 +36,15 @@ fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")
 }
 
+/// Where the CLI keeps an identity's record: the rule `wallet::record_path` follows, held here so
+/// that a change to it is seen.
+fn record_of(vault: &std::path::Path) -> std::path::PathBuf {
+    let name = vault.file_name().unwrap().to_string_lossy().to_string();
+    let stem = name.strip_suffix(".json").unwrap_or(&name);
+    let stem = stem.strip_suffix(".pact-vault").unwrap_or(stem);
+    vault.with_file_name(format!("{stem}.pact-record.json"))
+}
+
 #[test]
 fn a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates() {
     let dir = tempfile::tempdir().unwrap();
@@ -80,6 +89,10 @@ fn a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates() {
     }
     let text = fs::read_to_string(&vault).unwrap();
     assert!(text.contains("pact-vault/1") && !text.contains("pkcs8"), "the vault at rest shows no key material");
+    // Two files: the vault, and its record beside it, named after it.
+    let record = record_of(&vault);
+    assert!(record.exists(), "the record is written with the vault, at {}", record.display());
+    let vault_as_made = fs::read(&vault).unwrap();
 
     // The wallet issues; the leaf and the root validate as a chain for that address.
     pact()
@@ -94,6 +107,9 @@ fn a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates() {
         .success()
         .stdout(predicate::str::starts_with("-----BEGIN CERTIFICATE-----"))
         .stderr(predicate::str::contains("NEW HOST"));
+    // The signing wrote the record and never the vault: the file a person keeps is the one they were given.
+    assert_eq!(fs::read(&vault).unwrap(), vault_as_made, "the vault is written once");
+    assert!(!fs::read_to_string(&record).unwrap().contains("pkcs8"), "the record at rest shows no key material");
     pact()
         .args(["chain", "check", "--expect-endpoint", "https://agent.alina.example/mcp", "--expect-root", &root_fp, "--chain"])
         .arg(&chain)
@@ -206,6 +222,7 @@ fn a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates() {
         .assert()
         .success()
         .stderr(predicate::str::contains("3 leaves"));
+    assert!(record_of(&restored).exists(), "the record is restored beside the vault");
 
     // The contact book: export, then import a book with one more and one changed.
     let book = pact().env("PACT_PASSPHRASE_FILE", &pass).args(["contacts", "export", "--vault"]).arg(&vault).assert().success();

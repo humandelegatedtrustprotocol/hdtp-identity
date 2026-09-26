@@ -1061,6 +1061,10 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 		salt, nonce := []byte(a.Salt), []byte(a.Nonce)
 		v, err := VaultSeal(a.Passphrase, pt, a.KDF, salt, nonce)
 		if err != nil {
+			// The generation is a bad request, as the Rust core answers it; the rest is the vault's.
+			if plaintextV(pt) != PlaintextV {
+				return failErr("bad_request", err)
+			}
 			return failErr("vault", err)
 		}
 		return ok(map[string]any{"vault": v})
@@ -1091,12 +1095,13 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 	},
 	"wallet_issue": func(args json.RawMessage) json.RawMessage {
 		var a struct {
-			VaultPlaintext  VaultPlaintext `json:"vault_plaintext"`
-			RootFingerprint *string        `json:"root_fingerprint"`
-			CSR             B64            `json:"csr"`
-			Now             *string        `json:"now"`
-			ValidDays       *int           `json:"valid_days"`
-			Move            bool           `json:"move"`
+			VaultPlaintext  json.RawMessage  `json:"vault_plaintext"`
+			RecordPlaintext *RecordPlaintext `json:"record_plaintext"`
+			RootFingerprint *string          `json:"root_fingerprint"`
+			CSR             B64              `json:"csr"`
+			Now             *string          `json:"now"`
+			ValidDays       *int             `json:"valid_days"`
+			Move            bool             `json:"move"`
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return failErr(codeFor(err, codeArgs), err)
@@ -1116,7 +1121,28 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 		if err != nil {
 			return failErr("bad_request", err)
 		}
-		issued, err := WalletIssue(a.VaultPlaintext, fingerprint, a.CSR, now, days, a.Move)
+		// After the arguments, in the Rust core's order: its `wallet_issue` reads them before its
+		// body refuses a vault carrying what belongs in the record, or a missing record.
+		var vaultMembers map[string]json.RawMessage
+		if len(a.VaultPlaintext) > 0 {
+			_ = json.Unmarshal(a.VaultPlaintext, &vaultMembers)
+		}
+		if _, has := vaultMembers["ledger"]; has {
+			return fail("bad_request", "a vault holds the root and nothing else: its ledger and contacts belong in the record")
+		}
+		if _, has := vaultMembers["contacts"]; has {
+			return fail("bad_request", "a vault holds the root and nothing else: its ledger and contacts belong in the record")
+		}
+		if a.RecordPlaintext == nil {
+			return fail("bad_request", "record_plaintext is required: the ledger lives there")
+		}
+		var vault VaultPlaintext
+		if len(a.VaultPlaintext) > 0 {
+			if err := json.Unmarshal(a.VaultPlaintext, &vault); err != nil {
+				return failErr(codeArgs, err)
+			}
+		}
+		issued, err := WalletIssue(vault, *a.RecordPlaintext, fingerprint, a.CSR, now, days, a.Move)
 		if err != nil {
 			return failErr("bad_request", err)
 		}

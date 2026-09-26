@@ -8,6 +8,15 @@
     "why": "the receiver-side half is the node's: internal/public/identify20.go compares the transport chain's leaf key against the envelope's (TestHandshakeAcceptsEveryCertificateAndBelievesOnlyAChain)"
   },
   "2.1#1": {
+    "hash": "56c1be33d6c9",
+    "text": "A wallet that can use a WebAuthn credential MUST **derive the root's private key from one** rather than genera",
+    "elsewhere": "wallet",
+    "why": "which way a root is made is the wallet's: the browser wallet (pact-cloud/gateway/src/ceremony/ceremony.js) derives it from the credential and has no other way to make one; the pact CLI, which cannot speak WebAuthn, generates and keeps it as §9 says (rust:a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates)",
+    "elsewhere_names": [
+      "cloud:gateway/src/ceremony/ceremony.js"
+    ]
+  },
+  "2.1#2": {
     "hash": "e79efe20ebb8",
     "text": "A wallet MUST use exactly these values.",
     "held_by": [
@@ -17,13 +26,13 @@
       "go:TestDerivationRefusesWhatWouldSilentlyDiffer"
     ]
   },
-  "2.1#2": {
+  "2.1#3": {
     "hash": "82415d63414e",
     "text": "A wallet MUST NOT present this as a guarantee: whether a given provider carries the PRF secret across its own ",
     "elsewhere": "wallet",
     "why": "a claim a wallet's interface makes or does not make about its provider's sync; there is no wire artefact to test"
   },
-  "2.1#3": {
+  "2.1#4": {
     "hash": "1192a8910f37",
     "text": "A wallet holding more than one credential for its origin MUST name the intended credential when it knows which",
     "held_by": [
@@ -31,7 +40,7 @@
       "go:TestVaultRulesMirrorTheCore"
     ]
   },
-  "2.1#4": {
+  "2.1#5": {
     "hash": "0383cc3a9bf0",
     "text": "A wallet that derives its root MUST still be able to export it (§9).",
     "held_by": [
@@ -227,6 +236,20 @@
       "rust:issues_from_the_vault",
       "go:TestWalletIssue",
       "go:TestVaultRulesMirrorTheCore"
+    ]
+  },
+  "9.#6": {
+    "hash": "7fed1ebb6144",
+    "text": "The **file** is the backup of the root and nothing else — the root's private key, its certificate and, for a d",
+    "held_by": [
+      "rust:a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates",
+      "rust:issues_from_the_vault",
+      "go:TestWalletIssue",
+      "rust:a_record_is_named_after_its_vault"
+    ],
+    "why": "the CLI writes the vault once, the root and nothing else, and every signing writes the record beside it; the core's ledger entry is the endpoint and the dates and never the leaf, in both ports; the browser wallet (pact-cloud/gateway/src/ceremony/ceremony.js) writes the same file once and the record on every signing",
+    "elsewhere_names": [
+      "cloud:gateway/src/ceremony/ceremony.js"
     ]
   },
   "13.1#1": {

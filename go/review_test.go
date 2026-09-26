@@ -208,7 +208,7 @@ func TestSmallOrderPointsAndSPKIBits(t *testing.T) {
 // HIGH 1 (this port's half) and LOW 13: the vault's rules, and its message.
 func TestVaultRulesMirrorTheCore(t *testing.T) {
 	kdf := KDF{Name: "argon2id", MKiB: 8192, T: 1, P: 1}
-	r := Call("vault_seal", json.RawMessage(`{"passphrase":"","plaintext":{"v":1,"roots":[],"ledger":[],"contacts":[]}}`))
+	r := Call("vault_seal", json.RawMessage(`{"passphrase":"","plaintext":{"v":2,"roots":[]}}`))
 	var fail struct {
 		Error, Why string
 	}
@@ -216,7 +216,7 @@ func TestVaultRulesMirrorTheCore(t *testing.T) {
 	if fail.Error != "bad_request" || fail.Why != "empty passphrase" {
 		t.Errorf("empty passphrase: %s", r)
 	}
-	v, err := VaultSeal("correct horse", []byte(`{"v":1}`), &kdf, nil, nil)
+	v, err := VaultSeal("correct horse", []byte(`{"v":2}`), &kdf, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

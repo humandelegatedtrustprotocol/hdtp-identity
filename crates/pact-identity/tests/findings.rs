@@ -187,17 +187,16 @@ fn a_request_carrying_a_card_held_siblings_key_is_refused_on_the_software_path()
     let sibling = PrivateKey::generate(Alg::P256).unwrap();
     let sibling_der = x509::build_root("Alina at work", &sibling, NOW - 3600, &x509::serial_of("findings/sibling")).unwrap();
     let plaintext = json!({
-        "v": 1,
+        "v": 2,
         "roots": [
             { "fingerprint": c.root.public().fingerprint(), "cn": "Alina Rao", "pkcs8": b64u(&c.root.to_pkcs8()), "cert": b64u(&c.root_der) },
             { "fingerprint": sibling.public().fingerprint(), "cn": "Alina at work", "cert": b64u(&sibling_der), "holder": { "kind": "piv" } },
         ],
-        "ledger": [], "contacts": [],
     });
     let csr = call("csr_new", json!({ "cn": "A Host", "host_pkcs8": b64u(&sibling.to_pkcs8()), "endpoint": E_A }));
     let r = call(
         "wallet_issue",
-        json!({ "vault_plaintext": plaintext, "root_fingerprint": c.root.public().fingerprint(), "csr": csr["der"], "now": NOW_RFC }),
+        json!({ "vault_plaintext": plaintext, "record_plaintext": { "v": 2, "ledger": [] }, "root_fingerprint": c.root.public().fingerprint(), "csr": csr["der"], "now": NOW_RFC }),
     );
     assert_eq!(r["why"], "the request's key is a root", "{r}");
 }
