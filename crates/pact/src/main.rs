@@ -488,6 +488,8 @@ mod tests {
             ("piv.rs", include_str!("piv.rs")),
             ("io.rs", include_str!("io.rs")),
             ("vectors.rs", include_str!("vectors.rs")),
+            ("vectors/check.rs", include_str!("vectors/check.rs")),
+            ("vectors/intrude.rs", include_str!("vectors/intrude.rs")),
             ("implementer.rs", include_str!("implementer.rs")),
             ("README.md", include_str!("../README.md")),
         ];
