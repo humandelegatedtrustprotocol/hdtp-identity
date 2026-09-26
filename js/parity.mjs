@@ -391,6 +391,47 @@ const moved = { ...record, ledger: [{ root: rootFp, endpoint: 'https://elsewhere
 add('wallet_issue for a second address', 'wallet_issue', { vault_plaintext: vault, record_plaintext: moved, root_fingerprint: rootFp, csr, now });
 add('wallet_issue as a move', 'wallet_issue', { vault_plaintext: vault, record_plaintext: moved, root_fingerprint: rootFp, csr, now, move: true }, withoutSerial('der'));
 add('wallet_issue with an empty vault', 'wallet_issue', { vault_plaintext: { v: 2, roots: [] }, record_plaintext: record, root_fingerprint: rootFp, csr, now });
+// The review of PR #29 (C6, C8-C11, C18): every argument absent and of the wrong type, every document
+// shape the contract refuses, and every ledger entry that does not read — one answer from both ports.
+// A ledger entry that does not read is refused, never skipped: skipped, it could be the live leaf.
+const K = { m_kib: 8192, t: 1, p: 1 };
+add('vault_seal with no passphrase', 'vault_seal', { plaintext: { v: 2 }, kdf: K, salt: SALT, nonce: NONCE });
+add('vault_seal with a passphrase that is not a string', 'vault_seal', { passphrase: 5, plaintext: { v: 2 }, kdf: K, salt: SALT, nonce: NONCE });
+add('vault_seal of an earlier generation under a KDF out of range', 'vault_seal', { passphrase: 'a passphrase', plaintext: { v: 1 }, kdf: { name: 'argon2id', m_kib: 65536, t: 17, p: 1 }, salt: SALT, nonce: NONCE });
+add('vault_seal of a plaintext that is a string', 'vault_seal', { passphrase: 'a passphrase', plaintext: 'v2', kdf: K, salt: SALT, nonce: NONCE });
+const issueWith = (over) => ({ vault_plaintext: vault, record_plaintext: record, root_fingerprint: rootFp, csr, now, ...over });
+const entry = moved.ledger[0];
+for (const [what, over] of [
+  ['no root_fingerprint', { root_fingerprint: undefined }],
+  ['a root_fingerprint that is not a string', { root_fingerprint: 5 }],
+  ['no csr', { csr: undefined }],
+  ['no now', { now: undefined }],
+  ['a now that does not read', { now: 'yesterday' }],
+  ['valid_days as a string', { valid_days: '30' }],
+  ['valid_days of 0', { valid_days: 0 }],
+  ['valid_days of 999', { valid_days: 999 }],
+  ['a vault that is a string', { vault_plaintext: 'the vault' }],
+  ['a vault of an earlier generation', { vault_plaintext: { ...vault, v: 1 } }],
+  ['a vault with a member it does not hold', { vault_plaintext: { ...vault, note: 'hello' } }],
+  ['a record that is a string', { record_plaintext: 'the record' }],
+  ['a record that is a list', { record_plaintext: [] }],
+  ['a record of an earlier generation', { record_plaintext: { ...record, v: 1 } }],
+  ['a record with a member it does not hold', { record_plaintext: { ...record, note: 'hello' } }],
+  ['a record whose ledger is not a list', { record_plaintext: { ...record, ledger: {} } }],
+  ['a ledger entry with no endpoint', { record_plaintext: { ...record, ledger: [{ ...entry, endpoint: undefined }] } }],
+  ['a ledger entry whose not_before does not read', { record_plaintext: { ...record, ledger: [{ ...entry, not_before: 'soon' }] } }],
+  ['a ledger entry whose not_after does not read', { record_plaintext: { ...record, ledger: [{ ...entry, not_after: 'later' }] } }],
+  ['a ledger entry whose root is not a string', { record_plaintext: { ...record, ledger: [{ ...entry, root: 5 }] } }],
+  ['a ledger entry carrying the leaf', { record_plaintext: { ...record, ledger: [{ ...entry, leaf: 'MIIB' }] } }],
+  ['a ledger entry that is not an object', { record_plaintext: { ...record, ledger: ['an entry'] } }],
+  ['a root held on a card, which this function cannot sign with', { vault_plaintext: { ...vault, roots: vault.roots.map(({ pkcs8, ...r }) => ({ ...r, holder: { kind: 'piv' } })) } }],
+]) {
+  const args = issueWith(over);
+  for (const k of Object.keys(args)) if (args[k] === undefined) delete args[k];
+  add(`wallet_issue with ${what}`, 'wallet_issue', args);
+}
+// The control that must get through: a ledger that reads, an entry for another root, and an origin.
+add('wallet_issue over a ledger that reads', 'wallet_issue', issueWith({ valid_days: 30, record_plaintext: { ...record, ledger: [{ ...entry, root: 'sha256:' + 'B'.repeat(43), origin: 'https://app.example' }] } }), withoutSerial('der'));
 
 // A request the seed can make and both ports must answer identically: the header carries the rules.
 add('seal_request', 'seal_request', { recipient_leaf: leafDer, sender_pkcs8: hostPkcs8, form: 'chain', sender_chain: [leafDer, rootDer], method: 'tools/call', params: { name: 'send_message' }, msg_id: 'p-2', ts: Math.floor(Date.parse(now) / 1000), ephemeral_seed: b64url(new Uint8Array(32).fill(7)) });
@@ -709,6 +750,24 @@ const expected = new Map();
   }
 }
 
+// The review of PR #29 (C6): a ledger entry that does not read is REFUSED, and two ports that both
+// skipped it would agree with each other while one live leaf per identity failed open. So these carry
+// the answer SPEC §9 requires, and the control above ('over a ledger that reads') must issue.
+{
+  const unread = (m) => ({ error: 'bad_request', why: `the record's ledger entry 0 does not read${m ? `: ${m}` : ''}` });
+  for (const [what, want] of [
+    ['a ledger entry with no endpoint', unread('endpoint')],
+    ['a ledger entry whose not_before does not read', unread('not_before')],
+    ['a ledger entry whose not_after does not read', unread('not_after')],
+    ['a ledger entry whose root is not a string', unread('root')],
+    ['a ledger entry carrying the leaf', unread('leaf')],
+    ['a ledger entry that is not an object', unread('')],
+    ['a record whose ledger is not a list', { error: 'bad_request', why: "the record's ledger is a list" }],
+    ['a root held on a card, which this function cannot sign with', { error: 'bad_request', why: 'this root is held on a card: wallet_issue signs only with a key the vault holds' }],
+  ]) expected.set(`wallet_issue with ${what}`, want);
+  expected.set('vault_seal of an earlier generation under a KDF out of range', { error: 'bad_request', why: 'a vault plaintext is v 2: the root, or the record' });
+}
+
 for (const [name, fn, args, keys] of cases) {
   if (only && !name.includes(only) && fn !== only) continue;
   ran++;
@@ -727,8 +786,10 @@ for (const [name, fn, args, keys] of cases) {
   }
   // A case that carries the spec's answer is held to it, and counts once however many ports miss it.
   const want = expected.get(name);
-  const missed = want ? [['wasm', raw], ['go', rawGo]].filter(([, got]) => Object.entries(want).some(([k, v]) => got?.result?.[k] !== v)) : [];
-  for (const [port, got] of missed) console.log(`  NOT AS THE SPEC SAYS  ${name}  (${port}): want ${JSON.stringify(want)}, got ${JSON.stringify(got?.result)}`);
+  // `decide` answers under `result`; a refusal is the answer itself.
+  const judged = (got) => got?.result ?? got;
+  const missed = want ? [['wasm', raw], ['go', rawGo]].filter(([, got]) => Object.entries(want).some(([k, v]) => judged(got)?.[k] !== v)) : [];
+  for (const [port, got] of missed) console.log(`  NOT AS THE SPEC SAYS  ${name}  (${port}): want ${JSON.stringify(want)}, got ${JSON.stringify(judged(got))}`);
   if (missed.length) {
     bad++;
     continue;
