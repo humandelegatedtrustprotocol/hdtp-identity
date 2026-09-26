@@ -61,13 +61,14 @@ node contract/render.mjs --check
 
 step "The two ports answer a caller alike, and both answer as contract/contract.json says"
 node js/parity.mjs
-node --test --test-timeout=60000 js/live.test.mjs js/port.test.mjs js/surface.test.mjs js/cases.test.mjs
+node --test --test-timeout=60000 js/live.test.mjs js/port.test.mjs js/surface.test.mjs js/cases.test.mjs js/seed.test.mjs
 
 step "Every MUST in the specification names something that holds it, and the record is current"
 node js/musts.mjs
 node js/record.mjs --check
 
 step "The seed itself still proves the spec"
-( cd ../pact-protocol && node vectors/check.mjs && node vectors/intrude.mjs )
+( cd ../pact-protocol && node vectors/check.mjs )
+node js/seed.mjs
 
 printf '\ngate: ok\n'

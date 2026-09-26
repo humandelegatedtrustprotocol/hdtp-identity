@@ -250,10 +250,13 @@ pub fn gen(out: Option<&str>) -> Res<i32> {
     Ok(0)
 }
 
-/// The JSON blocks of a document's Appendix B.
+/// The JSON blocks of a document's Appendix B: everything fenced as ```json between the heading
+/// `## Appendix B` and the closing line `*End of PACT`. Both markers must be there and every fence
+/// must close — the rule js/seed.mjs `appendixB` reads by, held by the same cases in both test suites.
 fn appendix_b(spec: &str) -> Res<Vec<Value>> {
     let start = spec.find("## Appendix B").ok_or_else(|| Fail("no Appendix B in the document".into()))?;
-    let end = spec[start..].find("*End of PACT").map(|i| start + i).unwrap_or(spec.len());
+    let end =
+        spec[start..].find("*End of PACT").map(|i| start + i).ok_or_else(|| Fail("Appendix B has no end marker (*End of PACT)".into()))?;
     let b = &spec[start..end];
     let mut out = Vec::new();
     let mut rest = b;
@@ -1089,6 +1092,17 @@ pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The same cases js/seed.test.mjs holds `appendixB` to.
+    #[test]
+    fn appendix_b_is_read_between_its_two_markers_and_a_missing_marker_or_an_open_fence_is_refused() {
+        let doc = |body: &str, end: &str| format!("# Spec\n\n## Appendix B\n\n{body}\n{end}");
+        let blocks = appendix_b(&doc("```json\n{\"a\":1}\n```\n\n```json\n[2]\n```", "*End of PACT 2.1*\n")).unwrap();
+        assert_eq!(blocks, vec![json!({ "a": 1 }), json!([2])]);
+        assert!(appendix_b("# no appendix").is_err());
+        assert!(appendix_b(&doc("```json\n{\"a\":1}\n```", "")).is_err_and(|e| e.0.contains("no end marker")));
+        assert!(appendix_b(&doc("```json\n{\"a\":1}\n", "*End of PACT 2.1*\n")).is_err_and(|e| e.0.contains("unterminated")));
+    }
 
     // The battery is data (js/live-scenarios.json, which js/live.mjs reads too): this driver has to
     // build every id in it, and the file has to put its one control last.

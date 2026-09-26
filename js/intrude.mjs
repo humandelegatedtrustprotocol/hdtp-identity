@@ -6,8 +6,6 @@
 //   residual   — the attack succeeds, and §14.5 already says so and bounds it
 //   REPRODUCES — the attack succeeds and nothing in the spec stops it: a finding
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
 import { createPublicKey } from 'node:crypto';
 import { seed, ed25519FromSeed, p256FromSeed, pkcs8Of, b64url, fromB64url } from '../../pact-protocol/vectors/lib/keys.mjs';
 import { buildRoot, buildLeaf, parse, fingerprintOf, OID } from '../../pact-protocol/vectors/lib/x509.mjs';
@@ -16,6 +14,7 @@ import { sealEnvelope } from '../../pact-protocol/vectors/lib/envelope.mjs';
 import { makePort, portFromArgv } from './port.mjs';
 import { alina, bharat as bharatOf, mallory, CLOCK, ENDPOINTS, H, D } from './cast.mjs';
 import { makeDefender } from './defender.mjs';
+import { seedIntrusions } from './seed.mjs';
 
 if (portFromArgv() === 'live') {
   const { cli } = await import('./live.mjs');
@@ -442,12 +441,7 @@ const count = (v) => results.filter((r) => r.verdict === v).length;
 console.log(`\n${results.length} scenarios: ${count('blocked')} blocked, ${count('residual')} residual by decision, ${count('REPRODUCES')} reproduce`);
 
 // ── The same scenarios against the seed: every verdict must agree ───────────────
-const seedRun = spawnSync(process.execPath, [fileURLToPath(new URL('../../pact-protocol/vectors/intrude.mjs', import.meta.url))], { encoding: 'utf8' });
-const seedVerdicts = new Map();
-for (const line of seedRun.stdout.split('\n')) {
-  const m = /^  (blocked|residual|REPRODUCES)\s+(.*?)(?:\s+→ .*)?$/.exec(line);
-  if (m) seedVerdicts.set(m[2], m[1]);
-}
+const seedVerdicts = new Map(seedIntrusions().scenarios.map((s) => [s.name, s.verdict]));
 let differences = 0;
 for (const r of results) {
   const s = seedVerdicts.get(r.name);
