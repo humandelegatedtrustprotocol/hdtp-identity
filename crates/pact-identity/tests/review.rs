@@ -246,7 +246,7 @@ fn compressed_p256_points_are_refused() {
 // ── HIGH 1 (the core's half): an empty passphrase seals nothing ──
 #[test]
 fn empty_passphrase_is_refused() {
-    let r = call("vault_seal", json!({ "passphrase": "", "plaintext": { "v": 1, "roots": [], "ledger": [], "contacts": [] } }));
+    let r = call("vault_seal", json!({ "passphrase": "", "plaintext": { "v": 2, "roots": [] } }));
     assert_eq!(r["error"], "bad_request");
     assert_eq!(r["why"], "empty passphrase");
 }

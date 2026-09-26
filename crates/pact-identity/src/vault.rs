@@ -12,6 +12,14 @@ use serde_json::{json, Map, Value};
 use zeroize::Zeroizing;
 
 pub const FORMAT: &str = "pact-vault/1";
+/// The plaintext generation both documents carry: the file (the root and nothing else) and the
+/// record (the ledger and the contacts). There is no earlier one to open: a `v` that is not this is
+/// refused at both ends, sealing and opening, and nothing converts.
+pub const PLAINTEXT_V: u64 = 2;
+
+fn plaintext_v(plaintext: &Value) -> Option<u64> {
+    plaintext.get("v").and_then(|v| v.as_u64())
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct Kdf {
@@ -97,6 +105,15 @@ pub fn seal(passphrase: &str, plaintext: &Value, kdf: Option<Kdf>, salt: Option<
     if passphrase.is_empty() {
         return err("bad_request", "empty passphrase");
     }
+    if plaintext_v(plaintext) != Some(PLAINTEXT_V) {
+        return err("bad_request", "a vault plaintext is v 2: the root, or the record");
+    }
+    seal_any(passphrase, plaintext, kdf, salt, nonce)
+}
+
+/// The sealing itself, with no opinion about the plaintext: `seal` holds the generation, and the
+/// test of `open`'s refusal needs a document `seal` would not write.
+fn seal_any(passphrase: &str, plaintext: &Value, kdf: Option<Kdf>, salt: Option<Vec<u8>>, nonce: Option<Vec<u8>>) -> Result<Value> {
     let kdf = kdf.unwrap_or_default();
     let salt = match salt {
         Some(s) => s,
@@ -146,14 +163,36 @@ pub fn open(passphrase: &str, vault: &Value) -> Result<Value> {
             .decrypt(nonce.as_slice().into(), Payload { msg: &ct, aad: aad.as_bytes() })
             .map_err(|_| fail())?,
     );
-    serde_json::from_slice(&pt).map_err(|_| fail())
+    let plaintext: Value = serde_json::from_slice(&pt).map_err(|_| fail())?;
+    if plaintext_v(&plaintext) != Some(PLAINTEXT_V) {
+        return err("vault", "this vault was written by an earlier wallet and is not opened: there is no conversion");
+    }
+    Ok(plaintext)
 }
 
 /// The wallet's issuance (SPEC §9): the request checked against the vault's roots, a new host
 /// flagged, one live leaf per identity, `notBefore` monotonic over the ledger.
-pub fn wallet_issue(plaintext: &Value, root_fingerprint: &str, csr_der: &[u8], now: i64, valid_days: i64, moving: bool) -> Result<Value> {
-    let roots = plaintext.get("roots").and_then(|r| r.as_array()).cloned().unwrap_or_default();
-    let ledger = plaintext.get("ledger").and_then(|r| r.as_array()).cloned().unwrap_or_default();
+///
+/// Two documents, as §9 keeps them: the `vault` is the root and nothing else, and the `record`
+/// holds the ledger this reads and the entry this answers is appended to. A vault carrying a
+/// ledger or contacts was written by an earlier wallet and is refused, not read around.
+pub fn wallet_issue(
+    vault: &Value,
+    record: &Value,
+    root_fingerprint: &str,
+    csr_der: &[u8],
+    now: i64,
+    valid_days: i64,
+    moving: bool,
+) -> Result<Value> {
+    if vault.get("ledger").is_some() || vault.get("contacts").is_some() {
+        return err("bad_request", "a vault holds the root and nothing else: its ledger and contacts belong in the record");
+    }
+    if !record.is_object() {
+        return err("bad_request", "record_plaintext is required: the ledger lives there");
+    }
+    let roots = vault.get("roots").and_then(|r| r.as_array()).cloned().unwrap_or_default();
+    let ledger = record.get("ledger").and_then(|r| r.as_array()).cloned().unwrap_or_default();
     // EVERY root this vault holds, and a root is held as its certificate: a software root has a
     // `pkcs8` beside it and a card-held one has not. This read `pkcs8` alone, so a request carrying a
     // CARD-held sibling's key was not "a request whose key is a root" (§9) and was given a leaf. The
@@ -207,9 +246,10 @@ pub fn wallet_issue(plaintext: &Value, root_fingerprint: &str, csr_der: &[u8], n
     }
     let previous = mine.iter().filter_map(|l| l.get("not_before").and_then(|t| t.as_str()).and_then(|t| parse_rfc3339(t).ok())).max();
     let issued = csr::issue(&request, root_cn, &root_key, now, previous, valid_days)?;
+    // The endpoint and the dates: what every rule above reads. Never the leaf, which is the host's
+    // to serve and grants nothing (SPEC §9).
     let entry = json!({
         "root": root_fingerprint,
-        "leaf": b64u(&issued.der),
         "endpoint": request.endpoint,
         "not_before": format_rfc3339(issued.not_before),
         "not_after": format_rfc3339(issued.not_after),
@@ -232,13 +272,30 @@ mod tests {
 
     #[test]
     fn seals_opens_and_refuses() {
-        let v = seal("correct horse", &json!({"v": 1, "roots": []}), Some(small()), None, None).unwrap();
+        let v = seal("correct horse", &json!({"v": 2, "roots": []}), Some(small()), None, None).unwrap();
         assert_eq!(v["format"], FORMAT);
-        assert_eq!(open("correct horse", &v).unwrap()["v"], 1);
+        assert_eq!(open("correct horse", &v).unwrap()["v"], 2);
         assert_eq!(open("wrong", &v).unwrap_err().why, "the passphrase is wrong or the vault is damaged");
         let mut t = v.clone();
         t["kdf"]["t"] = json!(2);
         assert_eq!(open("correct horse", &t).unwrap_err().why, "the passphrase is wrong or the vault is damaged");
+    }
+
+    #[test]
+    fn an_earlier_generation_is_refused_at_both_ends_and_nothing_converts() {
+        assert_eq!(
+            seal("correct horse", &json!({"v": 1, "roots": [], "ledger": []}), Some(small()), None, None).unwrap_err().why,
+            "a vault plaintext is v 2: the root, or the record"
+        );
+        assert_eq!(seal("correct horse", &json!({"roots": []}), Some(small()), None, None).unwrap_err().code, "bad_request");
+        // A document an earlier wallet wrote: it decrypts, and is still not opened.
+        let old =
+            seal_any("correct horse", &json!({"v": 1, "roots": [], "ledger": [], "contacts": []}), Some(small()), None, None).unwrap();
+        let e = open("correct horse", &old).unwrap_err();
+        assert_eq!(e.code, "vault");
+        assert_eq!(e.why, "this vault was written by an earlier wallet and is not opened: there is no conversion");
+        // The control: a wrong passphrase on that same document is still the one message.
+        assert_eq!(open("wrong", &old).unwrap_err().why, "the passphrase is wrong or the vault is damaged");
     }
 
     #[test]
@@ -247,34 +304,51 @@ mod tests {
         let now = 1_789_214_400;
         let cert = x509::build_root("Alina Rao", &root, now, &x509::serial_of("vault/root")).unwrap();
         let fp = root.public().fingerprint();
-        let plaintext = json!({"v": 1, "roots": [{"fingerprint": fp, "cn": "Alina Rao", "pkcs8": b64u(&root.to_pkcs8()), "cert": b64u(&cert), "created": format_rfc3339(now)}], "ledger": [], "contacts": []});
+        let plaintext = json!({"v": 2, "roots": [{"fingerprint": fp, "cn": "Alina Rao", "pkcs8": b64u(&root.to_pkcs8()), "cert": b64u(&cert), "created": format_rfc3339(now)}]});
+        let record = json!({"v": 2, "ledger": [], "contacts": []});
         let host = PrivateKey::from_seed(Alg::Ed25519, &seed("vault/host")).unwrap();
         let req = csr::csr_new("Alina Rao", &host, "https://agent.alina.example/mcp", None).unwrap();
-        let out = wallet_issue(&plaintext, &fp, &req, now, 365, false).unwrap();
+        let out = wallet_issue(&plaintext, &record, &fp, &req, now, 365, false).unwrap();
         assert_eq!(out["new_host"], true);
+        // The entry is the endpoint and the dates: no leaf in it.
+        assert_eq!(
+            out["ledger_entry"].as_object().unwrap().keys().cloned().collect::<Vec<_>>(),
+            ["root", "endpoint", "not_before", "not_after", "issued_at"]
+        );
+        // A vault that carries what belongs in the record, and a missing record, are refused.
+        let mut old = plaintext.clone();
+        old["ledger"] = json!([]);
+        assert_eq!(
+            wallet_issue(&old, &record, &fp, &req, now, 365, false).unwrap_err().why,
+            "a vault holds the root and nothing else: its ledger and contacts belong in the record"
+        );
+        assert_eq!(
+            wallet_issue(&plaintext, &Value::Null, &fp, &req, now, 365, false).unwrap_err().why,
+            "record_plaintext is required: the ledger lives there"
+        );
         let leaf = from_b64u(out["der"].as_str().unwrap()).unwrap();
         assert!(matches!(
             x509::validate_chain(&[leaf, cert.clone()], now, Some(&fp), Some("https://agent.alina.example/mcp")),
             x509::ChainResult::Ok(_)
         ));
         // A second endpoint while one is live is a move, refused without the flag.
-        let mut with = plaintext.clone();
+        let mut with = record.clone();
         with["ledger"] = json!([out["ledger_entry"].clone()]);
         let host2 = PrivateKey::from_seed(Alg::P256, &seed("vault/host2")).unwrap();
         let req2 = csr::csr_new("Alina Rao", &host2, "https://alina.pact.contact/alina/mcp", None).unwrap();
-        assert!(wallet_issue(&with, &fp, &req2, now + 10, 365, false).is_err());
-        let moved = wallet_issue(&with, &fp, &req2, now + 10, 365, true).unwrap();
+        assert!(wallet_issue(&plaintext, &with, &fp, &req2, now + 10, 365, false).is_err());
+        let moved = wallet_issue(&plaintext, &with, &fp, &req2, now + 10, 365, true).unwrap();
         assert_eq!(moved["not_before"], format_rfc3339(now + 10 - 3600)); // an hour before issuance, later than the previous leaf plus one second
                                                                           // After the move the new address is the live one: a renewal there is not a second home,
                                                                           // and a leaf for the old address now is the move back, refused without the flag.
         with["ledger"] = json!([out["ledger_entry"].clone(), moved["ledger_entry"].clone()]);
         let host3 = PrivateKey::from_seed(Alg::Ed25519, &seed("vault/host3")).unwrap();
         let req3 = csr::csr_new("Alina Rao", &host3, "https://alina.pact.contact/alina/mcp", None).unwrap();
-        let renewed = wallet_issue(&with, &fp, &req3, now + 20, 365, false).unwrap();
+        let renewed = wallet_issue(&plaintext, &with, &fp, &req3, now + 20, 365, false).unwrap();
         assert_eq!(renewed["new_host"], false);
-        assert!(wallet_issue(&with, &fp, &req, now + 20, 365, false).is_err());
+        assert!(wallet_issue(&plaintext, &with, &fp, &req, now + 20, 365, false).is_err());
         // The root's own key in a request is refused by the wallet.
         let bad = csr::csr_new("Alina Rao", &root, "https://x.example/mcp", None).unwrap();
-        assert_eq!(wallet_issue(&plaintext, &fp, &bad, now, 365, false).unwrap_err().why, "the request's key is a root");
+        assert_eq!(wallet_issue(&plaintext, &record, &fp, &bad, now, 365, false).unwrap_err().why, "the request's key is a root");
     }
 }

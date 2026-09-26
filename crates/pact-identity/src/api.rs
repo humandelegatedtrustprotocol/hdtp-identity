@@ -444,6 +444,7 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
         }
         "wallet_issue" => vault::wallet_issue(
             a.get("vault_plaintext").unwrap_or(&Value::Null),
+            a.get("record_plaintext").unwrap_or(&Value::Null),
             s(a, "root_fingerprint")?,
             &bytes(a, "csr")?,
             instant(a, "now")?,

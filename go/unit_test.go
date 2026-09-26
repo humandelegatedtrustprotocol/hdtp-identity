@@ -122,7 +122,7 @@ func TestCSRRoundTrip(t *testing.T) {
 
 func TestVault(t *testing.T) {
 	kdf := KDF{Name: "argon2id", MKiB: 8192, T: 1, P: 1}
-	plain := []byte(`{"v":1,"roots":[],"ledger":[],"contacts":[]}`)
+	plain := []byte(`{"v":2,"roots":[]}`)
 	v, err := VaultSeal("correct horse", plain, &kdf, nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -145,12 +145,32 @@ func TestVault(t *testing.T) {
 		t.Fatalf("vault_seal: %s", out)
 	}
 	out = Call("vault_open", mustJSON(map[string]any{"passphrase": "p", "vault": sealed.Vault}))
-	if !bytes.Contains(out, []byte(`"plaintext":{"v":1`)) {
+	if !bytes.Contains(out, []byte(`"plaintext":{"v":2`)) {
 		t.Errorf("vault_open: %s", out)
 	}
 	out = Call("vault_open", mustJSON(map[string]any{"passphrase": "q", "vault": sealed.Vault}))
 	if !bytes.Contains(out, []byte(`"error":"vault"`)) {
 		t.Errorf("vault_open wrong passphrase: %s", out)
+	}
+	// An earlier generation is refused at both ends, and nothing converts: sealing it is a bad
+	// request; a document an earlier wallet wrote decrypts and is still not opened.
+	if _, err := VaultSeal("correct horse", []byte(`{"v":1,"roots":[],"ledger":[]}`), &kdf, nil, nil); err == nil || err.Error() != "a vault plaintext is v 2: the root, or the record" {
+		t.Errorf("sealing v 1: %v", err)
+	}
+	out = Call("vault_seal", mustJSON(map[string]any{"passphrase": "p", "plaintext": json.RawMessage(`{"roots":[]}`), "kdf": kdf}))
+	if !bytes.Contains(out, []byte(`"error":"bad_request"`)) {
+		t.Errorf("vault_seal without v: %s", out)
+	}
+	old, err := vaultSealAny("correct horse", []byte(`{"v":1,"roots":[],"ledger":[],"contacts":[]}`), &kdf, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VaultOpen("correct horse", *old); err == nil || err.Error() != errEarlierGeneration.Error() {
+		t.Errorf("opening v 1: %v", err)
+	}
+	// The control: a wrong passphrase on that same document is still the one message.
+	if _, err := VaultOpen("wrong", *old); err == nil || err.Error() != errVault.Error() {
+		t.Errorf("wrong passphrase on v 1: %v", err)
 	}
 }
 
@@ -160,18 +180,23 @@ func TestWalletIssue(t *testing.T) {
 	rootDer, _ := BuildRoot(RootOpts{CN: "Alina Rao", Key: root, NotBefore: now})
 	pkcs8, _ := root.PKCS8()
 	fp := Fingerprint(root.Public.SPKI)
-	plain := VaultPlaintext{V: 1, Roots: []VaultRoot{{Fingerprint: fp, CN: "Alina Rao", PKCS8: B64url(pkcs8), Cert: B64url(rootDer), Created: now.Format(time.RFC3339)}}}
+	plain := VaultPlaintext{V: 2, Roots: []VaultRoot{{Fingerprint: fp, CN: "Alina Rao", PKCS8: B64url(pkcs8), Cert: B64url(rootDer), Created: now.Format(time.RFC3339)}}}
+	record := RecordPlaintext{V: 2}
 	host, _ := GenerateKey(AlgEd25519)
 	csr, _ := CSRNew("Alina Rao", host, endpointA, "")
-	first, err := WalletIssue(plain, fp, csr, now, 365, false)
+	first, err := WalletIssue(plain, record, fp, csr, now, 365, false)
 	if err != nil || !first.NewHost || len(first.Warnings) != 1 {
 		t.Fatalf("first issue: %v %+v", err, first)
 	}
-	plain.Ledger = append(plain.Ledger, first.Entry)
+	// The entry is the endpoint and the dates: no leaf in it.
+	if entry, _ := json.Marshal(first.Entry); bytes.Contains(entry, []byte(`"leaf"`)) {
+		t.Errorf("the ledger entry carries a leaf: %s", entry)
+	}
+	record.Ledger = append(record.Ledger, first.Entry)
 	// A renewal for the same endpoint: allowed, monotonic, no longer a new host.
 	host2, _ := GenerateKey(AlgEd25519)
 	csr2, _ := CSRNew("Alina Rao", host2, endpointA, "")
-	renewal, err := WalletIssue(plain, fp, csr2, now.Add(time.Minute), 365, false)
+	renewal, err := WalletIssue(plain, record, fp, csr2, now.Add(time.Minute), 365, false)
 	if err != nil || renewal.NewHost {
 		t.Fatalf("renewal: %v", err)
 	}
@@ -180,27 +205,27 @@ func TestWalletIssue(t *testing.T) {
 	}
 	// A second endpoint while a leaf is live is a move, refused without move: true.
 	csr3, _ := CSRNew("Alina Rao", host2, "https://alina.pact.contact/alina/mcp", "")
-	if _, err := WalletIssue(plain, fp, csr3, now, 365, false); err == nil || !strings.Contains(err.Error(), "move") {
+	if _, err := WalletIssue(plain, record, fp, csr3, now, 365, false); err == nil || !strings.Contains(err.Error(), "move") {
 		t.Errorf("second endpoint: %v", err)
 	}
-	moved, err := WalletIssue(plain, fp, csr3, now, 365, true)
+	moved, err := WalletIssue(plain, record, fp, csr3, now, 365, true)
 	if err != nil || !moved.NewHost {
 		t.Errorf("move: %v", err)
 	}
 	// After the move the new address is the live one: a renewal there is not a second home, and
 	// a leaf for the old address now is the move back, refused without the flag.
-	plain.Ledger = append(plain.Ledger, moved.Entry)
+	record.Ledger = append(record.Ledger, moved.Entry)
 	host3, _ := GenerateKey("ed25519")
 	csr4, _ := CSRNew("Alina Rao", host3, "https://alina.pact.contact/alina/mcp", "")
-	if renewed, err := WalletIssue(plain, fp, csr4, now.Add(2*time.Minute), 365, false); err != nil || renewed.NewHost {
+	if renewed, err := WalletIssue(plain, record, fp, csr4, now.Add(2*time.Minute), 365, false); err != nil || renewed.NewHost {
 		t.Errorf("renewal after a move: %v", err)
 	}
-	if _, err := WalletIssue(plain, fp, csr, now.Add(2*time.Minute), 365, false); err == nil {
+	if _, err := WalletIssue(plain, record, fp, csr, now.Add(2*time.Minute), 365, false); err == nil {
 		t.Error("the old address after a move is a move back")
 	}
 	// The root's own key in a CSR is refused by the wallet too.
 	rootCSR, _ := CSRNew("Alina Rao", root, endpointA, "")
-	if _, err := WalletIssue(plain, fp, rootCSR, now, 365, false); err == nil {
+	if _, err := WalletIssue(plain, record, fp, rootCSR, now, 365, false); err == nil {
 		t.Error("root key as a leaf should be refused")
 	}
 }
