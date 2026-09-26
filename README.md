@@ -12,7 +12,7 @@ port presents: bytes in, JSON out, no state.
 | `crates/pact-identity` | the core (`der`, `keys`, `canonical`, `hpke`, `x509`, `address`, `csr`, `card`, `envelope`, `vault`, `api`) |
 | `crates/pact-identity-wasm` | the `wasm-bindgen` boundary: `call(name, args) -> json` |
 | `js/` | loaders (`index.mjs` for Node and the browser, `worker.mjs` for Workers), `build.sh`, `reproduce.sh` (the canonical, containerised build), `manifest.json` + `verify.mjs`, and the Node proofs `check.mjs` and `intrude.mjs` |
-| `go/` | the Go port and its `pact-identity-go` adapter binary (built by the Go side) |
+| `go/` | the Go port and its `pact-identity-go` adapter binary (built by the Go side; one JSON request per line on stdin, one answer per line out) |
 | `contract/` | `contract.json` — the boundary as data, and the source `CONTRACT.md` is rendered from (`render.mjs`); `schema.mjs` + `schema.test.mjs`, the JSON Schema subset it is written in; `contract.mjs`, which judges one answer by it |
 | `docs/` | `contract-one-place.md` — the proposal this came from. Phases 1 and 2 are built; 3 (typed bindings, an OpenAPI view), 4 (the Rust library validating against the file, which costs a re-pin) and 5 (the wire contract's schema bundle) are not |
 

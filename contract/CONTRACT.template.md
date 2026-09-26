@@ -51,8 +51,9 @@ the tables is `contract/CONTRACT.template.md` and is written by hand.
 {{table:build}}
 - The Wasm boundary takes `&str` JSON and `&[u8]` DER and returns `String` JSON. The Go port exposes
   the same functions as Go functions on `[]byte`/`string` returning structs, plus a `pact-identity-go`
-  binary that reads one JSON request on stdin (`{"fn": "<name>", "args": {...}}`) and writes the
-  JSON answer, so the JavaScript intrusion driver can aim the same scenarios at both ports.
+  binary that reads JSON requests on stdin, one per line (`{"fn": "<name>", "args": {...}}`), and
+  writes one JSON answer per line, so the JavaScript suites can aim the same cases at both ports
+  through one process per run.
 
 ## 1. Keys
 
