@@ -32,7 +32,7 @@
 // 9.#2 shape (a real file that holds something else) still rests on a person having read
 // the cited file. Half a guard, named as half.
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { seedIntrusions } from './seed.mjs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -85,14 +85,9 @@ function knownNames() {
   const names = new Set();
   // The seed suite prints one line per scenario, which is the only exact list: a
   // third of the names are built in loops, and a regex over the source finds the
-  // loop and not the scenarios. `js/intrude.mjs` reads the same output to compare
-  // verdicts, so this is the established way to ask what scenarios exist.
-  const seed = spawnSync(process.execPath, [join(here, '../../pact-protocol/vectors/intrude.mjs')], { encoding: 'utf8' });
-  if (seed.status !== 0 && !seed.stdout) throw new Error('the seed intrusion suite did not run: ' + (seed.stderr || seed.error?.message));
-  for (const line of seed.stdout.split('\n')) {
-    const m = /^  (?:blocked|residual|REPRODUCES)\s+(.*?)(?:\s+→ .*)?$/.exec(line);
-    if (m) names.add('scenario:' + m[1]);
-  }
+  // loop and not the scenarios. js/seed.mjs runs it and reads that list, for this
+  // file and for js/intrude.mjs alike.
+  for (const s of seedIntrusions().scenarios) names.add('scenario:' + s.name);
   const walk = (dir, out = []) => {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
       const p = join(dir, e.name);

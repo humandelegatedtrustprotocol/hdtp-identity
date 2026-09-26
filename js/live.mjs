@@ -10,28 +10,22 @@
 // tombstone) or a look inside the node, and are counted as skipped rather than pretended. One
 // scenario (a contact request with a matching card) leaves a pending request behind on the
 // target, because that is what it proves; aim it at a test identity.
-import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { b64url, fromB64url } from '../../pact-protocol/vectors/lib/keys.mjs';
 import { buildLeaf } from '../../pact-protocol/vectors/lib/x509.mjs';
 import { encodeCard, decodeCard } from '../../pact-protocol/vectors/lib/card.mjs';
 import { sealEnvelope } from '../../pact-protocol/vectors/lib/envelope.mjs';
 import { load } from './index.mjs';
 import { stranger, H, D } from './cast.mjs';
+import { seedIntrusions } from './seed.mjs';
 
 /**
- * How many scenarios the seed suite has, counted from the seed itself rather than written down
- * here. A number in this file was a number to go stale: it said 79 while the seed had 81, so a live
- * run understated what it had not tested. The seed prints one line per scenario, and that is the
- * count.
+ * How many scenarios the seed suite has, counted from the seed itself (js/seed.mjs) rather than
+ * written down here. A number in this file was a number to go stale: it said 79 while the seed had
+ * 81, so a live run understated what it had not tested.
  */
-export function seedScenarioCount() {
-  const run = spawnSync(process.execPath, [fileURLToPath(new URL('../../pact-protocol/vectors/intrude.mjs', import.meta.url))], { encoding: 'utf8' });
-  const m = /^(\d+) scenarios:/m.exec(run.stdout || '');
-  if (!m) throw new Error('the seed suite did not report a scenario count');
-  return Number(m[1]);
-}
+export const seedScenarioCount = () => seedIntrusions().total;
 
 /**
  * What a stranger can read from an answer: the error's code, or `sealed` for a sealed result.

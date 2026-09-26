@@ -6,6 +6,7 @@ import { createPrivateKey, createPublicKey, X509Certificate } from 'node:crypto'
 import { b64url, fromB64url } from '../../pact-protocol/vectors/lib/keys.mjs';
 import { makePort, portFromArgv } from './port.mjs';
 import { makeDefender } from './defender.mjs';
+import { appendixB } from './seed.mjs';
 
 const port = await makePort(portFromArgv());
 if (!port) { console.log('the Go port is not built (go/bin/pact-identity-go)'); process.exit(2); }
@@ -14,8 +15,7 @@ console.log(`port: ${port.kind} ${JSON.stringify(port.call('version', {}))}`);
 
 const specPath = new URL('../../pact-protocol/SPEC.md', import.meta.url);
 const spec = readFileSync(specPath, 'utf8');
-const appendixB = spec.slice(spec.indexOf('## Appendix B'), spec.indexOf('*End of PACT'));
-const blocks = [...appendixB.matchAll(/```json\n([\s\S]*?)\n```/g)].map((m) => JSON.parse(m[1]));
+const blocks = appendixB(spec);
 if (blocks.length < 1) throw new Error('Appendix B has no vector blocks');
 const [v2] = blocks;
 
