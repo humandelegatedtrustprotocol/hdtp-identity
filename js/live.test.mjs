@@ -4,20 +4,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { seed, ed25519FromSeed, b64url } from '../../pact-protocol/vectors/lib/keys.mjs';
+import { b64url } from '../../pact-protocol/vectors/lib/keys.mjs';
 import { buildRoot, buildLeaf } from '../../pact-protocol/vectors/lib/x509.mjs';
 import { encodeCard } from '../../pact-protocol/vectors/lib/card.mjs';
 import { makeNode, receive } from '../../pact-protocol/vectors/lib/envelope.mjs';
 import { readFileSync } from 'node:fs';
 import { runLive, answerCode, scenarios, BATTERY, checkBattery } from './live.mjs';
 import { load } from './index.mjs';
-
-const H = 3_600_000, D = 86_400_000;
+import { alina, H, D } from './cast.mjs';
 
 function fakeNode(port) {
   const now = Date.now();
   const endpoint = `http://127.0.0.1:${port}/alina`;
-  const root = ed25519FromSeed(seed('live-test/root')), host = ed25519FromSeed(seed('live-test/host'));
+  // Alina from the cast; the dates are the wall clock's, because the fake is posted to live.
+  const { root, host } = alina;
   const ROOT = buildRoot({ cn: 'Alina', key: root, notBefore: new Date(now - D), label: 'lt/root' });
   // The leaf names an https endpoint (the profile demands it); the fake listens on http and is dialed by its own address.
   const LEAF = buildLeaf({ cn: 'Alina', rootCn: 'Alina', root, hostKey: host, endpoint: 'https://alina.example/mcp', notBefore: new Date(now - H), notAfter: new Date(now + 365 * D), label: 'lt/leaf' });

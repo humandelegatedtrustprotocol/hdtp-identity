@@ -11,16 +11,14 @@
 // scenario (a contact request with a matching card) leaves a pending request behind on the
 // target, because that is what it proves; aim it at a test identity.
 import { spawnSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { ed25519FromSeed, b64url, fromB64url } from '../../pact-protocol/vectors/lib/keys.mjs';
-import { buildRoot, buildLeaf } from '../../pact-protocol/vectors/lib/x509.mjs';
+import { b64url, fromB64url } from '../../pact-protocol/vectors/lib/keys.mjs';
+import { buildLeaf } from '../../pact-protocol/vectors/lib/x509.mjs';
 import { encodeCard, decodeCard } from '../../pact-protocol/vectors/lib/card.mjs';
 import { sealEnvelope } from '../../pact-protocol/vectors/lib/envelope.mjs';
 import { load } from './index.mjs';
-
-const H = 3_600_000, D = 86_400_000;
+import { stranger, H, D } from './cast.mjs';
 
 /**
  * How many scenarios the seed suite has, counted from the seed itself rather than written down
@@ -77,7 +75,7 @@ export function answeredEnvelope(body) {
  * core: sealed to Mallory's leaf key, a result, for THIS call, inside the window, signed by a leaf
  * that chains to the target's root at the target's address — and carrying a result, not a sealed
  * refusal. Returns null when it does, and why not otherwise. The Rust driver does the same
- * (`control_opened`), and js/live.test.mjs holds the two to each other.
+ * (`control_opened`, held by its own unit test); js/live.test.mjs holds this one.
  */
 export async function controlOpened(answer, { pkcs8, msgId, now, root, endpoint }) {
   const envelope = answeredEnvelope(answer);
@@ -171,10 +169,8 @@ export function checkBattery(b) {
 export function scenarios({ targetLeaf, now = Date.now(), battery = BATTERY }) {
   const nowS = Math.floor(now / 1000);
   const skew = battery.window_s + battery.margin_s;
-  const E_M = 'https://mallory.example/mcp';
-  const rootM = ed25519FromSeed(randomBytes(32)), hostM = ed25519FromSeed(randomBytes(32));
-  const ROOT_M = buildRoot({ cn: 'Mallory', key: rootM, notBefore: new Date(now - D), label: 'live/root_m' });
-  const LEAF_M = buildLeaf({ cn: 'Mallory', rootCn: 'Mallory', root: rootM, hostKey: hostM, endpoint: E_M, notBefore: new Date(now - H), notAfter: new Date(now + 365 * D), label: 'live/leaf_m' });
+  // Mallory, new every run (js/cast.mjs): her root, her host, and a chain valid at `now`.
+  const { root: rootM, host: hostM, ROOT: ROOT_M, LEAF: LEAF_M, endpoint: E_M } = stranger(now);
   const chainM = [LEAF_M, ROOT_M];
   const card = encodeCard({ fn: 'Mallory', cert: LEAF_M, seal: 'required' });
   let n = 0;
