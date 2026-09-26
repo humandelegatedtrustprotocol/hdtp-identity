@@ -33,6 +33,7 @@
 // the cited file. Half a guard, named as half.
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { seedIntrusions } from './seed.mjs';
+import { recorder } from './results.mjs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -196,6 +197,18 @@ for (const m of musts) {
 for (const id of Object.keys(manifest)) {
   if (!byId.has(id)) problems.push(`DANGLING ${id}  the specification no longer has this MUST`);
 }
+
+// One case per MUST: a problem naming its id fails it; a problem naming no MUST of the document
+// (an entry for a sentence that is gone) is a case of its own.
+const rec = recorder('musts');
+const problemId = (p) => /^\S+\s+(\S+)/.exec(p)?.[1];
+for (const m of musts) {
+  const mine = problems.filter((p) => problemId(p) === m.id);
+  const e = manifest[m.id];
+  rec.add(m.id, mine.length ? 'FAIL' : 'PASS', { reason: mine.join('; ') || (e?.held_by?.length ? `held by ${e.held_by.join(', ')}` : `held elsewhere: ${e?.elsewhere}`) });
+}
+for (const p of problems.filter((x) => !byId.has(problemId(x)))) rec.add(problemId(p) ?? p, 'FAIL', { reason: p });
+rec.write();
 
 console.log(`${musts.length} MUSTs in pact-protocol/SPEC.md`);
 console.log(`  ${held} held by a test or scenario in this repository`);

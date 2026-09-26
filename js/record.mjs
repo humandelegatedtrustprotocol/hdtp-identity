@@ -9,8 +9,9 @@
 // same extractor `musts.mjs` uses, and `parity.mjs --manifest`, which emits only after
 // its comparison agreed — so a count here cannot drift from the count a run produces,
 // and the document cannot claim a case that did not pass. `--check` regenerates and
-// diffs, which is what CI runs; a hand edit fails it.
-import { readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+// diffs, which is what gate.sh runs; a hand edit fails it.
+import { readFileSync, writeFileSync, existsSync, rmSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -26,15 +27,29 @@ const map = JSON.parse(readFileSync(join(here, 'musts.json'), 'utf8'));
 // The parity manifest is produced by running the harness, not read from a committed file:
 // a committed one could be stale, and the whole point is that the record describes a run.
 //
-// A failing parity run throws here (execFileSync does, on a non-zero exit), so nothing is written.
-// The manifest is removed FIRST as well: this file outlives a run that dies between the two lines
-// below, and a parity that exited 0 without writing one — it skips the manifest under `--only` —
-// would otherwise hand this script the last run's numbers to record as today's.
-const tmp = join(here, '.parity-manifest.json');
-rmSync(tmp, { force: true });
-execFileSync(process.execPath, [join(here, 'parity.mjs'), '--manifest', tmp], { stdio: 'pipe' });
-const parity = JSON.parse(readFileSync(tmp, 'utf8'));
-rmSync(tmp, { force: true });
+// `--manifest <file>` takes the one a parity run of THIS gate wrote (`parity.mjs --manifest`, which
+// writes only after every case agreed): gate.sh runs parity once, into a results directory it wiped
+// at its start, and hands that file here, so no manifest from an earlier run can be read as today's.
+// Without it, parity is run here, into a fresh directory under the OS's temporary directory — never
+// into js/ — and a failing run throws (execFileSync does, on a non-zero exit), so nothing is written.
+const given = process.argv.includes('--manifest') ? process.argv[process.argv.indexOf('--manifest') + 1] : null;
+let parity;
+if (given) {
+  if (!existsSync(given)) {
+    console.error(`${given} does not exist: \`node js/parity.mjs --manifest ${given}\` writes it, and only when every case agreed`);
+    process.exit(1);
+  }
+  parity = JSON.parse(readFileSync(given, 'utf8'));
+} else {
+  const dir = mkdtempSync(join(tmpdir(), 'pact-record-'));
+  try {
+    const at = join(dir, 'parity-manifest.json');
+    execFileSync(process.execPath, [join(here, 'parity.mjs'), '--manifest', at], { stdio: 'pipe' });
+    parity = JSON.parse(readFileSync(at, 'utf8'));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 const specVersion = (readFileSync(join(here, '../../pact-protocol/SPEC.md'), 'utf8')
   .match(/^\*\*Version\s+([^\s·]+)/m) || [, '(unknown)'])[1];
@@ -51,7 +66,7 @@ const L = [];
 L.push('# What is proven, and by what');
 L.push('');
 L.push('**Generated — do not edit.** `node js/record.mjs` rewrites this file; `node js/record.mjs --check`');
-L.push('regenerates and fails on any difference, which is what CI runs. Both lists come from the things');
+L.push('regenerates and fails on any difference, which is what gate.sh runs. Both lists come from the things');
 L.push('that prove them rather than from prose beside them: the MUSTs from `pact-protocol/SPEC.md` through');
 L.push("the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the parity cases from");
 L.push('`js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no');

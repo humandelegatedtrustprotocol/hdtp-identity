@@ -1,7 +1,7 @@
 # What is proven, and by what
 
 **Generated — do not edit.** `node js/record.mjs` rewrites this file; `node js/record.mjs --check`
-regenerates and fails on any difference, which is what CI runs. Both lists come from the things
+regenerates and fails on any difference, which is what gate.sh runs. Both lists come from the things
 that prove them rather than from prose beside them: the MUSTs from `pact-protocol/SPEC.md` through
 the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the parity cases from
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
