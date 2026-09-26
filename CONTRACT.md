@@ -267,12 +267,14 @@ A wallet keeps two sealed documents, and both are this envelope:
 
 The key is Argon2id(passphrase, salt) → 32 bytes; the cipher is AES-256-GCM; the AAD is the RFC 8785
 canonical JSON of the document without `ct`. The **file** is the root and nothing else — the person's
-backup, sealed under the recovery key, written once when the root is made and again only when the root
-is re-bound; a wallet never writes a leaf, a ledger entry or a contact into it:
+backup, sealed under the recovery key (in a wallet without a credential, the passphrase the person
+chose), written once when the root is made and again only when the root is re-bound or a hardware key
+takes it; a wallet never writes a leaf, a ledger entry or a contact into it. A root entry carries its
+key (`pkcs8`), names the card that holds it (`holder`), or both — a key imported to a card and kept:
 
 ```json
 {"v": 2,
- "roots": [{"fingerprint", "cn", "alg"?, "pkcs8" | "holder", "cert", "created"}],
+ "roots": [{"fingerprint", "cn", "alg"?, "pkcs8"?, "holder"?, "cert", "created"}],
  "prf"?: "<b64url 32: the §2.1 secret, for a derived root>",
  "passkey"?: {"credential_id"}}
 ```

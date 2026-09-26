@@ -108,7 +108,7 @@ pub fn pem(label: &str, der: &[u8]) -> String {
 /// this write controls — opening a name that already exists would inherit whatever permissions that
 /// file has, and a stale `.tmp` from a killed run, or one a neighbour left, is where the vault's
 /// bytes would then land.
-fn unique_tmp(path: &Path) -> PathBuf {
+pub fn unique_tmp(path: &Path) -> PathBuf {
     let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
     let mut name = path.file_name().map(|f| f.to_os_string()).unwrap_or_default();
     name.push(format!(".{}.{n}.tmp", std::process::id()));
