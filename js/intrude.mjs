@@ -14,6 +14,7 @@ import { buildRoot, buildLeaf, parse, fingerprintOf, OID } from '../../pact-prot
 import { encodeCard } from '../../pact-protocol/vectors/lib/card.mjs';
 import { sealEnvelope } from '../../pact-protocol/vectors/lib/envelope.mjs';
 import { makePort, portFromArgv } from './port.mjs';
+import { alina, bharat as bharatOf, mallory, CLOCK, ENDPOINTS, H, D } from './cast.mjs';
 import { makeDefender } from './defender.mjs';
 
 if (portFromArgv() === 'live') {
@@ -26,14 +27,12 @@ const { validateChain, open, seal, sealDeterministic, decodeCard, makeNode, rene
 console.log(`defender: ${port.kind} ${JSON.stringify(port.call('version', {}))}`);
 
 const at = (iso) => new Date(iso);
-const NOW = at('2026-09-13T12:00:00Z'), nowS = Math.floor(NOW / 1000);
-const H = 3_600_000, D = 86_400_000;
-const E_A = 'https://agent.alina.example/mcp', E_B = 'https://agent.bharat.example/mcp', E_M = 'https://mallory.example/mcp', E_N = 'https://alina.pact.contact/alina/mcp';
+const NOW = at(CLOCK), nowS = Math.floor(NOW / 1000);
+const E_A = ENDPOINTS.alina, E_B = ENDPOINTS.bharat, E_M = ENDPOINTS.mallory, E_N = ENDPOINTS.alinaMoved;
 
-// The cast. Every key derives from a label; a host is one signing key.
-const host = (label, p256 = false) => ({ sign: p256 ? p256FromSeed(seed('intrude/sign/' + label)) : ed25519FromSeed(seed('intrude/sign/' + label)) });
-const rootA = ed25519FromSeed(seed('intrude/root/alina')), rootB = p256FromSeed(seed('intrude/root/bharat')), rootM = ed25519FromSeed(seed('intrude/root/mallory'));
-const hostA = host('alina'), hostA2 = host('alina/2'), hostN = host('alina/new'), hostB = host('bharat', true), hostM = host('mallory');
+// The cast (js/cast.mjs, built from labelled seeds by the seed library). A host is one signing key.
+const rootA = alina.root, rootB = bharatOf.root, rootM = mallory.root;
+const hostA = { sign: alina.host }, hostA2 = { sign: alina.host2 }, hostN = { sign: alina.hostNew }, hostB = { sign: bharatOf.host }, hostM = { sign: mallory.host };
 const leafOf = (root, rootCn, h, endpoint, o = {}) => buildLeaf({ cn: o.cn ?? rootCn, rootCn, root, hostKey: h.sign, endpoint, notBefore: o.notBefore ?? at('2026-09-01T00:00:00Z'), notAfter: o.notAfter ?? at('2027-09-01T00:00:00Z'), label: o.label ?? endpoint + (o.cn ?? '') + (o.notBefore ?? ''), ...o });
 const ROOT_A = buildRoot({ cn: 'Alina Rao', key: rootA, notBefore: at('2026-09-01T00:00:00Z'), label: 'i/root_a' });
 const ROOT_B = buildRoot({ cn: 'Bharat Mehta', key: rootB, notBefore: at('2026-09-01T00:00:00Z'), label: 'i/root_b' });
