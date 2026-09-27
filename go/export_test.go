@@ -161,8 +161,12 @@ func TestAVaultContactTravelsAsARowAndComesBack(t *testing.T) {
 		NotBefore: at, NotAfter: at.AddDate(1, 0, 0), Serial: []byte{8, 7, 6, 5, 4, 3, 2, 1}})
 	kept := VaultContact{Root: Fingerprint(friend.Public.SPKI), Endpoint: "https://friend.example/mcp", Name: "Friend", Leaf: B64url(leaf), RootCert: B64url(cert)}
 	var buf bytes.Buffer
+	row, err := ContactRowOf(kept, at.Add(24*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
 	in := ExportInput{Owner: Fingerprint(owner.Public.SPKI), OwnerName: "Owner", Tool: "test", ExportedAt: at.Add(24 * time.Hour),
-		Contacts: []ContactRow{ContactRowOf(kept, at.Add(24*time.Hour))}}
+		Contacts: []ContactRow{row}}
 	if err := WriteExportZip(&buf, in, nil); err != nil {
 		t.Fatal(err)
 	}

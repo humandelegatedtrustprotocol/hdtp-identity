@@ -254,6 +254,7 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
         "export_write_messages" => export::export_write_messages(a)?,
         "export_manifest" => export::export_manifest(a)?,
         "export_merge" => export::export_merge(a)?,
+        "book_rows" => export::book_rows(a)?,
         // §6.1 ledger
         "ledger_check" => ledger::ledger_check(a)?,
         "version" => json!({ "crate": env!("CARGO_PKG_VERSION"), "spec": SPEC_VERSION }),

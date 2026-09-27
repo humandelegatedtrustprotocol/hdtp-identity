@@ -13,7 +13,7 @@ the spec leaves a byte to the implementer, `pact-protocol/vectors/lib/*.mjs` —
 which every port must match byte for byte on the vectors in
 `pact-protocol/vectors/pact-2.0-vectors.json` and in SPEC.md Appendix B.
 
-**This file is generated.** `contract/contract.json` is the source: 48 functions, each with
+**This file is generated.** `contract/contract.json` is the source: 49 functions, each with
 the shape of its arguments, the shape of its answer and the error codes it may fail with, over the
 domain types they are assembled from. `js/parity.mjs` validates every answer of BOTH ports against
 that same file, so these tables and the gate cannot describe different contracts — which they did:
@@ -369,6 +369,8 @@ the host can do, and the words both hosts of this repository use for it (the Go 
 manifest; `export_write_messages` answers the lines; `export_manifest` finishes the manifest with
 the host's count and hash of `messages.jsonl`. The bytes are the same from every port: a Go host and
 a Rust host that write the same rows write the same file. A media file is stored, not recompressed.
+`book_rows` is the one mapping from the wallet's own book (`VaultContact`, §6) to those rows, which
+every wallet uses before `export_write` writes a book.
 
 The Go port also offers two conveniences over these functions, which are not contract functions and
 which its own tests run against the whole corpus: `ReadExportZip` (the reading above, with
@@ -385,6 +387,7 @@ valid book, and one hostile file per check, each naming the refusal it must prod
 | `export_write_messages` | `messages`: [MessageRow] | `lines`: [string]<br>*fails:* `bad_request` | One line per message, in the order given, as RFC 8785 JSON; each message held to the reader's rules but its references, which the host holds (`messages[<i>], member <m>: <why>`). The host writes each line followed by `\n`, hashes the member's bytes and counts its lines for export_manifest. |
 | `export_manifest` | `partial`: ExportManifest, `hashes`?: `messages.jsonl`?: Sha256Hex, `messages`?: integer | `manifest`: string<br>*fails:* `bad_request` | export_write's partial manifest finished with what the host counted and hashed: held to the manifest's rules first, refused if it already counts or lists messages, `messages.jsonl` required in `hashes` when there are messages. |
 | `export_merge` | `held`: [ContactRow], `rows`: [ContactRow] | `write`: [ContactRow], `keep`: [Fingerprint], `conflicts`: [`root`: Fingerprint, `field`: endpoint\|leaf\|root_cert, `held`, `row`]<br>*fails:* `bad_request` | SPEC §9.2's import step 2: an imported leaf never replaces a pin the host validated itself (§14.5). A row whose root is not held is written; a row whose root is held WITHOUT a leaf is written when the row carries one (export_read kept it only because it validated); every other held root is kept as held, and each of its endpoint, leaf and root certificate that the row would change is a conflict, for the host to show. |
+| `book_rows` | `contacts`: [VaultContact], `exported_at`: InstantIn | `rows`: [ContactRow]<br>*fails:* `bad_request`, `parse` | The wallet's book as rows of contacts.csv, the one mapping every wallet uses (SPEC §9.2: a book is an export of contacts only). Each contact, in order: an object (`contacts[<i>] is an object`), no member but `root`, `endpoint`, `name`, `leaf`, `root_cert` and `added` (the first other, in sorted order: `contacts[<i>]: "<m>" is not a member of a wallet contact`), `root` and `endpoint` strings (`contacts[<i>]: <m> is required`), the rest strings when present (`contacts[<i>]: <m> is a string`). A row carries the root, the endpoint, the name (empty when absent), the leaf and the root certificate (null when absent), and `added` (the export's time when absent); its other columns are what a contact the wallet keeps is: an empty `display_name`, `status` `active`, `was_active` true, and nothing granted either way. The rows are not checked here: export_write holds each to the reader's rules. |
 
 ## 7. Gates
 
