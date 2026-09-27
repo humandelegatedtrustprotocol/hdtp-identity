@@ -309,6 +309,7 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 	"export_write":          callExportWrite,
 	"export_write_messages": callExportWriteMessages,
 	"export_manifest":       callExportManifest,
+	"book_rows":             callBookRows,
 	"export_merge":          callExportMerge,
 
 	// Ledger: api_ledger.go

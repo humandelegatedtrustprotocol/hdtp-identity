@@ -129,6 +129,21 @@ export default function exportCases({ add, expect }, f) {
   add('export_merge: a held pin is never replaced', 'export_merge', { held, rows });
   add('export_merge with rows whose root is no fingerprint', 'export_merge', { held, rows: [{ root: 'alina' }] });
 
+  // ── the wallet's book as rows ───────────────────────────────────────────────────────────────
+  const kept = { root: rootFp, endpoint: ENDPOINT, name: 'Alina', leaf: leafDer, root_cert: rootDer, added: '2026-09-02T09:00:00Z' };
+  add('book_rows: a contact with everything, one with the least', 'book_rows', { contacts: [kept, { root: other('B'), endpoint: 'https://b.example/mcp' }], exported_at: now });
+  add('book_rows: an empty book', 'book_rows', { contacts: [], exported_at: now });
+  add('book_rows: a contact with a member a book does not keep', 'book_rows', { contacts: [{ ...kept, preset: 'friend' }], exported_at: now });
+  add('book_rows: a contact with no endpoint', 'book_rows', { contacts: [{ root: rootFp }], exported_at: now });
+  add('book_rows: a name that is not a string', 'book_rows', { contacts: [{ ...kept, name: 5 }], exported_at: now });
+  add('book_rows: a contact that is not an object', 'book_rows', { contacts: ['alina'], exported_at: now });
+  add('book_rows with nothing to work from', 'book_rows', {});
+  add('book_rows with an exported_at that does not read', 'book_rows', { contacts: [], exported_at: 'today' });
+  // The rows are the ones export_write takes: a book through book_rows is a book that writes.
+  const bookRows = wasm.call('book_rows', { contacts: [kept, { root: other('B'), endpoint: 'https://b.example/mcp' }], exported_at: now }).rows;
+  add('export_write: the rows book_rows made', 'export_write', { owner, owner_name: 'Olive', exported_at: now, tool: 'parity', contacts: bookRows });
+  expect('book_rows: a contact with a member a book does not keep', { error: 'bad_request', why: 'contacts[0]: "preset" is not a member of a wallet contact' });
+
   // ── the arguments and the writers' refusals ─────────────────────────────────────────────────
   add('export_read with nothing to work from', 'export_read', {});
   add('export_read with a directory entry that does not read', 'export_read', { directory: [{ name: 'manifest.json' }], owner, now });

@@ -594,6 +594,42 @@ pub fn write(
     Ok(Written { partial, contacts_csv, threads_csv })
 }
 
+/// The members of the wallet's own copy of a contact (CONTRACT §6, `VaultContact`).
+const VAULT_CONTACT: [&str; 6] = ["root", "endpoint", "name", "leaf", "root_cert", "added"];
+
+/// The wallet's book as rows of `contacts.csv` (SPEC §9.2: a book is an export of contacts only). The
+/// book keeps the root, the endpoint, the name, the leaf, the root certificate and when the contact was
+/// added; a row's other columns are what a contact the wallet keeps is — active, ever active, nothing
+/// granted — and `added` is the export's time when the book has none. The one mapping every wallet
+/// uses; export_write then holds each row to the reader's rules.
+pub fn book_rows(contacts: &[Value], exported_at: i64) -> Result<Vec<Value>> {
+    let mut rows = Vec::new();
+    for (i, c) in contacts.iter().enumerate() {
+        let Some(o) = c.as_object() else { return refuse(format!("contacts[{i}] is an object")) };
+        if let Some(k) = crate::ledger::stranger(o, &VAULT_CONTACT) {
+            return refuse(format!("contacts[{i}]: {} is not a member of a wallet contact", crate::canonical::string(&k)));
+        }
+        for m in ["root", "endpoint"] {
+            if !o.get(m).is_some_and(|v| v.is_string()) {
+                return refuse(format!("contacts[{i}]: {m} is required"));
+            }
+        }
+        for m in ["name", "leaf", "root_cert", "added"] {
+            if o.get(m).is_some_and(|v| !v.is_string()) {
+                return refuse(format!("contacts[{i}]: {m} is a string"));
+            }
+        }
+        let text = |m: &str| o.get(m).and_then(|v| v.as_str());
+        rows.push(json!({
+            "root": text("root"), "endpoint": text("endpoint"), "name": text("name").unwrap_or(""), "display_name": "",
+            "status": "active", "was_active": true, "permissions": [], "their_permissions": [],
+            "leaf": text("leaf"), "root_cert": text("root_cert"),
+            "added": text("added").map(String::from).unwrap_or_else(|| crate::time::format_rfc3339(exported_at)),
+        }));
+    }
+    Ok(rows)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
