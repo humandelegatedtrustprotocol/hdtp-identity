@@ -1,0 +1,22 @@
+# The licences this repository's Rust dependencies may carry, held by `cargo deny check licenses` in
+# gate.sh (so at every push). The list is what the dependency graph measured on 2026-09-27 with the
+# `zip` crate added to the pact CLI (SPEC §9.2's container), every one of them permissive; a
+# dependency under any other licence fails the gate until a person has read it and added it here.
+[graph]
+all-features = true
+
+[licenses]
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-1-Clause",
+    "BSD-3-Clause",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.93

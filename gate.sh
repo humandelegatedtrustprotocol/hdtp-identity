@@ -41,6 +41,13 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 
+step "Every Rust dependency's licence is one deny.toml allows"
+command -v cargo-deny >/dev/null 2>&1 || {
+  echo "gate: cargo-deny is not installed, and this step needs it: cargo install cargo-deny --locked" >&2
+  exit 2
+}
+cargo deny --locked check licenses
+
 step "One version everywhere it is written"
 node scripts/version.mjs --check
 
