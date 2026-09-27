@@ -3,7 +3,7 @@
   "$id": "urn:pact:identity:contract",
   "title": "pact-identity: the library boundary",
   "description": "Every function a port of pact-identity presents, as `call(name, args) -> answer`: what it takes, what it answers, and which error codes it can fail with. This file is the source; CONTRACT.md is rendered from it and js/parity.mjs holds both ports to it.",
-  "spec": "2.2.0",
+  "spec": "2.2.1",
   "sections": {
     "build": "The build",
     "keys": "Keys",
@@ -1654,14 +1654,34 @@
         "additionalProperties": false
       },
       "errors": ["bad_request", "parse"],
-      "notes": "The canonical members, the same bytes from every port: each row checked by the reader's rules (`contacts[<i>], column <c>: <why>`), contacts sorted by root and threads by id, a permission list sorted, instants written as RFC 3339 UTC seconds, every cell that begins with `=` `+` `-` `@` `'` a tab or a carriage return written with one `'` before it, a cell quoted exactly when it holds `,` `\"` CR or LF, CRLF after every record. A book is this with no threads and no media."
+      "notes": "The canonical members, the same bytes from every port: each row checked by the reader's rules (`contacts[<i>], column <c>: <why>`), contacts sorted by root and threads by id, a permission list sorted, instants written as RFC 3339 UTC seconds, every cell that begins with `=` `+` `-` `@` `'` a tab or a carriage return written with one `'` before it, a cell quoted exactly when it holds `,` `\"` CR or LF, CRLF after every record. What a contact controls never stops the export (SPEC \u00a79.2): `their_permissions` keeps only the names of \u00a78, once each, and `display_name` is cut to 200 characters, on a character; the reader refuses both as written by anyone else. A book is this with no threads and no media."
     },
     "export_write_messages": {
       "section": "export",
-      "params": { "type": "object", "properties": { "messages": { "type": "array", "items": { "$ref": "#/$defs/MessageRow" } } }, "required": ["messages"], "additionalProperties": false },
-      "result": { "type": "object", "properties": { "lines": { "type": "array", "items": { "type": "string" } } }, "required": ["lines"], "additionalProperties": false },
+      "params": {
+        "type": "object",
+        "properties": {
+          "messages": { "type": "array", "items": { "$ref": "#/$defs/MessageRow" } },
+          "msg_ids": { "type": "array", "items": { "type": "string" }, "description": "The msg_id of every message the file carries, when the host writes it in batches. Absent: the messages of this call, less those left out." }
+        },
+        "required": ["messages"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "lines": { "type": "array", "items": { "type": "string" } },
+          "left_out": {
+            "type": "array",
+            "items": { "type": "object", "properties": { "id": { "type": "string" }, "reason": { "type": "string" } }, "required": ["id", "reason"], "additionalProperties": false },
+            "description": "Every message left out, by its id and the reason, for the host to report to the person (SPEC \u00a79.2)."
+          }
+        },
+        "required": ["lines", "left_out"],
+        "additionalProperties": false
+      },
       "errors": ["bad_request"],
-      "notes": "One line per message, in the order given, as RFC 8785 JSON; each message held to the reader's rules but its references, which the host holds (`messages[<i>], member <m>: <why>`). The host writes each line followed by `\\n`, hashes the member's bytes and counts its lines for export_manifest."
+      "notes": "One line per message, in the order given, as RFC 8785 JSON; each message held to the reader's rules but its references, which the host holds (`messages[<i>], member <m>: <why>`). What a contact controls never stops the export (SPEC \u00a79.2): a message whose `body` holds what reads as a private key is left out, not refused, and listed in `left_out` (`its body holds what reads as a private key, which an export never carries`) \u2014 the host leaves out the file it carried too; and a `reply_to` naming a message the file does not carry (not among `msg_ids`, or, without them, not among the messages written) is written `null`. Key material in any other member is refused. The host writes each line followed by `\\n`, hashes the member's bytes and counts its lines for export_manifest."
     },
     "export_manifest": {
       "section": "export",

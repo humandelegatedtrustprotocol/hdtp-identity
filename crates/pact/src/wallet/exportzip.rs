@@ -394,6 +394,9 @@ mod tests {
             }
         }
         assert!(wrong.is_empty(), "{}", wrong.join("\n"));
-        assert_eq!(accepted, 2, "the corpus has two controls, and a reader that refuses everything must fail here");
+        // Every file cases.json marks as accepted, and at least one: a reader that refuses everything
+        // must fail here.
+        let want = index["cases"].as_array().unwrap().iter().filter(|c| c["accept"].is_object()).count();
+        assert!(want > 0 && accepted == want, "{accepted} files accepted; cases.json accepts {want}");
     }
 }

@@ -195,6 +195,24 @@ func holdsPrivateKey(text string) bool {
 	return false
 }
 
+// isExportPermission is a permission of §8: one of its names, or integration.<name>.
+func isExportPermission(p string) bool {
+	if contains(exportPerms, p) {
+		return true
+	}
+	n, found := strings.CutPrefix(p, "integration.")
+	if !found || n == "" || len(n) > 64 {
+		return false
+	}
+	for i := 0; i < len(n); i++ {
+		c := n[i]
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_' || c == '-') {
+			return false
+		}
+	}
+	return true
+}
+
 func exportPermissions(cell string) ([]any, string) {
 	out := []any{}
 	if cell == "" {
@@ -202,20 +220,10 @@ func exportPermissions(cell string) ([]any, string) {
 	}
 	seen := strSet{}
 	for _, p := range strings.Split(cell, " ") {
-		integration := false
-		if n, found := strings.CutPrefix(p, "integration."); found && n != "" && len(n) <= 64 {
-			integration = true
-			for i := 0; i < len(n); i++ {
-				c := n[i]
-				if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_' || c == '-') {
-					integration = false
-				}
-			}
-		}
 		if p == "" {
 			return nil, "not names separated by single spaces"
 		}
-		if !contains(exportPerms, p) && !integration {
+		if !isExportPermission(p) {
 			return nil, jsonString(p) + " is not a permission of §8"
 		}
 		if seen.has(p) {
@@ -1108,27 +1116,67 @@ func exportReadMessages(lines []string, firstLine uint64, names messageNames) ([
 
 // exportWriteMessages is the lines of messages.jsonl for these messages, in the order given, each
 // checked by the reader's rules but the references and written as RFC 8785 JSON.
-func exportWriteMessages(messages []any) ([]string, error) {
-	lines := []string{}
+// ExportLeftOut is a message the writer left out, and why (SPEC §9.2, what a contact controls).
+type ExportLeftOut struct {
+	ID     string `json:"id"`
+	Reason string `json:"reason"`
+}
+
+// exportBodyHoldsAKey is why a message is left out: its body is what the key-material check refuses.
+const exportBodyHoldsAKey = "its body holds what reads as a private key, which an export never carries"
+
+// exportWriteMessages is the lines of messages.jsonl for these messages, in the order given, each
+// checked by the reader's rules but the references (the host holds those) and written as RFC 8785
+// JSON. What a contact controls never stops the export (SPEC §9.2): a message whose body holds what
+// reads as a private key is left out and listed, and a reply_to naming a message the file does not
+// carry is written null. The file's messages are these, less those left out; a host writing in
+// batches names them all in fileMsgIDs.
+func exportWriteMessages(messages []any, fileMsgIDs []string) ([]string, []ExportLeftOut, error) {
+	var kept []map[string]any
+	var at []int
+	leftOut := []ExportLeftOut{}
 	for i, v := range messages {
 		doc, isObj := v.(map[string]any)
 		if !isObj {
-			return nil, exportRefuse(fmt.Sprintf("messages[%d]: a message is an object", i))
+			return nil, nil, exportRefuse(fmt.Sprintf("messages[%d]: a message is an object", i))
+		}
+		if body, isText := doc["body"].(string); isText && holdsPrivateKey(body) {
+			id, _ := doc["id"].(string)
+			leftOut = append(leftOut, ExportLeftOut{ID: id, Reason: exportBodyHoldsAKey})
+			continue
 		}
 		m, bad := checkMessage(doc, nil)
 		if bad != nil {
 			if bad.member != "" {
-				return nil, exportRefuse(fmt.Sprintf("messages[%d], member %s: %s", i, bad.member, bad.why))
+				return nil, nil, exportRefuse(fmt.Sprintf("messages[%d], member %s: %s", i, bad.member, bad.why))
 			}
-			return nil, exportRefuse(fmt.Sprintf("messages[%d]: %s", i, bad.why))
+			return nil, nil, exportRefuse(fmt.Sprintf("messages[%d]: %s", i, bad.why))
+		}
+		kept = append(kept, m)
+		at = append(at, i)
+	}
+	carried := strSet{}
+	if fileMsgIDs != nil {
+		carried = setOf(fileMsgIDs)
+	} else {
+		for _, m := range kept {
+			if id, isText := m["msg_id"].(string); isText {
+				carried.add(id)
+			}
+		}
+	}
+	lines := make([]string, 0, len(kept))
+	for k, m := range kept {
+		if r, isText := m["reply_to"].(string); isText && !carried.has(r) {
+			m["reply_to"] = nil
 		}
 		line := string(Canonical(m))
 		if len(line) > ExportLineMax {
-			return nil, exportRefuse(fmt.Sprintf("messages[%d]: over %d bytes as a line", i, ExportLineMax))
+			return nil, nil, exportRefuse(fmt.Sprintf("messages[%d]: over %d bytes as a line", at[k], ExportLineMax))
 		}
 		lines = append(lines, line)
 	}
-	return lines, nil
+	return lines, leftOut, nil
 }
 
 // ── the writer ──────────────────────────────────────────────────────────────────────────────────
@@ -1165,6 +1213,19 @@ func contactCells(v any) ([]string, *cellRefusal) {
 				}
 				names = append(names, s)
 			}
+			if col == "their_permissions" {
+				// SPEC §9.2, what a contact controls: the column is the contact's own claim and
+				// informative only, so a name §8 does not have, or one repeated, is dropped rather
+				// than stopping the owner's export.
+				kept, seen := names[:0], strSet{}
+				for _, n := range names {
+					if isExportPermission(n) && !seen.has(n) {
+						seen.add(n)
+						kept = append(kept, n)
+					}
+				}
+				names = kept
+			}
 			sort.Strings(names)
 			cells = append(cells, strings.Join(names, " "))
 		default:
@@ -1176,10 +1237,26 @@ func contactCells(v any) ([]string, *cellRefusal) {
 			if !isText {
 				return nil, wrong
 			}
+			if col == "display_name" {
+				// The contact's name for themselves is their own claim: cut to 200 characters, on a
+				// character, rather than refused (SPEC §9.2, what a contact controls).
+				s = truncateRunes(s, ExportNameMax)
+			}
 			cells = append(cells, s)
 		}
 	}
 	return cells, nil
+}
+
+// truncateRunes is s cut to at most n characters (Unicode scalar values), never inside one.
+func truncateRunes(s string, n int) string {
+	for i := range s {
+		if n == 0 {
+			return s[:i]
+		}
+		n--
+	}
+	return s
 }
 
 func threadCells(v any) ([]string, *cellRefusal) {

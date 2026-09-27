@@ -260,7 +260,14 @@ pub(super) fn export_write(a: &Value) -> Result<Value> {
 }
 
 pub(super) fn export_write_messages(a: &Value) -> Result<Value> {
-    Ok(json!({ "lines": jsonl::write(list(a, "messages")?)? }))
+    let messages = list(a, "messages")?;
+    let file_msg_ids = match a.get("msg_ids") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(strs(a, "msg_ids")?),
+    };
+    let (lines, left_out) = jsonl::write(messages, file_msg_ids.as_deref())?;
+    let left_out: Vec<Value> = left_out.iter().map(|l| json!({ "id": l.id, "reason": l.reason })).collect();
+    Ok(json!({ "lines": lines, "left_out": left_out }))
 }
 
 pub(super) fn export_manifest(a: &Value) -> Result<Value> {

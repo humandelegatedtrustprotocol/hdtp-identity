@@ -11,6 +11,7 @@
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { readZip } from '../zip.mjs';
+import readerCases from './export-reader.mjs';
 
 const CORPUS = new URL('../../go/exportcorpus/', import.meta.url);
 const sha = (b) => createHash('sha256').update(b).digest('hex');
@@ -149,6 +150,38 @@ export default function exportCases({ add, expect }, f) {
   add('export_merge: a held pin is never replaced', 'export_merge', { held, rows });
   add('export_merge with rows whose root is no fingerprint', 'export_merge', { held, rows: [{ root: 'alina' }] });
 
+  // ── what a contact controls (SPEC §9.2, 9.2#22–25): it never stops the owner's export, and what is
+  //    written reads back ─────────────────────────────────────────────────────────────────────────
+  const keyBody = f.hostPkcs8;
+  const theirs = [
+    { ...messages[0], id: 'k1', msg_id: 'k-1', reply_to: 'x-elsewhere' },
+    { ...messages[0], id: 'k2', msg_id: 'k-2', body: keyBody },
+    { ...messages[0], id: 'k3', msg_id: 'k-3', reply_to: 'k-2' },
+    { ...messages[0], id: 'k4', msg_id: 'k-4', reply_to: 'k-1' },
+  ];
+  add('export_write_messages: a dangling reply, a key in a body, a reply to what was left out', 'export_write_messages', { messages: theirs });
+  add('export_write_messages: in batches, the file names its msg_ids', 'export_write_messages', { messages: theirs.slice(0, 1), msg_ids: ['k-1', 'x-elsewhere'] });
+  add('export_write_messages: msg_ids that are not strings', 'export_write_messages', { messages: theirs.slice(0, 1), msg_ids: [5] });
+  const claimed = row({ root: other('B'), endpoint: 'https://b.example/mcp', display_name: 'é'.repeat(150) + 'x'.repeat(150), their_permissions: ['message.media', 'root.everything', 'message.media', 'integration.cal-x'], leaf: null, root_cert: null });
+  const claimsArgs = { owner, owner_name: '', exported_at: now, tool: 'parity', contacts: [claimed], threads: [{ ...threads[1] }] };
+  add('export_write: a 300-character display name and permissions §8 does not have', 'export_write', claimsArgs);
+  // Read back: what was written is a file the reader takes whole.
+  const cw = wasm.call('export_write', claimsArgs);
+  const cl = wasm.call('export_write_messages', { messages: theirs.map((m) => ({ ...m, thread: 't1', contact: other('B') })) });
+  const cjsonl = cl.lines.map((l) => l + '\n').join('');
+  const cman = wasm.call('export_manifest', { partial: cw.partial, hashes: { 'messages.jsonl': sha(cjsonl) }, messages: cl.lines.length }).manifest;
+  const cdir = [['manifest.json', cman], ['contacts.csv', cw.contacts_csv], ['threads.csv', cw.threads_csv], ['messages.jsonl', cjsonl]]
+    .map(([name, text]) => ({ name, size: Buffer.byteLength(text), encrypted: false, mode: 0o100644 }));
+  add('export_read: what a contact controls, as written, reads back', 'export_read', { directory: cdir, manifest: cman, contacts_csv: cw.contacts_csv, threads_csv: cw.threads_csv, owner, now });
+  const cread = wasm.call('export_read', { directory: cdir, manifest: cman, contacts_csv: cw.contacts_csv, threads_csv: cw.threads_csv, owner, now });
+  add('export_read_messages: what a contact controls, as written, reads back', 'export_read_messages', { lines: cl.lines, threads: cread.threads.map((t) => t.id), contacts: cread.contacts.map((c) => c.root), media: [] });
+  const cback = wasm.call('export_read_messages', { lines: cl.lines, threads: cread.threads.map((t) => t.id), contacts: cread.contacts.map((c) => c.root), media: [] }).messages;
+  add('export_read_end: what a contact controls, as written, reads back', 'export_read_end', {
+    manifest: cman, messages_sha256: sha(cjsonl), lines: cl.lines.length, ids: cback.map((m) => m.id), msg_ids: cback.map((m) => m.msg_id),
+    reply_tos: cback.map((m) => m.reply_to).filter((r) => r !== null), media_seen: [],
+  });
+  expect('export_read_end: what a contact controls, as written, reads back', { ok: true });
+
   // ── the wallet's book as rows ───────────────────────────────────────────────────────────────
   const kept = { root: rootFp, endpoint: ENDPOINT, name: 'Alina', leaf: leafDer, root_cert: rootDer, added: '2026-09-02T09:00:00Z' };
   add('book_rows: a contact with everything, one with the least', 'book_rows', { contacts: [kept, { root: other('B'), endpoint: 'https://b.example/mcp' }], exported_at: now });
@@ -183,4 +216,7 @@ export default function exportCases({ add, expect }, f) {
   add('export_manifest: a partial that already counts messages', 'export_manifest', { partial: { ...written.partial, counts: { ...written.partial.counts, messages: 2 } } });
   expect('export_write_messages: two attachments', { error: 'bad_request', why: 'messages[0], member attachments: more than one attachment: a message carries at most one file' });
   expect('export_write_messages: text beside a file', { error: 'bad_request', why: 'messages[0], member body: not empty, and the message carries a file: a message with an attachment has no text' });
+
+  // The reader's refusals, one per rule §9.2 names (SPEC 9.2#10, #13, #15): js/cases/export-reader.mjs.
+  readerCases({ add, expect }, f);
 }

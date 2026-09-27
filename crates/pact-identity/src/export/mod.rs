@@ -102,19 +102,24 @@ pub struct Cells<'a> {
 
 /// A permissions cell checked: §8's names, single-spaced, none twice. The names are the cell's own
 /// words; a reader answers them by splitting the cell, never a copy of it.
+/// A permission of §8: one of its names, or `integration.<name>`.
+fn is_permission(p: &str) -> bool {
+    PERMISSIONS.contains(&p)
+        || p.strip_prefix("integration.").is_some_and(|n| {
+            !n.is_empty() && n.len() <= 64 && n.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_' || c == b'-')
+        })
+}
+
 fn permissions(cell: &str) -> std::result::Result<(), String> {
     if cell.is_empty() {
         return Ok(());
     }
     let mut have: HashSet<&str> = HashSet::new();
     for p in cell.split(' ') {
-        let integration = p.strip_prefix("integration.").is_some_and(|n| {
-            !n.is_empty() && n.len() <= 64 && n.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_' || c == b'-')
-        });
         if p.is_empty() {
             return Err("not names separated by single spaces".into());
         }
-        if !PERMISSIONS.contains(&p) && !integration {
+        if !is_permission(p) {
             return Err(format!("{} is not a permission of §8", crate::canonical::string(p)));
         }
         if !have.insert(p) {
@@ -679,10 +684,21 @@ fn contact_cells(v: &Value) -> std::result::Result<Vec<String>, (usize, String)>
                     let Some(s) = i.as_str() else { return Err((k, "a list of names".into())) };
                     names.push(s.to_string());
                 }
+                if *col == "their_permissions" {
+                    // SPEC §9.2, what a contact controls: the column is the contact's own claim and
+                    // informative only, so a name §8 does not have, or one repeated, is dropped rather
+                    // than stopping the owner's export.
+                    names.retain(|n| is_permission(n));
+                    names.sort();
+                    names.dedup();
+                }
                 names.sort();
                 names.join(" ")
             }
             ("leaf" | "root_cert", None | Some(Value::Null)) => String::new(),
+            // The contact's name for themselves is their own claim: cut to 200 characters, on a
+            // character, rather than refused (SPEC §9.2, what a contact controls).
+            ("display_name", Some(Value::String(s))) => s.chars().take(NAME_MAX).collect(),
             (_, Some(Value::String(s))) if !matches!(*col, "was_active" | "permissions" | "their_permissions") => s.clone(),
             _ => return Err((k, "missing, or of the wrong type".into())),
         };
@@ -873,7 +889,92 @@ mod tests {
         let body = format!("keep this: {}", base64::engine::general_purpose::STANDARD.encode(&sec1));
         let message = json!({ "id": "1", "thread": "t", "contact": "c", "msg_id": "m", "direction": "in", "sender": "human",
             "time": "2026-09-27T10:00:00Z", "body": body, "reply_to": null, "status": "read", "attachments": [] });
-        assert_eq!(jsonl::write(&[message]).map_err(|e| e.why), Err("messages[0], member body: holds a private key".to_string()));
+        // A message's body is the contact's: one holding a key is left out and listed, never refused
+        // (SPEC §9.2, what a contact controls); the same key in a member the host writes is refused.
+        let (lines, left_out) = jsonl::write(std::slice::from_ref(&message), None).unwrap();
+        assert!(lines.is_empty());
+        assert_eq!(left_out.iter().map(|l| (l.id.as_str(), l.reason)).collect::<Vec<_>>(), [("1", jsonl::BODY_HOLDS_A_KEY)]);
+        let mut in_a_thread = message;
+        in_a_thread["body"] = json!("hi");
+        in_a_thread["thread"] = json!(body);
+        assert_eq!(
+            jsonl::write(&[in_a_thread], None).map(|_| ()).map_err(|e| e.why),
+            Err("messages[0], member thread: holds a private key".to_string())
+        );
+    }
+
+    /// SPEC §9.2, what a contact controls: none of it stops the owner's export, and what is written
+    /// reads back whole. A reply to a message the file does not carry is written null; a permission
+    /// the contact claims and §8 does not have, or one repeated, is dropped; a name the contact gives
+    /// themselves over 200 characters is cut to 200, on a character; a message whose body holds what
+    /// reads as a key is left out and listed, and the rest of the file writes.
+    #[test]
+    fn what_a_contact_controls_never_stops_an_export_and_it_reads_back() {
+        let owner = format!("sha256:{}", "O".repeat(43));
+        let peer = format!("sha256:{}", "B".repeat(43));
+        let long: String = "é".repeat(150) + &"x".repeat(150);
+        let row = json!({ "root": peer, "endpoint": "https://b.example/mcp", "name": "", "display_name": long, "status": "active",
+            "was_active": true, "permissions": ["message.text"], "their_permissions": ["message.media", "root.everything", "message.media", "integration.cal"],
+            "leaf": null, "root_cert": null, "added": "2026-09-27T10:00:00Z" });
+        let thread =
+            json!({ "id": "t1", "contact": peer, "topic": "", "created_at": "2026-09-27T10:00:00Z", "last_at": "2026-09-27T10:00:00Z" });
+        let w = write(&owner, "", 0, "t", &[row], &[thread], &[]).unwrap();
+        let cells = &csv::read(&w.contacts_csv).unwrap()[1];
+        assert_eq!(cells[3].chars().count(), NAME_MAX, "the name is cut to 200 characters");
+        assert!(long.starts_with(cells[3].as_str()), "on a character, keeping its start");
+        assert_eq!(cells[7], "integration.cal message.media", "unknown and repeated names are dropped");
+        let key = PrivateKey::from_seed(Alg::Ed25519, &seed("export/contact-key")).unwrap();
+        let message = |id: &str, msg_id: &str, body: &str, reply_to: Value| {
+            json!({ "id": id, "thread": "t1", "contact": peer, "msg_id": msg_id, "direction": "in", "sender": "human",
+                "time": "2026-09-27T10:00:00Z", "body": body, "reply_to": reply_to, "status": "read", "attachments": [] })
+        };
+        let messages = [
+            message("m1", "x1", "hello", json!("x-elsewhere")),
+            message("m2", "x2", &b64u(&key.to_pkcs8()), Value::Null),
+            message("m3", "x3", "about that", json!("x2")),
+            message("m4", "x4", "and this", json!("x1")),
+        ];
+        let (lines, left_out) = jsonl::write(&messages, None).unwrap();
+        assert_eq!(left_out.iter().map(|l| l.id.as_str()).collect::<Vec<_>>(), ["m2"], "the message holding a key is left out and listed");
+        let replies: Vec<Value> = lines.iter().map(|l| serde_json::from_str::<Value>(l).unwrap()["reply_to"].clone()).collect();
+        assert_eq!(
+            replies,
+            [Value::Null, Value::Null, json!("x1")],
+            "a reply to a message not carried, the left-out one included, is null"
+        );
+        // Batches: the file's msg_ids named by the host decide what is carried.
+        let (lines, _) = jsonl::write(&messages[..1], Some(&["x1", "x-elsewhere"])).unwrap();
+        assert!(lines[0].contains("\"reply_to\":\"x-elsewhere\""));
+        // And it all reads back.
+        let text = lines_to_file(&jsonl::write(&messages, None).unwrap().0);
+        let m = manifest::finish(&w.partial, Some(&sha256_hex(text.as_bytes())), 3).unwrap();
+        let entry = |name: &str| Entry { name: name.into(), size: 1, encrypted: false, mode: 0 };
+        let directory = [entry("manifest.json"), entry("contacts.csv"), entry("threads.csv"), entry("messages.jsonl")];
+        let r = read(&directory, Some(&m), Some(&w.contacts_csv), w.threads_csv.as_deref(), &owner, 0).unwrap();
+        assert!(r.answer.contains("\"their_permissions\":[\"integration.cal\",\"message.media\"]"));
+        let file_lines: Vec<&str> = text.lines().collect();
+        let (threads, contacts) = (["t1"], [peer.as_str()]);
+        let (read_back, _) = jsonl::read(&file_lines, 1, &jsonl::Names { threads: &threads, contacts: &contacts, media: &[] }).unwrap();
+        let ids: Vec<&str> = read_back.iter().filter_map(|m| m["id"].as_str()).collect();
+        assert_eq!(ids, ["m1", "m3", "m4"]);
+        let msg_ids: Vec<&str> = read_back.iter().filter_map(|m| m["msg_id"].as_str()).collect();
+        let reply_tos: Vec<&str> = read_back.iter().filter_map(|m| m["reply_to"].as_str()).collect();
+        read_end(
+            &m,
+            &End {
+                messages_sha256: Some(&sha256_hex(text.as_bytes())),
+                lines: 3,
+                ids: &ids,
+                msg_ids: &msg_ids,
+                reply_tos: &reply_tos,
+                media_seen: &[],
+            },
+        )
+        .unwrap();
+    }
+
+    fn lines_to_file(lines: &[String]) -> String {
+        lines.iter().map(|l| format!("{l}\n")).collect()
     }
 
     /// The export's functions grow linearly in the rows a file holds. Each is timed at N and 4N rows
@@ -940,7 +1041,7 @@ mod tests {
             read(&directory, Some(&manifest_text), Some(&w.contacts_csv), w.threads_csv.as_deref(), &owner, 0).unwrap();
             let t_read = t.elapsed().as_secs_f64();
             let t = clock();
-            let lines = jsonl::write(&d.messages).unwrap();
+            let lines = jsonl::write(&d.messages, None).unwrap().0;
             let t_write_messages = t.elapsed().as_secs_f64();
             let (thread_ids, roots, lines) = (refs(&d.thread_ids), refs(&roots), refs(&lines));
             let names = jsonl::Names { threads: &thread_ids, contacts: &roots, media: &[] };

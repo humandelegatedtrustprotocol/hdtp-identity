@@ -164,28 +164,63 @@ pub fn read(lines: &[&str], first_line: u64, names: &Names<'_>) -> Result<(Vec<V
     Ok((messages, seen))
 }
 
+/// A message the writer left out, and why (SPEC §9.2, what a contact controls).
+pub struct LeftOut {
+    pub id: String,
+    pub reason: &'static str,
+}
+
+/// Why a message is left out: its body is what the key-material check refuses.
+pub const BODY_HOLDS_A_KEY: &str = "its body holds what reads as a private key, which an export never carries";
+
 /// The lines of `messages.jsonl` for these messages, in the order given, each checked by the
-/// reader's rules but the references (the host holds those) and written as RFC 8785 JSON.
-pub fn write(messages: &[Value]) -> Result<Vec<String>> {
-    messages
+/// reader's rules but the references (the host holds those) and written as RFC 8785 JSON. What a
+/// contact controls never stops the export (SPEC §9.2): a message whose body holds what reads as a
+/// private key is left out and listed, and a `reply_to` naming a message the file does not carry is
+/// written `null`. The file's messages are these, less those left out; a host writing in batches
+/// names them all in `file_msg_ids`.
+pub fn write(messages: &[Value], file_msg_ids: Option<&[&str]>) -> Result<(Vec<String>, Vec<LeftOut>)> {
+    let mut kept = Vec::new();
+    let mut left_out = Vec::new();
+    for (i, v) in messages.iter().enumerate() {
+        let Some(doc) = v.as_object() else { return refuse(format!("messages[{i}]: a message is an object")) };
+        if doc.get("body").and_then(|b| b.as_str()).is_some_and(holds_private_key) {
+            let id = doc.get("id").and_then(|x| x.as_str()).unwrap_or_default().to_string();
+            left_out.push(LeftOut { id, reason: BODY_HOLDS_A_KEY });
+            continue;
+        }
+        let m = message(doc, None).map_err(|(member, why)| {
+            crate::util::Error::new(
+                "bad_request",
+                match member {
+                    Some(k) => format!("messages[{i}], member {k}: {why}"),
+                    None => format!("messages[{i}]: {why}"),
+                },
+            )
+        })?;
+        kept.push((i, m));
+    }
+    let carried: HashSet<&str> = match file_msg_ids {
+        Some(ids) => ids.iter().copied().collect(),
+        None => kept.iter().filter_map(|(_, m)| m["msg_id"].as_str()).collect(),
+    };
+    let dangling: Vec<usize> = kept
         .iter()
         .enumerate()
-        .map(|(i, v)| {
-            let Some(doc) = v.as_object() else { return refuse(format!("messages[{i}]: a message is an object")) };
-            let m = message(doc, None).map_err(|(member, why)| {
-                crate::util::Error::new(
-                    "bad_request",
-                    match member {
-                        Some(k) => format!("messages[{i}], member {k}: {why}"),
-                        None => format!("messages[{i}]: {why}"),
-                    },
-                )
-            })?;
-            let line = crate::canonical::canonical(&m);
-            if line.len() > LINE_MAX {
-                return refuse(format!("messages[{i}]: over {LINE_MAX} bytes as a line"));
-            }
-            Ok(line)
-        })
-        .collect()
+        .filter(|(_, (_, m))| m["reply_to"].as_str().is_some_and(|r| !carried.contains(r)))
+        .map(|(k, _)| k)
+        .collect();
+    drop(carried);
+    for k in dangling {
+        kept[k].1["reply_to"] = Value::Null;
+    }
+    let mut lines = Vec::with_capacity(kept.len());
+    for (i, m) in &kept {
+        let line = crate::canonical::canonical(m);
+        if line.len() > LINE_MAX {
+            return refuse(format!("messages[{i}]: over {LINE_MAX} bytes as a line"));
+        }
+        lines.push(line);
+    }
+    Ok((lines, left_out))
 }

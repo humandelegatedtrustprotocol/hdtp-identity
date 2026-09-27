@@ -70,8 +70,16 @@ func TestReadExportZipAnswersTheWholeCorpus(t *testing.T) {
 			t.Errorf("%s:\n  got  %s\n  want %s…", c.File, err, c.RefusalPrefix)
 		}
 	}
-	if accepted != 2 {
-		t.Errorf("%d controls accepted; the corpus has two, and a reader that refuses everything must fail here", accepted)
+	// Every file cases.json marks as accepted, and at least one: a reader that refuses everything
+	// must fail here.
+	want := 0
+	for _, c := range index.Cases {
+		if c.Accept != nil {
+			want++
+		}
+	}
+	if want == 0 || accepted != want {
+		t.Errorf("%d files accepted; cases.json accepts %d, and a reader that refuses everything must fail here", accepted, want)
 	}
 }
 
@@ -125,7 +133,7 @@ func TestWriteExportZipWritesTheCorpusControlsBack(t *testing.T) {
 		var out bytes.Buffer
 		in := pact.ExportInput{Owner: index.Owner, OwnerName: m.OwnerName, Tool: m.Tool, ExportedAt: at,
 			Contacts: first.Contacts, Threads: first.Threads, Messages: first.Messages, Media: first.Media}
-		err = pact.WriteExportZip(&out, in, func(hash string) (io.ReadCloser, error) { return zr.Open("media/" + hash) })
+		_, err = pact.WriteExportZip(&out, in, func(hash string) (io.ReadCloser, error) { return zr.Open("media/" + hash) })
 		if err != nil {
 			t.Fatalf("%s: %v", file, err)
 		}
@@ -149,7 +157,7 @@ func TestWriteExportZipWritesTheCorpusControlsBack(t *testing.T) {
 			t.Errorf("%s: what was written reads back differently", file)
 		}
 	}
-	if controls != 2 {
-		t.Errorf("%d controls in the corpus, want 2", controls)
+	if controls < 2 {
+		t.Errorf("%d controls in the corpus, want the export and the book at least", controls)
 	}
 }
