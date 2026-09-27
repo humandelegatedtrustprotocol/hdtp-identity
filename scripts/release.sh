@@ -13,7 +13,8 @@
 #   4. pins the Wasm of THAT commit (js/reproduce.sh --pin: the container build of `git archive HEAD`),
 #      checks it (js/verify.mjs), and commits js/manifest.json;
 #   5. tags that commit vX.Y.Z and go/vX.Y.Z (annotated; the Go module lives in go/);
-#   6. packs dist/X.Y.Z/: pact-identity-wasm-web-X.Y.Z.tgz (the pinned pkg-web/), the `pact` CLI
+#   6. packs dist/X.Y.Z/: pact-identity-wasm-web-X.Y.Z.tgz (the pinned pkg-web/),
+#      pact-identity-exportcorpus-X.Y.Z.tgz (go/exportcorpus's cases.json and zips), the `pact` CLI
 #      for each target, manifest.json (scripts/release-manifest.mjs) and SHA256SUMS; the release
 #      notes go to dist/X.Y.Z-notes.md.
 # Nothing is pushed and nothing is published: that is scripts/publish.sh, a separate step, so all
@@ -114,6 +115,17 @@ TGZ="pact-identity-wasm-web-$VERSION.tgz"
 COPYFILE_DISABLE=1 tar -czf "$DIST/$TGZ" -C "$STAGE" pkg-web
 listed="$(tar -tzf "$DIST/$TGZ" | grep -v '/$' | sed 's#^\./##' | sort)"
 [ "$listed" = "$(echo "$WEB_FILES" | sort)" ] || { echo "$listed" >&2; refuse "$TGZ does not hold exactly the pinned pkg-web/ files"; }
+
+# The export's fixture corpus (SPEC §9.2), for hosts that do not import the Go package: cases.json and
+# every file it names, exactly as the release commit tracks them, under exportcorpus/ — and nothing
+# of the generator beside them.
+CORPUS_FILES="$(git ls-files -- go/exportcorpus | grep -E '^go/exportcorpus/(cases\.json|[^/]+\.zip)$' | sed 's#^go/##' | sort)"
+[ -n "$CORPUS_FILES" ] || refuse "go/exportcorpus holds no cases.json and no zip"
+CORPUS_TGZ="pact-identity-exportcorpus-$VERSION.tgz"
+# shellcheck disable=SC2086 # one file per word; the names hold no spaces
+COPYFILE_DISABLE=1 tar -czf "$DIST/$CORPUS_TGZ" -C go $CORPUS_FILES
+listed="$(tar -tzf "$DIST/$CORPUS_TGZ" | grep -v '/$' | sed 's#^\./##' | sort)"
+[ "$listed" = "$CORPUS_FILES" ] || { echo "$listed" >&2; refuse "$CORPUS_TGZ does not hold exactly go/exportcorpus's cases.json and zips"; }
 
 echo "release: pact CLI for $TARGETS"
 # shellcheck disable=SC2086 # the targets are words
