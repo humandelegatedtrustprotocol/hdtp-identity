@@ -333,12 +333,16 @@ enum IdCmd {
 
 #[derive(Subcommand)]
 enum ContactsCmd {
-    /// The contact book as JSON on stdout
+    /// The contact book as a book (SPEC §9.2): an unencrypted zip of manifest.json and contacts.csv
     Export {
         #[arg(long)]
         vault: String,
+        /// The book to write: a new file, never written over
+        #[arg(long)]
+        out: String,
     },
-    /// Reconcile a book from a host against the wallet's, showing every difference first
+    /// Replace the wallet's book with an export's or a book's contacts, showing every difference
+    /// first; the whole file is checked, messages and files included
     Import {
         #[arg(long)]
         vault: String,
@@ -420,7 +424,7 @@ fn run(cli: Cli) -> Res<i32> {
             IdCmd::Restore { from, vault } => wallet::id_restore(&from, &vault),
         },
         Cmd::Contacts { cmd } => match cmd {
-            ContactsCmd::Export { vault } => wallet::contacts_export(&vault),
+            ContactsCmd::Export { vault, out } => wallet::contacts_export(&vault, &out),
             ContactsCmd::Import { vault, file, yes } => wallet::contacts_import(&vault, &file, yes),
         },
         Cmd::CardStatus { vault, slot, reader } => wallet::card_status(vault.as_deref(), &slot, reader.as_deref()),
@@ -485,6 +489,7 @@ mod tests {
             ("wallet/card.rs", include_str!("wallet/card.rs")),
             ("wallet/id.rs", include_str!("wallet/id.rs")),
             ("wallet/contacts.rs", include_str!("wallet/contacts.rs")),
+            ("wallet/exportzip.rs", include_str!("wallet/exportzip.rs")),
             ("piv.rs", include_str!("piv.rs")),
             ("io.rs", include_str!("io.rs")),
             ("vectors.rs", include_str!("vectors.rs")),
