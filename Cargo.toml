@@ -6,7 +6,7 @@ members = ["crates/pact-identity", "crates/pact-identity-wasm", "crates/pact"]
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-repository = "https://github.com/tech-sumit/pact-gateway"
+repository = "https://github.com/pact-cloud/pact-identity"
 
 [profile.release]
 opt-level = "z"
