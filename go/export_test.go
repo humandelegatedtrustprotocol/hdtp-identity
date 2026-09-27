@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestCSVReadsRFC4180StrictlyAndRefusesWhatItWouldHaveToRepair(t *testing.T) {
@@ -86,7 +87,7 @@ func exportFixture(t *testing.T) (ExportInput, map[string][]byte) {
 func writeFixture(t *testing.T, in ExportInput, files map[string][]byte) *zip.Reader {
 	t.Helper()
 	var b bytes.Buffer
-	err := WriteExportZip(&b, in, func(h string) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(files[h])), nil })
+	_, err := WriteExportZip(&b, in, func(h string) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(files[h])), nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +117,7 @@ func TestAnExportWrittenIsReadBackWhole(t *testing.T) {
 	// The same input writes the same bytes.
 	var one, two bytes.Buffer
 	for _, b := range []*bytes.Buffer{&one, &two} {
-		if err := WriteExportZip(b, in, func(h string) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(files[h])), nil }); err != nil {
+		if _, err := WriteExportZip(b, in, func(h string) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(files[h])), nil }); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -137,7 +138,7 @@ func TestAMessageCarriesAtMostOneFile(t *testing.T) {
 	in, files := exportFixture(t)
 	in.Messages[0].Attachments = append(in.Messages[0].Attachments, in.Messages[0].Attachments[0])
 	var b bytes.Buffer
-	err := WriteExportZip(&b, in, func(h string) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(files[h])), nil })
+	_, err := WriteExportZip(&b, in, func(h string) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(files[h])), nil })
 	if err == nil || err.Error() != "messages[0], member attachments: more than one attachment: a message carries at most one file" {
 		t.Errorf("the writer: %v", err)
 	}
@@ -167,7 +168,7 @@ func TestAVaultContactTravelsAsARowAndComesBack(t *testing.T) {
 	}
 	in := ExportInput{Owner: Fingerprint(owner.Public.SPKI), OwnerName: "Owner", Tool: "test", ExportedAt: at.Add(24 * time.Hour),
 		Contacts: []ContactRow{row}}
-	if err := WriteExportZip(&buf, in, nil); err != nil {
+	if _, err := WriteExportZip(&buf, in, nil); err != nil {
 		t.Fatal(err)
 	}
 	zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
@@ -191,16 +192,16 @@ func TestWriteExportZipRefusesRatherThanOmitsAFile(t *testing.T) {
 	in, files := exportFixture(t)
 	open := func(h string) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(files[h])), nil }
 	var b bytes.Buffer
-	if err := WriteExportZip(&b, in, open); err != nil {
+	if _, err := WriteExportZip(&b, in, open); err != nil {
 		t.Fatalf("the control: %v", err)
 	}
 	lost := func(string) (io.ReadCloser, error) { return nil, io.ErrUnexpectedEOF }
-	if err := WriteExportZip(&bytes.Buffer{}, in, lost); err == nil {
+	if _, err := WriteExportZip(&bytes.Buffer{}, in, lost); err == nil {
 		t.Error("a file that cannot be read was left out rather than refusing the export")
 	}
 	without := in
 	without.Media = nil
-	err := WriteExportZip(&bytes.Buffer{}, without, open)
+	_, err := WriteExportZip(&bytes.Buffer{}, without, open)
 	if err == nil || !strings.Contains(err.Error(), "it is not among the files to export") {
 		t.Errorf("a message's file left out of the export: %v", err)
 	}
@@ -227,5 +228,53 @@ func TestExportMergeNeverReplacesAHeldPin(t *testing.T) {
 	}
 	if len(conflicts) != 2 {
 		t.Errorf("the held pin's endpoint and leaf are two conflicts: %v", conflicts)
+	}
+}
+
+// SPEC §9.2, what a contact controls: none of it stops the owner's export, and what WriteExportZip
+// writes reads back whole. A reply to a message the file does not carry is written null; a
+// permission the contact claims and §8 does not have, or one repeated, is dropped; a name the contact
+// gives themselves over 200 characters is cut to 200, on a character; a message whose body holds what
+// reads as a key is left out with the file it carried, and listed.
+func TestWhatAContactControlsNeverStopsAnExportAndItReadsBack(t *testing.T) {
+	in, files := exportFixture(t)
+	long := strings.Repeat("é", 150) + strings.Repeat("x", 150)
+	in.Contacts[0].DisplayName = long
+	in.Contacts[0].TheirPermissions = []string{"message.media", "root.everything", "message.media", "integration.cal"}
+	elsewhere := "m-elsewhere"
+	in.Messages[1].ReplyTo = &elsewhere
+	key, _ := KeyFromSeed(AlgEd25519, Seed("export/contact-key"))
+	pkcs8, _ := key.PKCS8()
+	in.Messages[0].Body = B64url(pkcs8) // the message that carries the one file, now with a key in its body
+	var b bytes.Buffer
+	leftOut, err := WriteExportZip(&b, in, func(h string) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(files[h])), nil })
+	if err != nil {
+		t.Fatalf("the export was refused: %v", err)
+	}
+	if len(leftOut) != 1 || leftOut[0].ID != "1" || leftOut[0].Reason != exportBodyHoldsAKey {
+		t.Errorf("left out: %+v", leftOut)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(b.Bytes()), int64(b.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range zr.File {
+		if strings.HasPrefix(f.Name, "media/") {
+			t.Errorf("%s: the file of a message left out went into the export", f.Name)
+		}
+	}
+	got, err := ReadExportZip(zr, exportOwner, in.ExportedAt, 1<<30)
+	if err != nil {
+		t.Fatalf("what was written does not read: %v", err)
+	}
+	c := got.Contacts[0]
+	if utf8.RuneCountInString(c.DisplayName) != ExportNameMax || !strings.HasPrefix(long, c.DisplayName) {
+		t.Errorf("display_name: %d characters", utf8.RuneCountInString(c.DisplayName))
+	}
+	if !reflect.DeepEqual(c.TheirPermissions, []string{"integration.cal", "message.media"}) {
+		t.Errorf("their_permissions: %v", c.TheirPermissions)
+	}
+	if len(got.Messages) != 1 || got.Messages[0].ReplyTo != nil {
+		t.Errorf("messages: %+v", got.Messages)
 	}
 }

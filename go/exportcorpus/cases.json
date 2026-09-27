@@ -29,6 +29,20 @@
       }
     },
     {
+      "file": "local-names-differ.zip",
+      "about": "every local header names a path that climbs out; the central directory is the valid export's",
+      "accept": {
+        "contacts": 4,
+        "threads": 2,
+        "messages": 4,
+        "media": 1,
+        "pinned": 1,
+        "leafless": [
+          "sha256:bfrVPTYIFPebr1NGsRnHeKhO2gj5MuvVAZbh5OLdajk"
+        ]
+      }
+    },
+    {
       "file": "zip-slip.zip",
       "about": "a name that climbs out of the directory",
       "stage": "core",

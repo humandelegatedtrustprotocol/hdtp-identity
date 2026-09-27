@@ -142,6 +142,25 @@ func zipOf(entries []entry) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// localNamesDiffer rewrites the name in every local file header of a zip to `../` over its first
+// three bytes, leaving each length, CRC and offset, and the whole central directory, as they were.
+func localNamesDiffer(z []byte) []byte {
+	out := append([]byte{}, z...)
+	for i := 0; i+30 <= len(out); {
+		if !bytes.Equal(out[i:i+4], []byte{0x50, 0x4b, 0x03, 0x04}) {
+			break
+		}
+		nameLen := int(out[i+26]) | int(out[i+27])<<8
+		extraLen := int(out[i+28]) | int(out[i+29])<<8
+		compressed := int(out[i+18]) | int(out[i+19])<<8 | int(out[i+20])<<16 | int(out[i+21])<<24
+		if nameLen >= 3 {
+			copy(out[i+30:], "../")
+		}
+		i += 30 + nameLen + extraLen + compressed
+	}
+	return out
+}
+
 // export is the valid file's members, which the variants below copy and change one thing in.
 type export struct {
 	owner    string
@@ -374,6 +393,14 @@ func Build() (map[string][]byte, error) {
 	}
 	if err := add(Case{File: "valid-book.zip", About: "the control: a wallet's book, manifest.json and contacts.csv only",
 		Accept: &Accept{Contacts: 2, Pinned: 1, Leafless: []string{}}}, book, nil); err != nil {
+		return nil, err
+	}
+	// SPEC 9.2#6: the central directory is the only index. The valid export with every LOCAL file
+	// header naming another member of the same length — `../` over its first three bytes — and the
+	// central directory as it was: a reader that indexes the directory reads the valid export, one
+	// that walks the local headers finds names that climb out of the directory.
+	if err := add(Case{File: "local-names-differ.zip", About: "every local header names a path that climbs out; the central directory is the valid export's",
+		Accept: &Accept{Contacts: 4, Threads: 2, Messages: 4, Media: 1, Pinned: 1, Leafless: leafless}}, localNamesDiffer(whole), nil); err != nil {
 		return nil, err
 	}
 
