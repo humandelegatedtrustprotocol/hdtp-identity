@@ -745,3 +745,55 @@ fn the_two_files_are_found_together_and_never_mistaken() {
         as_pact().args(["id", "create", "--name", "N", "--vault"]).arg(&made).assert().success();
     }
 }
+
+/// The one-live-leaf rule and the move notice come from the core's `ledger_check` on BOTH paths. A
+/// card-held root has no key to hand `wallet_issue`, so the CLI's own copy of the rule used to hold
+/// it there; that copy is gone, and this is the card path refusing through the one function — before
+/// any card is looked for, which is why no card is needed here.
+#[test]
+fn a_card_held_root_is_held_to_the_ledger_by_the_core() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    let pass = passphrase_file(d, 0o600);
+    let as_pact = || {
+        let mut cmd = pact();
+        cmd.env("PACT_PASSPHRASE_FILE", &pass);
+        cmd
+    };
+    let key = d.join("host.key");
+    pact().args(["key", "new", "--alg", "ed25519", "--out"]).arg(&key).assert().success();
+    let csr = |name: &str, endpoint: &str| {
+        let p = d.join(name);
+        pact().args(["csr", "new", "--endpoint", endpoint, "--key"]).arg(&key).arg("--out").arg(&p).assert().success();
+        p
+    };
+    let (home, away) = (csr("home.csr", "https://agent.alina.example/mcp"), csr("away.csr", "https://alina.host.example/alina/mcp"));
+    let vault = d.join("alina.pact-vault.json");
+    as_pact().args(["id", "create", "--name", "Alina Rao", "--vault"]).arg(&vault).assert().success();
+    as_pact().args(["id", "issue", "--yes", "--csr"]).arg(&home).arg("--vault").arg(&vault).assert().success();
+    // The root moves to a card: its entry keeps the certificate and names the holder, and loses the key.
+    let mut plaintext = open_sealed(&vault);
+    let root = &mut plaintext["roots"][0];
+    root.as_object_mut().unwrap().remove("pkcs8");
+    root["holder"] = serde_json::json!({ "kind": "piv", "slot": "9c", "mode": "generated" });
+    let sealed: serde_json::Value = serde_json::from_str(&pact_identity::call(
+        "vault_seal",
+        &serde_json::json!({ "passphrase": "correct horse battery staple", "plaintext": plaintext }).to_string(),
+    ))
+    .unwrap();
+    fs::write(&vault, serde_json::to_string_pretty(&sealed["vault"]).unwrap()).unwrap();
+
+    as_pact().args(["id", "issue", "--yes", "--csr"]).arg(&away).arg("--vault").arg(&vault).assert().failure().stderr(
+        predicate::str::contains(
+            "bad_request: a leaf is live for https://agent.alina.example/mcp: a second endpoint is a move, not a second home",
+        ),
+    );
+    // Chosen, it is a move, and the person is told what a move does before anything is asked of a card.
+    as_pact().args(["id", "issue", "--yes", "--move", "--csr"]).arg(&away).arg("--vault").arg(&vault).assert().stderr(
+        predicate::str::contains(
+            "You are moving Alina Rao to https://alina.host.example/alina/mcp. Nothing cancels a certificate in PACT.",
+        )
+        .and(predicate::str::contains("agent.alina.example is not told by this signature"))
+        .and(predicate::str::contains("a second endpoint is a move").not()),
+    );
+}
