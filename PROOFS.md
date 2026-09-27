@@ -7,9 +7,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed here that did not pass.
 
-Specification: **2.1.3**. **52** normative sentences, **458** cross-port parity cases over **38** guarded functions.
+Specification: **2.1.3**. **52** normative sentences, **485** cross-port parity cases over **39** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**39** functions, spec 2.1.3): **916** answers held to the shape it declares, **0** did not. Of **77** declared error codes, **63** were produced by a case here; the rest are declared for a caller's benefit and no argument in this suite reaches them.
+Every answer of both ports is validated against `contract/contract.json` (**40** functions, spec 2.1.3): **970** answers held to the shape it declares, **0** did not. Of **79** declared error codes, **65** were produced by a case here; the rest are declared for a caller's benefit and no argument in this suite reaches them.
 
 ## The 52 normative sentences of the specification
 
@@ -88,7 +88,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 | `9.#2` | **Moving** is the person issuing a leaf to the new host, the data carried across as an archive — the person's contacts and their conversations, with the media in them, and nothing that is the host's own: no settings, no credentials, no invites, no record of the host's leaves; the archive's format is each host's own, a host that makes one MUST NOT put key material of any kind in it, and a host that imports one MUST refuse any key material in it and SHOULD refuse, rather than ignore, anything else it does not recognise — and the new host reaching every contact by §5.3, *before* the person tells the old host to leave, so that no contact meets a gap. | `gateway:TestAnExportCarriesContactsAndChatsAndNothingElse`, `gateway:TestAnImportRefusesAnythingAnExportDoesNotCarry`, `gateway:TestTheCloudsLeaveFileImports` |
 | `9.#3` | An address an identity has vacated MUST NOT be assigned to another identity until the last leaf issued for it has expired, so a contact that missed the move never reaches a stranger where it expects a friend. | *node, by declaration* |
 | `9.#4` | A host that exports an identity toward a destination that cannot carry its chain MUST say so before the export; the remedy is a destination that can. | *node, by declaration* |
-| `9.#5` | It issues one live leaf per identity at a time — a second endpoint is a move, not a second home, because contacts keep one pin and the newest leaf wins — and MUST NOT issue a second while one is live except as its replacement. | `rust:issues_from_the_vault`, `go:TestWalletIssue`, `go:TestVaultRulesMirrorTheCore` |
+| `9.#5` | It issues one live leaf per identity at a time — a second endpoint is a move, not a second home, because contacts keep one pin and the newest leaf wins — and MUST NOT issue a second while one is live except as its replacement. | `rust:issues_from_the_vault`, `go:TestWalletIssue`, `go:TestVaultRulesMirrorTheCore`, `rust:ledger_check_names_each_kind_and_refuses_only_a_second_home`, `go:TestLedgerCheckNamesEachKindAndRefusesOnlyASecondHome`, `rust:ledger_check_takes_the_newest_leaf_and_not_the_newest_unexpired_one`, `go:TestLedgerCheckTakesTheNewestLeafAndNotTheNewestUnexpiredOne`, `rust:a_card_held_root_is_held_to_the_ledger_by_the_core` |
 | `9.#6` | A wallet MUST NOT write a leaf, a ledger entry or a contact into the file, and writes it once, when the root is made, and again only when the root is re-bound or a hardware key takes it. | `rust:a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates`, `rust:issues_from_the_vault` |
 
 ### 13.1 Format
@@ -156,7 +156,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 458 cross-port parity cases
+## The 485 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -164,7 +164,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **458** cases, **0** disagreements, **38** of **38** functions compared whole on success.
+At the run that generated this file: **485** cases, **0** disagreements, **39** of **39** functions compared whole on success.
 
 ### `address_guard` — 32 cases · whole on success
 
@@ -506,6 +506,36 @@ At the run that generated this file: **458** cases, **0** disagreements, **38** 
 
 - leaf_tbs
 - leaf_tbs with no issuer
+
+### `ledger_check` — 27 cases · whole on success
+
+- ledger_check: a renewal where the live leaf is
+- ledger_check: a move, not chosen
+- ledger_check: a move, chosen
+- ledger_check: back to an endpoint issued to before, not chosen
+- ledger_check: back to an endpoint issued to before, chosen
+- ledger_check: an empty ledger
+- ledger_check: no ledger at all
+- ledger_check: a ledger given as null
+- ledger_check: after the live leaf expired, a new endpoint
+- ledger_check: after the live leaf expired, the same endpoint
+- ledger_check: another root's live leaf is not this root's
+- ledger_check: the newest leaf expired, an older one did not
+- ledger_check: an entry whose not_before does not read
+- ledger_check: an entry whose not_after does not read
+- ledger_check: an entry with no endpoint
+- ledger_check: an entry carrying the leaf
+- ledger_check: an entry that is not an object
+- ledger_check: a ledger that is not a list
+- ledger_check with no root
+- ledger_check with an empty root
+- ledger_check with no endpoint
+- ledger_check with an endpoint not in normal form
+- ledger_check with no now
+- ledger_check with a now that does not read
+- ledger_check with a move that is not a boolean
+- ledger_check with nothing to work from
+- ledger_check over a ledger that reads
 
 ### `no_such_function` — 1 case · not a dispatched function
 
