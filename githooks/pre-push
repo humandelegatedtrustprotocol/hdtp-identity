@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Pre-push: the whole gate (gate.sh), here, because nothing else can run it.
+#
+# gate.sh reads the private sibling `pact-protocol` (SPEC.md, the seed under vectors/lib), which no
+# CI runner is given a credential for (the owner's decision, 2026-09-20). So it runs here or nowhere.
+# It checks the CHECKED-OUT tree — cargo, the Go port, and js/verify.mjs, whose answer is about
+# HEAD — so pushing a ref that is not HEAD gates the wrong commit; that is said, not refused.
+#
+# The root is the working tree git runs this hook in, never this file's own directory: from a
+# `git worktree`, the two differ.
+#
+# This project does not bypass its hooks: a gate that is wrong is fixed, not skipped.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+zero=0000000000000000000000000000000000000000
+only_deletes=true
+head_sha="$(git rev-parse HEAD)"
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue
+  only_deletes=false
+  commit="$(git rev-parse "$local_sha^{commit}" 2>/dev/null || echo "$local_sha")"
+  [ "$commit" = "$head_sha" ] || echo "pre-push: NOTE — gating the checked-out tree ($(git rev-parse --short HEAD)), not $(git rev-parse --short "$commit")" >&2
+done
+[ "$only_deletes" = true ] && exit 0
+
+echo "pre-push: sh gate.sh — nothing else runs it"
+if ! sh gate.sh; then
+  echo >&2
+  echo "pre-push: the gate failed (sh gate.sh reproduces it). Fix it before pushing: hooks are never" >&2
+  echo "          bypassed here." >&2
+  exit 1
+fi
