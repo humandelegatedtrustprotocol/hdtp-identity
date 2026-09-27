@@ -8,7 +8,8 @@
 #      none missing from either and none extra;
 #   3. manifest.json's version, tags and commit against the tags vX.Y.Z and go/vX.Y.Z (fetched from
 #      origin if absent), and its pin fields against js/manifest.json AT that tag;
-#   4. the Wasm tarball: exactly the pinned pkg-web/ files, each with the pinned sha256 and size;
+#   4. the Wasm tarball: exactly the pinned pkg-web/ files, each with the pinned sha256 and size; the
+#      corpus tarball: exactly go/exportcorpus's cases.json and zips at the tag, byte for byte;
 #   5. a fresh container build of the tagged commit (js/reproduce.sh in a worktree of the tag), which
 #      compares its bytes with that same js/manifest.json — so published = pinned = rebuilt.
 # GH and RELEASE_REPRODUCE can be overridden; js/release.test.mjs runs this against a stub gh.
@@ -32,7 +33,9 @@ for t in "$TAG" "go/$TAG"; do
   git rev-parse -q --verify "refs/tags/$t" >/dev/null || git fetch -q origin "refs/tags/$t:refs/tags/$t" || fail "tag $t is neither here nor on origin"
 done
 git show "$TAG:js/manifest.json" > "$WORK/pin.json"
-node scripts/verify-assets.mjs "$WORK/assets" "$WORK/pin.json" "$VERSION" "$(git rev-parse "$TAG^{commit}")" "$(git rev-parse "go/$TAG^{commit}")"
+mkdir "$WORK/tagged"
+git archive "$TAG" go/exportcorpus | tar -x -C "$WORK/tagged"
+node scripts/verify-assets.mjs "$WORK/assets" "$WORK/pin.json" "$VERSION" "$(git rev-parse "$TAG^{commit}")" "$(git rev-parse "go/$TAG^{commit}")" "$WORK/tagged/go/exportcorpus"
 
 echo "verify-release: a fresh container build of $TAG"
 git worktree add -q --detach "$WORK/src" "$TAG"

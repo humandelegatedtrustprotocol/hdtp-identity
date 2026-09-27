@@ -197,7 +197,7 @@ test('a release: two commits, two tags on the second, the version everywhere, ex
     assert.match(readFileSync(join(f.work, 'CHANGELOG.md'), 'utf8'), /## Unreleased\n\n## 0\.2\.0 — 2026-09-27\n\n- a change the fixture releases\n/);
     // The assets, and nothing else.
     const dist = join(f.work, 'dist/0.2.0');
-    const assets = ['pact-0.2.0-darwin-arm64', 'pact-0.2.0-linux-amd64', 'pact-0.2.0-linux-arm64', 'pact-identity-wasm-web-0.2.0.tgz'];
+    const assets = ['pact-0.2.0-darwin-arm64', 'pact-0.2.0-linux-amd64', 'pact-0.2.0-linux-arm64', 'pact-identity-exportcorpus-0.2.0.tgz', 'pact-identity-wasm-web-0.2.0.tgz'];
     assert.deepEqual(readdirSync(dist).sort(), ['SHA256SUMS', 'manifest.json', ...assets].sort());
     const sums = readFileSync(join(dist, 'SHA256SUMS'), 'utf8').trim().split('\n');
     assert.deepEqual(sums.map((l) => l.split('  ')[1]), ['manifest.json', ...assets].sort());
@@ -212,6 +212,12 @@ test('a release: two commits, two tags on the second, the version everywhere, ex
     const listing = execFileSync('tar', ['-tzf', join(dist, 'pact-identity-wasm-web-0.2.0.tgz')], { encoding: 'utf8' }).trim().split('\n');
     assert.deepEqual(listing.filter((n) => !n.endsWith('/')).sort(), Object.keys(pin.files).filter((k) => k.startsWith('pkg-web/')).sort());
     assert.ok(listing.every((n) => n.startsWith('pkg-web/')), `the tarball has something outside pkg-web/: ${listing}`);
+    // The corpus: cases.json and every zip, under exportcorpus/, and nothing of the generator.
+    const corpus = execFileSync('tar', ['-tzf', join(dist, 'pact-identity-exportcorpus-0.2.0.tgz')], { encoding: 'utf8' }).trim().split('\n').filter((n) => !n.endsWith('/')).sort();
+    const tracked = readdirSync(join(f.work, 'go/exportcorpus')).filter((n) => n === 'cases.json' || n.endsWith('.zip')).map((n) => `exportcorpus/${n}`).sort();
+    assert.ok(tracked.length > 2, 'the fixture has no corpus to pack');
+    assert.deepEqual(corpus, tracked);
+    assert.ok(!corpus.some((n) => n.endsWith('.go')), `the corpus tarball carries the generator: ${corpus}`);
     assert.match(readFileSync(join(f.work, 'dist/0.2.0-notes.md'), 'utf8'), /^- a change the fixture releases$/m);
     // Nothing left the machine.
     assert.equal(f.gitIn(join(f.root, 'origin.git'), 'for-each-ref'), '', 'the release pushed something');
@@ -256,6 +262,29 @@ test('publish pushes the branch and both tags and gives gh every asset; verify-r
     assert.notEqual(v.status, 0);
     assert.match(v.stderr, /pact-identity-wasm-web-0\.2\.0\.tgz: its sha256 is not the one SHA256SUMS lists/);
     writeFileSync(tgz, good);
+    // A corpus tarball re-packed with one zip changed, its hashes rewritten in SHA256SUMS and the
+    // manifest to match, is caught against the tag's go/exportcorpus.
+    const corpusTgz = join(served, 'pact-identity-exportcorpus-0.2.0.tgz');
+    const goodCorpus = readFileSync(corpusTgz);
+    const sumsBefore = readFileSync(join(served, 'SHA256SUMS'), 'utf8'), manifestBefore = readFileSync(join(served, 'manifest.json'), 'utf8');
+    const unpacked = mkdtempSync(join(tmpdir(), 'pact-corpus-'));
+    execFileSync('tar', ['-xzf', corpusTgz, '-C', unpacked]);
+    appendFileSync(join(unpacked, 'exportcorpus/valid-book.zip'), 'x');
+    execFileSync('tar', ['-czf', corpusTgz, '-C', unpacked, 'exportcorpus']);
+    const forged = readFileSync(corpusTgz);
+    const man = JSON.parse(manifestBefore);
+    man.assets['pact-identity-exportcorpus-0.2.0.tgz'] = { sha256: sha(forged), bytes: forged.length };
+    writeFileSync(join(served, 'manifest.json'), JSON.stringify(man, null, 2) + '\n');
+    writeFileSync(join(served, 'SHA256SUMS'), sumsBefore
+      .replace(/^[0-9a-f]{64}(?= {2}pact-identity-exportcorpus-0\.2\.0\.tgz$)/m, sha(forged))
+      .replace(/^[0-9a-f]{64}(?= {2}manifest\.json$)/m, sha(readFileSync(join(served, 'manifest.json')))));
+    v = verify();
+    assert.notEqual(v.status, 0);
+    assert.match(v.stderr, /pact-identity-exportcorpus-0\.2\.0\.tgz: valid-book\.zip is not the tag's/);
+    writeFileSync(corpusTgz, goodCorpus);
+    writeFileSync(join(served, 'SHA256SUMS'), sumsBefore);
+    writeFileSync(join(served, 'manifest.json'), manifestBefore);
+    rmSync(unpacked, { recursive: true, force: true });
     // A replaced CLI whose SHA256SUMS line was rewritten to match is still caught, by manifest.json.
     const cli = join(served, 'pact-0.2.0-linux-arm64');
     writeFileSync(cli, 'tampered');
