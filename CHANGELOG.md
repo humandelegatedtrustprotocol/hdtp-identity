@@ -10,6 +10,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+## 0.3.0 — 2026-09-27
+
 - `ledger_check` (contract §6.1, section `ledger`): the wallet's ledger rules as facts — the refusal
   of a second home, `new_host`, `known_endpoint`, `previous_not_before`, the live leaf, and the move
   notice's kind (`renew`, `move`, `new_host`, `move_back`, `no_ledger`). `wallet_issue` in both ports
