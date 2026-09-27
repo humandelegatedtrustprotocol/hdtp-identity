@@ -1,14 +1,14 @@
 // The offline half of `make verify-release`: a directory of downloaded release assets, judged
 // against SHA256SUMS, manifest.json, the tags' commits and the pin at the tag.
 //
-//   node scripts/verify-assets.mjs <assets-dir> <pin.json> <version> <vX.Y.Z commit> <go/vX.Y.Z commit>
+//   node scripts/verify-assets.mjs <assets-dir> <pin.json> <version> <vX.Y.Z commit> <go/vX.Y.Z commit> <exportcorpus dir at the tag>
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-const [dir, pinFile, version, tagCommit, goTagCommit] = process.argv.slice(2);
+const [dir, pinFile, version, tagCommit, goTagCommit, corpusDir] = process.argv.slice(2);
 const sha = (b) => createHash('sha256').update(b).digest('hex');
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const problems = [];
@@ -57,6 +57,24 @@ else {
   for (const k of want.filter((x) => got.includes(x))) {
     const b = readFileSync(join(out, k));
     if (sha(b) !== pin.files[k].sha256 || b.length !== pin.files[k].bytes) problems.push(`${tgz}: ${k} is not the pinned bytes`);
+  }
+}
+
+// The export's corpus: exactly cases.json and the zips go/exportcorpus holds at the tag, byte for byte.
+const corpusTgz = `pact-identity-exportcorpus-${version}.tgz`;
+if (!names.includes(corpusTgz)) problems.push(`the release has no ${corpusTgz}`);
+else if (!corpusDir) problems.push('no exportcorpus directory to judge the corpus tarball against');
+else {
+  const out = mkdtempSync(join(tmpdir(), 'pact-verify-corpus-'));
+  execFileSync('tar', ['-xzf', join(dir, corpusTgz), '-C', out]);
+  const want = readdirSync(corpusDir).filter((n) => n === 'cases.json' || n.endsWith('.zip')).sort();
+  const top = readdirSync(out);
+  if (!same(top, ['exportcorpus'])) problems.push(`${corpusTgz}'s top level is ${top.join(', ')}, not exportcorpus/`);
+  let got = [];
+  try { got = readdirSync(join(out, 'exportcorpus')).sort(); } catch { /* reported above */ }
+  if (!same(got, want)) problems.push(`${corpusTgz} holds ${got.join(', ')}; the tag's go/exportcorpus has ${want.join(', ')}`);
+  for (const n of want.filter((x) => got.includes(x))) {
+    if (!readFileSync(join(out, 'exportcorpus', n)).equals(readFileSync(join(corpusDir, n)))) problems.push(`${corpusTgz}: ${n} is not the tag's`);
   }
 }
 
