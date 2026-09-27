@@ -13,6 +13,7 @@ mod csr;
 mod envelopes;
 mod keys;
 mod ledger;
+mod signing;
 mod vault;
 
 /// The version of `pact-protocol/SPEC.md` this core implements.
@@ -226,6 +227,8 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
         "csr_check" => csr::csr_check(a)?,
         "issue_from_csr" => csr::issue_from_csr(a)?,
         "issue_tbs_from_csr" => csr::issue_tbs_from_csr(a)?,
+        // §3.1 signing requests
+        "signing_request_check" => signing::signing_request_check(a)?,
         // §4 cards
         "card_encode" => cards::card_encode(a)?,
         "card_decode" => cards::card_decode(a)?,

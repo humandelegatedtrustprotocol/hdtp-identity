@@ -7,9 +7,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed here that did not pass.
 
-Specification: **2.1.3**. **52** normative sentences, **485** cross-port parity cases over **39** guarded functions.
+Specification: **2.1.3**. **52** normative sentences, **553** cross-port parity cases over **40** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**40** functions, spec 2.1.3): **970** answers held to the shape it declares, **0** did not. Of **79** declared error codes, **65** were produced by a case here; the rest are declared for a caller's benefit and no argument in this suite reaches them.
+Every answer of both ports is validated against `contract/contract.json` (**41** functions, spec 2.1.3): **1106** answers held to the shape it declares, **0** did not. Of **81** declared error codes, **67** were produced by a case here; the rest are declared for a caller's benefit and no argument in this suite reaches them.
 
 ## The 52 normative sentences of the specification
 
@@ -156,7 +156,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 485 cross-port parity cases
+## The 553 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -164,7 +164,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **485** cases, **0** disagreements, **39** of **39** functions compared whole on success.
+At the run that generated this file: **553** cases, **0** disagreements, **40** of **40** functions compared whole on success.
 
 ### `address_guard` — 32 cases · whole on success
 
@@ -644,6 +644,77 @@ At the run that generated this file: **485** cases, **0** disagreements, **39** 
 - sign
 - sign with a P-256 key
 - sign with an Ed25519 PKCS #8 whose algorithm carries a NULL
+
+### `signing_request_check` — 68 cases · whole on success
+
+- signing_request_check: a renewal from a localhost node
+- signing_request_check: a move from an https host, without root_cert
+- signing_request_check: a redirect to 127.0.0.2 over http
+- signing_request_check: a redirect to [::1] over http
+- signing_request_check: a redirect to an https default port written out
+- signing_request_check: a redirect to an http default port written out
+- signing_request_check: a redirect to no path at all
+- signing_request_check: expiring exactly ten minutes ahead
+- signing_request_check: 398 days, and a 200-character recipient
+- signing_request_check: a member a request does not carry
+- signing_request_check: valid_days as a number
+- signing_request_check: a csr over its bound
+- signing_request_check: a redirect over its bound
+- signing_request_check: a recipient of 201 characters
+- signing_request_check: an empty recipient
+- signing_request_check: no origin
+- signing_request_check: an origin of null
+- signing_request_check: an origin that is not the redirect's
+- signing_request_check: an origin written with its default port
+- signing_request_check: a redirect over http to a public host
+- signing_request_check: a redirect over http to a private address
+- signing_request_check: a redirect over http to 127.1
+- signing_request_check: a redirect over http to 127.000.0.1
+- signing_request_check: a redirect over http to [::2]
+- signing_request_check: a redirect over http to a name under localhost
+- signing_request_check: a javascript: redirect
+- signing_request_check: a relative redirect
+- signing_request_check: a redirect with a fragment
+- signing_request_check: a redirect with userinfo
+- signing_request_check: a redirect with a space
+- signing_request_check: a redirect with a backslash
+- signing_request_check: a redirect whose host is upper case
+- signing_request_check: a redirect with port 0
+- signing_request_check: a redirect with a port with a leading zero
+- signing_request_check: a redirect with port 65536
+- signing_request_check: an expired request
+- signing_request_check: a request expiring now
+- signing_request_check: a request expiring more than ten minutes ahead
+- signing_request_check: an expiry with an offset
+- signing_request_check: an expiry that does not read
+- signing_request_check: a signup
+- signing_request_check: valid_days of 0
+- signing_request_check: valid_days of 399
+- signing_request_check: valid_days with a leading zero
+- signing_request_check: valid_days of -1
+- signing_request_check: a state of 31 bytes
+- signing_request_check: a state outside base64url
+- signing_request_check: an expect_root that is no fingerprint
+- signing_request_check: a root_cert outside base64url
+- signing_request_check: a root_cert that is no certificate
+- signing_request_check: a root_cert that is a leaf
+- signing_request_check: another identity's root_cert
+- signing_request_check: a csr outside base64url
+- signing_request_check: a csr carrying the root's own key
+- signing_request_check: no csr
+- signing_request_check: no purpose
+- signing_request_check: no expect_root
+- signing_request_check: no redirect
+- signing_request_check: no state
+- signing_request_check: no valid_days
+- signing_request_check: no expires
+- signing_request_check: a csr that is not a request
+- signing_request_check with no request
+- signing_request_check with a request that is a string
+- signing_request_check with no origin
+- signing_request_check with no now
+- signing_request_check with root_spkis that do not read
+- signing_request_check with nothing to work from
 
 ### `suite_for` — 5 cases · whole on success
 

@@ -15,6 +15,12 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   notice's kind (`renew`, `move`, `new_host`, `move_back`, `no_ledger`). `wallet_issue` in both ports
   applies it, and so does the `pact` CLI's `id issue` for a card-held root; the CLI's own copy of the
   one-live-leaf rule is gone. `id issue` prints the move notice before it signs a move.
+- `signing_request_check` (contract §3.1, section `signing`) and `$defs.SigningRequest`: a web
+  wallet's checks of a host's signing request before a person sees it — the members and their
+  bounds, the asking origin against the redirect's, the redirect (https, or http to `localhost`,
+  `127.0.0.0/8` or `[::1]`; no userinfo, no fragment), the ten-minute expiry window, `renew` or
+  `move`, `valid_days` 1–398, the `state` and `expect_root` shapes, `root_cert` against `expect_root`,
+  and the CSR through `csr_check`.
 
 ## 0.2.0 — 2026-09-27
 
