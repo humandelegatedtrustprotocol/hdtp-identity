@@ -11,8 +11,10 @@ use std::path::Path;
 /// messages and files included, though only its contacts are kept.
 pub const IMPORT_CEILING: u64 = 1 << 30;
 
-/// §9.2's notice, before any surface writes an export or a book.
-pub const UNENCRYPTED: &str = "This file is not encrypted. Anyone who gets it can read your contact list and all your conversations and files. It holds no keys, so it cannot be used to speak as you. Keep it where you keep private documents, and delete it once it has been imported.";
+/// §9.2's notice, before the book is written, in the words of the cloud's book page. A book holds
+/// contacts only, so it says the contact list and not the conversations and files a full export
+/// carries; this CLI writes no full export.
+pub const BOOK_NOTICE: &str = "This file is not encrypted. Anyone who gets it can read your contact list. It holds no keys, so it cannot be used to speak as you. Keep it where you keep private documents, and delete it once it has been imported.";
 
 /// And back: a row as the book keeps a contact. The row's leaf is there only when it validated.
 fn contact_of(r: &Value) -> Value {
@@ -42,7 +44,7 @@ pub fn contacts_export(vault: &str, out: &str) -> Res<i32> {
     let book = r.plaintext["contacts"].as_array().cloned().unwrap_or_default();
     let rows: Vec<Value> =
         core("book_rows", json!({ "contacts": book, "exported_at": now }))?["rows"].as_array().cloned().unwrap_or_default();
-    eprintln!("{UNENCRYPTED}");
+    eprintln!("{BOOK_NOTICE}");
     write_book(Path::new(out), root["fingerprint"].as_str().unwrap_or(""), root["cn"].as_str().unwrap_or(""), &now, &rows).map_err(Fail)?;
     eprintln!("wrote {out}: {} contact{}", rows.len(), if rows.len() == 1 { "" } else { "s" });
     Ok(0)

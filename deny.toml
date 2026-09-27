@@ -1,5 +1,6 @@
-# The licences this repository's Rust dependencies may carry, held by `cargo deny check licenses` in
-# gate.sh (so at every push). The list is what the dependency graph measured on 2026-09-27 with the
+# The licences this repository's Rust dependencies may carry, and where they may come from, held by
+# `cargo deny check licenses sources` in gate.sh (so at every push), with the cargo-deny version the
+# gate pins. The list is what the dependency graph measured on 2026-09-27 with the
 # `zip` crate added to the pact CLI (SPEC §9.2's container), every one of them permissive; a
 # dependency under any other licence fails the gate until a person has read it and added it here.
 [graph]
@@ -20,3 +21,10 @@ allow = [
     "Zlib",
 ]
 confidence-threshold = 0.93
+
+# Every crate from crates.io and nowhere else: no git dependency, no other registry.
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

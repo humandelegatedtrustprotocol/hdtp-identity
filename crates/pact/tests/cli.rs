@@ -331,10 +331,31 @@ fn a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates() {
     // The contact book: export it as a book (SPEC §9.2), and import books with one more contact, one
     // changed, and ones a host must refuse.
     let out = d.join("alina-book.zip");
-    as_pact().args(["contacts", "export", "--vault"]).arg(&vault).arg("--out").arg(&out).assert().success().stderr(
-        predicate::str::contains("This file is not encrypted. Anyone who gets it can read your contact list")
-            .and(predicate::str::contains("0 contacts")),
+    // A book's notice says what a book holds, the contact list, and nothing it does not: no
+    // conversations, no files.
+    let notice = "This file is not encrypted. Anyone who gets it can read your contact list. It holds no keys, so it cannot be used to speak as you. Keep it where you keep private documents, and delete it once it has been imported.";
+    let said = as_pact().args(["contacts", "export", "--vault"]).arg(&vault).arg("--out").arg(&out).assert().success().stderr(
+        predicate::str::contains(notice).and(predicate::str::contains("0 contacts")).and(predicate::str::contains("conversations").not()),
     );
+    // The notice comes BEFORE the file is written (SPEC 9.2#3): ahead of the line that says it was
+    // written, and said when the write itself then fails. A dangling link passes every check made
+    // before the vault is opened (no file there, its directory there) and refuses the create.
+    let said = String::from_utf8_lossy(&said.get_output().stderr).into_owned();
+    assert!(said.find(notice) < said.find("wrote "), "the notice is printed before the file is written: {said}");
+    #[cfg(unix)]
+    {
+        let (link, target) = (d.join("dangling-book.zip"), d.join("nowhere-book.zip"));
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        as_pact()
+            .args(["contacts", "export", "--vault"])
+            .arg(&vault)
+            .arg("--out")
+            .arg(&link)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(notice));
+        assert!(!target.exists(), "the write failed, and the notice was already given");
+    }
     assert_eq!(zip_members(&out), ["contacts.csv", "manifest.json"], "a book is the manifest and contacts.csv only");
     as_pact()
         .args(["contacts", "export", "--vault"])

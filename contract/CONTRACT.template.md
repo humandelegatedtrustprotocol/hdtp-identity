@@ -318,20 +318,34 @@ the host can do, and the words both hosts of this repository use for it (the Go 
 - refuse a member that is not UTF-8 text (`<member>: not UTF-8 text`, or `messages.jsonl: line <n>:
   not UTF-8 text`) and one that does not decompress (`<member>: does not decompress`);
 - hash `messages.jsonl` as it streams it, and each media file against its own name (`media/<h>: its
-  sha256 is not its name`).
+  sha256 is not its name`): the manifest lists the text members only, and a media member is bound
+  by its name and counted by `counts.media` (SPEC 2.2.2);
+- refuse a media file whose bytes are a private key — PKCS #8 or SEC1 in DER, or text holding one
+  (`media/<h>: holds a private key`);
+- hand `export_read_end` the media `export_read` answered, so a media file no message names is
+  refused.
 
 **Writing.** `export_write` answers the canonical `contacts.csv` and `threads.csv` and a partial
 manifest; `export_write_messages` answers the lines; `export_manifest` finishes the manifest with
 the host's count and hash of `messages.jsonl`. The bytes are the same from every port: a Go host and
 a Rust host that write the same rows write the same file. A media file is stored, not recompressed.
+What a contact controls never stops the export (SPEC 9.2#22–25): `export_write_messages` leaves out
+a message whose body is a private key and answers it in `left_out`, and a host that writes in
+batches names the file's msg_ids in `msg_ids`, so a reply to a message not carried is written null.
+The core never sees a media file's bytes, so the host checks each before it writes: a message whose
+file is a private key is left out with the file and listed with the rest, for the host to report to
+the person.
 `book_rows` is the one mapping from the wallet's own book (`VaultContact`, §6) to those rows, which
 every wallet uses before `export_write` writes a book.
 
 The Go port also offers two conveniences over these functions, which are not contract functions and
 which its own tests run against the whole corpus: `ReadExportZip` (the reading above, with
-`archive/zip`) and `WriteExportZip`. The fixture corpus is `go/exportcorpus/`: a valid export, a
-valid book, and one hostile file per check, each naming the refusal it must produce
-(`go/exportcorpus/cases.json`); both ports' tests and `js/parity.mjs` read all of it.
+`archive/zip`) and `WriteExportZip`, which runs the reader's rules on what it is handed before it
+writes the first byte. The fixture corpus is `go/exportcorpus/`: two valid exports (one whose local
+headers disagree with its central directory), a valid book, and hostile files, each naming the
+refusal it must produce (`go/exportcorpus/cases.json`); both ports' tests and `js/parity.mjs` read
+all of it. Read-side parity cases on the core's functions (`js/cases/export-reader.mjs`) reach
+rules that no file does.
 
 {{table:export}}
 

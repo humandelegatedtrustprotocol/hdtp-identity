@@ -51,7 +51,9 @@ fn valid(y: i64, mo: i64, d: i64, h: i64, mi: i64, s: i64) -> bool {
     }
 }
 
-/// `YYYY-MM-DDTHH:MM:SS[.fff]Z`; fractions are dropped (the boundary is second precision).
+/// `YYYY-MM-DDTHH:MM:SS[.fff]Z`, the one grammar of every instant both ports read (SPEC 2.2.2):
+/// upper-case T and Z only, no offset, `.` alone before a fraction, which is dropped (the boundary
+/// is second precision).
 pub fn parse_rfc3339(s: &str) -> Result<i64> {
     let b = s.as_bytes();
     let num = |from: usize, to: usize| -> Result<i64> {
@@ -60,7 +62,7 @@ pub fn parse_rfc3339(s: &str) -> Result<i64> {
         }
         Ok(s[from..to].parse().unwrap_or(0))
     };
-    if b.len() < 20 || b[4] != b'-' || b[7] != b'-' || (b[10] != b'T' && b[10] != b't') || b[13] != b':' || b[16] != b':' {
+    if b.len() < 20 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T' || b[13] != b':' || b[16] != b':' {
         return err("parse", format!("not an RFC 3339 instant: {s}"));
     }
     let (y, mo, d, h, mi, sec) = (num(0, 4)?, num(5, 7)?, num(8, 10)?, num(11, 13)?, num(14, 16)?, num(17, 19)?);
@@ -75,7 +77,7 @@ pub fn parse_rfc3339(s: &str) -> Result<i64> {
             return err("parse", format!("not an RFC 3339 instant: {s}"));
         }
     }
-    if i + 1 != b.len() || (b[i] != b'Z' && b[i] != b'z') || !valid(y, mo, d, h, mi, sec) {
+    if i + 1 != b.len() || b[i] != b'Z' || !valid(y, mo, d, h, mi, sec) {
         return err("parse", format!("not an RFC 3339 instant: {s}"));
     }
     Ok(from_civil(y, mo, d, h, mi, sec))
@@ -145,5 +147,32 @@ mod tests {
         assert_eq!(der_time(t), crate::der::tlv(0x17, b"260913120000Z"));
         assert_eq!(read_der_time(0x17, b"260913120000Z").unwrap(), t);
         assert!(parse_rfc3339("2026-02-30T00:00:00Z").is_err());
+    }
+
+    /// One grammar for every instant both ports read (SPEC 2.2.2): `YYYY-MM-DDTHH:MM:SS`, an optional
+    /// `.` and digits (dropped), and `Z`. Upper-case T and Z only, no offset, no `,` before a fraction.
+    /// The Go port's parseInstantZ is held to the same list (go/instant_test.go).
+    #[test]
+    fn instants_have_one_grammar() {
+        for good in ["2026-09-13T12:00:00Z", "2026-09-13T12:00:00.5Z", "2026-09-13T12:00:00.123456789Z", "2024-02-29T23:59:59Z"] {
+            assert!(parse_rfc3339(good).is_ok(), "{good}");
+        }
+        assert_eq!(parse_rfc3339("2026-09-13T12:00:00.999Z").unwrap(), parse_rfc3339("2026-09-13T12:00:00Z").unwrap());
+        for bad in [
+            "2026-09-13T12:00:00z",
+            "2026-09-13t12:00:00Z",
+            "2026-09-13 12:00:00Z",
+            "2026-09-13T12:00:00,5Z",
+            "2026-09-13T12:00:00.Z",
+            "2026-09-13T12:00:00+00:00",
+            "2026-09-13T12:00:00-01:00",
+            "2026-09-13T12:00:00",
+            "2026-09-13T24:00:00Z",
+            "2026-09-13T12:00:60Z",
+            "2025-02-29T00:00:00Z",
+            "26-09-13T12:00:00Z",
+        ] {
+            assert!(parse_rfc3339(bad).is_err(), "{bad}");
+        }
     }
 }

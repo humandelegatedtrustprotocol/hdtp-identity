@@ -77,6 +77,15 @@ export default function signing({ add, expect }, f) {
     ['a request expiring more than ten minutes ahead', ask({ expires: at(601) }), 'the request expires more than ten minutes ahead'],
     ['an expiry with an offset', ask({ expires: '2026-09-15T14:05:00+02:00' }), 'expires is not an RFC 3339 instant'],
     ['an expiry that does not read', ask({ expires: 'soon' }), 'expires is not an RFC 3339 instant'],
+    // One grammar for every instant (SPEC 2.2.2): upper-case T and Z, no offset, `.` alone before a fraction.
+    ['an expiry with a lower-case z', ask({ expires: at(300).replace(/Z$/, 'z') }), 'expires is not an RFC 3339 instant'],
+    ['an expiry with a comma before its fraction', ask({ expires: at(300).replace(/Z$/, ',5Z') }), 'expires is not an RFC 3339 instant'],
+    ['an expiry with a lower-case t', ask({ expires: at(300).replace('T', 't') }), 'expires is not an RFC 3339 instant'],
+    // The redirect's host in lower-case normal form (CONTRACT §3.1): no upper-case IPv6 hex, no empty label.
+    ['a redirect to upper-case IPv6 hex', ask({ redirect: 'https://[2001:DB8::1]/r' }, { origin: 'https://[2001:DB8::1]' }), 'the redirect\'s host is not in normal form'],
+    ['a redirect whose host has an empty label', ask({ redirect: 'https://node..alina.example/r' }, { origin: 'https://node..alina.example' }), 'the redirect\'s host is not in normal form'],
+    ['a redirect whose host begins with a dot', ask({ redirect: 'https://.alina.example/r' }, { origin: 'https://.alina.example' }), 'the redirect\'s host is not in normal form'],
+    ['a redirect whose host ends with a dot', ask({ redirect: 'https://alina.example./r' }, { origin: 'https://alina.example.' }), 'the redirect\'s host is not in normal form'],
     ['a signup', ask({ purpose: 'signup' }), 'purpose is renew or move'],
     ['valid_days of 0', ask({ valid_days: '0' }), 'valid_days is a whole number of days from 1 to 398'],
     ['valid_days of 399', ask({ valid_days: '399' }), 'valid_days is a whole number of days from 1 to 398'],
