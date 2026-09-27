@@ -3,7 +3,7 @@
   "$id": "urn:pact:identity:contract",
   "title": "pact-identity: the library boundary",
   "description": "Every function a port of pact-identity presents, as `call(name, args) -> answer`: what it takes, what it answers, and which error codes it can fail with. This file is the source; CONTRACT.md is rendered from it and js/parity.mjs holds both ports to it.",
-  "spec": "2.2.0",
+  "spec": "2.2.2",
   "sections": {
     "build": "The build",
     "keys": "Keys",
@@ -51,8 +51,8 @@
     },
     "InstantIn": {
       "type": "string",
-      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?[Zz]$",
-      "description": "An RFC 3339 UTC instant as an argument: a fraction of a second is allowed and DROPPED, because the boundary is whole seconds."
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$",
+      "description": "An RFC 3339 UTC instant as an argument, in the one grammar every port reads (SPEC 2.2.2): upper-case T and Z, no offset, `.` alone before a fraction of a second, which is allowed and DROPPED, because the boundary is whole seconds."
     },
     "Pkcs8": { "$ref": "#/$defs/B64url", "description": "A private key: PKCS #8 DER." },
     "Spki": { "$ref": "#/$defs/B64url", "description": "A public key: SubjectPublicKeyInfo DER." },
@@ -451,7 +451,12 @@
           "required": ["contacts", "threads", "messages", "media"],
           "additionalProperties": false
         },
-        "files": { "type": "object", "additionalProperties": { "$ref": "#/$defs/Sha256Hex" }, "description": "contacts.csv, threads.csv, messages.jsonl and each media/<sha256>, to the sha256 of their bytes." }
+        "files": {
+          "type": "object",
+          "properties": { "contacts.csv": { "$ref": "#/$defs/Sha256Hex" }, "threads.csv": { "$ref": "#/$defs/Sha256Hex" }, "messages.jsonl": { "$ref": "#/$defs/Sha256Hex" } },
+          "additionalProperties": false,
+          "description": "The text members to the sha256 of their bytes. Never a media member: each is bound by its name, the sha256 of its bytes, and counted by counts.media (SPEC 2.2.2)."
+        }
       },
       "required": ["pact_export", "owner", "owner_name", "exported_at", "tool", "counts", "files"],
       "additionalProperties": false
@@ -1551,7 +1556,7 @@
         ]
       },
       "errors": ["bad_request", "parse"],
-      "notes": "What a web wallet decides about a host's signing request before a person sees it. The arguments first: `request` absent or not an object, `origin` absent or not a string, `now` absent (each `<name> is required`), `now` unreadable (`parse`), `root_spkis` unreadable — these are errors. Everything about the request itself is `{ok: false, why}`, the first thing wrong, in this order: a member a request does not carry (the first in sorted order: `a signing request does not carry <m>`); a member that is not a string (`<m> is a string, as a form carries it`) or over its bound (`<m> is longer than <n>`), in the order of SigningRequest's members; a required member absent or empty (`<m> is required`); an `origin` empty or `null` (`the request has no origin: a wallet answers only the origin that asked`); the redirect — not ASCII without spaces or backslashes (`the redirect is not an absolute URL`), a fragment (`the redirect carries a fragment`), not `https://` or `http://` (`the redirect is not https, or http to a loopback host`), userinfo (`the redirect carries userinfo`), a host not in lower-case normal form (`the redirect's host is not in normal form`), a port that is not 1–65535 without a leading zero (`the redirect's port is not in normal form`), `http` to a host that is not `localhost`, a dotted quad in `127.0.0.0/8` in normal form, or `[::1]` (`the redirect is not https, or http to a loopback host`); the redirect's origin (`scheme://host[:port]`, the default port left out) not equal to `origin` (`the redirect's origin is not the origin that asked`); `expires` not an RFC 3339 UTC instant (`expires is not an RFC 3339 instant`), not after `now` (`the request has expired`), or more than 600 seconds after it (`the request expires more than ten minutes ahead`); `purpose` not `renew` or `move` (`purpose is renew or move`; `signup` is not taken from a host); `valid_days` not a whole number 1–398 without a leading zero (`valid_days is a whole number of days from 1 to 398`); `state` not 43 base64url characters of 32 bytes (`state is 32 bytes, base64url`); `expect_root` not `sha256:` and 43 base64url characters (`expect_root is not a root fingerprint`); `root_cert`, when present, not base64url, not a certificate, not a root of §14.1's profile, or not the root `expect_root` names; `csr` not base64url (`csr is not base64url`); then `csr_check` with `root_spkis`, whose refusal is answered in its words. What stays the wallet's: proving the root against `expect_root` (§2.2), showing the asking origin, the `recipient` as the host's claim, the endpoint, the validity and whether the host is new, and the validity the person chooses. Nothing of the request is kept."
+      "notes": "What a web wallet decides about a host's signing request before a person sees it. The arguments first: `request` absent or not an object, `origin` absent or not a string, `now` absent (each `<name> is required`), `now` unreadable (`parse`), `root_spkis` unreadable — these are errors. Everything about the request itself is `{ok: false, why}`, the first thing wrong, in this order: a member a request does not carry (the first in sorted order: `a signing request does not carry <m>`); a member that is not a string (`<m> is a string, as a form carries it`) or over its bound (`<m> is longer than <n>`), in the order of SigningRequest's members; a required member absent or empty (`<m> is required`); an `origin` empty or `null` (`the request has no origin: a wallet answers only the origin that asked`); the redirect — not ASCII without spaces or backslashes (`the redirect is not an absolute URL`), a fragment (`the redirect carries a fragment`), not `https://` or `http://` (`the redirect is not https, or http to a loopback host`), userinfo (`the redirect carries userinfo`), a host not in lower-case normal form — IPv6 hex in lower case, a name of labels none of which is empty (`the redirect's host is not in normal form`), a port that is not 1–65535 without a leading zero (`the redirect's port is not in normal form`), `http` to a host that is not `localhost`, a dotted quad in `127.0.0.0/8` in normal form, or `[::1]` (`the redirect is not https, or http to a loopback host`); the redirect's origin (`scheme://host[:port]`, the default port left out) not equal to `origin` (`the redirect's origin is not the origin that asked`); `expires` not an RFC 3339 UTC instant in the one grammar — upper-case `T` and `Z`, `.` alone before a fraction (`expires is not an RFC 3339 instant`), not after `now` (`the request has expired`), or more than 600 seconds after it (`the request expires more than ten minutes ahead`); `purpose` not `renew` or `move` (`purpose is renew or move`; `signup` is not taken from a host); `valid_days` not a whole number 1–398 without a leading zero (`valid_days is a whole number of days from 1 to 398`); `state` not 43 base64url characters of 32 bytes (`state is 32 bytes, base64url`); `expect_root` not `sha256:` and 43 base64url characters (`expect_root is not a root fingerprint`); `root_cert`, when present, not base64url, not a certificate, not a root of §14.1's profile, or not the root `expect_root` names; `csr` not base64url (`csr is not base64url`); then `csr_check` with `root_spkis`, whose refusal is answered in its words. What stays the wallet's: proving the root against `expect_root` (§2.2), showing the asking origin, the `recipient` as the host's claim, the endpoint, the validity and whether the host is new, and the validity the person chooses. Nothing of the request is kept."
     },
     "export_read": {
       "section": "export",
@@ -1579,7 +1584,7 @@
         "additionalProperties": false
       },
       "errors": ["bad_request", "parse"],
-      "notes": "SPEC §9.2's validation of everything but the messages and the media bytes, refusing the whole file at the first fault; every refusal of the file is `bad_request` whose `why` names the member, then the row (the header is row 1) and the column. In order: each directory entry, in the order given (a name that is not exactly `manifest.json`, `contacts.csv`, `threads.csv`, `messages.jsonl`, `media/` or `media/` and 64 lowercase hex: `entry \"<name>\": not a name an export holds`; `appears twice`; `encrypted`; a symbolic link; a directory but `media/`; a stated size over its bound); `manifest.json` and `contacts.csv` present; the manifest (exactly its members, `pact_export` 2, `owner` a fingerprint and the importing identity's, the counts whole numbers, `files` naming only members an export lists, each a lowercase hex sha256, a media member's hash its own name); every member but the manifest and `media/` listed in `files`, and every listed member present; `threads.csv`, `messages.jsonl` and `media/` present when counted; the media entries as many as counted; `contacts.csv` (its sha256, its header exactly, at most 5000 rows, each row's cells — a cell that holds a private key is refused before its column's rule — the root a fingerprint, unique, not the owner; the endpoint in normal form and passing the address guard; names at most 200 characters; the status; `true` or `false`; §8's permissions, single-spaced, none twice; the leaf a leaf and the root certificate a root of §14.1's profile, the latter for the row's root; `added` an instant) and its count; then `threads.csv` the same way (ids unique, the contact a root in `contacts.csv`). One leading `'` is stripped from every cell. A row's `leaf` is answered only when `[leaf, root_cert]` validates at the row's endpoint at `now` (§14.2); otherwise it is null and pins nothing. `media` is each media member's hash and stated size, sorted by hash: the host checks each file's bytes against both as it streams it."
+      "notes": "SPEC §9.2's validation of everything but the messages and the media bytes, refusing the whole file at the first fault; every refusal of the file is `bad_request` whose `why` names the member, then the row (the header is row 1) and the column. In order: each directory entry, in the order given (a name that is not exactly `manifest.json`, `contacts.csv`, `threads.csv`, `messages.jsonl`, `media/` or `media/` and 64 lowercase hex: `entry \"<name>\": not a name an export holds`; `appears twice`; `encrypted`; a symbolic link; a directory but `media/`; a stated size over its bound); `manifest.json` and `contacts.csv` present; the manifest (exactly its members, `pact_export` 2, `owner` a fingerprint and the importing identity's, the counts whole numbers, `owner_name` and `tool` holding no private key, `files` naming only the text members — `contacts.csv`, `threads.csv`, `messages.jsonl` — each a lowercase hex sha256, never a media member, which is bound by its name and counted (SPEC 2.2.2)); every text member but the manifest listed in `files`, and every listed member present; `threads.csv`, `messages.jsonl` and `media/` present when counted; the media entries as many as counted; `contacts.csv` (its sha256, its header exactly, at most 5000 rows, each row's cells — a cell that holds a private key is refused before its column's rule — the root a fingerprint, unique, not the owner; the endpoint in normal form and passing the address guard; names at most 200 characters; the status; `true` or `false`; §8's permissions, single-spaced, none twice; the leaf a leaf and the root certificate a root of §14.1's profile, the latter for the row's root; `added` an instant) and its count; then `threads.csv` the same way (ids unique, the contact a root in `contacts.csv`). One leading `'` is stripped from every cell. A row's `leaf` is answered only when `[leaf, root_cert]` validates at the row's endpoint at `now` (§14.2); otherwise it is null and pins nothing. `media` is each media member's hash and stated size, sorted by hash: the host checks each file's bytes against both as it streams it."
     },
     "export_read_messages": {
       "section": "export",
@@ -1618,14 +1623,15 @@
           "ids": { "type": "array", "items": { "type": "string" } },
           "msg_ids": { "type": "array", "items": { "type": "string" } },
           "reply_tos": { "type": "array", "items": { "type": "string" }, "description": "Every non-null reply_to." },
-          "media_seen": { "type": "array", "items": { "$ref": "#/$defs/Sha256Hex" } }
+          "media_seen": { "type": "array", "items": { "$ref": "#/$defs/Sha256Hex" } },
+          "media": { "type": "array", "items": { "$ref": "#/$defs/Sha256Hex" }, "description": "The file's media members, by hash: export_read's `media`. Each must be named by a message." }
         },
-        "required": ["manifest", "lines", "ids", "msg_ids", "reply_tos", "media_seen"],
+        "required": ["manifest", "lines", "ids", "msg_ids", "reply_tos", "media_seen", "media"],
         "additionalProperties": false
       },
       "result": { "type": "object", "properties": { "ok": { "const": true } }, "required": ["ok"], "additionalProperties": false },
       "errors": ["bad_request"],
-      "notes": "SPEC §9.2's rules across the whole of messages.jsonl, once it is streamed: the line count against `counts.messages`, the member's sha256 against `files`, `id` unique in the file, every `reply_to` naming a `msg_id` in the file, and every media member named by some attachment (`media/<h>: nothing names it`)."
+      "notes": "SPEC §9.2's rules across the whole of messages.jsonl, once it is streamed: the line count against `counts.messages`, the member's sha256 against `files`, `id` unique in the file, every `reply_to` naming a `msg_id` in the file, and every media member (`media`, the hashes export_read answered) named by some attachment (`media/<h>: nothing names it`)."
     },
     "export_write": {
       "section": "export",
@@ -1654,14 +1660,34 @@
         "additionalProperties": false
       },
       "errors": ["bad_request", "parse"],
-      "notes": "The canonical members, the same bytes from every port: each row checked by the reader's rules (`contacts[<i>], column <c>: <why>`), contacts sorted by root and threads by id, a permission list sorted, instants written as RFC 3339 UTC seconds, every cell that begins with `=` `+` `-` `@` `'` a tab or a carriage return written with one `'` before it, a cell quoted exactly when it holds `,` `\"` CR or LF, CRLF after every record. A book is this with no threads and no media."
+      "notes": "The canonical members, the same bytes from every port: each row checked by the reader's rules (`contacts[<i>], column <c>: <why>`), contacts sorted by root and threads by id, a permission list sorted, instants written as RFC 3339 UTC seconds, every cell that begins with `=` `+` `-` `@` `'` a tab or a carriage return written with one `'` before it, a cell quoted exactly when it holds `,` `\"` CR or LF, CRLF after every record. What a contact controls never stops the export (SPEC \u00a79.2): `their_permissions` keeps only the names of \u00a78, once each, and `display_name` is cut to 200 characters, on a character; the reader refuses both as written by anyone else. `owner_name` or `tool` holding a private key is refused, naming the member (`owner_name holds a private key`). The manifest's `files` lists the text members only; the media are counted. A book is this with no threads and no media."
     },
     "export_write_messages": {
       "section": "export",
-      "params": { "type": "object", "properties": { "messages": { "type": "array", "items": { "$ref": "#/$defs/MessageRow" } } }, "required": ["messages"], "additionalProperties": false },
-      "result": { "type": "object", "properties": { "lines": { "type": "array", "items": { "type": "string" } } }, "required": ["lines"], "additionalProperties": false },
+      "params": {
+        "type": "object",
+        "properties": {
+          "messages": { "type": "array", "items": { "$ref": "#/$defs/MessageRow" } },
+          "msg_ids": { "type": "array", "items": { "type": "string" }, "description": "The msg_id of every message the file carries, when the host writes it in batches. Absent: the messages of this call, less those left out." }
+        },
+        "required": ["messages"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "lines": { "type": "array", "items": { "type": "string" } },
+          "left_out": {
+            "type": "array",
+            "items": { "type": "object", "properties": { "id": { "type": "string" }, "reason": { "type": "string" } }, "required": ["id", "reason"], "additionalProperties": false },
+            "description": "Every message left out, by its id and the reason, for the host to report to the person (SPEC \u00a79.2)."
+          }
+        },
+        "required": ["lines", "left_out"],
+        "additionalProperties": false
+      },
       "errors": ["bad_request"],
-      "notes": "One line per message, in the order given, as RFC 8785 JSON; each message held to the reader's rules but its references, which the host holds (`messages[<i>], member <m>: <why>`). The host writes each line followed by `\\n`, hashes the member's bytes and counts its lines for export_manifest."
+      "notes": "One line per message, in the order given, as RFC 8785 JSON; each message held to the reader's rules but its references, which the host holds (`messages[<i>], member <m>: <why>`). What a contact controls never stops the export (SPEC \u00a79.2): a message whose `body` holds what reads as a private key is left out, not refused, and listed in `left_out` (`its body holds what reads as a private key, which an export never carries`) \u2014 the host leaves out the file it carried too; and a `reply_to` naming a message the file does not carry (not among `msg_ids`, or, without them, not among the messages written) is written `null`. Key material in any other member is refused. The host writes each line followed by `\\n`, hashes the member's bytes and counts its lines for export_manifest."
     },
     "export_manifest": {
       "section": "export",
@@ -1695,13 +1721,13 @@
         "properties": {
           "write": { "type": "array", "items": { "$ref": "#/$defs/ContactRow" } },
           "keep": { "type": "array", "items": { "$ref": "#/$defs/Fingerprint" } },
-          "conflicts": { "type": "array", "items": { "type": "object", "properties": { "root": { "$ref": "#/$defs/Fingerprint" }, "field": { "enum": ["endpoint", "leaf", "root_cert"] }, "held": true, "row": true }, "required": ["root", "field", "held", "row"], "additionalProperties": false } }
+          "conflicts": { "type": "array", "items": { "type": "object", "properties": { "root": { "$ref": "#/$defs/Fingerprint" }, "field": { "enum": ["endpoint", "leaf", "root_cert", "status", "permissions"] }, "held": true, "row": true }, "required": ["root", "field", "held", "row"], "additionalProperties": false } }
         },
         "required": ["write", "keep", "conflicts"],
         "additionalProperties": false
       },
       "errors": ["bad_request"],
-      "notes": "SPEC §9.2's import step 2: an imported leaf never replaces a pin the host validated itself (§14.5). A row whose root is not held is written; a row whose root is held WITHOUT a leaf is written when the row carries one (export_read kept it only because it validated); every other held root is kept as held, and each of its endpoint, leaf and root certificate that the row would change is a conflict, for the host to show."
+      "notes": "SPEC §9.2's import step 2: an imported leaf never replaces a pin the host validated itself (§14.5). A row whose root is not held is written; a row whose root is held WITHOUT a leaf is written when the row carries one (export_read kept it only because it validated); and what the person decided about that contact stays as held: a blocked contact stays blocked, and its `permissions` stay the ones granted. Every other held root is kept as held. Each of the endpoint, leaf and root certificate a row would change, and each of the `status` and `permissions` (a list compared as a set), is a conflict for the host to show."
     },
     "book_rows": {
       "section": "export",

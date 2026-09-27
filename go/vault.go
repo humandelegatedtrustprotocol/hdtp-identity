@@ -372,37 +372,6 @@ type VaultContact struct {
 	Added    string `json:"added,omitempty"`
 }
 
-// ContactRowOf is a contact of the wallet's book as a row of contacts.csv (SPEC §9.2), through the
-// contract's book_rows: the one mapping every wallet uses, the pact CLI's contacts export included.
-func ContactRowOf(c VaultContact, exportedAt time.Time) (ContactRow, error) {
-	var in []any
-	if err := convert([]VaultContact{c}, &in); err != nil {
-		return ContactRow{}, err
-	}
-	rows, err := bookRows(in, exportedAt)
-	if err != nil {
-		return ContactRow{}, err
-	}
-	var out []ContactRow
-	if err := convert(rows, &out); err != nil {
-		return ContactRow{}, err
-	}
-	return out[0], nil
-}
-
-// VaultContactOf is a row of an export as the wallet's book keeps it: its leaf only when export_read
-// kept it, which is only when it validated (contact_of in the pact CLI).
-func VaultContactOf(r ContactRow) VaultContact {
-	c := VaultContact{Root: r.Root, Endpoint: r.Endpoint, Name: r.Name, Added: r.Added}
-	if r.Leaf != nil {
-		c.Leaf = *r.Leaf
-	}
-	if r.RootCert != nil {
-		c.RootCert = *r.RootCert
-	}
-	return c
-}
-
 // VaultPasskey names the credential a derived root belongs to (SPEC §2.1); not secret.
 type VaultPasskey struct {
 	CredentialID string `json:"credential_id"`

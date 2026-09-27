@@ -26,6 +26,14 @@ export default function ledger({ add, expect }, f) {
   add('ledger_check: back to an endpoint issued to before, not chosen', 'ledger_check', ask(moved));
   add('ledger_check: back to an endpoint issued to before, chosen', 'ledger_check', ask(moved, { move: true }));
   add('ledger_check: an empty ledger', 'ledger_check', ask([]));
+  // One grammar for every instant (SPEC 2.2.2): an entry's instant with an offset does not read, and
+  // neither does a `now` with one. One port read both.
+  add('ledger_check: an entry whose not_before has an offset', 'ledger_check', ask([{ ...here[0], not_before: here[0].not_before.replace(/Z$/, '+00:00') }]));
+  expect('ledger_check: an entry whose not_before has an offset', { error: 'bad_request', why: "the record's ledger entry 0 does not read: not_before" });
+  add('ledger_check: a now with an offset', 'ledger_check', ask(here, { now: now.replace(/Z$/, '+00:00') }));
+  expect('ledger_check: a now with an offset', { error: 'parse', why: `not an RFC 3339 instant: ${now.replace(/Z$/, '+00:00')}` });
+  add('ledger_check: a now with a lower-case z', 'ledger_check', ask(here, { now: now.replace(/Z$/, 'z') }));
+  expect('ledger_check: a now with a lower-case z', { error: 'parse', why: `not an RFC 3339 instant: ${now.replace(/Z$/, 'z')}` });
   add('ledger_check: no ledger at all', 'ledger_check', ask(undefined));
   add('ledger_check: a ledger given as null', 'ledger_check', ask(null));
   add('ledger_check: after the live leaf expired, a new endpoint', 'ledger_check', ask(expired, { endpoint: THERE }));

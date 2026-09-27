@@ -192,6 +192,8 @@ pub(super) struct EndArgs<'a> {
     reply_tos: Option<StrList<'a>>,
     #[serde(borrow)]
     media_seen: Option<StrList<'a>>,
+    #[serde(borrow)]
+    media: Option<StrList<'a>>,
 }
 
 impl<'a> EndArgs<'a> {
@@ -204,6 +206,7 @@ impl<'a> EndArgs<'a> {
             msg_ids: Some(StrList::of_value(a.get("msg_ids"))),
             reply_tos: Some(StrList::of_value(a.get("reply_tos"))),
             media_seen: Some(StrList::of_value(a.get("media_seen"))),
+            media: Some(StrList::of_value(a.get("media"))),
         }
     }
 }
@@ -220,8 +223,59 @@ pub(super) fn export_read_end_lean(args: &str) -> Option<Result<Value>> {
     if !args.trim_start().starts_with('{') {
         return None;
     }
+    // Every value of the text read as the ordinary path reads it — a number out of range included —
+    // without keeping any of it: the lean path answers only what the ordinary one would. A member the
+    // struct does not name is otherwise skipped unread, and `{"x": 1e400, ...}` was answered `ok` here
+    // where the ordinary path refuses it.
+    serde_json::from_str::<Walk>(args).ok()?;
     let a: EndArgs<'_> = serde_json::from_str(args).ok()?;
     Some(read_end(&a))
+}
+
+/// A JSON value walked whole, every number parsed and nothing kept.
+struct Walk;
+
+impl<'de> serde::Deserialize<'de> for Walk {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        use serde::de::{MapAccess, SeqAccess, Visitor};
+        struct V;
+        impl<'de> Visitor<'de> for V {
+            type Value = Walk;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("any JSON value")
+            }
+            fn visit_bool<E>(self, _: bool) -> std::result::Result<Walk, E> {
+                Ok(Walk)
+            }
+            fn visit_i64<E>(self, _: i64) -> std::result::Result<Walk, E> {
+                Ok(Walk)
+            }
+            fn visit_u64<E>(self, _: u64) -> std::result::Result<Walk, E> {
+                Ok(Walk)
+            }
+            fn visit_f64<E>(self, _: f64) -> std::result::Result<Walk, E> {
+                Ok(Walk)
+            }
+            fn visit_borrowed_str<E>(self, _: &'de str) -> std::result::Result<Walk, E> {
+                Ok(Walk)
+            }
+            fn visit_str<E>(self, _: &str) -> std::result::Result<Walk, E> {
+                Ok(Walk)
+            }
+            fn visit_unit<E>(self) -> std::result::Result<Walk, E> {
+                Ok(Walk)
+            }
+            fn visit_seq<S: SeqAccess<'de>>(self, mut seq: S) -> std::result::Result<Walk, S::Error> {
+                while seq.next_element::<Walk>()?.is_some() {}
+                Ok(Walk)
+            }
+            fn visit_map<M: MapAccess<'de>>(self, mut m: M) -> std::result::Result<Walk, M::Error> {
+                while m.next_entry::<Walk, Walk>()?.is_some() {}
+                Ok(Walk)
+            }
+        }
+        d.deserialize_any(V)
+    }
 }
 
 fn read_end<'b>(a: &'b EndArgs<'_>) -> Result<Value> {
@@ -242,9 +296,18 @@ fn read_end<'b>(a: &'b EndArgs<'_>) -> Result<Value> {
     };
     let (ids, msg_ids, reply_tos, media_seen) =
         (list(&a.ids, "ids")?, list(&a.msg_ids, "msg_ids")?, list(&a.reply_tos, "reply_tos")?, list(&a.media_seen, "media_seen")?);
+    let media = list(&a.media, "media")?;
     export::read_end(
         text,
-        &export::End { messages_sha256: sha, lines, ids: &ids, msg_ids: &msg_ids, reply_tos: &reply_tos, media_seen: &media_seen },
+        &export::End {
+            messages_sha256: sha,
+            lines,
+            ids: &ids,
+            msg_ids: &msg_ids,
+            reply_tos: &reply_tos,
+            media_seen: &media_seen,
+            media: &media,
+        },
     )?;
     Ok(json!({ "ok": true }))
 }
@@ -260,7 +323,14 @@ pub(super) fn export_write(a: &Value) -> Result<Value> {
 }
 
 pub(super) fn export_write_messages(a: &Value) -> Result<Value> {
-    Ok(json!({ "lines": jsonl::write(list(a, "messages")?)? }))
+    let messages = list(a, "messages")?;
+    let file_msg_ids = match a.get("msg_ids") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(strs(a, "msg_ids")?),
+    };
+    let (lines, left_out) = jsonl::write(messages, file_msg_ids.as_deref())?;
+    let left_out: Vec<Value> = left_out.iter().map(|l| json!({ "id": l.id, "reason": l.reason })).collect();
+    Ok(json!({ "lines": lines, "left_out": left_out }))
 }
 
 pub(super) fn export_manifest(a: &Value) -> Result<Value> {
