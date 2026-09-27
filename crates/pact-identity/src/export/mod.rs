@@ -593,3 +593,71 @@ pub fn write(
     });
     Ok(Written { partial, contacts_csv, threads_csv })
 }
+
+/// The members of the wallet's own copy of a contact (CONTRACT §6, `VaultContact`).
+const VAULT_CONTACT: [&str; 6] = ["root", "endpoint", "name", "leaf", "root_cert", "added"];
+
+/// The wallet's book as rows of `contacts.csv` (SPEC §9.2: a book is an export of contacts only). The
+/// book keeps the root, the endpoint, the name, the leaf, the root certificate and when the contact was
+/// added; a row's other columns are what a contact the wallet keeps is — active, ever active, nothing
+/// granted — and `added` is the export's time when the book has none. The one mapping every wallet
+/// uses; export_write then holds each row to the reader's rules.
+pub fn book_rows(contacts: &[Value], exported_at: i64) -> Result<Vec<Value>> {
+    let mut rows = Vec::new();
+    for (i, c) in contacts.iter().enumerate() {
+        let Some(o) = c.as_object() else { return refuse(format!("contacts[{i}] is an object")) };
+        if let Some(k) = crate::ledger::stranger(o, &VAULT_CONTACT) {
+            return refuse(format!("contacts[{i}]: {} is not a member of a wallet contact", crate::canonical::string(&k)));
+        }
+        for m in ["root", "endpoint"] {
+            if !o.get(m).is_some_and(|v| v.is_string()) {
+                return refuse(format!("contacts[{i}]: {m} is required"));
+            }
+        }
+        for m in ["name", "leaf", "root_cert", "added"] {
+            if o.get(m).is_some_and(|v| !v.is_string()) {
+                return refuse(format!("contacts[{i}]: {m} is a string"));
+            }
+        }
+        let text = |m: &str| o.get(m).and_then(|v| v.as_str());
+        rows.push(json!({
+            "root": text("root"), "endpoint": text("endpoint"), "name": text("name").unwrap_or(""), "display_name": "",
+            "status": "active", "was_active": true, "permissions": [], "their_permissions": [],
+            "leaf": text("leaf"), "root_cert": text("root_cert"),
+            "added": text("added").map(String::from).unwrap_or_else(|| crate::time::format_rfc3339(exported_at)),
+        }));
+    }
+    Ok(rows)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::keys::{Alg, PrivateKey};
+    use crate::util::{b64u, seed};
+
+    /// SPEC §9 and §9.2: a host that makes an export puts no key material in it. The writer holds its
+    /// rows and messages to the reader's rules, so a private key in a cell or a body is refused before
+    /// a byte is written — PKCS #8 as base64url, and SEC1 as base64 with padding.
+    #[test]
+    fn export_write_refuses_a_row_or_message_holding_a_private_key() {
+        let key = PrivateKey::from_seed(Alg::Ed25519, &seed("export/key")).unwrap();
+        let pkcs8 = b64u(&key.to_pkcs8());
+        let owner = format!("sha256:{}", "O".repeat(43));
+        let row = |name: &str| {
+            json!({ "root": format!("sha256:{}", "B".repeat(43)), "endpoint": "https://b.example/mcp", "name": name, "display_name": "",
+                "status": "active", "was_active": true, "permissions": [], "their_permissions": [], "leaf": null, "root_cert": null,
+                "added": "2026-09-27T10:00:00Z" })
+        };
+        let write = |name: &str| write(&owner, "", 0, "t", &[row(name)], &[], &[]).map(|_| ()).map_err(|e| e.why);
+        assert_eq!(write("Bharat"), Ok(()), "the control");
+        assert_eq!(write(&pkcs8), Err("contacts[0], column name: holds a private key".to_string()));
+        let mut sec1 = vec![0x30, 0x25, 0x02, 0x01, 0x01, 0x04, 0x20];
+        sec1.extend_from_slice(&seed("export/sec1"));
+        use base64::Engine;
+        let body = format!("keep this: {}", base64::engine::general_purpose::STANDARD.encode(&sec1));
+        let message = json!({ "id": "1", "thread": "t", "contact": "c", "msg_id": "m", "direction": "in", "sender": "human",
+            "time": "2026-09-27T10:00:00Z", "body": body, "reply_to": null, "status": "read", "attachments": [] });
+        assert_eq!(jsonl::write(&[message]).map_err(|e| e.why), Err("messages[0], member body: holds a private key".to_string()));
+    }
+}

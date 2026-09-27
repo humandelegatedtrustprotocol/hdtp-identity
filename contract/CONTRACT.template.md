@@ -45,6 +45,11 @@ the tables is `contract/CONTRACT.template.md` and is written by hand.
 - **`why` is part of the answer.** Two ports refusing the same call in different words is a
   divergence, not a detail: it is what a person debugging reads, and what a caller's test asserts. No
   `why` may be a library's own error text — one port cannot reproduce another library's wording.
+- **Half a surrogate pair is refused before anything else.** Arguments holding a `\u` escape of half
+  a UTF-16 surrogate pair (a high one not followed by a low one, or a low one alone) answer
+  `{"error": "bad_request", "why": "args: a string holds half of a UTF-16 surrogate pair"}` from
+  every function, before the arguments are read: one JSON parser refuses such text and another reads
+  it as U+FFFD, and a port must not answer by its parser's choice.
 - **`version` is the one exception.** It describes the port, not a rule, so its answer differs and
   nothing compares it.
 
@@ -319,6 +324,8 @@ the host can do, and the words both hosts of this repository use for it (the Go 
 manifest; `export_write_messages` answers the lines; `export_manifest` finishes the manifest with
 the host's count and hash of `messages.jsonl`. The bytes are the same from every port: a Go host and
 a Rust host that write the same rows write the same file. A media file is stored, not recompressed.
+`book_rows` is the one mapping from the wallet's own book (`VaultContact`, §6) to those rows, which
+every wallet uses before `export_write` writes a book.
 
 The Go port also offers two conveniences over these functions, which are not contract functions and
 which its own tests run against the whole corpus: `ReadExportZip` (the reading above, with

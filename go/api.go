@@ -17,7 +17,7 @@ import (
 // writes it here and holds it equal to the crates' and the Wasm package's).
 const (
 	ModuleVersion = "0.2.0"
-	SpecVersion   = "2.1.3"
+	SpecVersion   = "2.2.0"
 )
 
 type apiError struct {
@@ -218,12 +218,21 @@ func certOut(c *Cert) map[string]any {
 }
 
 // Call dispatches one contract function.
+// loneSurrogateWhy is what Call answers arguments holding an unpaired UTF-16 surrogate escape.
+const loneSurrogateWhy = "args: a string holds half of a UTF-16 surrogate pair"
+
 func Call(name string, args json.RawMessage) (out json.RawMessage) {
 	defer func() {
 		if r := recover(); r != nil {
 			out = fail("internal", fmt.Sprint(r))
 		}
 	}()
+	// A \u escape of half a surrogate pair: encoding/json reads it as U+FFFD, and the Rust core's
+	// parser refuses it, so the two ports answered it two ways. Both name it first, in these words,
+	// before anything reads the arguments or the name.
+	if loneSurrogate(args) {
+		return fail(codeArgs, loneSurrogateWhy)
+	}
 	fn, found := functions[name]
 	if !found {
 		return fail("unsupported", "no function named "+name)
@@ -309,6 +318,7 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 	"export_write":          callExportWrite,
 	"export_write_messages": callExportWriteMessages,
 	"export_manifest":       callExportManifest,
+	"book_rows":             callBookRows,
 	"export_merge":          callExportMerge,
 
 	// Ledger: api_ledger.go

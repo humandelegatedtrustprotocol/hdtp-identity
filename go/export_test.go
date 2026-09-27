@@ -161,8 +161,12 @@ func TestAVaultContactTravelsAsARowAndComesBack(t *testing.T) {
 		NotBefore: at, NotAfter: at.AddDate(1, 0, 0), Serial: []byte{8, 7, 6, 5, 4, 3, 2, 1}})
 	kept := VaultContact{Root: Fingerprint(friend.Public.SPKI), Endpoint: "https://friend.example/mcp", Name: "Friend", Leaf: B64url(leaf), RootCert: B64url(cert)}
 	var buf bytes.Buffer
+	row, err := ContactRowOf(kept, at.Add(24*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
 	in := ExportInput{Owner: Fingerprint(owner.Public.SPKI), OwnerName: "Owner", Tool: "test", ExportedAt: at.Add(24 * time.Hour),
-		Contacts: []ContactRow{ContactRowOf(kept, at.Add(24*time.Hour))}}
+		Contacts: []ContactRow{row}}
 	if err := WriteExportZip(&buf, in, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -178,5 +182,50 @@ func TestAVaultContactTravelsAsARowAndComesBack(t *testing.T) {
 	kept.Added = timeOut(at.Add(24 * time.Hour))
 	if back != kept {
 		t.Errorf("%+v\n  came back as\n%+v", kept, back)
+	}
+}
+
+// SPEC §9.2: an exporter never leaves a file out. A file that cannot be read, and a message whose
+// file is not among those handed in, each refuse the export; a control with the file writes.
+func TestWriteExportZipRefusesRatherThanOmitsAFile(t *testing.T) {
+	in, files := exportFixture(t)
+	open := func(h string) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(files[h])), nil }
+	var b bytes.Buffer
+	if err := WriteExportZip(&b, in, open); err != nil {
+		t.Fatalf("the control: %v", err)
+	}
+	lost := func(string) (io.ReadCloser, error) { return nil, io.ErrUnexpectedEOF }
+	if err := WriteExportZip(&bytes.Buffer{}, in, lost); err == nil {
+		t.Error("a file that cannot be read was left out rather than refusing the export")
+	}
+	without := in
+	without.Media = nil
+	err := WriteExportZip(&bytes.Buffer{}, without, open)
+	if err == nil || !strings.Contains(err.Error(), "it is not among the files to export") {
+		t.Errorf("a message's file left out of the export: %v", err)
+	}
+}
+
+// SPEC §9.2, import step 2: an imported leaf never replaces a pin the host validated itself, and a
+// row the host holds without a leaf takes the row's (export_read kept it only because it validated).
+func TestExportMergeNeverReplacesAHeldPin(t *testing.T) {
+	a, b, c := "sha256:"+strings.Repeat("A", 43), "sha256:"+strings.Repeat("B", 43), "sha256:"+strings.Repeat("C", 43)
+	row := func(root, endpoint string, leaf any) map[string]any {
+		return map[string]any{"root": root, "endpoint": endpoint, "leaf": leaf, "root_cert": nil}
+	}
+	held := []any{row(a, "https://a.example/mcp", "MIIheld"), row(b, "https://b.example/mcp", nil)}
+	rows := []any{row(a, "https://moved.example/mcp", "MIIrow"), row(b, "https://b.example/mcp", "MIIrow"), row(c, "https://c.example/mcp", nil)}
+	write, keep, conflicts, err := exportMerge(held, rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(write) != 2 || write[0].(map[string]any)["root"] != b || write[1].(map[string]any)["root"] != c {
+		t.Errorf("written: %v", write)
+	}
+	if len(keep) != 1 || keep[0] != a {
+		t.Errorf("kept: %v", keep)
+	}
+	if len(conflicts) != 2 {
+		t.Errorf("the held pin's endpoint and leaf are two conflicts: %v", conflicts)
 	}
 }

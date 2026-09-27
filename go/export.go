@@ -1310,3 +1310,52 @@ func exportMerge(held, rows []any) (write []any, keep []any, conflicts []any, er
 	}
 	return write, keep, conflicts, nil
 }
+
+// vaultContactMembers are the members of the wallet's own copy of a contact (CONTRACT §6).
+var vaultContactMembers = []string{"root", "endpoint", "name", "leaf", "root_cert", "added"}
+
+// bookRows is the wallet's book as rows of contacts.csv (SPEC §9.2), as the core's book_rows: the
+// book keeps the root, the endpoint, the name, the leaf, the root certificate and when the contact
+// was added; a row's other columns are what a contact the wallet keeps is (active, ever active,
+// nothing granted), and added is the export's time when the book has none.
+func bookRows(contacts []any, exportedAt time.Time) ([]any, error) {
+	rows := []any{}
+	for i, c := range contacts {
+		o, isObj := c.(map[string]any)
+		if !isObj {
+			return nil, exportRefuse(fmt.Sprintf("contacts[%d] is an object", i))
+		}
+		if k := stranger(o, vaultContactMembers); k != "" {
+			return nil, exportRefuse(fmt.Sprintf("contacts[%d]: %s is not a member of a wallet contact", i, jsonString(k)))
+		}
+		for _, m := range []string{"root", "endpoint"} {
+			if _, isText := o[m].(string); !isText {
+				return nil, exportRefuse(fmt.Sprintf("contacts[%d]: %s is required", i, m))
+			}
+		}
+		for _, m := range []string{"name", "leaf", "root_cert", "added"} {
+			if v, has := o[m]; has {
+				if _, isText := v.(string); !isText {
+					return nil, exportRefuse(fmt.Sprintf("contacts[%d]: %s is a string", i, m))
+				}
+			}
+		}
+		opt := func(m string) any {
+			if s, isText := o[m].(string); isText {
+				return s
+			}
+			return nil
+		}
+		name, _ := o["name"].(string)
+		added, has := o["added"].(string)
+		if !has {
+			added = timeOut(exportedAt)
+		}
+		rows = append(rows, map[string]any{
+			"root": o["root"], "endpoint": o["endpoint"], "name": name, "display_name": "",
+			"status": "active", "was_active": true, "permissions": []any{}, "their_permissions": []any{},
+			"leaf": opt("leaf"), "root_cert": opt("root_cert"), "added": added,
+		})
+	}
+	return rows, nil
+}
