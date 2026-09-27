@@ -109,7 +109,7 @@ fn a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates() {
     // The wallet issues; the leaf and the root validate as a chain for that address.
     pact()
         .env("PACT_PASSPHRASE_FILE", &pass)
-        .args(["id", "issue", "--yes", "--valid", "1y", "--origin", "https://app.pact-cloud.com", "--csr"])
+        .args(["id", "issue", "--yes", "--valid", "1y", "--origin", "https://wallet.example", "--csr"])
         .arg(&csr)
         .arg("--vault")
         .arg(&vault)
@@ -149,14 +149,14 @@ fn a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates() {
         .arg(&vault)
         .assert()
         .success()
-        .stdout(predicate::str::contains("* ").and(predicate::str::contains("asked by https://app.pact-cloud.com")));
+        .stdout(predicate::str::contains("* ").and(predicate::str::contains("asked by https://wallet.example")));
 
     // A second endpoint while a leaf is live is a move, refused without saying so.
     let key2 = d.join("host2.key");
     let csr2 = d.join("host2.csr");
     pact().args(["key", "new", "--alg", "p256", "--out"]).arg(&key2).assert().success();
     pact()
-        .args(["csr", "new", "--endpoint", "https://alina.pact.contact/alina/mcp", "--key"])
+        .args(["csr", "new", "--endpoint", "https://alina.host.example/alina/mcp", "--key"])
         .arg(&key2)
         .arg("--out")
         .arg(&csr2)
@@ -646,7 +646,7 @@ fn the_two_files_are_found_together_and_never_mistaken() {
         pact().args(["csr", "new", "--endpoint", endpoint, "--dns", "--key"]).arg(&key).arg("--out").arg(&p).assert().success();
         p
     };
-    let (home, away) = (csr("home.csr", "https://agent.alina.example/mcp"), csr("away.csr", "https://alina.pact.contact/alina/mcp"));
+    let (home, away) = (csr("home.csr", "https://agent.alina.example/mcp"), csr("away.csr", "https://alina.host.example/alina/mcp"));
     let as_pact = || {
         let mut cmd = pact();
         cmd.env("PACT_PASSPHRASE_FILE", &pass);

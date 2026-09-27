@@ -8,13 +8,13 @@
 # IT RUNS HERE AND NOT IN CI, by the owner's decision (2026-09-20): the list reads the private
 # sibling `pact-protocol` — SPEC.md, the seed in `vectors/lib` — and no CI credential for it will
 # be created. For five days a CI job held this list and failed at its first step on every run it
-# ever had; a gate nothing can run is a comment. The umbrella's pre-push hook runs this whenever a
-# push touches `pact-identity/` or moves the `pact-protocol` pointer.
+# ever had; a gate nothing can run is a comment. This repository's pre-push hook
+# (githooks/pre-push) runs it on every push, and `make release` runs it before a version is cut.
 #
 # It does NOT rebuild the Wasm. The build that ships is the pinned one (`js/reproduce.sh --pin`, a
 # container named by digest); a native `js/build.sh` writes this machine's bytes over it and
-# `js/verify.mjs` then refuses them, correctly. The pin's reproducibility is proven off this
-# machine, by the `reproduce` job of .github/workflows/pact-identity.yml, which needs no secret.
+# `js/verify.mjs` then refuses them, correctly. The container build is run again, and compared with
+# what was published, by `make verify-release VERSION=x.y.z`.
 set -eu
 cd "$(dirname "$0")"
 

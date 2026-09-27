@@ -13,7 +13,7 @@ import (
 )
 
 func TestIsNormalHTTPS(t *testing.T) {
-	good := []string{"https://agent.alina.example/mcp", "https://alina.pact.contact/alina/mcp", "https://a.example/x/y-z_1.2~", "https://a.example/%2F", "https://192.0.2.1/mcp", "https://[2001:db8::1]/mcp"}
+	good := []string{"https://agent.alina.example/mcp", "https://alina.host.example/alina/mcp", "https://a.example/x/y-z_1.2~", "https://a.example/%2F", "https://192.0.2.1/mcp", "https://[2001:db8::1]/mcp"}
 	bad := []string{"http://agent.alina.example/mcp", "https://agent.alina.example/", "https://agent.alina.example", "https://Agent.Alina.example/mcp", "https://agent.alina.example@mallory.example/mcp", "https://agent.alina.example:443/mcp", "https://agent.alina.example/mcp/", "https://agent.alina.example/mcp?x=1", "https://agent.alina.example/mcp#f", "https://agent.alina.example/mcp/../admin", "https://agent.alina.example/./mcp", "https://a.example/%2f", "https://a.example/%41", "https://a.example/a b", "https://a.example/a\\b", "https://a.example/ü", "https://a.example/%zz", "https://.a.example/mcp", "https://a..example/mcp", "https://01.2.3.4/mcp", "https://[2001:DB8::1]/mcp", "https://[::ffff:1.2.3.4]/mcp"}
 	for _, u := range good {
 		if !IsNormalHTTPS(u) {
@@ -204,7 +204,7 @@ func TestWalletIssue(t *testing.T) {
 		t.Errorf("renewal should be newer, got %s", cmp)
 	}
 	// A second endpoint while a leaf is live is a move, refused without move: true.
-	csr3, _ := CSRNew("Alina Rao", host2, "https://alina.pact.contact/alina/mcp", "")
+	csr3, _ := CSRNew("Alina Rao", host2, "https://alina.host.example/alina/mcp", "")
 	if _, err := WalletIssue(plain, record, fp, csr3, now, 365, false); err == nil || !strings.Contains(err.Error(), "move") {
 		t.Errorf("second endpoint: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestWalletIssue(t *testing.T) {
 	// a leaf for the old address now is the move back, refused without the flag.
 	record.Ledger = append(record.Ledger, moved.Entry)
 	host3, _ := GenerateKey("ed25519")
-	csr4, _ := CSRNew("Alina Rao", host3, "https://alina.pact.contact/alina/mcp", "")
+	csr4, _ := CSRNew("Alina Rao", host3, "https://alina.host.example/alina/mcp", "")
 	if renewed, err := WalletIssue(plain, record, fp, csr4, now.Add(2*time.Minute), 365, false); err != nil || renewed.NewHost {
 		t.Errorf("renewal after a move: %v", err)
 	}

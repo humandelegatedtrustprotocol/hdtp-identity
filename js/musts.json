@@ -11,10 +11,7 @@
     "hash": "56c1be33d6c9",
     "text": "A wallet that can use a WebAuthn credential MUST **derive the root's private key from one** rather than genera",
     "elsewhere": "wallet",
-    "why": "which way a root is made is the wallet's: the browser wallet (pact-cloud/gateway/src/ceremony/ceremony.js) derives it from the credential and has no other way to make one; the pact CLI, which cannot speak WebAuthn, generates and keeps it as §9 says (rust:a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates)",
-    "elsewhere_names": [
-      "cloud:gateway/src/ceremony/ceremony.js"
-    ]
+    "why": "which way a root is made is the wallet's: a browser wallet derives it from the credential; the pact CLI, which cannot speak WebAuthn, generates and keeps it as §9 says (rust:a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates); a hosting platform's half is held in that platform's own MUST table, beside its code"
   },
   "2.1#2": {
     "hash": "e79efe20ebb8",
@@ -69,11 +66,7 @@
     "hash": "48f03f123375",
     "text": "The challenge MUST be domain-separated from certificate bytes — the ASCII `PACT root proof v1` followed by a n",
     "elsewhere": "wallet",
-    "why": "the challenge is the browser wallet's: pact-cloud/gateway/src/ceremony/ceremony.js PROOF_LABEL, pinned by check-ceremony.mjs. This library issues from a vault whose entry carries the certificate and checks that instead",
-    "elsewhere_names": [
-      "cloud:gateway/src/ceremony/ceremony.js",
-      "cloud:gateway/scripts/check-ceremony.mjs"
-    ]
+    "why": "the challenge is the browser wallet's, and a hosting platform's half is held in that platform's own MUST table, beside its code. This library issues from a vault whose entry carries the certificate and checks that instead"
   },
   "2.2#4": {
     "hash": "11306b742c60",
@@ -134,10 +127,9 @@
     "hash": "1e774464ac5f",
     "text": "The same URL serves two audiences by content negotiation: a browser gets the human landing page; a client send",
     "elsewhere": "node",
-    "why": "content negotiation on an invite landing page is a host's route; pact-gateway serves it (TestLandingNoOracle404) and pact-cloud serves it (invite-landing.test.ts), and both bind the chain's leaf to the card",
+    "why": "content negotiation on an invite landing page is a host's route; pact-gateway serves it (TestLandingNoOracle404) and binds the chain's leaf to the card; a hosting platform's half is held in that platform's own MUST table, beside its code",
     "elsewhere_names": [
-      "gateway:TestLandingNoOracle404",
-      "cloud:gateway/test/invite-landing.test.ts"
+      "gateway:TestLandingNoOracle404"
     ]
   },
   "5.2#1": {
@@ -171,10 +163,9 @@
     "held_by": [
       "scenario:a guest whose card carries a different certificate than the chain"
     ],
-    "why": "the certificate equality is this library's guest binding (the scenario); the refusal CODE is a host's answer from update_contact: the node answers bad_request (TestACardThatDisagreesWithTheProofIsABadRequest) and so does the cloud (public-surface-certificates.test.ts), review P-24",
+    "why": "the certificate equality is this library's guest binding (the scenario); the refusal CODE is a host's answer from update_contact: the node answers bad_request (TestACardThatDisagreesWithTheProofIsABadRequest); a hosting platform's half is held in that platform's own MUST table, beside its code",
     "elsewhere_names": [
-      "gateway:TestACardThatDisagreesWithTheProofIsABadRequest",
-      "cloud:gateway/test/public-surface-certificates.test.ts"
+      "gateway:TestACardThatDisagreesWithTheProofIsABadRequest"
     ]
   },
   "6.2#3": {
@@ -190,44 +181,34 @@
     "hash": "63b8673a7797",
     "text": "A leaf's key does not outlive its leaf: a host MUST stop using the key of a leaf that has expired and MUST des",
     "elsewhere": "node",
-    "why": "holding and destroying a leaf's key is the host's act. pact-gateway stops offering the key on the read path from notAfter and destroys both copies — the ledger row's and the account's — at start, on the hourly sweep and on adoption, stops serving the account, and audits it (TestAnExpiredCurrentLeafLosesItsKeyInBothPlaces, TestALeafThatRunsOutStopsBeingServedAndLosesItsKey); pact-cloud does the same on the first request past the date, answers `unavailable` rather than signing with anything, and a renewal still installs (leaf-expiry.test.ts). Until 2026-09-19 both retired superseded leaves only, so the key of a leaf nobody renewed was held and used for as long as the process lived",
+    "why": "holding and destroying a leaf's key is the host's act. pact-gateway stops offering the key on the read path from notAfter and destroys both copies — the ledger row's and the account's — at start, on the hourly sweep and on adoption, stops serving the account, and audits it (TestAnExpiredCurrentLeafLosesItsKeyInBothPlaces, TestALeafThatRunsOutStopsBeingServedAndLosesItsKey); a hosting platform's half is held in that platform's own MUST table, beside its code. Until 2026-09-19 hosts retired superseded leaves only, so the key of a leaf nobody renewed was held and used for as long as the process lived",
     "elsewhere_names": [
       "gateway:TestAnExpiredCurrentLeafLosesItsKeyInBothPlaces",
-      "gateway:TestALeafThatRunsOutStopsBeingServedAndLosesItsKey",
-      "cloud:gateway/test/leaf-expiry.test.ts"
+      "gateway:TestALeafThatRunsOutStopsBeingServedAndLosesItsKey"
     ]
   },
   "9.#2": {
     "hash": "874aaad41c95",
     "text": "**Moving** is the person issuing a leaf to the new host, the data carried across as an archive — the person's ",
     "elsewhere": "node",
-    "why": "both halves are a host's. The host that MAKES an archive writes a person's contacts and conversations and nothing else, and no key of any kind: pact-gateway's export is written through its Store interface, so it holds what it asks for, and the test searches the archive's BYTES for a planted leaf key, ledger key, setting, token, invite and integration endpoint (TestAnExportCarriesContactsAndChatsAndNothingElse); pact-cloud's builder selects from an allow-list of tables and columns and its export is searched the same way (leave.test.ts). The host that IMPORTS one refuses key material and everything else it does not recognise — a member, a kind of line, a single field — before a write: pact-gateway (TestAnImportRefusesAnythingAnExportDoesNotCarry), pact-cloud (import.test.ts). And the two formats are proven against each other: the node's suite runs the cloud's converter and imports the file it wrote (TestTheCloudsLeaveFileImports)",
+    "why": "both halves are a host's. The host that MAKES an archive writes a person's contacts and conversations and nothing else, and no key of any kind: pact-gateway's export is written through its Store interface, so it holds what it asks for, and the test searches the archive's BYTES for a planted leaf key, ledger key, setting, token, invite and integration endpoint (TestAnExportCarriesContactsAndChatsAndNothingElse). The host that IMPORTS one refuses key material and everything else it does not recognise — a member, a kind of line, a single field — before a write (TestAnImportRefusesAnythingAnExportDoesNotCarry), and the node imports an archive written by another host's converter (TestTheCloudsLeaveFileImports); a hosting platform's half is held in that platform's own MUST table, beside its code",
     "elsewhere_names": [
       "gateway:TestAnExportCarriesContactsAndChatsAndNothingElse",
       "gateway:TestAnImportRefusesAnythingAnExportDoesNotCarry",
-      "gateway:TestTheCloudsLeaveFileImports",
-      "cloud:gateway/test/leave.test.ts",
-      "cloud:gateway/test/import.test.ts"
+      "gateway:TestTheCloudsLeaveFileImports"
     ]
   },
   "9.#3": {
     "hash": "6fd3ca8f5633",
     "text": "An address an identity has vacated MUST NOT be assigned to another identity until the last leaf issued for it ",
     "elsewhere": "node",
-    "why": "address reassignment is a host's allocation policy; pact-cloud marks the hostname `vacated` with a `vacated_until` taken from the latest notAfter of any leaf that named the endpoint, keeps the row in the taken set, and answers a claimant `address_vacated` with the date (move.test.ts, leave.test.ts)",
-    "elsewhere_names": [
-      "cloud:gateway/test/move.test.ts",
-      "cloud:gateway/test/leave.test.ts"
-    ]
+    "why": "address reassignment is a host's allocation policy, held by the host that allocates addresses; a hosting platform's half is held in that platform's own MUST table, beside its code"
   },
   "9.#4": {
     "hash": "9d2a2b8b2d6c",
     "text": "A host that exports an identity toward a destination that cannot carry its chain MUST say so before the export",
     "elsewhere": "node",
-    "why": "an export warning is a host's UI; pact-cloud's leave path states it in src/leave/convert.ts, which refuses to carry a 2.0 identity toward a host that cannot hold a chain and says why. The pact-gateway half is prose in its own SPEC §9 and names no test — a declaration, not a proof",
-    "elsewhere_names": [
-      "cloud:gateway/src/leave/convert.ts"
-    ]
+    "why": "an export warning is a host's UI; a hosting platform's half is held in that platform's own MUST table, beside its code. The pact-gateway half is prose in its own SPEC §9 and names no test — a declaration, not a proof"
   },
   "9.#5": {
     "hash": "f287941a9ea7",
@@ -245,10 +226,7 @@
       "rust:a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates",
       "rust:issues_from_the_vault"
     ],
-    "why": "the CLI's end-to-end test opens both files it wrote and holds each to its shape — the vault the root (its key and certificate) and nothing else, the record the ledger with no key — and the vault's bytes are unchanged by a signing; the core refuses a vault that carries a ledger or contacts, in both ports (issues_from_the_vault, and parity's 'wallet_issue from a vault that carries a ledger'). The browser wallet (pact-cloud/gateway/src/ceremony/ceremony.js) writes the file at creation and at a re-binding only, held by its ceremony suite. A CLI seals under the person's passphrase (owner, 2026-09-26); a card taking the root is the vault's one other writing (card-attach). (Until 2026-09-26 this cited a test of the record's file NAME and a test of the ledger entry, neither of which reads the file, and a search of ciphertext for \"pkcs8\".)",
-    "elsewhere_names": [
-      "cloud:gateway/src/ceremony/ceremony.js"
-    ]
+    "why": "the CLI's end-to-end test opens both files it wrote and holds each to its shape — the vault the root (its key and certificate) and nothing else, the record the ledger with no key — and the vault's bytes are unchanged by a signing; the core refuses a vault that carries a ledger or contacts, in both ports (issues_from_the_vault, and parity's 'wallet_issue from a vault that carries a ledger'). A browser wallet writes the file at creation and at a re-binding only; a hosting platform's half is held in that platform's own MUST table, beside its code. A CLI seals under the person's passphrase (owner, 2026-09-26); a card taking the root is the vault's one other writing (card-attach). (Until 2026-09-26 this cited a test of the record's file NAME and a test of the ledger entry, neither of which reads the file, and a search of ciphertext for \"pkcs8\".)"
   },
   "13.1#1": {
     "hash": "8d6cee3f7408",

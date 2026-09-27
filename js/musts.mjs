@@ -19,10 +19,10 @@
 // too whenever the sibling repository is on disk. They were prose for exactly one
 // revision, and in that revision two of eleven were wrong: 3.#1 named a
 // `TestDisplayNameCollision` that has never existed, and 9.#2 credited
-// `check-slug-rules.mjs`, which compares the portal's reserved-name list to the
-// server's and has nothing to do with holding a vacated address. A citation nothing
+// `check-slug-rules.mjs`, which compares one reserved-name list with another
+// and has nothing to do with holding a vacated address. A citation nothing
 // checks is the defect this file was written to find, so it may not live in this
-// file either. CI checks out neither sibling; there the count of unverified names is
+// file either. Where the sibling is not checked out, the count of unverified names is
 // printed rather than assumed to be zero.
 //
 // What this proves and what it does not. A token is checked for EXISTENCE — that the Go
@@ -123,16 +123,20 @@ const walkTree = (dir, out = []) => {
   return out;
 };
 
-/** The only repositories a citation's prefix may name, because these are the only two looked in. */
-const SIBLING_REPOS = ['gateway', 'cloud']; // invariant: constant
+/**
+ * The only repository a citation's prefix may name, because it is the only one looked in. The node
+ * is the other consumer of this library and its tests are cited here; a hosting platform keeps the
+ * MUSTs it holds in its own table, beside its own code, and checks them there — this library does
+ * not read a product's tree.
+ */
+const SIBLING_REPOS = ['gateway']; // invariant: constant
 
 /**
  * The holders that live in a sibling repository, checked when that repository is on
- * disk. `gateway:Name` is a Go test function anywhere in pact-gateway; `cloud:path`
- * is a file under pact-cloud, relative to its root.
+ * disk. `gateway:Name` is a Go test function anywhere in pact-gateway.
  *
  * Returns the names it could confirm plus the roots it actually looked in, so a run
- * with no siblings reports what it could not check instead of passing quietly.
+ * without the sibling reports what it could not check instead of passing quietly.
  */
 function siblingNames() {
   const names = new Set();
@@ -143,13 +147,6 @@ function siblingNames() {
     for (const f of walkTree(gateway)) {
       if (!f.endsWith('_test.go')) continue;
       for (const m of readFileSync(f, 'utf8').matchAll(/func\s+(Test[A-Za-z0-9_]*)\s*\(/g)) names.add('gateway:' + m[1]);
-    }
-  }
-  const cloud = join(here, '../../pact-cloud');
-  if (existsSync(cloud)) {
-    looked.push('cloud');
-    for (const f of walkTree(cloud)) {
-      if (f.startsWith(cloud + '/')) names.add('cloud:' + f.slice(cloud.length + 1));
     }
   }
   return { names, looked };
@@ -182,7 +179,7 @@ for (const m of musts) {
     // A prefix nobody can ever look in is a dangling citation, not an unverified one. `unverified` is
     // printed and never asserted on, so `gatway:TestFoo` — or a prefix for a repository that will
     // never be consulted — was excused for ever by the very mechanism built to stop citations nobody
-    // checks. Only these two repositories are ever looked in.
+    // checks. Only SIBLING_REPOS are ever looked in.
     if (!SIBLING_REPOS.includes(repo)) {
       problems.push(`DANGLING ${m.id}  names ${n}, whose prefix is not a repository this checks (${SIBLING_REPOS.join(', ')})`);
       continue;

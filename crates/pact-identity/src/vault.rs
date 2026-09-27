@@ -410,7 +410,7 @@ mod tests {
         let mut with = record.clone();
         with["ledger"] = json!([out["ledger_entry"].clone()]);
         let host2 = PrivateKey::from_seed(Alg::P256, &seed("vault/host2")).unwrap();
-        let req2 = csr::csr_new("Alina Rao", &host2, "https://alina.pact.contact/alina/mcp", None).unwrap();
+        let req2 = csr::csr_new("Alina Rao", &host2, "https://alina.host.example/alina/mcp", None).unwrap();
         assert!(wallet_issue(&plaintext, &with, &fp, &req2, now + 10, 365, false).is_err());
         let moved = wallet_issue(&plaintext, &with, &fp, &req2, now + 10, 365, true).unwrap();
         assert_eq!(moved["not_before"], format_rfc3339(now + 10 - 3600)); // an hour before issuance, later than the previous leaf plus one second
@@ -418,7 +418,7 @@ mod tests {
                                                                           // and a leaf for the old address now is the move back, refused without the flag.
         with["ledger"] = json!([out["ledger_entry"].clone(), moved["ledger_entry"].clone()]);
         let host3 = PrivateKey::from_seed(Alg::Ed25519, &seed("vault/host3")).unwrap();
-        let req3 = csr::csr_new("Alina Rao", &host3, "https://alina.pact.contact/alina/mcp", None).unwrap();
+        let req3 = csr::csr_new("Alina Rao", &host3, "https://alina.host.example/alina/mcp", None).unwrap();
         let renewed = wallet_issue(&plaintext, &with, &fp, &req3, now + 20, 365, false).unwrap();
         assert_eq!(renewed["new_host"], false);
         assert!(wallet_issue(&plaintext, &with, &fp, &req, now + 20, 365, false).is_err());
