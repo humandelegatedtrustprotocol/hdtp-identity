@@ -3,7 +3,7 @@
 //! or a book, uses its `contacts.csv`, and shows every difference before the book is replaced.
 use super::exportzip::{read_export, write_book};
 use super::files::{open_record, open_vault, pick_root, save_record};
-use crate::io::{check_writable, confirm, fail, instant, now_or, Fail, Res};
+use crate::io::{check_writable, confirm, core, fail, instant, now_or, Fail, Res};
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -13,19 +13,6 @@ pub const IMPORT_CEILING: u64 = 1 << 30;
 
 /// §9.2's notice, before any surface writes an export or a book.
 pub const UNENCRYPTED: &str = "This file is not encrypted. Anyone who gets it can read your contact list and all your conversations and files. It holds no keys, so it cannot be used to speak as you. Keep it where you keep private documents, and delete it once it has been imported.";
-
-/// A contact of the book as a row of `contacts.csv`: the book keeps the root, the endpoint, the name,
-/// the leaf, the root certificate and when it was added; a row's other columns are what a contact the
-/// wallet keeps is (`active`, ever active, nothing granted), and `added` is the export's time when the
-/// book has none.
-fn row_of(c: &Value, exported_at: &str) -> Value {
-    json!({
-        "root": c["root"], "endpoint": c["endpoint"], "name": c["name"].as_str().unwrap_or(""), "display_name": "",
-        "status": "active", "was_active": true, "permissions": [], "their_permissions": [],
-        "leaf": c.get("leaf").cloned().unwrap_or(Value::Null), "root_cert": c.get("root_cert").cloned().unwrap_or(Value::Null),
-        "added": c["added"].as_str().unwrap_or(exported_at),
-    })
-}
 
 /// And back: a row as the book keeps a contact. The row's leaf is there only when it validated.
 fn contact_of(r: &Value) -> Value {
@@ -51,7 +38,10 @@ pub fn contacts_export(vault: &str, out: &str) -> Res<i32> {
     }
     let root = pick_root(&v.plaintext, None)?;
     let now = instant(now_or(None)?);
-    let rows: Vec<Value> = r.plaintext["contacts"].as_array().into_iter().flatten().map(|c| row_of(c, &now)).collect();
+    // The book's contacts as rows, through the core's book_rows: the one mapping every wallet uses.
+    let book = r.plaintext["contacts"].as_array().cloned().unwrap_or_default();
+    let rows: Vec<Value> =
+        core("book_rows", json!({ "contacts": book, "exported_at": now }))?["rows"].as_array().cloned().unwrap_or_default();
     eprintln!("{UNENCRYPTED}");
     write_book(Path::new(out), root["fingerprint"].as_str().unwrap_or(""), root["cn"].as_str().unwrap_or(""), &now, &rows).map_err(Fail)?;
     eprintln!("wrote {out}: {} contact{}", rows.len(), if rows.len() == 1 { "" } else { "s" });

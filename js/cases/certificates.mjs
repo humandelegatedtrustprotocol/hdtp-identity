@@ -17,7 +17,7 @@ const LOCAL = [
   'https://127.1/mcp', 'https://2130706433/mcp', 'https://0x7f000001/mcp', 'https://0177.0.0.1/mcp',
 ];
 
-export default function certificates({ add }, f) {
+export default function certificates({ add, expect }, f) {
   const { now, ENDPOINT, rootKey, hostKey, p256Key, rootDer, leafDer, rootPkcs8, rootSpki, hostSpki, p256Spki, rootFp, leafTbs, rootTbs, SERIAL } = f;
   const URLS = [
     ENDPOINT, 'https://agent.alina.example:8443/mcp', 'https://agent.alina.example:443/mcp', 'https://agent.alina.example/mcp/',
@@ -178,4 +178,8 @@ export default function certificates({ add }, f) {
   // B7 — `now` is whole seconds. Half a second past a leaf's notAfter is the same second.
   add('validate_chain half a second after the leaf\'s last second', 'validate_chain', { chain: [leafDer, rootDer], now: '2027-09-01T00:00:00.500Z', expected_root: rootFp, expected_endpoint: ENDPOINT });
   add('validate_chain in the leaf\'s last second, with a fraction', 'validate_chain', { chain: [leafDer, rootDer], now: '2027-08-31T23:59:59.900Z', expected_root: rootFp, expected_endpoint: ENDPOINT });
+  // Half a surrogate pair refused at the boundary, and a whole pair, which is text, reaching the rule.
+  add('is_normal_https with args holding a lone low surrogate', 'is_normal_https', { url: 'https://x.example/\udc00' });
+  expect('is_normal_https with args holding a lone low surrogate', { error: 'bad_request', why: 'args: a string holds half of a UTF-16 surrogate pair' });
+  add('is_normal_https with args holding a surrogate pair', 'is_normal_https', { url: 'https://x.example/\ud83d\ude00' });
 }

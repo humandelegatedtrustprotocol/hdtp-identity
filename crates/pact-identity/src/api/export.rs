@@ -117,3 +117,9 @@ pub(super) fn export_merge(a: &Value) -> Result<Value> {
     let m = merge::merge(list(a, "held")?, list(a, "rows")?)?;
     Ok(json!({ "write": m.write, "keep": m.keep, "conflicts": m.conflicts }))
 }
+
+pub(super) fn book_rows(a: &Value) -> Result<Value> {
+    let contacts = list(a, "contacts")?;
+    let at = instant(a, "exported_at")?;
+    Ok(json!({ "rows": export::book_rows(contacts, at)? }))
+}

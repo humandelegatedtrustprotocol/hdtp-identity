@@ -339,3 +339,23 @@ func callExportMerge(args json.RawMessage) json.RawMessage {
 	}
 	return ok(map[string]any{"write": write, "keep": keep, "conflicts": conflicts})
 }
+
+func callBookRows(args json.RawMessage) json.RawMessage {
+	a, bad := readExportArgs(args)
+	if bad != nil {
+		return bad
+	}
+	contacts, err := a.list("contacts")
+	if err != nil {
+		return failErr(codeArgs, err)
+	}
+	at, bad := a.instant("exported_at")
+	if bad != nil {
+		return bad
+	}
+	rows, err := bookRows(contacts, at)
+	if err != nil {
+		return fail(codeArgs, err.Error())
+	}
+	return ok(map[string]any{"rows": rows})
+}

@@ -3,7 +3,7 @@
   "$id": "urn:pact:identity:contract",
   "title": "pact-identity: the library boundary",
   "description": "Every function a port of pact-identity presents, as `call(name, args) -> answer`: what it takes, what it answers, and which error codes it can fail with. This file is the source; CONTRACT.md is rendered from it and js/parity.mjs holds both ports to it.",
-  "spec": "2.1.3",
+  "spec": "2.2.0",
   "sections": {
     "build": "The build",
     "keys": "Keys",
@@ -1702,6 +1702,26 @@
       },
       "errors": ["bad_request"],
       "notes": "SPEC §9.2's import step 2: an imported leaf never replaces a pin the host validated itself (§14.5). A row whose root is not held is written; a row whose root is held WITHOUT a leaf is written when the row carries one (export_read kept it only because it validated); every other held root is kept as held, and each of its endpoint, leaf and root certificate that the row would change is a conflict, for the host to show."
+    },
+    "book_rows": {
+      "section": "export",
+      "params": {
+        "type": "object",
+        "properties": {
+          "contacts": { "type": "array", "items": { "$ref": "#/$defs/VaultContact" }, "description": "The wallet's book, as the record keeps it." },
+          "exported_at": { "$ref": "#/$defs/InstantIn" }
+        },
+        "required": ["contacts", "exported_at"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": { "rows": { "type": "array", "items": { "$ref": "#/$defs/ContactRow" } } },
+        "required": ["rows"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "parse"],
+      "notes": "The wallet's book as rows of contacts.csv, the one mapping every wallet uses (SPEC §9.2: a book is an export of contacts only). Each contact, in order: an object (`contacts[<i>] is an object`), no member but `root`, `endpoint`, `name`, `leaf`, `root_cert` and `added` (the first other, in sorted order: `contacts[<i>]: \"<m>\" is not a member of a wallet contact`), `root` and `endpoint` strings (`contacts[<i>]: <m> is required`), the rest strings when present (`contacts[<i>]: <m> is a string`). A row carries the root, the endpoint, the name (empty when absent), the leaf and the root certificate (null when absent), and `added` (the export's time when absent); its other columns are what a contact the wallet keeps is: an empty `display_name`, `status` `active`, `was_active` true, and nothing granted either way. The rows are not checked here: export_write holds each to the reader's rules."
     }
   }
 }
