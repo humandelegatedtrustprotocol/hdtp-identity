@@ -267,6 +267,18 @@ material behind treats the strings it passes and receives as its own to clear.
 
 **The KDF's range, at both ends, on both paths.** `m_kib` 8192–2097152 (8 MiB–2 GiB), `t` 1–16, `p` 1–16, `name` `argon2id`; anything else is `{"error": "vault", "why": "kdf parameters out of range"}` (or `"unknown kdf"`), from `vault_seal` and `vault_open` alike, through one parser. The parameters are read out of the document **before the passphrase is tested**, so an unbounded reader hands an attacker's file a 256 GiB allocation or a derivation that never returns, and an unbounded writer seals the person's root behind a KDF a laptop brute-forces. A value that does not fit in 32 bits is out of range, never truncated.
 
+### 6.1 The ledger — what signing would mean
+
+`ledger_check` is SPEC §9's issuance rules over the record's ledger, answered as facts and not as
+prose: whether a leaf is live and where, whether this endpoint or its host has been issued to, the
+`notBefore` the next leaf must follow, and which move notice applies (`renew`, `move`, `new_host`,
+`move_back`, or `no_ledger` when the signer has no record to read). `wallet_issue` applies these
+rules; the `pact` CLI applies them to a card-held root, where there is no key to hand the core; a
+wallet page and a host render the notice from them. Every entry is read before any rule is, and one
+that does not read is refused, never skipped.
+
+{{table:ledger}}
+
 ## 7. Gates
 
 1. `cargo test` and `go test ./...` each: rebuild the seven vector certificates byte for byte from
