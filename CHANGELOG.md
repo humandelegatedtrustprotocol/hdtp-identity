@@ -41,6 +41,16 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 - `deny.toml`, and a `cargo deny check licenses` step in `gate.sh`, which needs
   `cargo install cargo-deny --locked`.
 
+- SPEC 2.2.0: `version` answers spec 2.2.0, and `js/musts.json` holds each of its 81 MUSTs (29 new,
+  9.#2 re-read). `WriteExportZip` refuses a message whose file is not among those exported.
+- `book_rows` (contract §6.2): the wallet's book as `contacts.csv` rows, the one mapping the `pact`
+  CLI's `contacts export` and the Go port's `ContactRowOf` use.
+- Arguments holding half a UTF-16 surrogate pair are refused by every function of both ports, in one
+  answer, before anything reads them (CONTRACT §0).
+- The release carries `pact-identity-exportcorpus-X.Y.Z.tgz`: `go/exportcorpus`'s `cases.json` and
+  zips under `exportcorpus/`, listed in `manifest.json` and `SHA256SUMS`, and checked against the tag
+  by `make verify-release`.
+
 ## 0.2.0 — 2026-09-27
 
 The first release of pact-identity as a repository of its own (split from the umbrella
