@@ -2,10 +2,66 @@
 
 The PACT 2.0 identity core: the certificate profile and chain validation of SPEC §14, the sealed
 envelopes of §13 in both forms, the §3 card codec, PKCS #10 requests and issuance per §9, the
-receiving rules as one pure decision function, and the vault. One Rust crate, compiled to
-WebAssembly for the browser, Cloudflare Workers and Node, and natively for the `pact` CLI; an
-independent Go port under `go/` that the same vectors tie to it. `CONTRACT.md` is the boundary every
-port presents: bytes in, JSON out, no state.
+receiving rules as one pure decision function, and the vault and derived roots of §2.1 and §9. One
+Rust crate, compiled to WebAssembly for the browser, Cloudflare Workers and Node, and natively for
+the `pact` CLI; an independent Go port under `go/` that the same vectors tie to it.
+
+It is the part of PACT that every host shares: a self-hosted node (pact-gateway, through the Go
+port) and a hosted platform (through the Wasm) call the same functions and get the same answers.
+Nothing here knows about any one host.
+
+## Using it
+
+**The contract.** `CONTRACT.md` is the boundary every port presents: a function name and JSON
+arguments in, JSON out, no state — `call(name, args)` in Wasm and JavaScript, `Call(name, args)` in
+Go. It is rendered from `contract/contract.json`, which both ports are validated against on every
+gate run (`js/parity.mjs`), so the document, the Rust core and the Go port describe one contract.
+
+**Go.** The module is `github.com/pact-cloud/pact-identity/go` (package `pactidentity`). The
+repository is private, so Go must fetch it over SSH and not through the public proxy:
+
+```sh
+export GOPRIVATE=github.com/pact-cloud/*
+git config --global url.git@github.com:.insteadOf https://github.com/   # or per process: GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.git@github.com:.insteadOf GIT_CONFIG_VALUE_0=https://github.com/
+go get github.com/pact-cloud/pact-identity/go@v0.2.0
+```
+
+```go
+import pactidentity "github.com/pact-cloud/pact-identity/go"
+
+out := pactidentity.Call("version", json.RawMessage(`{}`))
+```
+
+Go versions are the tags `go/vX.Y.Z` (the module lives in `go/`); each names the same commit as
+`vX.Y.Z`.
+
+**Wasm.** Take the release asset, not a build of your own: the bytes are pinned, and only the pinned
+bytes are what every other host runs. Each GitHub release `vX.Y.Z` carries:
+
+| Asset | What |
+|---|---|
+| `pact-identity-wasm-web-X.Y.Z.tgz` | `pkg-web/` exactly as pinned: the `.wasm`, its wasm-bindgen glue and types, `package.json`, `.gitignore` |
+| `manifest.json` | `js/manifest.json` of the tagged commit (the sha256 and size of every package file, the builder image by digest, the source inputs), plus `version`, `commit`, `tags`, `protocol_commit` and the sha256 and size of every other asset |
+| `SHA256SUMS` | every other asset, `<hex>  <name>` |
+| `pact-X.Y.Z-darwin-arm64`, `-linux-arm64`, `-linux-amd64` | the `pact` CLI. The Linux builds link `libpcsclite` dynamically (the PIV feature): `apt install libpcsclite1` |
+
+```sh
+gh release download v0.2.0 -R pact-cloud/pact-identity -D vendor/
+( cd vendor && shasum -a 256 -c SHA256SUMS ) && tar -xzf vendor/pact-identity-wasm-web-0.2.0.tgz -C vendor/
+```
+
+Check every unpacked file against `manifest.json`'s `files["pkg-web/<name>"]` before shipping it.
+`js/worker.mjs` is the recipe for Cloudflare Workers (the web package over a `CompiledWasm`
+module), `js/index.mjs` for Node and the browser.
+
+**Versions.** One semver version for the crates, the Go module and the Wasm package, written in six
+places and held equal by `node scripts/version.mjs --check` (a gate step); what each release changed
+is in `CHANGELOG.md`. Before 1.0.0 a minor version may change the contract. `make release
+VERSION=X.Y.Z` cuts a release locally (gate, version commit, pin, tags, assets in `dist/X.Y.Z/`),
+`make publish VERSION=X.Y.Z` pushes it and creates the GitHub release, and `make verify-release
+VERSION=X.Y.Z` downloads a published one and checks it — against its sums and manifest, against
+the pin at its tag, and against a fresh container build of that tag. Nothing leaves the machine
+before `make publish`; there is no CI (see "The gate is local").
 
 | Path | What |
 |---|---|
@@ -14,6 +70,8 @@ port presents: bytes in, JSON out, no state.
 | `js/` | loaders (`index.mjs` for Node and the browser, `worker.mjs` for Workers), `build.sh`, `reproduce.sh` (the canonical, containerised build), `manifest.json` + `verify.mjs`, and the Node proofs `check.mjs` and `intrude.mjs` |
 | `go/` | the Go port and its `pact-identity-go` adapter binary (built by the Go side; one JSON request per line on stdin, one answer per line out) |
 | `contract/` | `contract.json` — the boundary as data, and the source `CONTRACT.md` is rendered from (`render.mjs`); `schema.mjs` + `schema.test.mjs`, the JSON Schema subset it is written in; `contract.mjs`, which judges one answer by it |
+| `scripts/` | the release: `release.sh`, `publish.sh`, `verify-release.sh` (behind the `Makefile`), `build-cli.sh`, `version.mjs`, `changelog.mjs`, `release-manifest.mjs`, `verify-assets.mjs`; `js/release.test.mjs` runs them against stubs |
+| `githooks/` | this repository's hooks (`git config core.hooksPath githooks`): rustfmt and clippy at commit, the pin's state after it, `gate.sh` at push |
 
 ## Build and prove
 
@@ -48,7 +106,9 @@ node contract/render.mjs --check  # CONTRACT.md is what contract/contract.json a
 node js/musts.mjs               # every MUST in pact-protocol/SPEC.md names something that holds it, or says who does
 node js/record.mjs             # regenerate PROOFS.md: every MUST with its holder, every parity case (it prints both counts)
 node js/record.mjs --check     # ...and fail if it is stale (what gate.sh runs)
-                                # and why: 49 MUSTs, 36 held here, 13 declared elsewhere
+node js/check-no-1x.mjs         # no tracked file carries a PACT 1.x name; js/pact1x-markers.txt is
+                                # pact-protocol's list, byte for byte (`--selftest` proves the matcher)
+node scripts/version.mjs --check  # the one version, in all six places it is written
 ```
 
 Toolchain: Rust 1.92, `wasm-pack` 0.15 (installs a matching `wasm-bindgen`), the
@@ -74,9 +134,9 @@ included — into panic locations where one without them writes `/rustc/<commit>
 fixed in `js/build.sh` by remapping. The first is fixed the usual way, by pinning the build
 platform: `js/reproduce.sh` runs `js/build.sh` in `rust:1.92.0` named BY DIGEST
 on `linux/arm64`, with wasm-pack fetched from its release and checked against a hash, and
-`js/manifest.json` records that builder beside the hash. CI rebuilds it on every push, on a hosted
-runner that is not the machine the pin was written on, and fails if a byte differs.
-`rust-toolchain.toml` pins the compiler for everything else.
+`js/manifest.json` records that builder beside the hash. `make verify-release` rebuilds it from a
+published release's tag and fails if a byte differs; nothing rebuilds it on another machine on every
+push. `rust-toolchain.toml` pins the compiler for everything else.
 
 **Style, then commit, then compile — in that order, and the tooling holds it.** The pin is of a
 COMMIT: `js/reproduce.sh` builds `git archive HEAD`, never the working tree, and `--pin` refuses
@@ -84,8 +144,8 @@ while a build input (`js/inputs.mjs` has the list) is uncommitted. `js/manifest.
 identity of the inputs it was built from, and `node js/verify.mjs` compares it with HEAD's before
 it hashes a byte — so "the source moved and the pin did not" is learned in a second, locally,
 instead of from a container five minutes after a push, or (as on 2026-09-19) not at all. Style
-cannot move the pin after the fact because style is never applied after the fact: the umbrella's
-pre-commit hook runs rustfmt (`rustfmt.toml`) over staged Rust and re-stages it, then requires
+cannot move the pin after the fact because style is never applied after the fact: the
+pre-commit hook (`githooks/pre-commit`) runs rustfmt (`rustfmt.toml`) over staged Rust and re-stages it, then requires
 clippy with warnings as errors; its post-commit hook says when a commit has left the pin behind;
 and the pre-push hook runs `gate.sh`, which refuses a stale pin. This exists because the order
 was once the other way round: a clippy style lint nobody had ever run was obeyed after a pin, the
@@ -95,27 +155,25 @@ matching. After a change under `crates/`:
 ```sh
 git commit …                    # the hook styles it and lints it
 sh js/reproduce.sh --pin        # the canonical build of THAT commit; writes js/manifest.json
-git commit js/manifest.json …   # hosts take the bytes from a release (make release)
+git commit js/manifest.json …   # a release (make release) re-pins its own version commit the same way
 ```
 
-**The gate is local, and CI holds one job.** `sh gate.sh` is the list above as one command — all
+**The gate is local, and there is no CI.** `sh gate.sh` is the list above as one command — all
 of it except the two builds, since the Wasm that ships is the pinned one and a native rebuild would
 write this machine's bytes over it. It reads the private sibling `pact-protocol` (SPEC.md, the seed
 under `vectors/lib`), which a runner's `GITHUB_TOKEN` cannot see, and the owner's decision
 (2026-09-20) is that no CI credential will be made for it: this project builds, gates and deploys
-from the owner's machine. So the umbrella's pre-push hook runs `gate.sh` whenever a push touches
-`pact-identity/` or moves the `pact-protocol` pointer. A `gate` job used to hold this list in
-`.github/workflows/pact-identity.yml` and failed at its first step on every run it ever had; it is
-gone, and the first real run of the list found a clippy error that job had never once reported.
-What CI still runs is `reproduce`, the container rebuild described above, which needs no secret.
+from the owner's machine. So this repository's pre-push hook runs `gate.sh` on every push, and
+`make release` runs it before a version is cut. A CI job once held this list and failed at its
+first step on every run it ever had; the first real run of the list found a clippy error that job
+had never once reported. The gate needs `../pact-protocol` checked out beside this repository.
 
-**Workers.** Workers Builds has no Rust toolchain, so the gateway vendors the built `js/pkg-web`
-files and checks `pact_identity_wasm_bg.wasm` against `js/manifest.json` with `node js/verify.mjs
-<file>` before it ships. wasm-bindgen's bundler target does not run on workerd; the web package does,
+**Workers.** Workers Builds has no Rust toolchain, so a Worker vendors the released `pkg-web`
+files and checks them against the release's `manifest.json` before it ships (`node js/verify.mjs
+<file>` does it for one file against this tree's `js/manifest.json`). wasm-bindgen's bundler target does not run on workerd; the web package does,
 initialised synchronously over a `CompiledWasm` module — `js/worker.mjs` is the recipe, with
 `{ "type": "CompiledWasm", "globs": ["**/*.wasm"], "fallthrough": true }` in `wrangler.jsonc`. That
-path is documented from the gateway's own notes and has not been executed under workerd from this
-repository; phase 2.0 runs it through the gateway's vitest pool.
+path has not been executed under workerd from this repository; a host that runs it tests it there.
 
 **Browser.** `js/index.mjs` picks the Node package under Node and otherwise the web package, fetching
 the `.wasm` beside it. `wasm-pack test --headless --chrome crates/pact-identity-wasm` runs the
