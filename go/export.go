@@ -32,6 +32,7 @@ const (
 	ExportMediaMax       = 5 * 1024 * 1024
 	ExportBodyMax        = 16 * 1024
 	ExportNameMax        = 200
+	ExportAttachmentsMax = 1
 	exportVersion        = 2
 )
 
@@ -504,8 +505,13 @@ func checkManifest(doc map[string]any, order []string, owner string) (*exportMan
 		return nil, manifestAt(fmt.Sprintf("owner: the file is %s's, not this identity's (%s)", fileOwner, owner))
 	}
 	for _, m := range []string{"owner_name", "tool"} {
-		if _, isText := doc[m].(string); !isText {
+		text, isText := doc[m].(string)
+		if !isText {
 			return nil, manifestAt(m + " is a string")
+		}
+		// SPEC §9.2, key material: every string member of the manifest, as every cell.
+		if holdsPrivateKey(text) {
+			return nil, manifestAt(m + " holds a private key")
 		}
 	}
 	if at, isText := doc["exported_at"].(string); !isText {
@@ -549,15 +555,14 @@ func checkManifest(doc map[string]any, order []string, owner string) (*exportMan
 		if !has {
 			continue
 		}
-		if !contains(manifestListed, name) && !isExportMedia(name) {
+		// SPEC 2.2.2, 9.2#11: files lists the text members only; a media member is bound by its
+		// name, the sha256 of its bytes, and counted by counts.media.
+		if !contains(manifestListed, name) {
 			return nil, manifestAt("files: " + jsonString(name) + " is not a member an export lists")
 		}
 		hash, isText := v.(string)
 		if !isText || !isExportHash(hash) {
 			return nil, manifestAt("files: " + name + ": not a lowercase hex sha256")
-		}
-		if isExportMedia(name) && name[6:] != hash {
-			return nil, manifestAt("files: " + name + ": the hash is not the name")
 		}
 		files[name] = hash
 	}
@@ -729,7 +734,7 @@ func exportRead(directory []ExportEntry, manifestText, contactsCSV, threadsCSV *
 		return nil, err
 	}
 	for _, e := range directory {
-		if e.Name == "manifest.json" || e.Name == "media/" {
+		if e.Name == "manifest.json" || e.Name == "media/" || isExportMedia(e.Name) {
 			continue
 		}
 		if _, listed := m.files[e.Name]; !listed {
@@ -859,6 +864,8 @@ type exportEnd struct {
 	messagesSHA256                   *string
 	lines                            uint64
 	ids, msgIDs, replyTos, mediaSeen []string
+	// media is the file's media members, by hash: export_read's media. Each must be named.
+	media []string
 }
 
 // exportReadEnd is §9.2's cross-batch rules, once the host has streamed messages.jsonl.
@@ -894,15 +901,10 @@ func exportReadEnd(manifestText string, e exportEnd) error {
 			return exportRefuse("messages.jsonl: reply_to " + jsonString(r) + " names no message in the file")
 		}
 	}
-	names := make([]string, 0, len(m.files))
-	for k := range m.files {
-		names = append(names, k)
-	}
-	sort.Strings(names)
 	mediaSeen := setOf(e.mediaSeen)
-	for _, name := range names {
-		if isExportMedia(name) && !mediaSeen.has(name[6:]) {
-			return exportRefuse(name + ": nothing names it")
+	for _, h := range e.media {
+		if !mediaSeen.has(h) {
+			return exportRefuse("media/" + h + ": nothing names it")
 		}
 	}
 	return nil
@@ -1032,7 +1034,7 @@ func checkMessage(doc map[string]any, names *messageNames) (map[string]any, *mem
 	if !isList {
 		return nil, &memberRefusal{"attachments", "not a list"}
 	}
-	if len(attachments) > 1 {
+	if len(attachments) > ExportAttachmentsMax {
 		return nil, &memberRefusal{"attachments", "more than one attachment: a message carries at most one file"}
 	}
 	kept := []any{}
@@ -1303,6 +1305,13 @@ func exportWrite(owner, ownerName string, exportedAt time.Time, tool string, con
 	if !IsFingerprint(owner) {
 		return nil, exportRefuse("owner is not a fingerprint")
 	}
+	// SPEC 2.2.2, 9.2#28: the owner's and the host's own strings are refused, naming the member —
+	// there is nothing of a contact's to leave out.
+	for _, m := range [][2]string{{"owner_name", ownerName}, {"tool", tool}} {
+		if holdsPrivateKey(m[1]) {
+			return nil, exportRefuse(m[0] + " holds a private key")
+		}
+	}
 	var rows []csvRowSort
 	written := strSet{}
 	for i, c := range contacts {
@@ -1386,6 +1395,8 @@ func exportWrite(owner, ownerName string, exportedAt time.Time, tool string, con
 	if threadsCSV != nil {
 		files["threads.csv"] = sha256Hex([]byte(*threadsCSV))
 	}
+	// The media are counted, never listed: files holds the text members alone (SPEC 2.2.2, 9.2#11).
+	hashes := strSet{}
 	for i, item := range media {
 		o, _ := item.(map[string]any)
 		hash, _ := o["hash"].(string)
@@ -1395,10 +1406,10 @@ func exportWrite(owner, ownerName string, exportedAt time.Time, tool string, con
 		if s, ok := asU64(o["size"]); !ok || s > ExportMediaMax {
 			return nil, exportRefuse(fmt.Sprintf("media[%d]: size is a number of bytes up to %d", i, ExportMediaMax))
 		}
-		if _, dup := files["media/"+hash]; dup {
+		if hashes.has(hash) {
 			return nil, exportRefuse(fmt.Sprintf("media[%d]: appears twice", i))
 		}
-		files["media/"+hash] = hash
+		hashes.add(hash)
 	}
 	partial := map[string]any{
 		"pact_export": int64(exportVersion), "owner": owner, "owner_name": ownerName,
@@ -1435,6 +1446,12 @@ func exportMerge(held, rows []any) (write []any, keep []any, conflicts []any, er
 		}
 	}
 	write, keep, conflicts = []any{}, []any{}, []any{}
+	conflict := func(root, f string, h, r map[string]any) {
+		was, now := h[f], r[f]
+		if now != nil && !mergeSame(was, now) {
+			conflicts = append(conflicts, map[string]any{"root": root, "field": f, "held": was, "row": now})
+		}
+	}
 	for i, v := range rows {
 		root, err := mergeRoot(v, "rows", i)
 		if err != nil {
@@ -1447,18 +1464,53 @@ func exportMerge(held, rows []any) (write []any, keep []any, conflicts []any, er
 			continue
 		}
 		if h["leaf"] == nil && r["leaf"] != nil {
-			write = append(write, v)
+			// The leaf that validated is taken; what the person decided about the contact is kept
+			// as held — a blocked contact stays blocked, the grants stay the person's — and each
+			// difference the file carried is a conflict.
+			for _, f := range decidedFields {
+				conflict(root, f, h, r)
+			}
+			w := make(map[string]any, len(r))
+			for k, x := range r {
+				w[k] = x
+			}
+			if h["status"] == "blocked" {
+				w["status"] = "blocked"
+			}
+			if p, has := h["permissions"]; has && p != nil {
+				w["permissions"] = p
+			}
+			write = append(write, w)
 			continue
 		}
-		for _, f := range pinFields {
-			was, now := h[f], r[f]
-			if now != nil && !bytes.Equal(Canonical(was), Canonical(now)) {
-				conflicts = append(conflicts, map[string]any{"root": root, "field": f, "held": was, "row": now})
-			}
+		for _, f := range append(append([]string{}, pinFields...), decidedFields...) {
+			conflict(root, f, h, r)
 		}
 		keep = append(keep, root)
 	}
 	return write, keep, conflicts, nil
+}
+
+// decidedFields are what the person decided about a contact the host holds: never taken from a file.
+var decidedFields = []string{"status", "permissions"}
+
+// mergeSame is two values alike: a list of names compared as a set, anything else as JSON.
+func mergeSame(a, b any) bool {
+	x, xl := a.([]any)
+	y, yl := b.([]any)
+	if xl && yl {
+		sx, sy := make([]string, len(x)), make([]string, len(y))
+		for i, v := range x {
+			sx[i] = string(Canonical(v))
+		}
+		for i, v := range y {
+			sy[i] = string(Canonical(v))
+		}
+		sort.Strings(sx)
+		sort.Strings(sy)
+		return strings.Join(sx, "\x00") == strings.Join(sy, "\x00") && len(sx) == len(sy)
+	}
+	return bytes.Equal(Canonical(a), Canonical(b))
 }
 
 // vaultContactMembers are the members of the wallet's own copy of a contact (CONTRACT §6).

@@ -128,13 +128,15 @@ func redirectAllowed(redirect string) (string, error) {
 	} else {
 		host = authority
 	}
+	// Lower-case normal form (CONTRACT §3.1): an IPv6 literal's hex in lower case, and a name of
+	// labels none of which is empty.
 	hostOK := host != ""
 	if hostOK && strings.HasPrefix(host, "[") {
 		inner := host[1 : len(host)-1]
 		hostOK = inner != ""
 		for i := 0; i < len(inner); i++ {
 			c := inner[i]
-			if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F' || c == ':' || c == '.') {
+			if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c == ':' || c == '.') {
 				hostOK = false
 			}
 		}
@@ -142,6 +144,12 @@ func redirectAllowed(redirect string) (string, error) {
 		for i := 0; i < len(host); i++ {
 			c := host[i]
 			if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '.') {
+				hostOK = false
+			}
+		}
+		// A name of labels none of which is empty: no leading, trailing or doubled dot.
+		for _, label := range strings.Split(host, ".") {
+			if label == "" {
 				hostOK = false
 			}
 		}
@@ -288,18 +296,54 @@ func SigningRequestCheck(request map[string]any, origin string, now time.Time, r
 	return &SigningChecked{CSR: csrText, Redirect: text["redirect"], Purpose: purpose, ValidDays: n}, nil
 }
 
-// parseInstantZ reads an instant as the Rust core's parse_rfc3339 does: UTC only (`Z` or `z`), a
-// fraction of a second allowed and dropped. time.RFC3339 alone would also take an offset.
+// parseInstantZ reads an instant in the one grammar both ports read everywhere (SPEC 2.2.2; the
+// Rust core's parse_rfc3339): `YYYY-MM-DDTHH:MM:SS`, an optional `.` and one or more digits (the
+// fraction is dropped: the boundary is whole seconds), and `Z` — upper-case T and Z only, no offset,
+// `.` alone as the fraction separator. time.Parse is not the reader: it takes an offset, and a `,`
+// before the fraction.
 func parseInstantZ(s string) (time.Time, bool) {
-	if len(s) < 20 || (s[len(s)-1] != 'Z' && s[len(s)-1] != 'z') || (s[10] != 'T' && s[10] != 't') {
+	if len(s) < 20 || s[4] != '-' || s[7] != '-' || s[10] != 'T' || s[13] != ':' || s[16] != ':' {
 		return time.Time{}, false
 	}
-	if s[10] != 'T' || s[len(s)-1] != 'Z' {
-		s = s[:10] + "T" + s[11:len(s)-1] + "Z"
+	num := func(from, to int) (int, bool) {
+		n := 0
+		for i := from; i < to; i++ {
+			if s[i] < '0' || s[i] > '9' {
+				return 0, false
+			}
+			n = n*10 + int(s[i]-'0')
+		}
+		return n, true
 	}
-	t, err := time.Parse(time.RFC3339Nano, s)
-	if err != nil {
+	i := 19
+	if s[i] == '.' {
+		i++
+		start := i
+		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+			i++
+		}
+		if i == start {
+			return time.Time{}, false
+		}
+	}
+	if i+1 != len(s) || s[i] != 'Z' {
 		return time.Time{}, false
 	}
-	return time.Unix(t.Unix(), 0).UTC(), true
+	var f [6]int
+	for k, r := range [6][2]int{{0, 4}, {5, 7}, {8, 10}, {11, 13}, {14, 16}, {17, 19}} {
+		n, ok := num(r[0], r[1])
+		if !ok {
+			return time.Time{}, false
+		}
+		f[k] = n
+	}
+	y, mo, d, h, mi, sec := f[0], f[1], f[2], f[3], f[4], f[5]
+	if mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59 || sec > 59 {
+		return time.Time{}, false
+	}
+	t := time.Date(y, time.Month(mo), d, h, mi, sec, 0, time.UTC)
+	if t.Year() != y || int(t.Month()) != mo || t.Day() != d {
+		return time.Time{}, false
+	}
+	return t, true
 }

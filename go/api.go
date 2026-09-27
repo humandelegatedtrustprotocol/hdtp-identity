@@ -17,7 +17,7 @@ import (
 // writes it here and holds it equal to the crates' and the Wasm package's).
 const (
 	ModuleVersion = "0.3.2"
-	SpecVersion   = "2.2.1"
+	SpecVersion   = "2.2.2"
 )
 
 type apiError struct {
@@ -62,11 +62,12 @@ func timeIn(s *string, name string) (time.Time, error) {
 	if s == nil {
 		return time.Time{}, errArg(name + " is required")
 	}
-	t, err := time.Parse(time.RFC3339, *s)
-	if err != nil {
+	// The one grammar (parseInstantZ): time.RFC3339 took an offset `now` in every function.
+	t, ok := parseInstantZ(*s)
+	if !ok {
 		return time.Time{}, parseError{"not an RFC 3339 instant: " + *s}
 	}
-	return t.Truncate(time.Second), nil
+	return t, nil
 }
 
 // A caller's arguments that will not read are a caller mistake, so they answer `bad_request` here

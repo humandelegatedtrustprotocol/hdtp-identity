@@ -1,11 +1,12 @@
 package exportcorpus
 
 // Build makes the whole corpus, deterministically: the same bytes on every run, so a test can hold
-// the committed files to it. Every member is stored, never deflated — a compressor's output may
-// change with the toolchain, and a stored member's bytes are its own — and every time and serial is
-// fixed. The valid export and the book are what the library's own writer makes (export_write,
-// export_write_messages, export_manifest); each hostile file is the valid export with ONE thing
-// wrong, and cases.json names the refusal it must produce.
+// the committed files to it. Every member is stored — a compressor's output may change with the
+// toolchain, and a stored member's bytes are its own — except the one member of each bound's file,
+// deflated so the repository holds kilobytes, not megabytes (the drift test would name a toolchain
+// whose deflate changed); every time and serial is fixed. The valid export and the book are what the
+// library's own writer makes (export_write, export_write_messages, export_manifest); each hostile
+// file is the valid export with ONE thing wrong, and cases.json names the refusal it must produce.
 
 import (
 	"archive/zip"
@@ -76,6 +77,9 @@ type entry struct {
 	mode      fs.FileMode // 0: a regular file, 0644
 	// size, when set, is the uncompressed size the headers state instead of the true one.
 	size *uint64
+	// deflate compresses the member: the files of a bound's size, which stored would put megabytes
+	// into the repository. Everything else is stored, its bytes its own.
+	deflate bool
 }
 
 func seed(label string) []byte {
@@ -111,6 +115,18 @@ func zipOf(entries []entry) ([]byte, error) {
 	var buf bytes.Buffer
 	w := zip.NewWriter(&buf)
 	for _, e := range entries {
+		if e.deflate {
+			fh := &zip.FileHeader{Name: e.name, Method: zip.Deflate, Modified: modified}
+			fh.SetMode(0o644)
+			fw, err := w.CreateHeader(fh)
+			if err != nil {
+				return nil, err
+			}
+			if _, err := fw.Write(e.data); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		size := uint64(len(e.data))
 		if e.size != nil {
 			size = *e.size
@@ -210,17 +226,13 @@ func (x export) files() map[string]any { return x.manifest["files"].(map[string]
 
 func (x export) counts() map[string]any { return x.manifest["counts"].(map[string]any) }
 
-// relist sets manifest.files to the true hash of every member but the manifest and media/.
+// relist sets manifest.files to the true hash of every text member: a media member is bound by its
+// name and counted, never listed (SPEC 2.2.2).
 func (x *export) relist() {
 	files := map[string]any{}
 	for _, e := range x.members {
-		if e.name != "media/" {
+		if !strings.HasPrefix(e.name, "media/") {
 			files[e.name] = sum(e.data)
-		}
-	}
-	for name := range files {
-		if strings.HasPrefix(name, "media/") {
-			files[name] = name[len("media/"):]
 		}
 	}
 	x.manifest["files"] = files
@@ -462,6 +474,36 @@ func Build() (map[string][]byte, error) {
 			bharatRow = i + 1
 		}
 	}
+	// Chen's row, found the same way: the only name that begins with the HYPERLINK formula.
+	chenRow := 0
+	for i, l := range strings.SplitAfter(contactsCSV, "\r\n") {
+		if strings.Contains(l, "HYPERLINK") {
+			chenRow = i + 1
+		}
+	}
+	// deflated is the variant's members and manifest with the named member compressed.
+	deflated := func(v *export, name string) []entry {
+		e := withManifest(v)
+		for i := range e {
+			if e[i].name == name {
+				e[i].deflate = true
+			}
+		}
+		return e
+	}
+	// swapMedia puts data where the one media file was: the member named by its hash, the
+	// attachment naming it and stating its size.
+	swapMedia := func(v *export, data []byte) {
+		for i := range v.members {
+			if v.members[i].name == media {
+				v.members[i] = entry{name: "media/" + sum(data), data: data}
+			}
+		}
+		m := line(1)
+		a := m["attachments"].([]any)[0].(map[string]any)
+		a["file"], a["size"] = sum(data), len(data)
+		withLine(v, 1, m)
+	}
 	sec1 := append([]byte{0x30, 0x25, 0x02, 0x01, 0x01, 0x04, 0x20}, seed("sec1")...)
 
 	steps := []struct {
@@ -520,9 +562,9 @@ func Build() (map[string][]byte, error) {
 				v.set("contacts.csv", []byte(strings.Replace(contactsCSV, "Bharat S.", "Bharat Z.", 1)))
 				return nil
 			}},
-		{"media-name-not-hash.zip", "manifest.json lists a media file under another hash", "core",
-			"manifest.json: files: " + media + ": the hash is not the name",
-			func(v *export) []entry { v.files()[media] = sum([]byte("other")); return nil }},
+		{"media-listed-in-files.zip", "manifest.json lists a media member in files, where only text members go", "core",
+			`manifest.json: files: "` + media + `" is not a member an export lists`,
+			func(v *export) []entry { v.files()[media] = media[len("media/"):]; return nil }},
 		{"media-bytes-not-name.zip", "a media file whose bytes are not its name", "host", media + ": its sha256 is not its name",
 			func(v *export) []entry { v.set(media, []byte("%PDF-1.7\nnot the bytes named\n")); return nil }},
 		{"count-mismatch.zip", "counts that are not what the file holds", "core", "manifest.json: counts: contacts is 5, and contacts.csv holds 4",
@@ -641,6 +683,55 @@ func Build() (map[string][]byte, error) {
 				v.set("messages.jsonl", []byte(strings.Replace(string(v.get("messages.jsonl")), "two lines", "2 lines", 1)))
 				return nil
 			}},
+		// SPEC 9.2#10, one file per bound, each member deflated so the repository holds kilobytes;
+		// its headers state its true size, so the directory is where a reader first meets it.
+		{"contacts-over-4-mib.zip", "a contacts.csv one byte over 4 MiB", "core",
+			fmt.Sprintf(`entry "contacts.csv": %d bytes, over the %d an export allows`, 4<<20+1, 4<<20),
+			func(v *export) []entry {
+				v.set("contacts.csv", append([]byte(contactsCSV), bytes.Repeat([]byte("x"), 4<<20+1-len(contactsCSV))...))
+				v.relist()
+				return deflated(v, "contacts.csv")
+			}},
+		{"contacts-over-5000-rows.zip", "a contacts.csv of 5001 rows, well under 4 MiB", "core", "contacts.csv: over 5000 rows",
+			func(v *export) []entry {
+				header := strings.SplitAfter(contactsCSV, "\r\n")[0]
+				v.set("contacts.csv", []byte(header+strings.Repeat("x\r\n", 5001)))
+				v.counts()["contacts"] = 5001
+				v.relist()
+				return deflated(v, "contacts.csv")
+			}},
+		{"threads-over-16-mib.zip", "a threads.csv one byte over 16 MiB", "core",
+			fmt.Sprintf(`entry "threads.csv": %d bytes, over the %d an export allows`, 16<<20+1, 16<<20),
+			func(v *export) []entry {
+				t := v.get("threads.csv")
+				v.set("threads.csv", append(append([]byte{}, t...), bytes.Repeat([]byte("x"), 16<<20+1-len(t))...))
+				v.relist()
+				return deflated(v, "threads.csv")
+			}},
+		{"media-over-5-mib.zip", "a media file one byte over 5 MiB, named by its hash and attached", "core",
+			fmt.Sprintf(`entry "media/%s": %d bytes, over the %d an export allows`, sum(bytes.Repeat([]byte("m"), 5<<20+1)), 5<<20+1, 5<<20),
+			func(v *export) []entry {
+				big := bytes.Repeat([]byte("m"), 5<<20+1)
+				swapMedia(v, big)
+				return deflated(v, "media/"+sum(big))
+			}},
+		// SPEC 9.2#15: a certificate outside §14.1's profile. Chen's own leaf where Chen's root
+		// certificate goes: a real certificate, of Chen's, and not a root.
+		{"root-cert-not-a-root.zip", "a contact whose root_cert is a leaf, not a root of §14.1's profile", "core",
+			fmt.Sprintf("contacts.csv: row %d, column root_cert: not a root of §14.1's profile", chenRow),
+			func(v *export) []entry {
+				lines := strings.SplitAfter(contactsCSV, "\r\n")
+				c := strings.Split(lines[chenRow-1], ",")
+				c[len(c)-2] = c[len(c)-3]
+				lines[chenRow-1] = strings.Join(c, ",")
+				v.set("contacts.csv", []byte(strings.Join(lines, "")))
+				v.relist()
+				return nil
+			}},
+		// SPEC 9.2#25: key material in a media file. Only a host reading the bytes can see it.
+		{"media-is-a-key.zip", "a media file whose bytes are a PKCS #8 private key, named by its hash and attached", "host",
+			"media/" + sum(pkcs8) + ": holds a private key",
+			func(v *export) []entry { swapMedia(v, pkcs8); return nil }},
 	}
 	for _, s := range steps {
 		if err := variant(s.file, s.about, s.stage, s.refusal, s.change); err != nil {

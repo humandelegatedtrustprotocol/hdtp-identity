@@ -127,10 +127,10 @@
       "refusal": "contacts.csv: its sha256 is not manifest.json's"
     },
     {
-      "file": "media-name-not-hash.zip",
-      "about": "manifest.json lists a media file under another hash",
+      "file": "media-listed-in-files.zip",
+      "about": "manifest.json lists a media member in files, where only text members go",
       "stage": "core",
-      "refusal": "manifest.json: files: media/e6c8d0d8cfd770fc7f214bffb285c69f88546b90c4810c3a7b8a463569bf0ca5: the hash is not the name"
+      "refusal": "manifest.json: files: \"media/e6c8d0d8cfd770fc7f214bffb285c69f88546b90c4810c3a7b8a463569bf0ca5\" is not a member an export lists"
     },
     {
       "file": "media-bytes-not-name.zip",
@@ -251,6 +251,42 @@
       "about": "messages.jsonl changed after the manifest hashed it",
       "stage": "core",
       "refusal": "messages.jsonl: its sha256 is not manifest.json's"
+    },
+    {
+      "file": "contacts-over-4-mib.zip",
+      "about": "a contacts.csv one byte over 4 MiB",
+      "stage": "core",
+      "refusal": "entry \"contacts.csv\": 4194305 bytes, over the 4194304 an export allows"
+    },
+    {
+      "file": "contacts-over-5000-rows.zip",
+      "about": "a contacts.csv of 5001 rows, well under 4 MiB",
+      "stage": "core",
+      "refusal": "contacts.csv: over 5000 rows"
+    },
+    {
+      "file": "threads-over-16-mib.zip",
+      "about": "a threads.csv one byte over 16 MiB",
+      "stage": "core",
+      "refusal": "entry \"threads.csv\": 16777217 bytes, over the 16777216 an export allows"
+    },
+    {
+      "file": "media-over-5-mib.zip",
+      "about": "a media file one byte over 5 MiB, named by its hash and attached",
+      "stage": "core",
+      "refusal": "entry \"media/9ee5aced4ca5b12326015a106f41bef6e064d0fbbfd2a495dc8089af334e337a\": 5242881 bytes, over the 5242880 an export allows"
+    },
+    {
+      "file": "root-cert-not-a-root.zip",
+      "about": "a contact whose root_cert is a leaf, not a root of §14.1's profile",
+      "stage": "core",
+      "refusal": "contacts.csv: row 4, column root_cert: not a root of §14.1's profile"
+    },
+    {
+      "file": "media-is-a-key.zip",
+      "about": "a media file whose bytes are a PKCS #8 private key, named by its hash and attached",
+      "stage": "host",
+      "refusal": "media/40cbe3b252696642b19d5245e0a8d53b66f332b68155b48f2097f361902c5c67: holds a private key"
     }
   ]
 }

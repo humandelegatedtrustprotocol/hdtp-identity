@@ -93,7 +93,7 @@ pub fn message(doc: &Map<String, Value>, names: Option<&Lookup<'_>>) -> std::res
     }
     one_of("status", &STATUSES)?;
     let Some(attachments) = doc["attachments"].as_array() else { return Err((Some("attachments"), "not a list".into())) };
-    if attachments.len() > 1 {
+    if attachments.len() > super::ATTACHMENTS_MAX {
         return Err((Some("attachments"), "more than one attachment: a message carries at most one file".into()));
     }
     let mut kept = Vec::new();

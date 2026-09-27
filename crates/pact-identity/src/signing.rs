@@ -99,11 +99,15 @@ pub(crate) fn redirect_allowed(redirect: &str) -> std::result::Result<String, &'
             None => (authority, ""),
         }
     };
+    // Lower-case normal form (CONTRACT §3.1): an IPv6 literal's hex in lower case, and a name of
+    // labels none of which is empty — no leading, trailing or doubled dot.
     let host_ok = !host.is_empty()
         && if host.starts_with('[') {
-            host.len() > 2 && host[1..host.len() - 1].bytes().all(|c| c.is_ascii_hexdigit() || c == b':' || c == b'.')
+            host.len() > 2
+                && host[1..host.len() - 1].bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c) || c == b':' || c == b'.')
         } else {
             host.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-' || c == b'.')
+                && host.split('.').all(|l| !l.is_empty())
         };
     if !host_ok {
         return Err("the redirect's host is not in normal form");
@@ -344,6 +348,10 @@ mod tests {
             "http://localhost\\@evil.example/",
             "http://localhost/ r",
             "http://localhost/é",
+            "https://[2001:DB8::1]/r",
+            "https://node..alina.example/r",
+            "https://.alina.example/r",
+            "https://alina.example./r",
         ] {
             assert!(redirect_allowed(redirect).is_err(), "{redirect}");
         }
