@@ -430,6 +430,19 @@ func WriteExportZip(w io.Writer, in ExportInput, media func(hash string) (io.Rea
 			return err
 		}
 	}
+	// SPEC §9.2: an exporter never leaves out a file a message it exports carries. A message whose
+	// attachment is not among the files handed in is a reason to refuse the export, not to write it.
+	for _, msg := range in.Messages {
+		for _, a := range msg.Attachments {
+			held := false
+			for _, m := range in.Media {
+				held = held || m.Hash == a.File
+			}
+			if !held {
+				return fmt.Errorf("media/%s: message %s carries it, and it is not among the files to export", a.File, msg.ID)
+			}
+		}
+	}
 	if len(in.Media) > 0 {
 		if _, err := zw.CreateHeader(&zip.FileHeader{Name: "media/", Method: zip.Store, Modified: at}); err != nil {
 			return err
