@@ -87,6 +87,14 @@ func TestLedgerCheckRefusesAnEntryThatDoesNotRead(t *testing.T) {
 	if err == nil || err.Error() != "the record's ledger entry 1 does not read: not_before" {
 		t.Errorf("an unread entry: %v", err)
 	}
+	for _, tc := range [][2]string{{"root", ""}, {"root", "alina"}, {"endpoint", ""}} {
+		e := ledgerEntry(ledgerOther, ledgerB, days(-1), days(300))
+		raw := map[string]any{"root": e.Root, "endpoint": e.Endpoint, "not_before": e.NotBefore, "not_after": e.NotAfter, "issued_at": e.IssuedAt}
+		raw[tc[0]] = tc[1]
+		if err := ReadLedger([]any{raw}); err == nil || err.Error() != "the record's ledger entry 0 does not read: "+tc[0] {
+			t.Errorf("%s = %q: %v", tc[0], tc[1], err)
+		}
+	}
 	if err := ReadLedger(map[string]any{}); err == nil || err.Error() != "the record's ledger is a list" {
 		t.Errorf("a ledger that is not a list: %v", err)
 	}

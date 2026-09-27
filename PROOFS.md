@@ -7,9 +7,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed here that did not pass.
 
-Specification: **2.1.3**. **52** normative sentences, **553** cross-port parity cases over **40** guarded functions.
+Specification: **2.1.3**. **52** normative sentences, **558** cross-port parity cases over **40** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**41** functions, spec 2.1.3): **1106** answers held to the shape it declares, **0** did not. Of **81** declared error codes, **67** were produced by a case here; the rest are declared for a caller's benefit and no argument in this suite reaches them.
+Every answer of both ports is validated against `contract/contract.json` (**41** functions, spec 2.1.3): **1116** answers held to the shape it declares, **0** did not. Of **81** declared error codes, **67** were produced by a case here; the rest are declared for a caller's benefit and no argument in this suite reaches them.
 
 ## The 52 normative sentences of the specification
 
@@ -156,7 +156,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 553 cross-port parity cases
+## The 558 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -164,7 +164,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **553** cases, **0** disagreements, **40** of **40** functions compared whole on success.
+At the run that generated this file: **558** cases, **0** disagreements, **40** of **40** functions compared whole on success.
 
 ### `address_guard` — 32 cases · whole on success
 
@@ -507,7 +507,7 @@ At the run that generated this file: **553** cases, **0** disagreements, **40** 
 - leaf_tbs
 - leaf_tbs with no issuer
 
-### `ledger_check` — 27 cases · whole on success
+### `ledger_check` — 30 cases · whole on success
 
 - ledger_check: a renewal where the live leaf is
 - ledger_check: a move, not chosen
@@ -521,6 +521,9 @@ At the run that generated this file: **553** cases, **0** disagreements, **40** 
 - ledger_check: after the live leaf expired, the same endpoint
 - ledger_check: another root's live leaf is not this root's
 - ledger_check: the newest leaf expired, an older one did not
+- ledger_check: an entry whose root is empty
+- ledger_check: an entry whose root is no fingerprint
+- ledger_check: an entry whose endpoint is empty
 - ledger_check: an entry whose not_before does not read
 - ledger_check: an entry whose not_after does not read
 - ledger_check: an entry with no endpoint
@@ -805,7 +808,7 @@ At the run that generated this file: **553** cases, **0** disagreements, **40** 
 - verify with nothing to work from
 - verify a signature the other port made
 
-### `wallet_issue` — 34 cases · whole on success
+### `wallet_issue` — 36 cases · whole on success
 
 - wallet_issue
 - wallet_issue from a vault that carries a ledger
@@ -837,6 +840,8 @@ At the run that generated this file: **553** cases, **0** disagreements, **40** 
 - wallet_issue with a ledger entry whose root is not a string
 - wallet_issue with a ledger entry carrying the leaf
 - wallet_issue with a ledger entry that is not an object
+- wallet_issue with a ledger entry whose root is empty
+- wallet_issue with a ledger entry whose endpoint is empty
 - wallet_issue with a root held on a card, which this function cannot sign with
 - wallet_issue over a ledger that reads
 - wallet_issue with nothing to work from
