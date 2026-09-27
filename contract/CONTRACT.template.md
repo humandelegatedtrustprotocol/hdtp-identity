@@ -290,6 +290,44 @@ that does not read is refused, never skipped.
 
 {{table:ledger}}
 
+### 6.2 The export (SPEC §9.2)
+
+An export is one unencrypted zip — `manifest.json`, `contacts.csv`, `threads.csv`, `messages.jsonl`,
+`media/<sha256>` — and a wallet's book is one holding the manifest and `contacts.csv` only. The core
+never opens a zip: a host reads the container and hands over what it read, and every rule that can
+be decided on that is decided here, once. Every refusal of what a file holds, or of rows to write,
+is `bad_request`, and its `why` begins with where: the member, then the row (the header is row 1) or
+the line, then the column or member. An argument that is not an instant (`now`, `exported_at`) is
+`parse`, as everywhere in this contract.
+
+**Reading.** The host passes `export_read` the central directory and the three text members, then
+streams `messages.jsonl` through `export_read_messages` in batches of lines (`first_line` numbering
+them in the whole member), then checks each media file, then calls `export_read_end`. What only
+the host can do, and the words both hosts of this repository use for it (the Go port's
+`ReadExportZip` and the `pact` CLI):
+
+- count the bytes it actually decompresses, never the sizes a header states: a text member over its
+  bound is `<member>: over <n> bytes`, a line `messages.jsonl: line <n>: over 65536 bytes`, a media
+  file `media/<h>: over 5242880 bytes`, and the whole file over the host's own ceiling `the file is
+  over the <n>-byte ceiling this host sets`;
+- refuse a member that is not UTF-8 text (`<member>: not UTF-8 text`, or `messages.jsonl: line <n>:
+  not UTF-8 text`) and one that does not decompress (`<member>: does not decompress`);
+- hash `messages.jsonl` as it streams it, and each media file against its own name (`media/<h>: its
+  sha256 is not its name`).
+
+**Writing.** `export_write` answers the canonical `contacts.csv` and `threads.csv` and a partial
+manifest; `export_write_messages` answers the lines; `export_manifest` finishes the manifest with
+the host's count and hash of `messages.jsonl`. The bytes are the same from every port: a Go host and
+a Rust host that write the same rows write the same file. A media file is stored, not recompressed.
+
+The Go port also offers two conveniences over these functions, which are not contract functions and
+which its own tests run against the whole corpus: `ReadExportZip` (the reading above, with
+`archive/zip`) and `WriteExportZip`. The fixture corpus is `go/exportcorpus/`: a valid export, a
+valid book, and one hostile file per check, each naming the refusal it must produce
+(`go/exportcorpus/cases.json`); both ports' tests and `js/parity.mjs` read all of it.
+
+{{table:export}}
+
 ## 7. Gates
 
 1. `cargo test` and `go test ./...` each: rebuild the seven vector certificates byte for byte from

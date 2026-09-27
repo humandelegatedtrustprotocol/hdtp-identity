@@ -57,6 +57,84 @@ fn open_sealed(path: &Path) -> serde_json::Value {
     answer["plaintext"].clone()
 }
 
+const CONTACT_HEADER: &str = "root,endpoint,name,display_name,status,was_active,permissions,their_permissions,leaf,root_cert,added";
+
+/// The core's answer to one call, which must not be a refusal.
+fn core_call(name: &str, args: serde_json::Value) -> serde_json::Value {
+    let out: serde_json::Value = serde_json::from_str(&pact_identity::call(name, &args.to_string())).unwrap();
+    assert!(out.get("error").is_none(), "{name}: {out}");
+    out
+}
+
+/// A vault's root, as its certificate: base64url DER.
+fn root_cert_of_vault(pass: &Path, vault: &Path) -> String {
+    let shown = pact().env("PACT_PASSPHRASE_FILE", pass).args(["id", "show", "--vault"]).arg(vault).assert().success();
+    let pem = String::from_utf8(shown.get_output().stdout.clone()).unwrap();
+    pem.lines().filter(|l| !l.starts_with("-----")).collect::<Vec<_>>().join("").replace('+', "-").replace('/', "_").replace('=', "")
+}
+
+/// A vault's root fingerprint, read back through `cert show`.
+fn fingerprint_of_vault(pass: &Path, vault: &Path, dir: &Path) -> String {
+    let shown = pact().env("PACT_PASSPHRASE_FILE", pass).args(["id", "show", "--vault"]).arg(vault).assert().success();
+    let pem_path = dir.join("root.pem");
+    fs::write(&pem_path, &shown.get_output().stdout).unwrap();
+    let out = pact().args(["cert", "show", "--json"]).arg(&pem_path).assert().success();
+    serde_json::from_slice::<serde_json::Value>(&out.get_output().stdout).unwrap()["fingerprint"].as_str().unwrap().to_string()
+}
+
+fn put(path: &Path, members: &[(&str, String)]) {
+    let _ = fs::remove_file(path);
+    let mut z = zip::ZipWriter::new(fs::File::create(path).unwrap());
+    let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    for (name, text) in members {
+        z.start_file(*name, opts).unwrap();
+        std::io::Write::write_all(&mut z, text.as_bytes()).unwrap();
+    }
+    z.finish().unwrap();
+}
+
+/// A book as the core writes one, for `owner`.
+fn write_book(path: &Path, owner: &str, rows: &[serde_json::Value]) {
+    let w = core_call(
+        "export_write",
+        serde_json::json!({ "owner": owner, "owner_name": "", "exported_at": "2026-09-27T10:00:00Z", "tool": "cli.rs", "contacts": rows }),
+    );
+    let m = core_call("export_manifest", serde_json::json!({ "partial": w["partial"] }));
+    put(
+        path,
+        &[
+            ("contacts.csv", w["contacts_csv"].as_str().unwrap().to_string()),
+            ("manifest.json", m["manifest"].as_str().unwrap().to_string()),
+        ],
+    );
+}
+
+/// A book around a contacts.csv written by hand, with a manifest that is true of it.
+fn write_raw_book(path: &Path, owner: &str, contacts_csv: &str) {
+    use sha2::Digest;
+    let rows = contacts_csv.matches("\r\n").count() - 1;
+    let manifest = serde_json::json!({
+        "pact_export": 2, "owner": owner, "owner_name": "", "exported_at": "2026-09-27T10:00:00Z", "tool": "cli.rs",
+        "counts": { "contacts": rows, "threads": 0, "messages": 0, "media": 0 },
+        "files": { "contacts.csv": pact_identity::util::hex(&sha2::Sha256::digest(contacts_csv.as_bytes())) },
+    });
+    put(path, &[("contacts.csv", contacts_csv.to_string()), ("manifest.json", manifest.to_string())]);
+}
+
+fn zip_members(path: &Path) -> Vec<String> {
+    let z = zip::ZipArchive::new(fs::File::open(path).unwrap()).unwrap();
+    let mut names: Vec<String> = z.file_names().map(String::from).collect();
+    names.sort();
+    names
+}
+
+fn zip_text(path: &Path, name: &str) -> String {
+    let mut z = zip::ZipArchive::new(fs::File::open(path).unwrap()).unwrap();
+    let mut text = String::new();
+    std::io::Read::read_to_string(&mut z.by_name(name).unwrap(), &mut text).unwrap();
+    text
+}
+
 #[test]
 fn a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates() {
     let dir = tempfile::tempdir().unwrap();
@@ -245,98 +323,95 @@ fn a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates() {
         .stderr(predicate::str::contains("3 leaves"));
     assert!(record_of(&restored).exists(), "the record is restored beside the vault");
 
-    // The contact book: export, then import a book with one more and one changed.
-    let book = pact().env("PACT_PASSPHRASE_FILE", &pass).args(["contacts", "export", "--vault"]).arg(&vault).assert().success();
-    assert_eq!(String::from_utf8(book.get_output().stdout.clone()).unwrap().trim(), "[]");
-    let incoming = d.join("book.json");
-    // Bharat, with a root of his own: a contact is pinned by a fingerprint, so the book carries one
-    // that is the shape §2 defines, and a `root_cert` is worth only its binding to it.
+    let as_pact = || {
+        let mut cmd = pact();
+        cmd.env("PACT_PASSPHRASE_FILE", &pass);
+        cmd
+    };
+    // The contact book: export it as a book (SPEC §9.2), and import books with one more contact, one
+    // changed, and ones a host must refuse.
+    let out = d.join("alina-book.zip");
+    as_pact().args(["contacts", "export", "--vault"]).arg(&vault).arg("--out").arg(&out).assert().success().stderr(
+        predicate::str::contains("This file is not encrypted. Anyone who gets it can read your contact list")
+            .and(predicate::str::contains("0 contacts")),
+    );
+    assert_eq!(zip_members(&out), ["contacts.csv", "manifest.json"], "a book is the manifest and contacts.csv only");
+    as_pact()
+        .args(["contacts", "export", "--vault"])
+        .arg(&vault)
+        .arg("--out")
+        .arg(&out)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("exists: a book is not written over a file"));
+    as_pact()
+        .args(["contacts", "import", "--yes", "--vault"])
+        .arg(&vault)
+        .arg(&out)
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("no differences"));
+    let alina_fp = fingerprint_of_vault(&pass, &vault, d);
+    // Bharat, with a root of his own: a contact is pinned by a fingerprint, and a `root_cert` is worth
+    // only its binding to it.
     let bharat_vault = d.join("bharat.json");
-    pact().env("PACT_PASSPHRASE_FILE", &pass).args(["id", "create", "--name", "Bharat", "--vault"]).arg(&bharat_vault).assert().success();
-    let bharat_cert = pact().env("PACT_PASSPHRASE_FILE", &pass).args(["id", "show", "--vault"]).arg(&bharat_vault).assert().success();
-    let bharat_pem = String::from_utf8(bharat_cert.get_output().stdout.clone()).unwrap();
-    let bharat_der: String = bharat_pem.lines().filter(|l| !l.starts_with("-----")).collect::<Vec<_>>().join("");
-    let bharat_der_b64u = bharat_der.replace('+', "-").replace('/', "_").replace('=', "");
-    // The fingerprint to pin is the root certificate's own, read back through `cert show`.
-    let bharat_pem_path = d.join("bharat.pem");
-    fs::write(&bharat_pem_path, &bharat_pem).unwrap();
-    let shown = pact().args(["cert", "show", "--json"]).arg(&bharat_pem_path).assert().success();
-    let bharat_fp =
-        serde_json::from_slice::<serde_json::Value>(&shown.get_output().stdout).unwrap()["fingerprint"].as_str().unwrap().to_string();
-
-    fs::write(&incoming, format!(r#"[{{"root":"{bharat_fp}","endpoint":"https://b.example/mcp","name":"Bharat"}}]"#)).unwrap();
-    pact()
-        .env("PACT_PASSPHRASE_FILE", &pass)
-        .args(["contacts", "import", "--yes", "--vault"])
-        .arg(&vault)
-        .arg(&incoming)
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("1 added, 0 removed, 0 changed"));
-    fs::write(&incoming, format!(r#"[{{"root":"{bharat_fp}","endpoint":"https://c.example/mcp","name":"Bharat"}}]"#)).unwrap();
-    pact()
-        .env("PACT_PASSPHRASE_FILE", &pass)
-        .args(["contacts", "import", "--yes", "--vault"])
-        .arg(&vault)
-        .arg(&incoming)
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("0 added, 0 removed, 1 changed"));
-    let book = pact().env("PACT_PASSPHRASE_FILE", &pass).args(["contacts", "export", "--vault"]).arg(&vault).assert().success();
-    assert!(String::from_utf8(book.get_output().stdout.clone()).unwrap().contains("https://c.example/mcp"));
+    as_pact().args(["id", "create", "--name", "Bharat", "--vault"]).arg(&bharat_vault).assert().success();
+    let bharat_fp = fingerprint_of_vault(&pass, &bharat_vault, d);
+    let bharat_der = root_cert_of_vault(&pass, &bharat_vault);
+    let alina_der = root_cert_of_vault(&pass, &vault);
+    let incoming = d.join("incoming.zip");
+    let row = |endpoint: &str, root_cert: Option<&str>| {
+        serde_json::json!({
+            "root": bharat_fp, "endpoint": endpoint, "name": "Bharat", "display_name": "", "status": "active", "was_active": true,
+            "permissions": [], "their_permissions": [], "leaf": null, "root_cert": root_cert, "added": "2026-09-27T10:00:00Z",
+        })
+    };
+    let import = |book: &Path| {
+        let mut cmd = as_pact();
+        cmd.args(["contacts", "import", "--yes", "--vault"]).arg(&vault).arg(book);
+        cmd
+    };
+    write_book(&incoming, &alina_fp, &[row("https://b.example/mcp", None)]);
+    import(&incoming).assert().success().stderr(predicate::str::contains("1 added, 0 removed, 0 changed"));
+    write_book(&incoming, &alina_fp, &[row("https://c.example/mcp", None)]);
+    import(&incoming).assert().success().stderr(predicate::str::contains("0 added, 0 removed, 1 changed"));
+    fs::remove_file(&out).unwrap();
+    as_pact().args(["contacts", "export", "--vault"]).arg(&vault).arg("--out").arg(&out).assert().success();
+    assert!(zip_text(&out, "contacts.csv").contains("https://c.example/mcp"));
 
     // A root certificate that is not the pinned root's is refused, and nothing is written: §14.5's
-    // poisoned archive arriving through the book instead.
-    let mine_cert = pact().env("PACT_PASSPHRASE_FILE", &pass).args(["id", "show", "--vault"]).arg(&vault).assert().success();
-    let mine_der: String = String::from_utf8(mine_cert.get_output().stdout.clone())
-        .unwrap()
-        .lines()
-        .filter(|l| !l.starts_with("-----"))
-        .collect::<Vec<_>>()
-        .join("")
-        .replace('+', "-")
-        .replace('/', "_")
-        .replace('=', "");
-    fs::write(
+    // planted row, arriving through the book. Written by hand: no port writes a row it would refuse.
+    let csv = |cells: &str| format!("{}\r\n{cells}\r\n", CONTACT_HEADER);
+    write_raw_book(
         &incoming,
-        format!(r#"[{{"root":"{bharat_fp}","endpoint":"https://c.example/mcp","name":"Bharat","root_cert":"{mine_der}"}}]"#),
-    )
-    .unwrap();
-    pact()
-        .env("PACT_PASSPHRASE_FILE", &pass)
-        .args(["contacts", "import", "--yes", "--vault"])
-        .arg(&vault)
-        .arg(&incoming)
+        &alina_fp,
+        &csv(&format!("{bharat_fp},https://c.example/mcp,Bharat,,active,true,,,,{alina_der},2026-09-27T10:00:00Z")),
+    );
+    import(&incoming)
         .assert()
         .failure()
-        .stderr(predicate::str::contains("not for the root this contact is pinned by"));
-    // A book whose root is not a fingerprint at all is refused before anything is read.
-    fs::write(&incoming, r#"[{"root":"sha256:AAAA","endpoint":"https://c.example/mcp","name":"Bharat"}]"#).unwrap();
-    pact()
-        .env("PACT_PASSPHRASE_FILE", &pass)
-        .args(["contacts", "import", "--yes", "--vault"])
-        .arg(&vault)
-        .arg(&incoming)
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("root fingerprint"));
+        .stderr(predicate::str::contains("contacts.csv: row 2, column root_cert: not the certificate of this row's root"));
+    // A root that is not a fingerprint at all.
+    write_raw_book(&incoming, &alina_fp, &csv("sha256:AAAA,https://c.example/mcp,Bharat,,active,true,,,,,2026-09-27T10:00:00Z"));
+    import(&incoming).assert().failure().stderr(predicate::str::contains("contacts.csv: row 2, column root: not a fingerprint"));
+    // A book that is someone else's: the owner is the importing identity's root, or nothing is read.
+    write_book(&incoming, &bharat_fp, &[]);
+    import(&incoming).assert().failure().stderr(predicate::str::contains("manifest.json: owner: the file is"));
+    // Not a zip at all.
+    fs::write(&incoming, "[]").unwrap();
+    import(&incoming).assert().failure().stderr(predicate::str::contains("the file is not a zip"));
 
     // Bharat's own certificate under Bharat's fingerprint is a change, is kept, and is exported again.
-    fs::write(
-        &incoming,
-        format!(r#"[{{"root":"{bharat_fp}","endpoint":"https://c.example/mcp","name":"Bharat","root_cert":"{bharat_der_b64u}"}}]"#),
-    )
-    .unwrap();
-    pact()
-        .env("PACT_PASSPHRASE_FILE", &pass)
-        .args(["contacts", "import", "--yes", "--vault"])
-        .arg(&vault)
-        .arg(&incoming)
+    write_book(&incoming, &alina_fp, &[row("https://c.example/mcp", Some(&bharat_der))]);
+    import(&incoming)
         .assert()
         .success()
         .stderr(predicate::str::contains("0 added, 0 removed, 1 changed").and(predicate::str::contains("root certificate differs")));
-    let book = pact().env("PACT_PASSPHRASE_FILE", &pass).args(["contacts", "export", "--vault"]).arg(&vault).assert().success();
-    assert!(String::from_utf8(book.get_output().stdout.clone()).unwrap().contains(&bharat_der_b64u));
+    fs::remove_file(&out).unwrap();
+    as_pact().args(["contacts", "export", "--vault"]).arg(&vault).arg("--out").arg(&out).assert().success();
+    assert!(zip_text(&out, "contacts.csv").contains(&bharat_der));
+    // And a book the CLI wrote is one the core reads back whole: the same contact, the same bytes.
+    import(&out).assert().success().stderr(predicate::str::contains("no differences"));
 
     // A backup never writes over a file that is there, unless it is told to.
     let occupied = d.join("occupied.json");
@@ -685,6 +760,8 @@ fn the_two_files_are_found_together_and_never_mistaken() {
     as_pact()
         .args(["contacts", "export", "--vault"])
         .arg(a.join("alnia.pact-vault.json"))
+        .arg("--out")
+        .arg(a.join("book.zip"))
         .assert()
         .failure()
         .stderr(predicate::str::contains("no vault there"));

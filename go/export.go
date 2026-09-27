@@ -1,0 +1,1312 @@
+package pactidentity
+
+// The export (SPEC §9.2; CONTRACT §6.2): one unencrypted zip carrying a person's contacts,
+// conversations and files between hosts, and the wallet's book in the same format. The Rust core's
+// export module, rule for rule and word for word; js/parity.mjs holds the two to each other.
+//
+// The core never opens a zip. A host reads the container and hands these functions what it read;
+// what only the host can do — counting the bytes it decompresses, hashing messages.jsonl and each
+// media file as it streams them, refusing a member that is not UTF-8 — is the host's (export_zip.go
+// does it for a Go host). Every refusal is bad_request, and its why begins with where.
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+	"unicode/utf8"
+)
+
+const (
+	ExportManifestMax    = 64 * 1024
+	ExportContactsMax    = 4 * 1024 * 1024
+	ExportContactsRowMax = 5000
+	ExportThreadsMax     = 16 * 1024 * 1024
+	ExportLineMax        = 64 * 1024
+	ExportMediaMax       = 5 * 1024 * 1024
+	ExportBodyMax        = 16 * 1024
+	ExportNameMax        = 200
+	exportVersion        = 2
+)
+
+var (
+	contactColumns   = []string{"root", "endpoint", "name", "display_name", "status", "was_active", "permissions", "their_permissions", "leaf", "root_cert", "added"}
+	threadColumns    = []string{"id", "contact", "topic", "created_at", "last_at"}
+	contactStatuses  = []string{"active", "blocked", "pending_out"}
+	exportPerms      = []string{"message.text", "message.media", "status.view", "calendar.availability", "calendar.book"}
+	manifestMembers  = []string{"pact_export", "owner", "owner_name", "exported_at", "tool", "counts", "files"}
+	manifestCounts   = []string{"contacts", "threads", "messages", "media"}
+	manifestListed   = []string{"contacts.csv", "threads.csv", "messages.jsonl"}
+	messageMembers   = []string{"id", "thread", "contact", "msg_id", "direction", "sender", "time", "body", "reply_to", "status", "attachments"}
+	attachmentFields = []string{"file", "filename", "mime", "size"}
+	msgDirections    = []string{"in", "out"}
+	msgSenders       = []string{"agent", "human"}
+	msgStatuses      = []string{"delivered", "queued", "failed", "read"}
+	pinFields        = []string{"endpoint", "leaf", "root_cert"}
+)
+
+func contains(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+func exportRefuse(why string) error { return errors.New(why) }
+
+// asU64 is serde_json's as_u64: a non-negative integer, never a fraction or an exponent.
+func asU64(v any) (uint64, bool) {
+	switch x := v.(type) {
+	case json.Number:
+		n, err := strconv.ParseUint(x.String(), 10, 64)
+		return n, err == nil
+	case int:
+		return uint64(x), x >= 0
+	case int64:
+		return uint64(x), x >= 0
+	case uint64:
+		return x, true
+	}
+	return 0, false
+}
+
+func isExportHash(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func sha256Hex(b []byte) string {
+	s := sha256.Sum256(b)
+	return hex.EncodeToString(s[:])
+}
+
+func isBase64Text(s string) bool {
+	if len(s) < 16 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '+' || c == '/' || c == '=') {
+			return false
+		}
+	}
+	return true
+}
+
+// isPrivateKeyDER is PKCS #8 or SEC1 by shape, whatever the algorithm.
+func isPrivateKeyDER(b []byte) bool {
+	node, err := derRead(b, 0)
+	if err != nil || node.tag != 0x30 || node.end != len(b) {
+		return false
+	}
+	f, err := derChildren(node)
+	if err != nil {
+		return false
+	}
+	version := func(n derNode, allowed ...byte) bool {
+		if n.tag != 0x02 || len(n.content) != 1 {
+			return false
+		}
+		for _, a := range allowed {
+			if n.content[0] == a {
+				return true
+			}
+		}
+		return false
+	}
+	pkcs8 := false
+	if len(f) >= 3 && version(f[0], 0, 1) && f[1].tag == 0x30 && f[2].tag == 0x04 {
+		alg, err := derChildren(f[1])
+		pkcs8 = err == nil && len(alg) > 0 && alg[0].tag == 0x06
+	}
+	sec1 := len(f) >= 2 && len(f) <= 4 && version(f[0], 1) && f[1].tag == 0x04
+	if sec1 {
+		for k, n := range f[2:] {
+			if !(n.tag == 0xa0+byte(k) || (k == 0 && n.tag == 0xa1)) {
+				sec1 = false
+			}
+		}
+	}
+	return pkcs8 || sec1
+}
+
+func asciiSpace(r rune) bool { return r == ' ' || r == '\t' || r == '\n' || r == '\f' || r == '\r' }
+
+// holdsPrivateKey is SPEC §9.2's key material: PEM armour naming a private key, or any word
+// (split at ASCII whitespace) that decodes as base64 or base64url to a PKCS #8 or SEC1 key.
+func holdsPrivateKey(text string) bool {
+	if strings.Contains(text, "PRIVATE KEY-----") {
+		return true
+	}
+	for _, w := range strings.FieldsFunc(text, asciiSpace) {
+		if isBase64Text(w) {
+			if der, err := decodeB64url(w); err == nil && isPrivateKeyDER(der) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func exportPermissions(cell string) ([]any, string) {
+	out := []any{}
+	if cell == "" {
+		return out, ""
+	}
+	var seen []string
+	for _, p := range strings.Split(cell, " ") {
+		integration := false
+		if n, found := strings.CutPrefix(p, "integration."); found && n != "" && len(n) <= 64 {
+			integration = true
+			for i := 0; i < len(n); i++ {
+				c := n[i]
+				if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_' || c == '-') {
+					integration = false
+				}
+			}
+		}
+		if p == "" {
+			return nil, "not names separated by single spaces"
+		}
+		if !contains(exportPerms, p) && !integration {
+			return nil, jsonString(p) + " is not a permission of §8"
+		}
+		if contains(seen, p) {
+			return nil, p + " twice"
+		}
+		seen = append(seen, p)
+		out = append(out, p)
+	}
+	return out, ""
+}
+
+func exportCertificate(cell string) (*Cert, string) {
+	if cell == "" {
+		return nil, ""
+	}
+	if !isB64url(cell) {
+		return nil, "not base64url"
+	}
+	der, err := decodeB64url(cell)
+	if err != nil {
+		return nil, "not base64url"
+	}
+	c, err := Parse(der)
+	if err != nil {
+		return nil, "not a certificate"
+	}
+	return c, ""
+}
+
+// cellRefusal is a column (or a message member) and why.
+type cellRefusal struct {
+	col int
+	why string
+}
+
+// contactRow checks one contact row's cells, in column order. pinAt decides the leaf: kept only
+// when [leaf, root_cert] validates at the row's endpoint at that instant, null otherwise; nil keeps
+// it as written.
+func contactRow(cells []string, owner string, pinAt *time.Time) (map[string]any, *cellRefusal) {
+	for k, c := range cells {
+		if holdsPrivateKey(c) {
+			return nil, &cellRefusal{k, "holds a private key"}
+		}
+	}
+	if len(cells) != 11 {
+		return nil, &cellRefusal{0, fmt.Sprintf("%d fields, not 11", len(cells))}
+	}
+	root, endpoint, name, display, status, was, perms, theirs, leaf, rootCert, added := cells[0], cells[1], cells[2], cells[3], cells[4], cells[5], cells[6], cells[7], cells[8], cells[9], cells[10]
+	if !IsFingerprint(root) {
+		return nil, &cellRefusal{0, "not a fingerprint"}
+	}
+	if root == owner {
+		return nil, &cellRefusal{0, "the owner's own root"}
+	}
+	if !IsNormalHTTPS(endpoint) {
+		return nil, &cellRefusal{1, "not an https URL in normal form"}
+	}
+	if ok, why := AddressGuard(endpoint, "", false); !ok {
+		return nil, &cellRefusal{1, why}
+	}
+	for _, kv := range []struct {
+		k int
+		v string
+	}{{2, name}, {3, display}} {
+		if utf8.RuneCountInString(kv.v) > ExportNameMax {
+			return nil, &cellRefusal{kv.k, fmt.Sprintf("over %d characters", ExportNameMax)}
+		}
+	}
+	if !contains(contactStatuses, status) {
+		return nil, &cellRefusal{4, "not active, blocked or pending_out"}
+	}
+	var wasActive bool
+	switch was {
+	case "true":
+		wasActive = true
+	case "false":
+	default:
+		return nil, &cellRefusal{5, "not true or false"}
+	}
+	granted, why := exportPermissions(perms)
+	if why != "" {
+		return nil, &cellRefusal{6, why}
+	}
+	told, why := exportPermissions(theirs)
+	if why != "" {
+		return nil, &cellRefusal{7, why}
+	}
+	leafCert, why := exportCertificate(leaf)
+	if why != "" {
+		return nil, &cellRefusal{8, why}
+	}
+	if leafCert != nil && ProfileError(leafCert, "leaf") != "" {
+		return nil, &cellRefusal{8, "not a leaf of §14.1's profile"}
+	}
+	rootParsed, why := exportCertificate(rootCert)
+	if why != "" {
+		return nil, &cellRefusal{9, why}
+	}
+	if rootParsed != nil {
+		if ProfileError(rootParsed, "root") != "" {
+			return nil, &cellRefusal{9, "not a root of §14.1's profile"}
+		}
+		if FingerprintOf(rootParsed) != root {
+			return nil, &cellRefusal{9, "not the certificate of this row's root"}
+		}
+	}
+	addedAt, ok := parseInstantZ(added)
+	if !ok {
+		return nil, &cellRefusal{10, "not an RFC 3339 instant"}
+	}
+	var pinned any
+	switch {
+	case pinAt == nil && leafCert != nil:
+		pinned = leaf
+	case pinAt != nil && leafCert != nil && rootParsed != nil:
+		if ValidateChain([][]byte{leafCert.DER, rootParsed.DER}, ChainOpts{Now: *pinAt, ExpectedRoot: root, ExpectedEndpoint: endpoint}).OK {
+			pinned = leaf
+		}
+	}
+	var rc any
+	if rootParsed != nil {
+		rc = rootCert
+	}
+	return map[string]any{
+		"root": root, "endpoint": endpoint, "name": name, "display_name": display, "status": status,
+		"was_active": wasActive, "permissions": granted, "their_permissions": told,
+		"leaf": pinned, "root_cert": rc, "added": timeOut(addedAt),
+	}, nil
+}
+
+// threadRow checks one thread row's cells against the contacts' roots.
+func threadRow(cells []string, roots []string) (map[string]any, *cellRefusal) {
+	for k, c := range cells {
+		if holdsPrivateKey(c) {
+			return nil, &cellRefusal{k, "holds a private key"}
+		}
+	}
+	if len(cells) != 5 {
+		return nil, &cellRefusal{0, fmt.Sprintf("%d fields, not 5", len(cells))}
+	}
+	if cells[0] == "" {
+		return nil, &cellRefusal{0, "empty"}
+	}
+	if !contains(roots, cells[1]) {
+		return nil, &cellRefusal{1, "names no contact in contacts.csv"}
+	}
+	var times []string
+	for _, k := range []int{3, 4} {
+		t, ok := parseInstantZ(cells[k])
+		if !ok {
+			return nil, &cellRefusal{k, "not an RFC 3339 instant"}
+		}
+		times = append(times, timeOut(t))
+	}
+	return map[string]any{"id": cells[0], "contact": cells[1], "topic": cells[2], "created_at": times[0], "last_at": times[1]}, nil
+}
+
+type tableRow struct {
+	n     int
+	cells []string
+}
+
+func csvTable(member, text string, columns []string) ([]tableRow, error) {
+	records, bad := csvRead(text)
+	if bad != nil {
+		return nil, exportRefuse(fmt.Sprintf("%s: row %d: %s", member, bad.record, bad.why))
+	}
+	if len(records) == 0 || strings.Join(records[0], "\x00") != strings.Join(columns, "\x00") || len(records[0]) != len(columns) {
+		return nil, exportRefuse(fmt.Sprintf("%s: row 1: the header is not %s", member, strings.Join(columns, ",")))
+	}
+	var rows []tableRow
+	for i, r := range records[1:] {
+		cells := make([]string, len(r))
+		for k, c := range r {
+			cells[k] = csvUnguard(c)
+		}
+		rows = append(rows, tableRow{i + 2, cells})
+	}
+	return rows, nil
+}
+
+// ── the manifest ────────────────────────────────────────────────────────────────────────────────
+
+type exportManifest struct {
+	contacts, threads, messages, media uint64
+	files                              map[string]string
+}
+
+// orderedKeys is an object's member names in document order, a repeated name at its first place —
+// the order serde_json's preserve_order map iterates in, which the Rust core reads `files` in.
+func orderedKeys(raw json.RawMessage) []string {
+	d := json.NewDecoder(bytes.NewReader(raw))
+	if t, err := d.Token(); err != nil || t != json.Delim('{') {
+		return nil
+	}
+	var keys []string
+	for d.More() {
+		t, err := d.Token()
+		if err != nil {
+			return keys
+		}
+		k, _ := t.(string)
+		if !contains(keys, k) {
+			keys = append(keys, k)
+		}
+		var skip json.RawMessage
+		if d.Decode(&skip) != nil {
+			return keys
+		}
+	}
+	return keys
+}
+
+func filesOrder(raw []byte) []string {
+	var top map[string]json.RawMessage
+	if json.Unmarshal(raw, &top) != nil {
+		return nil
+	}
+	return orderedKeys(top["files"])
+}
+
+func manifestAt(why string) error { return exportRefuse("manifest.json: " + why) }
+
+// checkManifest holds a manifest's members to §9.2, and its owner to owner when owner is not "".
+// order is the document order of `files`.
+func checkManifest(doc map[string]any, order []string, owner string) (*exportManifest, error) {
+	if k := stranger(doc, manifestMembers); k != "" {
+		return nil, manifestAt(jsonString(k) + " is not a member of a manifest")
+	}
+	for _, m := range manifestMembers {
+		if _, has := doc[m]; !has {
+			return nil, manifestAt(m + " is missing")
+		}
+	}
+	if v, ok := asU64(doc["pact_export"]); !ok || v != exportVersion {
+		return nil, manifestAt("pact_export is 2")
+	}
+	fileOwner, isText := doc["owner"].(string)
+	if !isText || !IsFingerprint(fileOwner) {
+		return nil, manifestAt("owner is not a fingerprint")
+	}
+	if owner != "" && owner != fileOwner {
+		return nil, manifestAt(fmt.Sprintf("owner: the file is %s's, not this identity's (%s)", fileOwner, owner))
+	}
+	for _, m := range []string{"owner_name", "tool"} {
+		if _, isText := doc[m].(string); !isText {
+			return nil, manifestAt(m + " is a string")
+		}
+	}
+	if at, isText := doc["exported_at"].(string); !isText {
+		return nil, manifestAt("exported_at is not an RFC 3339 instant")
+	} else if _, ok := parseInstantZ(at); !ok {
+		return nil, manifestAt("exported_at is not an RFC 3339 instant")
+	}
+	counts, isObj := doc["counts"].(map[string]any)
+	if !isObj {
+		return nil, manifestAt("counts is an object")
+	}
+	if k := stranger(counts, manifestCounts); k != "" {
+		return nil, manifestAt("counts: " + jsonString(k) + " is not a count of a manifest")
+	}
+	var n [4]uint64
+	for i, k := range manifestCounts {
+		v, ok := asU64(counts[k])
+		if !ok {
+			return nil, manifestAt("counts: " + k + " is not a whole number")
+		}
+		n[i] = v
+	}
+	listed, isObj := doc["files"].(map[string]any)
+	if !isObj {
+		return nil, manifestAt("files is an object")
+	}
+	// Document order, as the core reads it; a name order does not know comes after, sorted.
+	names := append([]string{}, order...)
+	var rest []string
+	for k := range listed {
+		if !contains(names, k) {
+			rest = append(rest, k)
+		}
+	}
+	sort.Strings(rest)
+	names = append(names, rest...)
+	files := map[string]string{}
+	for _, name := range names {
+		v, has := listed[name]
+		if !has {
+			continue
+		}
+		if !contains(manifestListed, name) && !isExportMedia(name) {
+			return nil, manifestAt("files: " + jsonString(name) + " is not a member an export lists")
+		}
+		hash, isText := v.(string)
+		if !isText || !isExportHash(hash) {
+			return nil, manifestAt("files: " + name + ": not a lowercase hex sha256")
+		}
+		if isExportMedia(name) && name[6:] != hash {
+			return nil, manifestAt("files: " + name + ": the hash is not the name")
+		}
+		files[name] = hash
+	}
+	return &exportManifest{contacts: n[0], threads: n[1], messages: n[2], media: n[3], files: files}, nil
+}
+
+// loneSurrogate reports a \u escape of a UTF-16 surrogate that is not half of a pair. serde_json
+// refuses such JSON; encoding/json reads it as U+FFFD, so without this the two ports answered one
+// manifest or message line two ways. An escaped backslash before a `u` is text, not an escape.
+func loneSurrogate(text []byte) bool {
+	hex4 := func(i int) (int, bool) {
+		if i+4 > len(text) {
+			return 0, false
+		}
+		n, err := strconv.ParseUint(string(text[i:i+4]), 16, 16)
+		return int(n), err == nil
+	}
+	for i := 0; i < len(text); i++ {
+		if text[i] != '\\' || i+1 >= len(text) {
+			continue
+		}
+		if text[i+1] != 'u' {
+			i++ // the escaped character, whatever it is, is not the start of another escape
+			continue
+		}
+		u, ok := hex4(i + 2)
+		switch {
+		case !ok:
+		case u >= 0xdc00 && u <= 0xdfff:
+			return true
+		case u >= 0xd800 && u <= 0xdbff:
+			low, ok := 0, false
+			if i+7 < len(text) && text[i+6] == '\\' && text[i+7] == 'u' {
+				low, ok = hex4(i + 8)
+			}
+			if !ok || low < 0xdc00 || low > 0xdfff {
+				return true
+			}
+			i += 6
+		}
+		i += 5
+	}
+	return false
+}
+
+func parseManifest(text, owner string) (*exportManifest, error) {
+	if len(text) > ExportManifestMax {
+		return nil, manifestAt(fmt.Sprintf("over %d bytes", ExportManifestMax))
+	}
+	v, err := decodeJSON([]byte(text))
+	doc, isObj := v.(map[string]any)
+	if err != nil || !isObj || loneSurrogate([]byte(text)) {
+		return nil, manifestAt("not a JSON object")
+	}
+	return checkManifest(doc, filesOrder([]byte(text)), owner)
+}
+
+// finishManifest is the finished manifest, from export_write's partial one (raw, as the caller sent
+// it) and what the host counted and hashed while it streamed messages.jsonl.
+func finishManifest(raw json.RawMessage, messagesSHA *string, messages uint64) (string, error) {
+	v, err := decodeJSON(raw)
+	doc, isObj := v.(map[string]any)
+	if err != nil || !isObj {
+		return "", exportRefuse("partial is required")
+	}
+	before, err := checkManifest(doc, filesOrder(raw), "")
+	if err != nil {
+		return "", err
+	}
+	if _, has := before.files["messages.jsonl"]; before.messages != 0 || has {
+		return "", exportRefuse("partial: the messages are counted and hashed here, not before")
+	}
+	switch {
+	case messagesSHA != nil && isExportHash(*messagesSHA):
+		doc["files"].(map[string]any)["messages.jsonl"] = *messagesSHA
+	case messagesSHA != nil:
+		return "", exportRefuse("hashes: messages.jsonl: not a lowercase hex sha256")
+	case messages > 0:
+		return "", exportRefuse("hashes: messages.jsonl is required when there are messages")
+	}
+	doc["counts"].(map[string]any)["messages"] = json.Number(strconv.FormatUint(messages, 10))
+	text := string(Canonical(doc))
+	if _, err := parseManifest(text, ""); err != nil {
+		return "", err
+	}
+	return text, nil
+}
+
+// ── the directory, contacts.csv, threads.csv ────────────────────────────────────────────────────
+
+// ExportEntry is one entry of a zip's central directory, as the host read it.
+type ExportEntry struct {
+	Name      string `json:"name"`
+	Size      uint64 `json:"size"`
+	Encrypted bool   `json:"encrypted"`
+	Mode      uint32 `json:"mode"`
+}
+
+func isExportMedia(name string) bool {
+	h, found := strings.CutPrefix(name, "media/")
+	return found && isExportHash(h)
+}
+
+func allowedExportName(name string) bool {
+	switch name {
+	case "manifest.json", "contacts.csv", "threads.csv", "messages.jsonl", "media/":
+		return true
+	}
+	return isExportMedia(name)
+}
+
+func memberLimit(name string) int {
+	switch {
+	case name == "manifest.json":
+		return ExportManifestMax
+	case name == "contacts.csv":
+		return ExportContactsMax
+	case name == "threads.csv":
+		return ExportThreadsMax
+	case strings.HasPrefix(name, "media/") && len(name) > 6:
+		return ExportMediaMax
+	}
+	return -1
+}
+
+type exportReadResult struct {
+	contacts []any
+	threads  []any
+	media    []ExportMedia
+}
+
+// exportRead is §9.2's validation of everything but the messages and the media bytes, in the core's
+// order.
+func exportRead(directory []ExportEntry, manifestText, contactsCSV, threadsCSV *string, owner string, now time.Time) (*exportReadResult, error) {
+	var seen []string
+	for _, e := range directory {
+		label := "entry " + jsonString(e.Name)
+		if !allowedExportName(e.Name) {
+			return nil, exportRefuse(label + ": not a name an export holds")
+		}
+		if contains(seen, e.Name) {
+			return nil, exportRefuse(label + ": appears twice")
+		}
+		seen = append(seen, e.Name)
+		if e.Encrypted {
+			return nil, exportRefuse(label + ": encrypted")
+		}
+		if e.Mode&0o170000 == 0o120000 {
+			return nil, exportRefuse(label + ": a symbolic link")
+		}
+		if e.Mode&0o170000 == 0o040000 && e.Name != "media/" {
+			return nil, exportRefuse(label + ": a directory")
+		}
+		if limit := memberLimit(e.Name); limit >= 0 && e.Size > uint64(limit) {
+			return nil, exportRefuse(fmt.Sprintf("%s: %d bytes, over the %d an export allows", label, e.Size, limit))
+		}
+	}
+	has := func(n string) bool { return contains(seen, n) }
+	for _, required := range []string{"manifest.json", "contacts.csv"} {
+		if !has(required) {
+			return nil, exportRefuse(required + ": the file lacks it")
+		}
+	}
+	if manifestText == nil {
+		return nil, exportRefuse("manifest is required")
+	}
+	m, err := parseManifest(*manifestText, owner)
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range directory {
+		if e.Name == "manifest.json" || e.Name == "media/" {
+			continue
+		}
+		if _, listed := m.files[e.Name]; !listed {
+			return nil, exportRefuse(e.Name + ": manifest.json's files does not list it")
+		}
+	}
+	listedNames := make([]string, 0, len(m.files))
+	for k := range m.files {
+		listedNames = append(listedNames, k)
+	}
+	sort.Strings(listedNames)
+	for _, name := range listedNames {
+		if !has(name) {
+			return nil, exportRefuse(name + ": manifest.json's files lists it, and the file lacks it")
+		}
+	}
+	for _, mc := range []struct {
+		member string
+		count  uint64
+	}{{"threads.csv", m.threads}, {"messages.jsonl", m.messages}, {"media/", m.media}} {
+		if mc.count > 0 && !has(mc.member) {
+			return nil, exportRefuse(mc.member + ": the file lacks it")
+		}
+	}
+	media := []ExportMedia{}
+	for _, e := range directory {
+		if isExportMedia(e.Name) {
+			media = append(media, ExportMedia{Hash: e.Name[6:], Size: int64(e.Size)})
+		}
+	}
+	sort.Slice(media, func(i, j int) bool {
+		if media[i].Hash != media[j].Hash {
+			return media[i].Hash < media[j].Hash
+		}
+		return media[i].Size < media[j].Size
+	})
+	if uint64(len(media)) != m.media {
+		return nil, exportRefuse(fmt.Sprintf("manifest.json: counts: media is %d, and the file holds %d", m.media, len(media)))
+	}
+
+	if contactsCSV == nil {
+		return nil, exportRefuse("contacts_csv is required")
+	}
+	if len(*contactsCSV) > ExportContactsMax {
+		return nil, exportRefuse(fmt.Sprintf("contacts.csv: over %d bytes", ExportContactsMax))
+	}
+	if sha256Hex([]byte(*contactsCSV)) != m.files["contacts.csv"] {
+		return nil, exportRefuse("contacts.csv: its sha256 is not manifest.json's")
+	}
+	rows, err := csvTable("contacts.csv", *contactsCSV, contactColumns)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) > ExportContactsRowMax {
+		return nil, exportRefuse(fmt.Sprintf("contacts.csv: over %d rows", ExportContactsRowMax))
+	}
+	contacts := []any{}
+	var roots []string
+	for _, r := range rows {
+		if len(r.cells) != len(contactColumns) {
+			return nil, exportRefuse(fmt.Sprintf("contacts.csv: row %d: %d fields, not %d", r.n, len(r.cells), len(contactColumns)))
+		}
+		row, bad := contactRow(r.cells, owner, &now)
+		if bad != nil {
+			return nil, exportRefuse(fmt.Sprintf("contacts.csv: row %d, column %s: %s", r.n, contactColumns[bad.col], bad.why))
+		}
+		if contains(roots, row["root"].(string)) {
+			return nil, exportRefuse(fmt.Sprintf("contacts.csv: row %d, column root: appears twice", r.n))
+		}
+		roots = append(roots, row["root"].(string))
+		contacts = append(contacts, row)
+	}
+	if uint64(len(contacts)) != m.contacts {
+		return nil, exportRefuse(fmt.Sprintf("manifest.json: counts: contacts is %d, and contacts.csv holds %d", m.contacts, len(contacts)))
+	}
+
+	threads := []any{}
+	if has("threads.csv") {
+		if threadsCSV == nil {
+			return nil, exportRefuse("threads_csv is required: the file has threads.csv")
+		}
+		if len(*threadsCSV) > ExportThreadsMax {
+			return nil, exportRefuse(fmt.Sprintf("threads.csv: over %d bytes", ExportThreadsMax))
+		}
+		if sha256Hex([]byte(*threadsCSV)) != m.files["threads.csv"] {
+			return nil, exportRefuse("threads.csv: its sha256 is not manifest.json's")
+		}
+		trows, err := csvTable("threads.csv", *threadsCSV, threadColumns)
+		if err != nil {
+			return nil, err
+		}
+		var ids []string
+		for _, r := range trows {
+			if len(r.cells) != len(threadColumns) {
+				return nil, exportRefuse(fmt.Sprintf("threads.csv: row %d: %d fields, not %d", r.n, len(r.cells), len(threadColumns)))
+			}
+			row, bad := threadRow(r.cells, roots)
+			if bad != nil {
+				return nil, exportRefuse(fmt.Sprintf("threads.csv: row %d, column %s: %s", r.n, threadColumns[bad.col], bad.why))
+			}
+			if contains(ids, row["id"].(string)) {
+				return nil, exportRefuse(fmt.Sprintf("threads.csv: row %d, column id: appears twice", r.n))
+			}
+			ids = append(ids, row["id"].(string))
+			threads = append(threads, row)
+		}
+		if uint64(len(threads)) != m.threads {
+			return nil, exportRefuse(fmt.Sprintf("manifest.json: counts: threads is %d, and threads.csv holds %d", m.threads, len(threads)))
+		}
+	} else if threadsCSV != nil {
+		return nil, exportRefuse("threads_csv is given, and the file has no threads.csv")
+	}
+	return &exportReadResult{contacts: contacts, threads: threads, media: media}, nil
+}
+
+// exportEnd is what the host gathered while it streamed messages.jsonl.
+type exportEnd struct {
+	messagesSHA256                   *string
+	lines                            uint64
+	ids, msgIDs, replyTos, mediaSeen []string
+}
+
+// exportReadEnd is §9.2's cross-batch rules, once the host has streamed messages.jsonl.
+func exportReadEnd(manifestText string, e exportEnd) error {
+	m, err := parseManifest(manifestText, "")
+	if err != nil {
+		return err
+	}
+	if e.lines != m.messages {
+		return exportRefuse(fmt.Sprintf("manifest.json: counts: messages is %d, and messages.jsonl holds %d lines", m.messages, e.lines))
+	}
+	want, listed := m.files["messages.jsonl"]
+	switch {
+	case listed && e.messagesSHA256 != nil && want == *e.messagesSHA256:
+	case listed:
+		return exportRefuse("messages.jsonl: its sha256 is not manifest.json's")
+	case e.messagesSHA256 != nil:
+		return exportRefuse("messages.jsonl: manifest.json's files does not list it")
+	}
+	sorted := append([]string{}, e.ids...)
+	sort.Strings(sorted)
+	for i := 1; i < len(sorted); i++ {
+		if sorted[i] == sorted[i-1] {
+			return exportRefuse("messages.jsonl: id " + jsonString(sorted[i]) + " appears twice")
+		}
+	}
+	for _, r := range e.replyTos {
+		if !contains(e.msgIDs, r) {
+			return exportRefuse("messages.jsonl: reply_to " + jsonString(r) + " names no message in the file")
+		}
+	}
+	names := make([]string, 0, len(m.files))
+	for k := range m.files {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if isExportMedia(name) && !contains(e.mediaSeen, name[6:]) {
+			return exportRefuse(name + ": nothing names it")
+		}
+	}
+	return nil
+}
+
+// ── messages.jsonl ──────────────────────────────────────────────────────────────────────────────
+
+type messageNames struct{ threads, contacts, media []string }
+
+type memberRefusal struct {
+	member string // "" for the message as a whole
+	why    string
+}
+
+func keyMaterial(v any) bool {
+	switch x := v.(type) {
+	case string:
+		return holdsPrivateKey(x)
+	case []any:
+		for _, i := range x {
+			if keyMaterial(i) {
+				return true
+			}
+		}
+	case map[string]any:
+		for _, i := range x {
+			if keyMaterial(i) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// checkMessage holds one message's members to §9.2; names nil skips the references.
+func checkMessage(doc map[string]any, names *messageNames) (map[string]any, *memberRefusal) {
+	if k := stranger(doc, messageMembers); k != "" {
+		return nil, &memberRefusal{"", jsonString(k) + " is not a member of a message"}
+	}
+	for _, m := range messageMembers {
+		if _, has := doc[m]; !has {
+			return nil, &memberRefusal{"", m + " is missing"}
+		}
+	}
+	for _, m := range messageMembers {
+		if keyMaterial(doc[m]) {
+			return nil, &memberRefusal{m, "holds a private key"}
+		}
+	}
+	text := func(m string) (string, *memberRefusal) {
+		s, isText := doc[m].(string)
+		if !isText {
+			return "", &memberRefusal{m, "not a string"}
+		}
+		return s, nil
+	}
+	oneOf := func(m string, allowed []string) *memberRefusal {
+		s, bad := text(m)
+		if bad != nil {
+			return bad
+		}
+		if !contains(allowed, s) {
+			return &memberRefusal{m, "not " + strings.Join(allowed, " or ")}
+		}
+		return nil
+	}
+	for _, m := range []string{"id", "msg_id"} {
+		s, bad := text(m)
+		if bad != nil {
+			return nil, bad
+		}
+		if s == "" {
+			return nil, &memberRefusal{m, "empty"}
+		}
+	}
+	thread, bad := text("thread")
+	if bad != nil {
+		return nil, bad
+	}
+	contact, bad := text("contact")
+	if bad != nil {
+		return nil, bad
+	}
+	if names != nil {
+		if !contains(names.threads, thread) {
+			return nil, &memberRefusal{"thread", "names no thread in threads.csv"}
+		}
+		if !contains(names.contacts, contact) {
+			return nil, &memberRefusal{"contact", "names no contact in contacts.csv"}
+		}
+	}
+	if bad := oneOf("direction", msgDirections); bad != nil {
+		return nil, bad
+	}
+	if bad := oneOf("sender", msgSenders); bad != nil {
+		return nil, bad
+	}
+	ts, bad := text("time")
+	if bad != nil {
+		return nil, bad
+	}
+	at, ok := parseInstantZ(ts)
+	if !ok {
+		return nil, &memberRefusal{"time", "not an RFC 3339 instant"}
+	}
+	body, bad := text("body")
+	if bad != nil {
+		return nil, bad
+	}
+	if len(body) > ExportBodyMax {
+		return nil, &memberRefusal{"body", fmt.Sprintf("over %d bytes", ExportBodyMax)}
+	}
+	switch r := doc["reply_to"].(type) {
+	case nil:
+	case string:
+		if r == "" {
+			return nil, &memberRefusal{"reply_to", "not a msg_id or null"}
+		}
+	default:
+		return nil, &memberRefusal{"reply_to", "not a msg_id or null"}
+	}
+	if bad := oneOf("status", msgStatuses); bad != nil {
+		return nil, bad
+	}
+	attachments, isList := doc["attachments"].([]any)
+	if !isList {
+		return nil, &memberRefusal{"attachments", "not a list"}
+	}
+	if len(attachments) > 1 {
+		return nil, &memberRefusal{"attachments", "more than one attachment: a message carries at most one file"}
+	}
+	kept := []any{}
+	for _, a := range attachments {
+		refuse := func(why string) (map[string]any, *memberRefusal) { return nil, &memberRefusal{"attachments", why} }
+		o, isObj := a.(map[string]any)
+		if !isObj {
+			return refuse("an attachment is an object")
+		}
+		if k := stranger(o, attachmentFields); k != "" {
+			return refuse(jsonString(k) + " is not a member of an attachment")
+		}
+		for _, m := range attachmentFields {
+			if _, has := o[m]; !has {
+				return refuse(m + " is missing")
+			}
+		}
+		file, isText := o["file"].(string)
+		if !isText || !isExportHash(file) {
+			return refuse("file is not a lowercase hex sha256")
+		}
+		if names != nil && !contains(names.media, file) {
+			return refuse("file names no media member")
+		}
+		_, fn := o["filename"].(string)
+		_, mt := o["mime"].(string)
+		if !fn || !mt {
+			return refuse("filename and mime are strings")
+		}
+		size, ok := asU64(o["size"])
+		if !ok || size > ExportMediaMax {
+			return refuse(fmt.Sprintf("size is a number of bytes up to %d", ExportMediaMax))
+		}
+		kept = append(kept, map[string]any{"file": file, "filename": o["filename"], "mime": o["mime"], "size": int64(size)})
+	}
+	// A message carries a file or text, never both: neither host's send_media carries a caption.
+	if len(kept) > 0 && body != "" {
+		return nil, &memberRefusal{"body", "not empty, and the message carries a file: a message with an attachment has no text"}
+	}
+	return map[string]any{
+		"id": doc["id"], "thread": thread, "contact": contact, "msg_id": doc["msg_id"], "direction": doc["direction"],
+		"sender": doc["sender"], "time": timeOut(at), "body": body, "reply_to": doc["reply_to"],
+		"status": doc["status"], "attachments": kept,
+	}, nil
+}
+
+// exportReadMessages reads one batch of lines; firstLine is the number of the first in the file.
+func exportReadMessages(lines []string, firstLine uint64, names messageNames) ([]any, []string, error) {
+	messages := []any{}
+	seen := []string{}
+	for i, line := range lines {
+		n := firstLine + uint64(i)
+		if len(line) > ExportLineMax {
+			return nil, nil, exportRefuse(fmt.Sprintf("messages.jsonl: line %d: over %d bytes", n, ExportLineMax))
+		}
+		v, err := decodeJSON([]byte(line))
+		doc, isObj := v.(map[string]any)
+		if err != nil || !isObj || loneSurrogate([]byte(line)) {
+			return nil, nil, exportRefuse(fmt.Sprintf("messages.jsonl: line %d: not a JSON object", n))
+		}
+		m, bad := checkMessage(doc, &names)
+		if bad != nil {
+			if bad.member != "" {
+				return nil, nil, exportRefuse(fmt.Sprintf("messages.jsonl: line %d, member %s: %s", n, bad.member, bad.why))
+			}
+			return nil, nil, exportRefuse(fmt.Sprintf("messages.jsonl: line %d: %s", n, bad.why))
+		}
+		for _, a := range m["attachments"].([]any) {
+			f := a.(map[string]any)["file"].(string)
+			if !contains(seen, f) {
+				seen = append(seen, f)
+			}
+		}
+		messages = append(messages, m)
+	}
+	sort.Strings(seen)
+	return messages, seen, nil
+}
+
+// exportWriteMessages is the lines of messages.jsonl for these messages, in the order given, each
+// checked by the reader's rules but the references and written as RFC 8785 JSON.
+func exportWriteMessages(messages []any) ([]string, error) {
+	lines := []string{}
+	for i, v := range messages {
+		doc, isObj := v.(map[string]any)
+		if !isObj {
+			return nil, exportRefuse(fmt.Sprintf("messages[%d]: a message is an object", i))
+		}
+		m, bad := checkMessage(doc, nil)
+		if bad != nil {
+			if bad.member != "" {
+				return nil, exportRefuse(fmt.Sprintf("messages[%d], member %s: %s", i, bad.member, bad.why))
+			}
+			return nil, exportRefuse(fmt.Sprintf("messages[%d]: %s", i, bad.why))
+		}
+		line := string(Canonical(m))
+		if len(line) > ExportLineMax {
+			return nil, exportRefuse(fmt.Sprintf("messages[%d]: over %d bytes as a line", i, ExportLineMax))
+		}
+		lines = append(lines, line)
+	}
+	return lines, nil
+}
+
+// ── the writer ──────────────────────────────────────────────────────────────────────────────────
+
+func contactCells(v any) ([]string, *cellRefusal) {
+	o, isObj := v.(map[string]any)
+	if !isObj {
+		return nil, &cellRefusal{0, "a contact row is an object"}
+	}
+	if k := stranger(o, contactColumns); k != "" {
+		return nil, &cellRefusal{0, k + " is not a column of contacts.csv"}
+	}
+	var cells []string
+	for k, col := range contactColumns {
+		val, has := o[col]
+		wrong := &cellRefusal{k, "missing, or of the wrong type"}
+		switch col {
+		case "was_active":
+			b, isBool := val.(bool)
+			if !isBool {
+				return nil, wrong
+			}
+			cells = append(cells, strconv.FormatBool(b))
+		case "permissions", "their_permissions":
+			items, isList := val.([]any)
+			if !isList {
+				return nil, wrong
+			}
+			var names []string
+			for _, i := range items {
+				s, isText := i.(string)
+				if !isText {
+					return nil, &cellRefusal{k, "a list of names"}
+				}
+				names = append(names, s)
+			}
+			sort.Strings(names)
+			cells = append(cells, strings.Join(names, " "))
+		default:
+			if (col == "leaf" || col == "root_cert") && (!has || val == nil) {
+				cells = append(cells, "")
+				continue
+			}
+			s, isText := val.(string)
+			if !isText {
+				return nil, wrong
+			}
+			cells = append(cells, s)
+		}
+	}
+	return cells, nil
+}
+
+func threadCells(v any) ([]string, *cellRefusal) {
+	o, isObj := v.(map[string]any)
+	if !isObj {
+		return nil, &cellRefusal{0, "a thread row is an object"}
+	}
+	if k := stranger(o, threadColumns); k != "" {
+		return nil, &cellRefusal{0, k + " is not a column of threads.csv"}
+	}
+	var cells []string
+	for k, col := range threadColumns {
+		s, isText := o[col].(string)
+		if !isText {
+			return nil, &cellRefusal{k, "missing, or not a string"}
+		}
+		cells = append(cells, s)
+	}
+	return cells, nil
+}
+
+type exportWritten struct {
+	partial     map[string]any
+	contactsCSV string
+	threadsCSV  *string
+}
+
+type csvRowSort struct {
+	key   string
+	cells []string
+}
+
+func sortRows(rows []csvRowSort) {
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].key != rows[j].key {
+			return rows[i].key < rows[j].key
+		}
+		return strings.Join(rows[i].cells, "\x00") < strings.Join(rows[j].cells, "\x00")
+	})
+}
+
+// exportWrite is the canonical contacts.csv and threads.csv and the manifest without the messages.
+func exportWrite(owner, ownerName string, exportedAt time.Time, tool string, contacts, threads, media []any) (*exportWritten, error) {
+	if !IsFingerprint(owner) {
+		return nil, exportRefuse("owner is not a fingerprint")
+	}
+	var rows []csvRowSort
+	for i, c := range contacts {
+		located := func(b *cellRefusal) error {
+			return exportRefuse(fmt.Sprintf("contacts[%d], column %s: %s", i, contactColumns[b.col], b.why))
+		}
+		r, bad := contactCells(c)
+		if bad != nil {
+			return nil, located(bad)
+		}
+		row, bad := contactRow(r, owner, nil)
+		if bad != nil {
+			return nil, located(bad)
+		}
+		r[10] = row["added"].(string)
+		for _, x := range rows {
+			if x.key == r[0] {
+				return nil, exportRefuse(fmt.Sprintf("contacts[%d], column root: appears twice", i))
+			}
+		}
+		rows = append(rows, csvRowSort{r[0], r})
+	}
+	if len(rows) > ExportContactsRowMax {
+		return nil, exportRefuse(fmt.Sprintf("contacts: over %d rows", ExportContactsRowMax))
+	}
+	sortRows(rows)
+	var roots []string
+	for _, r := range rows {
+		roots = append(roots, r.key)
+	}
+	guarded := func(cells []string) []string {
+		out := make([]string, len(cells))
+		for k, c := range cells {
+			out[k] = csvGuard(c)
+		}
+		return out
+	}
+	var cb strings.Builder
+	csvWriteRecord(&cb, contactColumns)
+	for _, r := range rows {
+		csvWriteRecord(&cb, guarded(r.cells))
+	}
+	contactsCSV := cb.String()
+	if len(contactsCSV) > ExportContactsMax {
+		return nil, exportRefuse(fmt.Sprintf("contacts: over %d bytes as contacts.csv", ExportContactsMax))
+	}
+
+	var trows []csvRowSort
+	for i, t := range threads {
+		located := func(b *cellRefusal) error {
+			return exportRefuse(fmt.Sprintf("threads[%d], column %s: %s", i, threadColumns[b.col], b.why))
+		}
+		r, bad := threadCells(t)
+		if bad != nil {
+			return nil, located(bad)
+		}
+		row, bad := threadRow(r, roots)
+		if bad != nil {
+			return nil, located(bad)
+		}
+		r[3], r[4] = row["created_at"].(string), row["last_at"].(string)
+		for _, x := range trows {
+			if x.key == r[0] {
+				return nil, exportRefuse(fmt.Sprintf("threads[%d], column id: appears twice", i))
+			}
+		}
+		trows = append(trows, csvRowSort{r[0], r})
+	}
+	sortRows(trows)
+	var threadsCSV *string
+	if len(trows) > 0 {
+		var tb strings.Builder
+		csvWriteRecord(&tb, threadColumns)
+		for _, r := range trows {
+			csvWriteRecord(&tb, guarded(r.cells))
+		}
+		t := tb.String()
+		threadsCSV = &t
+	}
+	if threadsCSV != nil && len(*threadsCSV) > ExportThreadsMax {
+		return nil, exportRefuse(fmt.Sprintf("threads: over %d bytes as threads.csv", ExportThreadsMax))
+	}
+
+	files := map[string]any{"contacts.csv": sha256Hex([]byte(contactsCSV))}
+	if threadsCSV != nil {
+		files["threads.csv"] = sha256Hex([]byte(*threadsCSV))
+	}
+	for i, item := range media {
+		o, _ := item.(map[string]any)
+		hash, _ := o["hash"].(string)
+		if !isExportHash(hash) {
+			return nil, exportRefuse(fmt.Sprintf("media[%d]: hash is not a lowercase hex sha256", i))
+		}
+		if s, ok := asU64(o["size"]); !ok || s > ExportMediaMax {
+			return nil, exportRefuse(fmt.Sprintf("media[%d]: size is a number of bytes up to %d", i, ExportMediaMax))
+		}
+		if _, dup := files["media/"+hash]; dup {
+			return nil, exportRefuse(fmt.Sprintf("media[%d]: appears twice", i))
+		}
+		files["media/"+hash] = hash
+	}
+	partial := map[string]any{
+		"pact_export": int64(exportVersion), "owner": owner, "owner_name": ownerName,
+		"exported_at": timeOut(exportedAt), "tool": tool,
+		"counts": map[string]any{"contacts": int64(len(rows)), "threads": int64(len(trows)), "messages": int64(0), "media": int64(len(media))},
+		"files":  files,
+	}
+	return &exportWritten{partial: partial, contactsCSV: contactsCSV, threadsCSV: threadsCSV}, nil
+}
+
+// ── the merge ───────────────────────────────────────────────────────────────────────────────────
+
+func mergeRoot(v any, what string, i int) (string, error) {
+	o, _ := v.(map[string]any)
+	r, isText := o["root"].(string)
+	if !isText || !IsFingerprint(r) {
+		return "", exportRefuse(fmt.Sprintf("%s[%d]: root is not a fingerprint", what, i))
+	}
+	return r, nil
+}
+
+// exportMerge is SPEC §9.2's import step 2: an imported leaf never replaces a pin the host holds.
+func exportMerge(held, rows []any) (write []any, keep []any, conflicts []any, err error) {
+	type heldRow struct {
+		root string
+		row  map[string]any
+	}
+	var hs []heldRow
+	for i, h := range held {
+		r, err := mergeRoot(h, "held", i)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		o, _ := h.(map[string]any)
+		hs = append(hs, heldRow{r, o})
+	}
+	write, keep, conflicts = []any{}, []any{}, []any{}
+	for i, v := range rows {
+		root, err := mergeRoot(v, "rows", i)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		r, _ := v.(map[string]any)
+		var h map[string]any
+		found := false
+		for _, x := range hs {
+			if x.root == root {
+				h, found = x.row, true
+				break
+			}
+		}
+		if !found {
+			write = append(write, v)
+			continue
+		}
+		if h["leaf"] == nil && r["leaf"] != nil {
+			write = append(write, v)
+			continue
+		}
+		for _, f := range pinFields {
+			was, now := h[f], r[f]
+			if now != nil && !bytes.Equal(Canonical(was), Canonical(now)) {
+				conflicts = append(conflicts, map[string]any{"root": root, "field": f, "held": was, "row": now})
+			}
+		}
+		keep = append(keep, root)
+	}
+	return write, keep, conflicts, nil
+}
