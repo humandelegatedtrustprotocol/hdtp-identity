@@ -9,10 +9,8 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math"
 	"sort"
-	"strings"
 	"time"
 
 	"golang.org/x/crypto/argon2"
@@ -231,37 +229,7 @@ func CheckRecord(raw json.RawMessage) error {
 	if !has {
 		return nil
 	}
-	entries, isList := ledger.([]any)
-	if !isList {
-		return errors.New("the record's ledger is a list")
-	}
-	for i, e := range entries {
-		o, isObj := e.(map[string]any)
-		if !isObj {
-			return fmt.Errorf("the record's ledger entry %d does not read", i)
-		}
-		unread := func(m string) error { return fmt.Errorf("the record's ledger entry %d does not read: %s", i, m) }
-		for _, m := range entryRequired {
-			text, isText := o[m].(string)
-			if !isText {
-				return unread(m)
-			}
-			if entryInstants[m] {
-				if _, ok := parseInstant(text); !ok {
-					return unread(m)
-				}
-			}
-		}
-		if origin, has := o["origin"]; has {
-			if _, isText := origin.(string); !isText {
-				return unread("origin")
-			}
-		}
-		if k := stranger(o, entryMembers); k != "" {
-			return unread(k)
-		}
-	}
-	return nil
+	return ReadLedger(ledger)
 }
 
 // VaultSeal encrypts plaintext under the passphrase. salt and nonce are drawn when nil (tests pass them).
@@ -474,41 +442,16 @@ func WalletIssue(plain VaultPlaintext, record RecordPlaintext, rootFingerprint s
 	if !info.OK {
 		return nil, errors.New(info.Why)
 	}
-	host := hostOf(info.Endpoint)
-	newHost := true
-	var previous *time.Time
-	var newest *LedgerEntry
-	for i := range record.Ledger {
-		e := &record.Ledger[i]
-		// Every entry read, as CheckRecord reads it, for a caller that reached here without it.
-		for _, m := range [][2]string{{"root", e.Root}, {"endpoint", e.Endpoint}, {"not_before", e.NotBefore}, {"not_after", e.NotAfter}, {"issued_at", e.IssuedAt}} {
-			if _, ok := parseInstant(m[1]); m[1] == "" || (strings.HasPrefix(m[0], "not_") || m[0] == "issued_at") && !ok {
-				return nil, fmt.Errorf("the record's ledger entry %d does not read: %s", i, m[0])
-			}
-		}
-		if e.Root != rootFingerprint {
-			continue
-		}
-		if hostOf(e.Endpoint) == host {
-			newHost = false
-		}
-		if nb, ok := parseInstant(e.NotBefore); ok && (previous == nil || nb.After(*previous)) {
-			t := nb
-			previous = &t
-			newest = e
-		}
+	// The ledger's rules, in the one place they are written (ledger.go).
+	facts, err := LedgerCheck(record.Ledger, rootFingerprint, info.Endpoint, now, move)
+	if err != nil {
+		return nil, err
 	}
-	// The live leaf is the newest one issued (§14.3: a later notBefore supersedes every earlier
-	// leaf the instant it is seen), if it has not expired. Earlier entries are history.
-	movingFrom := ""
-	if newest != nil && newest.Endpoint != info.Endpoint {
-		if na, ok := parseInstant(newest.NotAfter); ok && na.After(now) {
-			if !move {
-				return nil, errors.New("a leaf is live for " + newest.Endpoint + ": a second endpoint is a move, not a second home")
-			}
-			movingFrom = newest.Endpoint
-		}
+	if facts.Refusal != "" {
+		return nil, errors.New(facts.Refusal)
 	}
+	newHost, previous := facts.NewHost, facts.PreviousNotBefore
+	moving := facts.Kind == LedgerMove || facts.Kind == LedgerMoveBack
 	issued, err := IssueFromCSR(csr, IssueOpts{RootCN: root.CN, RootKey: rootKey, RootSPKIs: rootSPKIs, Now: now, PreviousNotBefore: previous, ValidDays: validDays})
 	if err != nil {
 		return nil, err
@@ -521,7 +464,7 @@ func WalletIssue(plain VaultPlaintext, record RecordPlaintext, rootFingerprint s
 	if newHost {
 		out.Warnings = append(out.Warnings, "new host: this endpoint's host has never been issued to")
 	}
-	if movingFrom != "" {
+	if moving {
 		out.Warnings = append(out.Warnings, "move: the live leaf at the previous endpoint is superseded once contacts see this one")
 	}
 	return out, nil
