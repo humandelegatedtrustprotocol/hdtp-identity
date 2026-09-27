@@ -104,6 +104,21 @@ export default function exportCases({ add, expect }, f) {
     expect(`${label}: export_read_end`, want ?? { ok: true });
   }
 
+  // JSON the two ports' decoders read differently: a lone surrogate escape is refused by serde and
+  // was replaced with U+FFFD by Go's encoding/json. A manifest and a message are JSON inside a string,
+  // so a file carries one to both; the ports must refuse it alike. A pair is one character, and reads.
+  const manifestWith = (name) => `{"pact_export":2,"owner":"${owner}","owner_name":"${name}","exported_at":"2026-09-27T10:00:00Z","tool":"t","counts":{"contacts":0,"threads":0,"messages":0,"media":0},"files":{}}`;
+  const end = (m) => ({ manifest: m, messages_sha256: null, lines: 0, ids: [], msg_ids: [], reply_tos: [], media_seen: [] });
+  add('export_read_end: a manifest with a lone surrogate escape', 'export_read_end', end(manifestWith('\\ud800')));
+  expect('export_read_end: a manifest with a lone surrogate escape', { error: 'bad_request', why: 'manifest.json: not a JSON object' });
+  add('export_read_end: a manifest with a surrogate pair', 'export_read_end', end(manifestWith('\\ud83d\\ude00')));
+  add('export_read_end: a manifest with a count of -0', 'export_read_end', end(manifestWith('x').replace('"messages":0', '"messages":-0')));
+  const lineWith = (body) => `{"id":"1","thread":"t1","contact":"${other('B')}","msg_id":"m","direction":"in","sender":"human","time":"2026-09-27T10:00:00Z","body":"${body}","reply_to":null,"status":"read","attachments":[]}`;
+  const lineNames = { threads: ['t1'], contacts: [other('B')], media: [] };
+  add('export_read_messages: a line with a lone low surrogate escape', 'export_read_messages', { lines: [lineWith('a\\udc00b')], ...lineNames });
+  expect('export_read_messages: a line with a lone low surrogate escape', { error: 'bad_request', why: 'messages.jsonl: line 1: not a JSON object' });
+  add('export_read_messages: a line with a surrogate pair', 'export_read_messages', { lines: [lineWith('\\ud83d\\ude00 \\\\ud800')], ...lineNames });
+
   // ── the merge ───────────────────────────────────────────────────────────────────────────────
   const held = [row({}), row({ root: other('C'), endpoint: 'https://c.example/mcp', leaf: null, root_cert: null })];
   const rows = [

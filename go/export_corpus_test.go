@@ -4,6 +4,8 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"io"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -70,5 +72,84 @@ func TestReadExportZipAnswersTheWholeCorpus(t *testing.T) {
 	}
 	if accepted != 2 {
 		t.Errorf("%d controls accepted; the corpus has two, and a reader that refuses everything must fail here", accepted)
+	}
+}
+
+// WriteExportZip over the corpus's two controls: each is read with ReadExportZip and written again
+// from what was read, and the file written is the file read — every member byte for byte but where a
+// reader changes a row (a leaf that pins nothing comes back null, so contacts.csv and the manifest
+// that hashes it differ in the export and nowhere in the book) — and it reads back to the same rows.
+func TestWriteExportZipWritesTheCorpusControlsBack(t *testing.T) {
+	raw, _ := exportcorpus.FS.ReadFile("cases.json")
+	var index exportcorpus.Index
+	if err := json.Unmarshal(raw, &index); err != nil {
+		t.Fatal(err)
+	}
+	now, _ := time.Parse(time.RFC3339, index.Now)
+	members := func(zr *zip.Reader) map[string][]byte {
+		out := map[string][]byte{}
+		for _, f := range zr.File {
+			r, err := f.Open()
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, _ := io.ReadAll(r)
+			r.Close()
+			out[f.Name] = b
+		}
+		return out
+	}
+	controls := 0
+	for _, c := range index.Cases {
+		if c.Accept == nil {
+			continue
+		}
+		controls++
+		file := c.File
+		data, _ := exportcorpus.FS.ReadFile(file)
+		zr, _ := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+		first, err := pact.ReadExportZip(zr, index.Owner, now, 1<<30)
+		if err != nil {
+			t.Fatalf("%s: %v", file, err)
+		}
+		was := members(zr)
+		var m struct {
+			OwnerName  string `json:"owner_name"`
+			Tool       string `json:"tool"`
+			ExportedAt string `json:"exported_at"`
+		}
+		if err := json.Unmarshal(was["manifest.json"], &m); err != nil {
+			t.Fatal(err)
+		}
+		at, _ := time.Parse(time.RFC3339, m.ExportedAt)
+		var out bytes.Buffer
+		in := pact.ExportInput{Owner: index.Owner, OwnerName: m.OwnerName, Tool: m.Tool, ExportedAt: at,
+			Contacts: first.Contacts, Threads: first.Threads, Messages: first.Messages, Media: first.Media}
+		err = pact.WriteExportZip(&out, in, func(hash string) (io.ReadCloser, error) { return zr.Open("media/" + hash) })
+		if err != nil {
+			t.Fatalf("%s: %v", file, err)
+		}
+		again, _ := zip.NewReader(bytes.NewReader(out.Bytes()), int64(out.Len()))
+		now2 := members(again)
+		if len(now2) != len(was) {
+			t.Errorf("%s: %d members written, %d read", file, len(now2), len(was))
+		}
+		leafless := len(c.Accept.Leafless) > 0
+		for name, b := range was {
+			changed := leafless && (name == "contacts.csv" || name == "manifest.json")
+			if !changed && !bytes.Equal(now2[name], b) {
+				t.Errorf("%s: %s is not written back as it was read", file, name)
+			}
+		}
+		second, err := pact.ReadExportZip(again, index.Owner, now, 1<<30)
+		if err != nil {
+			t.Fatalf("%s: what was written does not read: %v", file, err)
+		}
+		if !reflect.DeepEqual(first, second) {
+			t.Errorf("%s: what was written reads back differently", file)
+		}
+	}
+	if controls != 2 {
+		t.Errorf("%d controls in the corpus, want 2", controls)
 	}
 }

@@ -489,6 +489,7 @@ mod tests {
             ("wallet/card.rs", include_str!("wallet/card.rs")),
             ("wallet/id.rs", include_str!("wallet/id.rs")),
             ("wallet/contacts.rs", include_str!("wallet/contacts.rs")),
+            ("wallet/exportzip.rs", include_str!("wallet/exportzip.rs")),
             ("piv.rs", include_str!("piv.rs")),
             ("io.rs", include_str!("io.rs")),
             ("vectors.rs", include_str!("vectors.rs")),
