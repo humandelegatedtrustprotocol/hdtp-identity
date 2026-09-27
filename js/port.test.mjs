@@ -51,7 +51,10 @@ test('a process that dies fails the call it was holding, and the next call gets 
 });
 
 test('a call that hangs is failed at its deadline, and the port goes on', () => {
-  const port = adapterPort(fake(), { callMs: 500 });
+  // The deadline also covers the NEXT call, which starts a new process: 500 ms was enough alone and
+  // not under the gate, where every suite runs at once (a gate run of 2026-09-27 failed here with
+  // "gave no answer to x in 0.5 s", the fresh process still starting). A margin, not a boundary.
+  const port = adapterPort(fake(), { callMs: 3000 });
   assert.throws(() => port.call('hang', {}), /gave no answer to hang/);
   assert.equal(port.call('x', {}).n, 1, 'the hung process was killed and a new one answers');
 });

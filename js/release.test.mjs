@@ -42,6 +42,11 @@ function fixture({ branch = 'main' } = {}) {
     mkdirSync(dirname(join(work, f)), { recursive: true });
     cpSync(join(repo, f), join(work, f));
   }
+  // The fixture's own release state, not this tree's: after a real release this tree is AT its
+  // version with an empty Unreleased section, and a fixture copied as it stands could never release
+  // again — the test went red on the very commit it was released from.
+  execFileSync('node', ['scripts/version.mjs', '--set', '0.1.0'], { cwd: work, stdio: 'ignore' });
+  writeFileSync(join(work, 'CHANGELOG.md'), '# Changelog\n\n## Unreleased\n\n- a change the fixture releases\n\n## 0.1.0 — 2026-01-01\n\n- before\n');
   git(work, 'init', '-q', '-b', branch);
   for (const [k, v] of [['user.name', 'release test'], ['user.email', 'release@test.invalid'], ['commit.gpgsign', 'false'], ['tag.gpgsign', 'false']]) git(work, 'config', k, v);
   git(work, 'add', '-A'); git(work, 'commit', '-q', '-m', 'fixture');
@@ -186,7 +191,7 @@ test('a release: two commits, two tags on the second, the version everywhere, ex
     assert.equal(execFileSync('node', ['scripts/version.mjs', '--check'], { cwd: f.work, encoding: 'utf8' }).trim(), 'version: ok (0.2.0 in all 6 places)');
     const pin = JSON.parse(readFileSync(join(f.work, 'js/manifest.json'), 'utf8'));
     assert.equal(pin.crate_version, '0.2.0');
-    assert.match(readFileSync(join(f.work, 'CHANGELOG.md'), 'utf8'), /## Unreleased\n\n## 0\.2\.0 — 2026-09-27\n/);
+    assert.match(readFileSync(join(f.work, 'CHANGELOG.md'), 'utf8'), /## Unreleased\n\n## 0\.2\.0 — 2026-09-27\n\n- a change the fixture releases\n/);
     // The assets, and nothing else.
     const dist = join(f.work, 'dist/0.2.0');
     const assets = ['pact-0.2.0-darwin-arm64', 'pact-0.2.0-linux-amd64', 'pact-0.2.0-linux-arm64', 'pact-identity-wasm-web-0.2.0.tgz'];
@@ -204,7 +209,7 @@ test('a release: two commits, two tags on the second, the version everywhere, ex
     const listing = execFileSync('tar', ['-tzf', join(dist, 'pact-identity-wasm-web-0.2.0.tgz')], { encoding: 'utf8' }).trim().split('\n');
     assert.deepEqual(listing.filter((n) => !n.endsWith('/')).sort(), Object.keys(pin.files).filter((k) => k.startsWith('pkg-web/')).sort());
     assert.ok(listing.every((n) => n.startsWith('pkg-web/')), `the tarball has something outside pkg-web/: ${listing}`);
-    assert.match(readFileSync(join(f.work, 'dist/0.2.0-notes.md'), 'utf8'), /repository of its own/);
+    assert.match(readFileSync(join(f.work, 'dist/0.2.0-notes.md'), 'utf8'), /^- a change the fixture releases$/m);
     // Nothing left the machine.
     assert.equal(f.gitIn(join(f.root, 'origin.git'), 'for-each-ref'), '', 'the release pushed something');
     assert.doesNotMatch(f.calls(), /^gh /m, 'the release called gh');
