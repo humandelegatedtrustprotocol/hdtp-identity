@@ -8,8 +8,9 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -87,14 +88,15 @@ func loadVectors(t *testing.T) vectorFile {
 	if err != nil {
 		t.Skip("SPEC.md not found: " + err.Error())
 	}
-	s := string(spec)
-	appendixB := s[strings.Index(s, "## Appendix B"):strings.Index(s, "*End of PACT")]
-	blocks := regexp.MustCompile("(?s)```json\n(.*?)\n```").FindAllStringSubmatch(appendixB, -1)
+	blocks, err := appendixB(string(spec))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(blocks) < 1 {
 		t.Fatal("Appendix B lacks its vector block")
 	}
 	var inSpec, inFile any
-	_ = json.Unmarshal([]byte(blocks[0][1]), &inSpec)
+	_ = json.Unmarshal(blocks[0], &inSpec)
 	_ = json.Unmarshal(raw, &inFile)
 	a, _ := json.Marshal(inSpec)
 	b, _ := json.Marshal(inFile)
@@ -102,6 +104,66 @@ func loadVectors(t *testing.T) vectorFile {
 		t.Error("SPEC.md does not carry the generated vectors unchanged")
 	}
 	return v
+}
+
+// appendixB is the JSON blocks of a specification's Appendix B: everything fenced as ```json between
+// the heading `## Appendix B` and the first `*End of PACT` after it. Both markers must be there and
+// every fence must close — the rule js/seed.mjs `appendixB` and the CLI's `appendix_b`
+// (crates/pact/src/vectors/check.rs) read by, held by the same cases in TestAppendixBIsReadBetweenItsMarkers.
+// It sliced with two bare strings.Index calls, which panicked on a missing marker, took an end marker
+// from before the heading, and silently dropped a block whose fence never closed.
+func appendixB(spec string) ([]json.RawMessage, error) {
+	start := strings.Index(spec, "## Appendix B")
+	if start < 0 {
+		return nil, errors.New("the document has no Appendix B")
+	}
+	end := strings.Index(spec[start:], "*End of PACT")
+	if end < 0 {
+		return nil, errors.New("Appendix B has no end marker (*End of PACT)")
+	}
+	b := spec[start : start+end]
+	var out []json.RawMessage
+	for {
+		i := strings.Index(b, "```json\n")
+		if i < 0 {
+			return out, nil
+		}
+		after := b[i+8:]
+		j := strings.Index(after, "\n```")
+		if j < 0 {
+			return nil, errors.New("an unterminated json fence in Appendix B")
+		}
+		block := json.RawMessage(after[:j])
+		if !json.Valid(block) {
+			return nil, fmt.Errorf("Appendix B block %d is not JSON", len(out)+1)
+		}
+		out = append(out, block)
+		b = after[j+4:]
+	}
+}
+
+// The cases js/seed.test.mjs and check.rs hold their slicers to, plus two they do not: an end marker
+// quoted before the heading, and a block that is not JSON.
+func TestAppendixBIsReadBetweenItsMarkers(t *testing.T) {
+	doc := func(body, end string) string { return "# Spec\n\n## Appendix B\n\n" + body + "\n" + end }
+	blocks, err := appendixB(doc("```json\n{\"a\":1}\n```\n\n```json\n[2]\n```", "*End of PACT 2.1*\n"))
+	if err != nil || len(blocks) != 2 || string(blocks[0]) != `{"a":1}` || string(blocks[1]) != "[2]" {
+		t.Fatalf("two blocks read as %q, %v", blocks, err)
+	}
+	early := "*End of PACT 2.0* is quoted here\n" + doc("```json\n{\"a\":1}\n```", "*End of PACT 2.1*\n")
+	if blocks, err := appendixB(early); err != nil || len(blocks) != 1 {
+		t.Errorf("an end marker before the heading was taken for the appendix's own: %q, %v", blocks, err)
+	}
+	for _, c := range []struct{ name, doc, want string }{
+		{"no appendix", "# no appendix", "no Appendix B"},
+		{"no end marker", doc("```json\n{\"a\":1}\n```", ""), "no end marker"},
+		{"an open fence", doc("```json\n{\"a\":1}\n", "*End of PACT 2.1*\n"), "unterminated"},
+		{"a block that is not JSON", doc("```json\n{\"a\":\n```", "*End of PACT 2.1*\n"), "not JSON"},
+	} {
+		if _, err := appendixB(c.doc); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: got %v, want an error saying %q", c.name, err, c.want)
+		}
+	}
 }
 
 func mustTime(t *testing.T, s string) time.Time {
