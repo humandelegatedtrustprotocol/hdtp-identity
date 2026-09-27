@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"os"
 
-	pact "github.com/tech-sumit/pact-gateway/pact-identity"
+	pact "github.com/pact-cloud/pact-identity/go"
 )
 
 type request struct {

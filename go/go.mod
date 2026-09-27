@@ -1,4 +1,4 @@
-module github.com/tech-sumit/pact-gateway/pact-identity
+module github.com/pact-cloud/pact-identity/go
 
 go 1.25
 
