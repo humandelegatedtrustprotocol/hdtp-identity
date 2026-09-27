@@ -7,9 +7,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed here that did not pass.
 
-Specification: **2.1.3**. **52** normative sentences, **621** cross-port parity cases over **47** guarded functions.
+Specification: **2.1.3**. **52** normative sentences, **626** cross-port parity cases over **47** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**48** functions, spec 2.1.3): **1242** answers held to the shape it declares, **0** did not. Of **90** declared error codes, **74** were produced by a case here; the rest are declared for a caller's benefit and no argument in this suite reaches them.
+Every answer of both ports is validated against `contract/contract.json` (**48** functions, spec 2.1.3): **1252** answers held to the shape it declares, **0** did not. Of **90** declared error codes, **74** were produced by a case here; the rest are declared for a caller's benefit and no argument in this suite reaches them.
 
 ## The 52 normative sentences of the specification
 
@@ -156,7 +156,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 621 cross-port parity cases
+## The 626 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -164,7 +164,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **621** cases, **0** disagreements, **47** of **47** functions compared whole on success.
+At the run that generated this file: **626** cases, **0** disagreements, **47** of **47** functions compared whole on success.
 
 ### `address_guard` — 32 cases · whole on success
 
@@ -410,7 +410,7 @@ At the run that generated this file: **621** cases, **0** disagreements, **47** 
 - export_read with nothing to work from
 - export_read with a directory entry that does not read
 
-### `export_read_end` — 8 cases · whole on success
+### `export_read_end` — 11 cases · whole on success
 
 - export_read_end: what was written
 - export corpus valid-export.zip: export_read_end
@@ -419,9 +419,12 @@ At the run that generated this file: **621** cases, **0** disagreements, **47** 
 - export corpus unreferenced-media.zip: export_read_end
 - export corpus message-count.zip: export_read_end
 - export corpus messages-hash.zip: export_read_end
+- export_read_end: a manifest with a lone surrogate escape
+- export_read_end: a manifest with a surrogate pair
+- export_read_end: a manifest with a count of -0
 - export_read_end with nothing to work from
 
-### `export_read_messages` — 11 cases · whole on success
+### `export_read_messages` — 13 cases · whole on success
 
 - export_read_messages: what export_write_messages wrote
 - export corpus valid-export.zip: export_read_messages
@@ -432,6 +435,8 @@ At the run that generated this file: **621** cases, **0** disagreements, **47** 
 - export corpus body-with-a-file.zip: export_read_messages
 - export corpus key-in-a-body.zip: export_read_messages
 - export corpus unknown-message-member.zip: export_read_messages
+- export_read_messages: a line with a lone low surrogate escape
+- export_read_messages: a line with a surrogate pair
 - export_read_messages with nothing to work from
 - export_read_messages from line 0
 
