@@ -12,6 +12,7 @@ package pactidentity
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -30,9 +31,30 @@ func SecondHome(liveEndpoint string) string {
 	return "a leaf is live for " + liveEndpoint + ": a second endpoint is a move, not a second home"
 }
 
+// IsFingerprint is `sha256:` and 43 base64url characters: a root fingerprint as SPEC §2 writes one.
+func IsFingerprint(s string) bool {
+	h, found := strings.CutPrefix(s, "sha256:")
+	return found && len(h) == 43 && isB64url(h)
+}
+
+// entryMemberReads is one required member of a ledger entry, read: the root a fingerprint, the
+// endpoint not empty, an instant parsing (contract: LedgerEntry). The same rule in both passes.
+func entryMemberReads(m, text string) bool {
+	switch {
+	case m == "root":
+		return IsFingerprint(text)
+	case m == "endpoint":
+		return text != ""
+	case entryInstants[m]:
+		_, ok := parseInstant(text)
+		return ok
+	}
+	return true
+}
+
 // ReadLedger reads every entry of a decoded ledger as CONTRACT §6's LedgerEntry: a list, each entry
-// an object with the required members as strings, the instants parsing, origin a string if present,
-// and nothing else. The first that does not read is named by its index and member.
+// an object with the required members as strings, the root a fingerprint, the endpoint not empty,
+// the instants parsing, origin a string if present, and nothing else. The first that does not read is named by its index and member.
 func ReadLedger(ledger any) error {
 	entries, isList := ledger.([]any)
 	if !isList {
@@ -46,13 +68,8 @@ func ReadLedger(ledger any) error {
 		unread := func(m string) error { return fmt.Errorf("the record's ledger entry %d does not read: %s", i, m) }
 		for _, m := range entryRequired {
 			text, isText := o[m].(string)
-			if !isText {
+			if !isText || !entryMemberReads(m, text) {
 				return unread(m)
-			}
-			if entryInstants[m] {
-				if _, ok := parseInstant(text); !ok {
-					return unread(m)
-				}
 			}
 		}
 		if origin, has := o["origin"]; has {
@@ -103,7 +120,7 @@ func LedgerCheck(ledger []LedgerEntry, root, endpoint string, now time.Time, mov
 	// Every entry read, as ReadLedger reads it, for a Go caller that holds typed entries.
 	for i, e := range ledger {
 		for _, m := range [][2]string{{"root", e.Root}, {"endpoint", e.Endpoint}, {"not_before", e.NotBefore}, {"not_after", e.NotAfter}, {"issued_at", e.IssuedAt}} {
-			if _, ok := parseInstant(m[1]); m[1] == "" || entryInstants[m[0]] && !ok {
+			if !entryMemberReads(m[0], m[1]) {
 				return nil, errArg(fmt.Sprintf("the record's ledger entry %d does not read: %s", i, m[0]))
 			}
 		}
