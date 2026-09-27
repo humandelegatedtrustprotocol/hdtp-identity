@@ -3,6 +3,7 @@
 use super::{holds_private_key, is_hash, refuse, BODY_MAX, LINE_MAX, MEDIA_MAX};
 use crate::util::Result;
 use serde_json::{json, Map, Value};
+use std::collections::HashSet;
 
 pub const MEMBERS: [&str; 11] =
     ["id", "thread", "contact", "msg_id", "direction", "sender", "time", "body", "reply_to", "status", "attachments"];
@@ -27,9 +28,24 @@ fn key_material(v: &Value) -> bool {
     }
 }
 
+/// What a message may name, as sets built once per call: a lookup per message in the lists the
+/// caller passed was a scan the file's size multiplied.
+pub struct Lookup<'a> {
+    threads: HashSet<&'a str>,
+    contacts: HashSet<&'a str>,
+    media: HashSet<&'a str>,
+}
+
+impl<'a> Lookup<'a> {
+    pub fn of(names: &'a Names<'a>) -> Lookup<'a> {
+        let set = |l: &'a [String]| l.iter().map(String::as_str).collect();
+        Lookup { threads: set(names.threads), contacts: set(names.contacts), media: set(names.media) }
+    }
+}
+
 /// One message, its members held to §9.2; `names` absent skips the references (a writer's check).
 /// The refusal is the member and why.
-pub fn message(doc: &Map<String, Value>, names: Option<&Names<'_>>) -> std::result::Result<Value, (Option<&'static str>, String)> {
+pub fn message(doc: &Map<String, Value>, names: Option<&Lookup<'_>>) -> std::result::Result<Value, (Option<&'static str>, String)> {
     if let Some(k) = crate::ledger::stranger(doc, &MEMBERS) {
         return Err((None, format!("{} is not a member of a message", crate::canonical::string(&k))));
     }
@@ -57,10 +73,10 @@ pub fn message(doc: &Map<String, Value>, names: Option<&Names<'_>>) -> std::resu
     let thread = text("thread")?;
     let contact = text("contact")?;
     if let Some(n) = names {
-        if !n.threads.iter().any(|t| t == thread) {
+        if !n.threads.contains(thread) {
             return Err((Some("thread"), "names no thread in threads.csv".into()));
         }
-        if !n.contacts.iter().any(|c| c == contact) {
+        if !n.contacts.contains(contact) {
             return Err((Some("contact"), "names no contact in contacts.csv".into()));
         }
     }
@@ -91,7 +107,7 @@ pub fn message(doc: &Map<String, Value>, names: Option<&Names<'_>>) -> std::resu
             return at(format!("{k} is missing"));
         }
         let Some(file) = o["file"].as_str().filter(|f| is_hash(f)) else { return at("file is not a lowercase hex sha256".into()) };
-        if names.is_some_and(|n| !n.media.iter().any(|m| m == file)) {
+        if names.is_some_and(|n| !n.media.contains(file)) {
             return at("file names no media member".into());
         }
         if !o["filename"].is_string() || !o["mime"].is_string() {
@@ -116,6 +132,7 @@ pub fn message(doc: &Map<String, Value>, names: Option<&Names<'_>>) -> std::resu
 /// One batch of lines; `first_line` is the number of the first in the whole file. Answers the
 /// messages and the media they name.
 pub fn read(lines: &[String], first_line: u64, names: &Names<'_>) -> Result<(Vec<Value>, Vec<String>)> {
+    let lookup = Lookup::of(names);
     let mut messages = Vec::new();
     let mut seen: Vec<String> = Vec::new();
     for (i, line) in lines.iter().enumerate() {
@@ -126,7 +143,7 @@ pub fn read(lines: &[String], first_line: u64, names: &Names<'_>) -> Result<(Vec
         let Ok(Value::Object(doc)) = serde_json::from_str::<Value>(line) else {
             return refuse(format!("messages.jsonl: line {n}: not a JSON object"));
         };
-        let m = message(&doc, Some(names)).map_err(|(member, why)| {
+        let m = message(&doc, Some(&lookup)).map_err(|(member, why)| {
             crate::util::Error::new(
                 "bad_request",
                 match member {
