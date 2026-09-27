@@ -10,6 +10,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+## 0.2.0 — 2026-09-27
+
 The first release of pact-identity as a repository of its own (split from the umbrella
 `pact-gateway` on 2026-09-27). What 0.1.0 was is unchanged in behaviour; what is new is how it is
 named, depended on and released.
