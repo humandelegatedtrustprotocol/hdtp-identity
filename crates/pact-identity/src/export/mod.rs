@@ -19,6 +19,7 @@ use crate::der;
 use crate::util::{err, from_b64u, hex, sha256, Error, Result};
 use crate::{address, x509};
 use serde_json::{json, Value};
+use std::collections::HashSet;
 
 pub const MANIFEST_MAX: usize = 64 * 1024;
 pub const CONTACTS_MAX: usize = 4 * 1024 * 1024;
@@ -101,6 +102,7 @@ fn permissions(cell: &str) -> std::result::Result<Vec<String>, String> {
         return Ok(Vec::new());
     }
     let mut seen: Vec<String> = Vec::new();
+    let mut have: HashSet<&str> = HashSet::new();
     for p in cell.split(' ') {
         let integration = p.strip_prefix("integration.").is_some_and(|n| {
             !n.is_empty() && n.len() <= 64 && n.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_' || c == b'-')
@@ -111,7 +113,7 @@ fn permissions(cell: &str) -> std::result::Result<Vec<String>, String> {
         if !PERMISSIONS.contains(&p) && !integration {
             return Err(format!("{} is not a permission of §8", crate::canonical::string(p)));
         }
-        if seen.iter().any(|s| s == p) {
+        if !have.insert(p) {
             return Err(format!("{p} twice"));
         }
         seen.push(p.to_string());
@@ -201,7 +203,7 @@ pub fn contact_row(cells: &[String], c: &Cells<'_>, pin_at: Option<i64>) -> std:
 }
 
 /// One thread row's cells, checked against the contacts' roots.
-pub fn thread_row(cells: &[String], roots: &[&str]) -> std::result::Result<Value, (usize, String)> {
+pub fn thread_row(cells: &[String], roots: &HashSet<&str>) -> std::result::Result<Value, (usize, String)> {
     for (k, cell) in cells.iter().enumerate() {
         if holds_private_key(cell) {
             return Err((k, "holds a private key".into()));
@@ -293,16 +295,19 @@ pub fn read(
     owner: &str,
     now: i64,
 ) -> Result<Read> {
-    let mut seen: Vec<&str> = Vec::new();
+    // Every name the rules look up in a list the FILE sizes — the directory, the roots, the thread
+    // ids, the msg_ids, the media — is looked up in a set, never by a scan: a scan per row made this
+    // quadratic in threads.csv's rows (16k threads: 11 s in the Wasm core), and a file within every
+    // bound pinned a host for minutes. js/perf.test.mjs and both ports' growth tests hold it.
+    let mut seen: HashSet<&str> = HashSet::new();
     for e in directory {
         let label = entry_label(&e.name);
         if !allowed_name(&e.name) {
             return refuse(format!("{label}: not a name an export holds"));
         }
-        if seen.contains(&e.name.as_str()) {
+        if !seen.insert(&e.name) {
             return refuse(format!("{label}: appears twice"));
         }
-        seen.push(&e.name);
         if e.encrypted {
             return refuse(format!("{label}: encrypted"));
         }
@@ -318,7 +323,7 @@ pub fn read(
             }
         }
     }
-    let has = |n: &str| seen.contains(&n);
+    let has = |n: &str| seen.contains(n);
     for required in ["manifest.json", "contacts.csv"] {
         if !has(required) {
             return refuse(format!("{required}: the file lacks it"));
@@ -366,13 +371,14 @@ pub fn read(
     }
     let cells = Cells { owner };
     let mut contacts: Vec<Value> = Vec::new();
+    let mut roots: HashSet<String> = HashSet::new();
     for (n, r) in &rows {
         if r.len() != CONTACT_COLUMNS.len() {
             return refuse(format!("contacts.csv: row {n}: {} fields, not {}", r.len(), CONTACT_COLUMNS.len()));
         }
         let row = contact_row(r, &cells, Some(now))
             .map_err(|(k, why)| Error::new("bad_request", format!("contacts.csv: row {n}, column {}: {why}", CONTACT_COLUMNS[k])))?;
-        if contacts.iter().any(|c| c["root"] == row["root"]) {
+        if !roots.insert(row["root"].as_str().unwrap_or_default().to_string()) {
             return refuse(format!("contacts.csv: row {n}, column root: appears twice"));
         }
         contacts.push(row);
@@ -390,14 +396,15 @@ pub fn read(
         if Some(&sha256_hex(threads_text.as_bytes())) != m.files.get("threads.csv") {
             return refuse("threads.csv: its sha256 is not manifest.json's");
         }
-        let roots: Vec<&str> = contacts.iter().filter_map(|c| c["root"].as_str()).collect();
+        let roots: HashSet<&str> = roots.iter().map(String::as_str).collect();
+        let mut ids: HashSet<String> = HashSet::new();
         for (n, r) in table("threads.csv", threads_text, &THREAD_COLUMNS)? {
             if r.len() != THREAD_COLUMNS.len() {
                 return refuse(format!("threads.csv: row {n}: {} fields, not {}", r.len(), THREAD_COLUMNS.len()));
             }
             let row = thread_row(&r, &roots)
                 .map_err(|(k, why)| Error::new("bad_request", format!("threads.csv: row {n}, column {}: {why}", THREAD_COLUMNS[k])))?;
-            if threads.iter().any(|t| t["id"] == row["id"]) {
+            if !ids.insert(row["id"].as_str().unwrap_or_default().to_string()) {
                 return refuse(format!("threads.csv: row {n}, column id: appears twice"));
             }
             threads.push(row);
@@ -442,11 +449,13 @@ pub fn read_end(manifest_text: &str, end: &End<'_>) -> Result<()> {
     if let Some(w) = sorted.windows(2).find(|w| w[0] == w[1]) {
         return refuse(format!("messages.jsonl: id {} appears twice", crate::canonical::string(w[0])));
     }
-    if let Some(r) = reply_tos.iter().find(|r| !msg_ids.contains(r)) {
+    let msg_ids: HashSet<&str> = msg_ids.iter().map(String::as_str).collect();
+    let media_seen: HashSet<&str> = media_seen.iter().map(String::as_str).collect();
+    if let Some(r) = reply_tos.iter().find(|r| !msg_ids.contains(r.as_str())) {
         return refuse(format!("messages.jsonl: reply_to {} names no message in the file", crate::canonical::string(r)));
     }
     for name in m.files.keys().filter(|k| is_media(k)) {
-        if !media_seen.iter().any(|h| h == &name[6..]) {
+        if !media_seen.contains(&name[6..]) {
             return refuse(format!("{name}: nothing names it"));
         }
     }
@@ -516,13 +525,14 @@ pub fn write(
     }
     let cells = Cells { owner };
     let mut rows: Vec<(String, Vec<String>)> = Vec::new();
+    let mut written: HashSet<String> = HashSet::new();
     for (i, c) in contacts.iter().enumerate() {
         let located = |(k, why): (usize, String)| Error::new("bad_request", format!("contacts[{i}], column {}: {why}", CONTACT_COLUMNS[k]));
         let r = contact_cells(c).map_err(located)?;
         let row = contact_row(&r, &cells, None).map_err(located)?;
         let mut r = r;
         r[10] = row["added"].as_str().unwrap_or_default().to_string();
-        if rows.iter().any(|(root, _)| *root == r[0]) {
+        if !written.insert(r[0].clone()) {
             return refuse(format!("contacts[{i}], column root: appears twice"));
         }
         rows.push((r[0].clone(), r));
@@ -532,7 +542,7 @@ pub fn write(
     }
     rows.sort();
     let roots: Vec<String> = rows.iter().map(|(r, _)| r.clone()).collect();
-    let root_refs: Vec<&str> = roots.iter().map(String::as_str).collect();
+    let root_refs: HashSet<&str> = roots.iter().map(String::as_str).collect();
     let mut contacts_csv = String::new();
     csv::write_record(&mut contacts_csv, &CONTACT_COLUMNS.map(String::from));
     for (_, r) in &rows {
@@ -543,13 +553,14 @@ pub fn write(
     }
 
     let mut trows: Vec<(String, Vec<String>)> = Vec::new();
+    let mut thread_ids: HashSet<String> = HashSet::new();
     for (i, t) in threads.iter().enumerate() {
         let located = |(k, why): (usize, String)| Error::new("bad_request", format!("threads[{i}], column {}: {why}", THREAD_COLUMNS[k]));
         let mut r = thread_cells(t).map_err(located)?;
         let row = thread_row(&r, &root_refs).map_err(located)?;
         r[3] = row["created_at"].as_str().unwrap_or_default().to_string();
         r[4] = row["last_at"].as_str().unwrap_or_default().to_string();
-        if trows.iter().any(|(id, _)| *id == r[0]) {
+        if !thread_ids.insert(r[0].clone()) {
             return refuse(format!("threads[{i}], column id: appears twice"));
         }
         trows.push((r[0].clone(), r));
@@ -659,5 +670,112 @@ mod tests {
         let message = json!({ "id": "1", "thread": "t", "contact": "c", "msg_id": "m", "direction": "in", "sender": "human",
             "time": "2026-09-27T10:00:00Z", "body": body, "reply_to": null, "status": "read", "attachments": [] });
         assert_eq!(jsonl::write(&[message]).map_err(|e| e.why), Err("messages[0], member body: holds a private key".to_string()));
+    }
+
+    /// The export's functions grow linearly in the rows a file holds. Each is timed at N and 4N rows
+    /// (threads, messages, and held and imported contacts), the two sizes interleaved over five
+    /// rounds so a busy machine slows both alike, the best round of each kept; 4N may take at most 8×
+    /// N. Why 8: linear work is 4×, n·log n about 4.6×, and a scan per row 16× — the defect of 0.3.0,
+    /// where export_read took 0.2 s at 2k threads and 11 s at 16k. 8 is halfway (in log terms)
+    /// between linear and quadratic, a 2× margin for noise that no quadratic fits in. A function under
+    /// 20 ms at 4N is too fast to judge and passes: a scan per row at 4N rows is far above that. The
+    /// bound is on rows and a ratio, never on seconds, so it cannot go stale with the machine.
+    #[test]
+    fn export_functions_grow_linearly_in_the_rows_of_a_file() {
+        let n = 5_000;
+        let owner = format!("sha256:{}", "O".repeat(43));
+        let fp = |i: usize| format!("sha256:{}", b64u(&crate::util::sha256(format!("c{i}").as_bytes())));
+        let contacts: Vec<Value> = (0..200)
+            .map(|i| {
+                json!({ "root": fp(i), "endpoint": format!("https://c{i}.example/mcp"), "name": "", "display_name": "", "status": "active",
+                    "was_active": true, "permissions": [], "their_permissions": [], "added": "2026-09-01T00:00:00Z" })
+            })
+            .collect();
+        let roots: Vec<String> = (0..200).map(fp).collect();
+        struct Data {
+            rows: usize,
+            threads: Vec<Value>,
+            messages: Vec<Value>,
+            many: Vec<Value>,
+            thread_ids: Vec<String>,
+            ids: Vec<String>,
+            msg_ids: Vec<String>,
+            reply_tos: Vec<String>,
+        }
+        let data = |rows: usize| {
+            Data {
+            rows,
+            threads: (0..rows)
+                .map(|i| json!({ "id": format!("t{i}"), "contact": fp(i % 200), "topic": "x", "created_at": "2026-09-01T00:00:00Z", "last_at": "2026-09-01T00:00:00Z" }))
+                .collect(),
+            messages: (0..rows)
+                .map(|i| {
+                    json!({ "id": format!("m{i}"), "thread": format!("t{i}"), "contact": fp(i % 200), "msg_id": format!("x{i}"), "direction": "in",
+                        "sender": "human", "time": "2026-09-01T00:00:00Z", "body": "hi", "reply_to": if i > 0 { json!(format!("x{}", i - 1)) } else { Value::Null },
+                        "status": "read", "attachments": [] })
+                })
+                .collect(),
+            many: (0..rows).map(|i| json!({ "root": fp(1000 + i), "leaf": null })).collect(),
+            thread_ids: (0..rows).map(|i| format!("t{i}")).collect(),
+            ids: (0..rows).map(|i| format!("m{i}")).collect(),
+            msg_ids: (0..rows).map(|i| format!("x{i}")).collect(),
+            reply_tos: (0..rows - 1).map(|i| format!("x{i}")).collect(),
+        }
+        };
+        let entry = |name: &str| Entry { name: name.into(), size: 1, encrypted: false, mode: 0 };
+        let directory = [entry("manifest.json"), entry("contacts.csv"), entry("threads.csv")];
+        let hash = "a".repeat(64);
+        // One pass over every function at one size: the seconds each took.
+        let pass = |d: &Data| -> [f64; 6] {
+            let clock = std::time::Instant::now;
+            let t = clock();
+            let w = write(&owner, "", 0, "t", &contacts, &d.threads, &[]).unwrap();
+            let t_write = t.elapsed().as_secs_f64();
+            let manifest_text = manifest::finish(&w.partial, None, 0).unwrap();
+            let t = clock();
+            read(&directory, Some(&manifest_text), Some(&w.contacts_csv), w.threads_csv.as_deref(), &owner, 0).unwrap();
+            let t_read = t.elapsed().as_secs_f64();
+            let t = clock();
+            let lines = jsonl::write(&d.messages).unwrap();
+            let t_write_messages = t.elapsed().as_secs_f64();
+            let names = jsonl::Names { threads: &d.thread_ids, contacts: &roots, media: &[] };
+            let t = clock();
+            jsonl::read(&lines, 1, &names).unwrap();
+            let t_read_messages = t.elapsed().as_secs_f64();
+            let with_messages = manifest::finish(&w.partial, Some(&hash), d.rows as u64).unwrap();
+            let end = End {
+                messages_sha256: Some(&hash),
+                lines: d.rows as u64,
+                ids: &d.ids,
+                msg_ids: &d.msg_ids,
+                reply_tos: &d.reply_tos,
+                media_seen: &[],
+            };
+            let t = clock();
+            read_end(&with_messages, &end).unwrap();
+            let t_read_end = t.elapsed().as_secs_f64();
+            let t = clock();
+            merge::merge(&d.many, &d.many).unwrap();
+            [t_write, t_read, t_write_messages, t_read_messages, t_read_end, t.elapsed().as_secs_f64()]
+        };
+        let names = ["export_write", "export_read", "export_write_messages", "export_read_messages", "export_read_end", "export_merge"];
+        let (small, large) = (data(n), data(4 * n));
+        let (mut a, mut b) = ([f64::MAX; 6], [f64::MAX; 6]);
+        for _ in 0..5 {
+            for (best, d) in [(&mut a, &small), (&mut b, &large)] {
+                for (k, t) in pass(d).into_iter().enumerate() {
+                    best[k] = best[k].min(t);
+                }
+            }
+        }
+        let mut slow = Vec::new();
+        for k in 0..6 {
+            let line = format!("{}: {:.1} ms at {n} rows, {:.1} ms at {} ({:.1}×)", names[k], a[k] * 1e3, b[k] * 1e3, 4 * n, b[k] / a[k]);
+            eprintln!("{line}");
+            if b[k] >= 0.020 && b[k] / a[k] > 8.0 {
+                slow.push(line);
+            }
+        }
+        assert!(slow.is_empty(), "superlinear in the rows of a file:\n  {}", slow.join("\n  "));
     }
 }
