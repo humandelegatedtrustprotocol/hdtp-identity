@@ -214,15 +214,15 @@ func ReadExportZip(zr *zip.Reader, owner string, now time.Time, ceiling int64) (
 	if err := convert(r.threads, &out.Threads); err != nil {
 		return nil, err
 	}
-	names := messageNames{threads: []string{}, contacts: []string{}, media: []string{}}
+	names := messageNames{threads: strSet{}, contacts: strSet{}, media: strSet{}}
 	for _, c := range out.Contacts {
-		names.contacts = append(names.contacts, c.Root)
+		names.contacts.add(c.Root)
 	}
 	for _, t := range out.Threads {
-		names.threads = append(names.threads, t.ID)
+		names.threads.add(t.ID)
 	}
 	for _, m := range out.Media {
-		names.media = append(names.media, m.Hash)
+		names.media.add(m.Hash)
 	}
 
 	end := exportEnd{ids: []string{}, msgIDs: []string{}, replyTos: []string{}, mediaSeen: []string{}}
@@ -254,6 +254,7 @@ func (h *exportHost) streamMessages(f *zip.File, names messageNames, end *export
 	defer rc.Close()
 	sum := sha256.New()
 	br := bufio.NewReader(io.TeeReader(rc, sum))
+	mediaSeen := setOf(end.mediaSeen)
 	var batch []string
 	var n uint64
 	flush := func() error {
@@ -278,7 +279,8 @@ func (h *exportHost) streamMessages(f *zip.File, names messageNames, end *export
 			out.Messages = append(out.Messages, row)
 		}
 		for _, s := range seen {
-			if !contains(end.mediaSeen, s) {
+			if !mediaSeen.has(s) {
+				mediaSeen.add(s)
 				end.mediaSeen = append(end.mediaSeen, s)
 			}
 		}
