@@ -10,6 +10,12 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+- SPEC 2.2.3: `version` answers spec 2.2.3. The only change is 9.2#3's wording: the notice names
+  what the file holds, and a book's notice names the contact list alone. `js/musts.json` re-reads
+  that row, and there are still 88 MUSTs. It is held by the pact CLI's book-notice test, which
+  0.3.3 already gave the book's words. Nothing here writes a full export's notice: that is the
+  hosts'. No behaviour changes.
+
 ## 0.3.3 — 2026-09-27
 
 SPEC 2.2.2: `version` answers spec 2.2.2, and `js/musts.json` holds each of its 88 MUSTs.
