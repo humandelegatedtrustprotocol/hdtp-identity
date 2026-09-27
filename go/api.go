@@ -298,4 +298,7 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 	"vault_seal":   callVaultSeal,
 	"vault_open":   callVaultOpen,
 	"wallet_issue": callWalletIssue,
+
+	// Ledger: api_ledger.go
+	"ledger_check": callLedgerCheck,
 }

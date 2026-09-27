@@ -216,7 +216,12 @@
     "held_by": [
       "rust:issues_from_the_vault",
       "go:TestWalletIssue",
-      "go:TestVaultRulesMirrorTheCore"
+      "go:TestVaultRulesMirrorTheCore",
+      "rust:ledger_check_names_each_kind_and_refuses_only_a_second_home",
+      "go:TestLedgerCheckNamesEachKindAndRefusesOnlyASecondHome",
+      "rust:ledger_check_takes_the_newest_leaf_and_not_the_newest_unexpired_one",
+      "go:TestLedgerCheckTakesTheNewestLeafAndNotTheNewestUnexpiredOne",
+      "rust:a_card_held_root_is_held_to_the_ledger_by_the_core"
     ]
   },
   "9.#6": {

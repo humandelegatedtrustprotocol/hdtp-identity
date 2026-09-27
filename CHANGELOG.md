@@ -10,6 +10,12 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+- `ledger_check` (contract §6.1, section `ledger`): the wallet's ledger rules as facts — the refusal
+  of a second home, `new_host`, `known_endpoint`, `previous_not_before`, the live leaf, and the move
+  notice's kind (`renew`, `move`, `new_host`, `move_back`, `no_ledger`). `wallet_issue` in both ports
+  applies it, and so does the `pact` CLI's `id issue` for a card-held root; the CLI's own copy of the
+  one-live-leaf rule is gone. `id issue` prints the move notice before it signs a move.
+
 ## 0.2.0 — 2026-09-27
 
 The first release of pact-identity as a repository of its own (split from the umbrella
