@@ -45,6 +45,17 @@ export default function ledger({ add, expect }, f) {
     ['an entry that is not an object', ['an entry'], 'the record\'s ledger entry 0 does not read'],
     ['a ledger that is not a list', { entries: [] }, 'the record\'s ledger is a list'],
   ];
+  // An entry's root is a fingerprint (contract: LedgerEntry.root is a Fingerprint) and its endpoint is
+  // not empty, whichever root it names. The ports answered these two ways: the Go port's typed pass
+  // refused an empty member, and the core read it.
+  for (const [what, bad, m] of [
+    ['an entry whose root is empty', { ...good, root: '' }, 'root'],
+    ['an entry whose root is no fingerprint', { ...good, root: 'alina' }, 'root'],
+    ['an entry whose endpoint is empty', { ...good, endpoint: '' }, 'endpoint'],
+  ]) {
+    add(`ledger_check: ${what}`, 'ledger_check', ask([...here, bad]));
+    expect(`ledger_check: ${what}`, { error: 'bad_request', why: `the record's ledger entry 1 does not read: ${m}` });
+  }
   for (const [what, ledger, why] of unreadable) {
     add(`ledger_check: ${what}`, 'ledger_check', ask(ledger));
     expect(`ledger_check: ${what}`, { error: 'bad_request', why });
