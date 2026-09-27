@@ -143,7 +143,7 @@ fn export_read_end_holds_a_bounded_amount_per_id() {
         let manifest = json!({ "pact_export": 2, "owner": owner, "owner_name": "", "exported_at": "2026-09-27T00:00:00Z", "tool": "t",
         "counts": { "contacts": 0, "threads": 0, "messages": rows, "media": 0 }, "files": { "messages.jsonl": hash } })
         .to_string();
-        let args = json!({ "manifest": manifest, "messages_sha256": hash, "lines": rows, "ids": ids, "msg_ids": msg_ids, "reply_tos": msg_ids[1..], "media_seen": [] }).to_string();
+        let args = json!({ "manifest": manifest, "messages_sha256": hash, "lines": rows, "ids": ids, "msg_ids": msg_ids, "reply_tos": msg_ids[1..], "media_seen": [], "media": [] }).to_string();
         let lists = json!([ids, msg_ids, msg_ids[1..]]).to_string().len();
         let (peak, answer) = peak_of("export_read_end", &args);
         assert!(!answer.contains("\"error\""), "{answer}");

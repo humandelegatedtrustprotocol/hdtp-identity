@@ -194,9 +194,12 @@
       "rust:read_export_answers_the_whole_corpus",
       "go:TestReadExportZipAnswersTheWholeCorpus",
       "rust:export_write_refuses_a_row_or_message_holding_a_private_key",
-      "go:TestAnExportWrittenIsReadBackWhole"
+      "go:TestAFileThatIsAKeyLeavesWithItsMessageAndIsRefusedOnRead",
+      "go:TestWriteExportZipRefusesWhatItsReaderRefusesBeforeTheFirstByte",
+      "rust:what_a_contact_controls_never_stops_an_export_and_it_reads_back",
+      "go:TestWhatAContactControlsNeverStopsAnExportAndItReadsBack"
     ],
-    "why": "an archive is the §9.2 export, and both halves are this library's functions: the writer holds every row and message to the reader's rules, so a private key in any cell or body is refused before a byte is written (export_write_refuses_a_row_or_message_holding_a_private_key); the reader refuses key material, an unknown member, file or message member (key-in-a-cell.zip, key-in-a-body.zip, unknown-file.zip, unknown-message-member.zip in the corpus). The new host reaching every contact, and the person telling the old host to leave, are the hosts'"
+    "why": "an archive is the §9.2 export, and both halves are this library's functions. The writer puts no key in a file: a key in a cell of a row the host writes, a message member the host writes, `owner_name` or `tool` is refused (export_write_refuses_a_row_or_message_holding_a_private_key; TestWriteExportZipRefusesWhatItsReaderRefusesBeforeTheFirstByte refuses before the first byte), and a message whose body or file is a key is left out with its file and listed (what_a_contact_controls_never_stops_an_export_and_it_reads_back, TestAFileThatIsAKeyLeavesWithItsMessageAndIsRefusedOnRead). The reader refuses key material and anything it does not recognise (key-in-a-cell.zip, key-in-a-body.zip, media-is-a-key.zip, unknown-file.zip, unknown-message-member.zip in the corpus). The new host reaching every contact, and the person telling the old host to leave, are the hosts'"
   },
   "9.#3": {
     "hash": "6fd3ca8f5633",
@@ -250,14 +253,17 @@
     ]
   },
   "9.1#3": {
-    "hash": "bc53eb66f36e",
-    "text": "A wallet MUST refuse a request whose fields break the table above, and a request that has expired or expires m",
+    "hash": "cfbb3ddc06c6",
+    "text": "A wallet MUST refuse a request with a field the table above does not list, a field that is not a string, or a ",
     "held_by": [
       "rust:signing_request_check_passes_one_request_and_refuses_one_per_rule",
       "go:TestSigningRequestCheckPassesOneRequestAndRefusesOnePerRule",
       "rust:redirect_allowed_is_https_or_http_to_loopback_only",
-      "go:TestRedirectAllowedIsHTTPSOrHTTPToLoopbackOnly"
-    ]
+      "go:TestRedirectAllowedIsHTTPSOrHTTPToLoopbackOnly",
+      "rust:instants_have_one_grammar",
+      "go:TestInstantsHaveOneGrammar"
+    ],
+    "why": "a field the table does not list, a field that is not a string, and each field's shape are one case each in both ports' signing_request_check tests and in js/cases/signing.mjs's parity cases; `expires` is read in the one instant grammar (upper-case T and Z, `.` alone before a fraction) that instants_have_one_grammar and TestInstantsHaveOneGrammar hold"
   },
   "9.1#4": {
     "hash": "e85d4ccda221",
@@ -290,7 +296,11 @@
     "hash": "9b7ef049cbe7",
     "text": "A host MUST accept an answer only once, only with the `state` it minted for a pending request, and only a chai",
     "elsewhere": "node",
-    "why": "accepting the answer is the host's: pact-gateway's pending request and install (the state minted with the CSR, consumed once, the leaf checked against the pending key and endpoint), whose tests land with that work"
+    "elsewhere_names": [
+      "gateway:TestAWebWalletsAnswerIsAcceptedOnceAndOnlyWithItsState",
+      "gateway:TestTheStateIsConsumedByTheStatementThatChecksIt"
+    ],
+    "why": "accepting the answer is the host's: pact-gateway mints the state with the pending request, consumes it in the statement that checks it, and installs only a chain whose leaf carries the pending key and validates at the endpoint; the node's table is pact-gateway's docs/conformance.md (the row for PACT §9.1's web wallet answer), and the hosting platform's is pact-cloud's docs/must-holders.json"
   },
   "9.2#1": {
     "hash": "92584925803d",
@@ -314,13 +324,13 @@
     "held_by": [
       "rust:a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates"
     ],
-    "why": "the pact CLI's contacts export prints the notice before it writes the book, which that test asserts; the node's and the cloud's surfaces are theirs to hold"
+    "why": "the pact CLI writes a contact book, never a full export, and says before it writes one that the file is not encrypted, that anyone who gets it can read the contact list (a book holds nothing else, so it names no conversations or files), and that it holds no keys: that test holds the words exactly, finds them ahead of the line reporting the write, and finds them said when the write itself fails (an --out that is a dangling link passes every check made before the vault is opened and refuses the create), with no file written. The full export is written by hosts, whose surfaces are theirs to hold: the node's table is pact-gateway's docs/conformance.md, and the hosting platform's is pact-cloud's docs/must-holders.json"
   },
   "9.2#4": {
     "hash": "642ebd3f0504",
     "text": "A host that delivers an export over a network MUST NOT keep it at rest: it builds the file when the signed-in ",
     "elsewhere": "host",
-    "why": "delivery over a network is a host's import or export flow, which pact-gateway (the node) and pact-cloud each build over this library's export functions; the node's half lands with its own tests, and a hosting platform's half is held in that platform's own MUST table, beside its code"
+    "why": "delivery over a network is a host's import or export flow, which pact-gateway (the node) and pact-cloud each build over this library's export functions. No test of the node is named here; the node's table is pact-gateway's docs/conformance.md, and the hosting platform's is pact-cloud's docs/must-holders.json"
   },
   "9.2#5": {
     "hash": "29667f806da5",
@@ -364,22 +374,25 @@
     ]
   },
   "9.2#10": {
-    "hash": "6f91b6f888b3",
+    "hash": "8360926b909b",
     "text": "An importer MUST count sizes by the bytes it actually decompresses, never by the sizes a header states, and MU",
     "held_by": [
       "rust:read_export_answers_the_whole_corpus",
       "go:TestReadExportZipAnswersTheWholeCorpus",
-      "go:TestAnExportWrittenIsReadBackWhole"
+      "go:TestAnExportWrittenIsReadBackWhole",
+      "rust:the_contracts_export_limits_are_the_cores_constants",
+      "go:TestTheContractsExportLimitsAreThePortsConstants"
     ],
-    "why": "understated-size.zip states 16 bytes and holds 70000; the host ceiling is refused by name in TestAnExportWrittenIsReadBackWhole"
+    "why": "bytes actually decompressed: understated-size.zip states 16 bytes and holds 70000, and both hosts refuse it by what they read; js/cases/export-reader.mjs holds the core's own count of the text it is handed for contacts.csv and threads.csv with an entry that says less. Each bound has its file in the corpus, refused at the directory: oversize-manifest.zip, contacts-over-4-mib.zip, contacts-over-5000-rows.zip (by rows), threads-over-16-mib.zip, long-line.zip, media-over-5-mib.zip. The host's own whole-file ceiling is refused by name in TestAnExportWrittenIsReadBackWhole. The bounds themselves are held to contract/contract.json's ExportLimits in both ports"
   },
   "9.2#11": {
-    "hash": "b966e61c1d4e",
-    "text": "An importer MUST refuse a member that `manifest.files` does not list or whose sha256 differs from it, a listed",
+    "hash": "9703a4bea0dd",
+    "text": "An importer MUST refuse a text member that `manifest.files` does not list or whose sha256 differs from it, a l",
     "held_by": [
       "rust:read_export_answers_the_whole_corpus",
       "go:TestReadExportZipAnswersTheWholeCorpus"
-    ]
+    ],
+    "why": "unlisted-member.zip, hash-mismatch.zip, missing-threads.zip, media-listed-in-files.zip (a `files` entry naming a media member), media-bytes-not-name.zip and count-mismatch.zip in the corpus; `counts.media` is checked against the media members in both ports' read"
   },
   "9.2#12": {
     "hash": "ea4ec8f44de1",
@@ -390,13 +403,16 @@
     ]
   },
   "9.2#13": {
-    "hash": "803f7f58aa81",
+    "hash": "1d420b1906f6",
     "text": "An importer MUST refuse a header that is not exactly the one shown, a row or a message that breaks what its co",
     "held_by": [
       "rust:read_export_answers_the_whole_corpus",
       "go:TestReadExportZipAnswersTheWholeCorpus",
-      "go:TestAMessageCarriesAtMostOneFile"
-    ]
+      "go:TestAMessageCarriesAtMostOneFile",
+      "rust:instants_have_one_grammar",
+      "go:TestInstantsHaveOneGrammar"
+    ],
+    "why": "bad-header.zip, blank-row.zip, two-attachments.zip, body-with-a-file.zip and unknown-message-member.zip in the corpus, and read-side parity cases for columns and members in js/cases/export-reader.mjs. A time outside the one grammar (a lower-case z or t, a comma before the fraction, an offset) is refused on read in a contact row, a thread row, the manifest and a message, in both ports (the instant cases of js/cases/export-reader.mjs), and by the grammar's own tests"
   },
   "9.2#14": {
     "hash": "2dbab6660c18",
@@ -407,18 +423,23 @@
     ]
   },
   "9.2#15": {
-    "hash": "fd79e3c41333",
-    "text": "An importer MUST refuse any cell or member that decodes as a private key (PKCS #8, SEC1), and MUST parse a cer",
+    "hash": "01ede3d78374",
+    "text": "An importer MUST refuse any cell, any string member of the manifest or of a message, and any media file that d",
     "held_by": [
       "rust:read_export_answers_the_whole_corpus",
-      "go:TestReadExportZipAnswersTheWholeCorpus"
-    ]
+      "go:TestReadExportZipAnswersTheWholeCorpus",
+      "rust:export_write_refuses_a_row_or_message_holding_a_private_key",
+      "go:TestAFileThatIsAKeyLeavesWithItsMessageAndIsRefusedOnRead",
+      "rust:a_media_file_is_key_material_in_der_or_pem",
+      "go:TestAMediaFileIsKeyMaterialInDEROrPEM"
+    ],
+    "why": "key material: key-in-a-cell.zip (PKCS #8), key-in-a-body.zip (SEC1) and media-is-a-key.zip (a media file whose bytes are a PKCS #8 key in DER; a host's check, both hosts) in the corpus, with PKCS #8 and SEC1 in DER and PEM held by a_media_file_is_key_material_in_der_or_pem and TestAMediaFileIsKeyMaterialInDEROrPEM, and a manifest's owner_name on read in export_write_refuses_a_row_or_message_holding_a_private_key, owner_name and tool on read in js/cases/export.mjs. The profile: root-cert-not-a-root.zip in the corpus puts a contact's own leaf where its root certificate goes and is refused as not a root of §14.1's profile, and js/cases/export-reader.mjs holds the same and another root's certificate"
   },
   "9.2#16": {
     "hash": "8bb2c5069814",
     "text": "It MUST show the person the contacts, and write nothing until the person agrees.",
     "elsewhere": "host",
-    "why": "asking the person is a host's import or export flow, which pact-gateway (the node) and pact-cloud each build over this library's export functions; the node's half lands with its own tests, and a hosting platform's half is held in that platform's own MUST table, beside its code; the pact CLI's contacts import shows every difference and asks before it writes the record"
+    "why": "asking the person is a host's import or export flow, which pact-gateway (the node) and pact-cloud each build over this library's export functions. No test of the node is named here; the node's table is pact-gateway's docs/conformance.md, and the hosting platform's is pact-cloud's docs/must-holders.json; the pact CLI's contacts import shows every difference and asks before it writes the record"
   },
   "9.2#17": {
     "hash": "5f621f70c3a8",
@@ -435,25 +456,93 @@
     "hash": "9fb036438409",
     "text": "A host MUST NOT send a message it imported, whatever its `status`: retries belonged to the host that exported ",
     "elsewhere": "host",
-    "why": "sending is a host's import or export flow, which pact-gateway (the node) and pact-cloud each build over this library's export functions; the node's half lands with its own tests, and a hosting platform's half is held in that platform's own MUST table, beside its code"
+    "why": "sending is a host's import or export flow, which pact-gateway (the node) and pact-cloud each build over this library's export functions. No test of the node is named here; the node's table is pact-gateway's docs/conformance.md, and the hosting platform's is pact-cloud's docs/must-holders.json"
   },
   "9.2#19": {
-    "hash": "868cb4b80791",
-    "text": "The import MUST end with a new leaf from the person's wallet for the importing endpoint, asked for with `expec",
+    "hash": "f68b533e70e4",
+    "text": "The import MUST end with a request for a new leaf for the importing endpoint, which the host mints itself with",
     "elsewhere": "host",
-    "why": "asking the wallet for a leaf after an import is a host's import or export flow, which pact-gateway (the node) and pact-cloud each build over this library's export functions; the node's half lands with its own tests, and a hosting platform's half is held in that platform's own MUST table, beside its code"
+    "elsewhere_names": [
+      "gateway:TestFirstLeafAfterADataOnlyImport",
+      "gateway:TestAnImportedSlugHoldsOnlyItsRootUntilTheFirstChainInstalls"
+    ],
+    "why": "ending an import with a request for a new leaf is a host's import or export flow, which pact-gateway (the node) and pact-cloud each build over this library's export functions. The node holds it in TestFirstLeafAfterADataOnlyImport and TestAnImportedSlugHoldsOnlyItsRootUntilTheFirstChainInstalls; the node's table is pact-gateway's docs/conformance.md, and the hosting platform's is pact-cloud's docs/must-holders.json"
   },
   "9.2#20": {
     "hash": "732c5dd8f556",
     "text": "Once that leaf is installed, the host MUST call `update_contact` at every imported contact that is not blocked",
     "elsewhere": "host",
-    "why": "the handshake after the import is a host's import or export flow, which pact-gateway (the node) and pact-cloud each build over this library's export functions; the node's half lands with its own tests, and a hosting platform's half is held in that platform's own MUST table, beside its code"
+    "elsewhere_names": [
+      "gateway:TestAfterAnImportTheNextLeafHandshakesEveryImportedContact",
+      "gateway:TestTheCampaignWalksAnImportsContactsOnceAndNeverABlockedOne"
+    ],
+    "why": "the handshake after the import is a host's import or export flow, which pact-gateway (the node) and pact-cloud each build over this library's export functions. The node holds it in TestAfterAnImportTheNextLeafHandshakesEveryImportedContact and TestTheCampaignWalksAnImportsContactsOnceAndNeverABlockedOne; the node's table is pact-gateway's docs/conformance.md, and the hosting platform's is pact-cloud's docs/must-holders.json"
   },
   "9.2#21": {
     "hash": "51fb37a492ed",
     "text": "A contact that refuses the call — `update_contact` is a contact-tier tool, and that contact does not hold the ",
     "elsewhere": "host",
-    "why": "the request_contact fallback is a host's import or export flow, which pact-gateway (the node) and pact-cloud each build over this library's export functions; the node's half lands with its own tests, and a hosting platform's half is held in that platform's own MUST table, beside its code"
+    "elsewhere_names": [
+      "gateway:TestAfterAnImportTheNextLeafHandshakesEveryImportedContact",
+      "gateway:TestTheCampaignWalksAnImportsContactsOnceAndNeverABlockedOne"
+    ],
+    "why": "the request_contact fallback is a host's import or export flow, which pact-gateway (the node) and pact-cloud each build over this library's export functions. The node holds it in TestAfterAnImportTheNextLeafHandshakesEveryImportedContact and TestTheCampaignWalksAnImportsContactsOnceAndNeverABlockedOne; the node's table is pact-gateway's docs/conformance.md, and the hosting platform's is pact-cloud's docs/must-holders.json"
+  },
+  "9.2#22": {
+    "hash": "a6d2916359bc",
+    "text": "A writer MUST write `reply_to` as `null` when the message it names is not in the file.",
+    "held_by": [
+      "rust:what_a_contact_controls_never_stops_an_export_and_it_reads_back",
+      "go:TestWhatAContactControlsNeverStopsAnExportAndItReadsBack"
+    ],
+    "why": "a reply to a message the file does not carry, the left-out one included, is written as null, and the file reads back"
+  },
+  "9.2#23": {
+    "hash": "4d8bedace3e3",
+    "text": "A writer MUST drop from `their_permissions` every name that is not a permission of §8 and every name repeated,",
+    "held_by": [
+      "rust:what_a_contact_controls_never_stops_an_export_and_it_reads_back",
+      "go:TestWhatAContactControlsNeverStopsAnExportAndItReadsBack"
+    ]
+  },
+  "9.2#24": {
+    "hash": "a8eb3f538099",
+    "text": "A writer MUST truncate `display_name` to 200 characters, since it is the contact's own claim.",
+    "held_by": [
+      "rust:what_a_contact_controls_never_stops_an_export_and_it_reads_back",
+      "go:TestWhatAContactControlsNeverStopsAnExportAndItReadsBack"
+    ]
+  },
+  "9.2#25": {
+    "hash": "aa745ab035b1",
+    "text": "A writer MUST leave out a message whose `body`, or whose media file, the key-material check above would refuse",
+    "held_by": [
+      "rust:what_a_contact_controls_never_stops_an_export_and_it_reads_back",
+      "go:TestWhatAContactControlsNeverStopsAnExportAndItReadsBack",
+      "go:TestAFileThatIsAKeyLeavesWithItsMessageAndIsRefusedOnRead"
+    ],
+    "why": "a body that is a key: the message is left out and listed by id and reason (export_write_messages answers `left_out`); a media file that is a key: Go's WriteExportZip leaves out every message that carries it, with the file, and lists each (the core never sees media bytes, so the host's writer holds this half). The report the person is shown is the host's"
+  },
+  "9.2#26": {
+    "hash": "5154986a4395",
+    "text": "**Ceilings.** A host MAY set import ceilings of its own, on the whole file and on counts — contacts, threads, ",
+    "elsewhere": "host",
+    "why": "a host's own ceilings are the host's. The one this library's Go port sets names itself in its refusal (\"the file is over the N-byte ceiling this host sets\", TestAnExportWrittenIsReadBackWhole); the node's table is pact-gateway's docs/conformance.md, and the hosting platform's is pact-cloud's docs/must-holders.json"
+  },
+  "9.2#27": {
+    "hash": "9364e147ab0b",
+    "text": "A host MUST NOT refuse to write an export because the file would exceed an import ceiling of its own, of any k",
+    "elsewhere": "host",
+    "why": "this library's writers take no ceiling at all, so nothing here refuses an export for one; whether a host warns is its surface. the node's table is pact-gateway's docs/conformance.md, and the hosting platform's is pact-cloud's docs/must-holders.json"
+  },
+  "9.2#28": {
+    "hash": "ff5bc5bb3c9f",
+    "text": "**The owner's own strings.** A writer MUST refuse to write a manifest whose `owner_name` or `tool` the key-mat",
+    "held_by": [
+      "rust:export_write_refuses_a_row_or_message_holding_a_private_key",
+      "go:TestWriteExportZipRefusesWhatItsReaderRefusesBeforeTheFirstByte"
+    ],
+    "why": "export_write refuses a key in owner_name or tool, naming the member, and Go's WriteExportZip refuses it before the first byte; js/cases/export.mjs holds both ports to the same words"
   },
   "13.1#1": {
     "hash": "8d6cee3f7408",

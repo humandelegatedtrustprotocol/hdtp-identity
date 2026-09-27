@@ -30,6 +30,7 @@ pub const LINE_MAX: usize = 64 * 1024;
 pub const MEDIA_MAX: usize = 5 * 1024 * 1024;
 pub const BODY_MAX: usize = 16 * 1024;
 pub const NAME_MAX: usize = 200;
+pub const ATTACHMENTS_MAX: usize = 1;
 
 pub const CONTACT_COLUMNS: [&str; 11] =
     ["root", "endpoint", "name", "display_name", "status", "was_active", "permissions", "their_permissions", "leaf", "root_cert", "added"];
@@ -84,6 +85,12 @@ fn is_private_key_der(bytes: &[u8]) -> bool {
     pkcs8 || sec1
 }
 
+/// Whether a media file's bytes are a private key (SPEC 2.2.2, 9.2#15): PKCS #8 or SEC1 in DER, or
+/// text that holds one (PEM, or a base64 word) — the rule a cell is held to, over the file.
+pub fn media_holds_private_key(bytes: &[u8]) -> bool {
+    is_private_key_der(bytes) || std::str::from_utf8(bytes).is_ok_and(holds_private_key)
+}
+
 /// Whether text holds a private key (SPEC §9.2, "key material"): PEM armour naming one, or any
 /// whitespace-separated word that decodes, as base64 or base64url, to a PKCS #8 or SEC1 key.
 pub fn holds_private_key(text: &str) -> bool {
@@ -102,19 +109,24 @@ pub struct Cells<'a> {
 
 /// A permissions cell checked: §8's names, single-spaced, none twice. The names are the cell's own
 /// words; a reader answers them by splitting the cell, never a copy of it.
+/// A permission of §8: one of its names, or `integration.<name>`.
+fn is_permission(p: &str) -> bool {
+    PERMISSIONS.contains(&p)
+        || p.strip_prefix("integration.").is_some_and(|n| {
+            !n.is_empty() && n.len() <= 64 && n.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_' || c == b'-')
+        })
+}
+
 fn permissions(cell: &str) -> std::result::Result<(), String> {
     if cell.is_empty() {
         return Ok(());
     }
     let mut have: HashSet<&str> = HashSet::new();
     for p in cell.split(' ') {
-        let integration = p.strip_prefix("integration.").is_some_and(|n| {
-            !n.is_empty() && n.len() <= 64 && n.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_' || c == b'-')
-        });
         if p.is_empty() {
             return Err("not names separated by single spaces".into());
         }
-        if !PERMISSIONS.contains(&p) && !integration {
+        if !is_permission(p) {
             return Err(format!("{} is not a permission of §8", crate::canonical::string(p)));
         }
         if !have.insert(p) {
@@ -484,7 +496,7 @@ pub fn read<'a>(
     let Some(manifest_text) = manifest_text else { return refuse("manifest is required") };
     let m = manifest::parse(manifest_text, Some(owner))?;
     for e in directory {
-        if e.name == "manifest.json" || e.name == "media/" {
+        if e.name == "manifest.json" || e.name == "media/" || is_media(&e.name) {
             continue;
         }
         if !m.files.contains_key(&e.name) {
@@ -626,10 +638,12 @@ pub struct End<'a> {
     pub msg_ids: &'a [&'a str],
     pub reply_tos: &'a [&'a str],
     pub media_seen: &'a [&'a str],
+    /// The file's media members, by hash: export_read's `media`. Each must be named by a message.
+    pub media: &'a [&'a str],
 }
 
 pub fn read_end(manifest_text: &str, end: &End<'_>) -> Result<()> {
-    let End { messages_sha256, lines, ids, msg_ids, reply_tos, media_seen } = *end;
+    let End { messages_sha256, lines, ids, msg_ids, reply_tos, media_seen, media } = *end;
     let m = manifest::parse(manifest_text, None)?;
     if lines != m.messages {
         return refuse(format!("manifest.json: counts: messages is {}, and messages.jsonl holds {lines} lines", m.messages));
@@ -655,9 +669,9 @@ pub fn read_end(manifest_text: &str, end: &End<'_>) -> Result<()> {
     if let Some(r) = reply_tos.iter().find(|r| msg_ids.binary_search(r).is_err()) {
         return refuse(format!("messages.jsonl: reply_to {} names no message in the file", crate::canonical::string(r)));
     }
-    for name in m.files.keys().filter(|k| is_media(k)) {
-        if !media_seen.contains(&name[6..]) {
-            return refuse(format!("{name}: nothing names it"));
+    for hash in media {
+        if !media_seen.contains(hash) {
+            return refuse(format!("media/{hash}: nothing names it"));
         }
     }
     Ok(())
@@ -679,10 +693,21 @@ fn contact_cells(v: &Value) -> std::result::Result<Vec<String>, (usize, String)>
                     let Some(s) = i.as_str() else { return Err((k, "a list of names".into())) };
                     names.push(s.to_string());
                 }
+                if *col == "their_permissions" {
+                    // SPEC §9.2, what a contact controls: the column is the contact's own claim and
+                    // informative only, so a name §8 does not have, or one repeated, is dropped rather
+                    // than stopping the owner's export.
+                    names.retain(|n| is_permission(n));
+                    names.sort();
+                    names.dedup();
+                }
                 names.sort();
                 names.join(" ")
             }
             ("leaf" | "root_cert", None | Some(Value::Null)) => String::new(),
+            // The contact's name for themselves is their own claim: cut to 200 characters, on a
+            // character, rather than refused (SPEC §9.2, what a contact controls).
+            ("display_name", Some(Value::String(s))) => s.chars().take(NAME_MAX).collect(),
             (_, Some(Value::String(s))) if !matches!(*col, "was_active" | "permissions" | "their_permissions") => s.clone(),
             _ => return Err((k, "missing, or of the wrong type".into())),
         };
@@ -723,6 +748,13 @@ pub fn write(
 ) -> Result<Written> {
     if !is_fingerprint(owner) {
         return refuse("owner is not a fingerprint");
+    }
+    // SPEC 2.2.2, 9.2#28: the owner's and the host's own strings are refused, naming the member —
+    // there is nothing of a contact's to leave out.
+    for (m, text) in [("owner_name", owner_name), ("tool", tool)] {
+        if holds_private_key(text) {
+            return refuse(format!("{m} holds a private key"));
+        }
     }
     let cells = Cells { owner };
     let mut rows: Vec<(String, Vec<String>)> = Vec::new();
@@ -787,6 +819,8 @@ pub fn write(
     if let Some(t) = &threads_csv {
         files.insert("threads.csv".into(), json!(sha256_hex(t.as_bytes())));
     }
+    // The media are counted, never listed: `files` holds the text members alone (SPEC 2.2.2, 9.2#11).
+    let mut hashes: HashSet<&str> = HashSet::with_capacity(media.len());
     for (i, item) in media.iter().enumerate() {
         let hash = item.get("hash").and_then(|h| h.as_str()).unwrap_or("");
         if !is_hash(hash) {
@@ -796,7 +830,7 @@ pub fn write(
             Some(s) if s <= MEDIA_MAX as u64 => {}
             _ => return refuse(format!("media[{i}]: size is a number of bytes up to {MEDIA_MAX}")),
         }
-        if files.insert(format!("media/{hash}"), json!(hash)).is_some() {
+        if !hashes.insert(hash) {
             return refuse(format!("media[{i}]: appears twice"));
         }
     }
@@ -867,13 +901,161 @@ mod tests {
         let write = |name: &str| write(&owner, "", 0, "t", &[row(name)], &[], &[]).map(|_| ()).map_err(|e| e.why);
         assert_eq!(write("Bharat"), Ok(()), "the control");
         assert_eq!(write(&pkcs8), Err("contacts[0], column name: holds a private key".to_string()));
+        // The owner's and the host's own strings are refused, naming the member (SPEC 9.2#28), and a
+        // manifest someone else wrote with one is refused on read (9.2#15).
+        let own = |owner_name: &str, tool: &str| super::write(&owner, owner_name, 0, tool, &[], &[], &[]).map(|_| ()).map_err(|e| e.why);
+        assert_eq!(own(&pkcs8, "t"), Err("owner_name holds a private key".to_string()));
+        let pem = format!("-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----", base64_std(&key.to_pkcs8()));
+        assert_eq!(own("Alina", &pem), Err("tool holds a private key".to_string()));
+        let partial = super::write(&owner, "Alina", 0, "t", &[], &[], &[]).unwrap().partial;
+        let finished = manifest::finish(&partial, None, 0).unwrap();
+        assert!(manifest::parse(&finished, Some(&owner)).is_ok(), "the control reads");
+        let with_key = finished.replace("\"owner_name\":\"Alina\"", &format!("\"owner_name\":\"{pkcs8}\""));
+        assert_eq!(
+            manifest::parse(&with_key, Some(&owner)).map(|_| ()).map_err(|e| e.why),
+            Err("manifest.json: owner_name holds a private key".to_string())
+        );
         let mut sec1 = vec![0x30, 0x25, 0x02, 0x01, 0x01, 0x04, 0x20];
         sec1.extend_from_slice(&seed("export/sec1"));
         use base64::Engine;
         let body = format!("keep this: {}", base64::engine::general_purpose::STANDARD.encode(&sec1));
         let message = json!({ "id": "1", "thread": "t", "contact": "c", "msg_id": "m", "direction": "in", "sender": "human",
             "time": "2026-09-27T10:00:00Z", "body": body, "reply_to": null, "status": "read", "attachments": [] });
-        assert_eq!(jsonl::write(&[message]).map_err(|e| e.why), Err("messages[0], member body: holds a private key".to_string()));
+        // A message's body is the contact's: one holding a key is left out and listed, never refused
+        // (SPEC §9.2, what a contact controls); the same key in a member the host writes is refused.
+        let (lines, left_out) = jsonl::write(std::slice::from_ref(&message), None).unwrap();
+        assert!(lines.is_empty());
+        assert_eq!(left_out.iter().map(|l| (l.id.as_str(), l.reason)).collect::<Vec<_>>(), [("1", jsonl::BODY_HOLDS_A_KEY)]);
+        let mut in_a_thread = message;
+        in_a_thread["body"] = json!("hi");
+        in_a_thread["thread"] = json!(body);
+        assert_eq!(
+            jsonl::write(&[in_a_thread], None).map(|_| ()).map_err(|e| e.why),
+            Err("messages[0], member thread: holds a private key".to_string())
+        );
+    }
+
+    /// SPEC §9.2, what a contact controls: none of it stops the owner's export, and what is written
+    /// reads back whole. A reply to a message the file does not carry is written null; a permission
+    /// the contact claims and §8 does not have, or one repeated, is dropped; a name the contact gives
+    /// themselves over 200 characters is cut to 200, on a character; a message whose body holds what
+    /// reads as a key is left out and listed, and the rest of the file writes.
+    #[test]
+    fn what_a_contact_controls_never_stops_an_export_and_it_reads_back() {
+        let owner = format!("sha256:{}", "O".repeat(43));
+        let peer = format!("sha256:{}", "B".repeat(43));
+        let long: String = "é".repeat(150) + &"x".repeat(150);
+        let row = json!({ "root": peer, "endpoint": "https://b.example/mcp", "name": "", "display_name": long, "status": "active",
+            "was_active": true, "permissions": ["message.text"], "their_permissions": ["message.media", "root.everything", "message.media", "integration.cal"],
+            "leaf": null, "root_cert": null, "added": "2026-09-27T10:00:00Z" });
+        let thread =
+            json!({ "id": "t1", "contact": peer, "topic": "", "created_at": "2026-09-27T10:00:00Z", "last_at": "2026-09-27T10:00:00Z" });
+        let w = write(&owner, "", 0, "t", &[row], &[thread], &[]).unwrap();
+        let cells = &csv::read(&w.contacts_csv).unwrap()[1];
+        assert_eq!(cells[3].chars().count(), NAME_MAX, "the name is cut to 200 characters");
+        assert!(long.starts_with(cells[3].as_str()), "on a character, keeping its start");
+        assert_eq!(cells[7], "integration.cal message.media", "unknown and repeated names are dropped");
+        let key = PrivateKey::from_seed(Alg::Ed25519, &seed("export/contact-key")).unwrap();
+        let message = |id: &str, msg_id: &str, body: &str, reply_to: Value| {
+            json!({ "id": id, "thread": "t1", "contact": peer, "msg_id": msg_id, "direction": "in", "sender": "human",
+                "time": "2026-09-27T10:00:00Z", "body": body, "reply_to": reply_to, "status": "read", "attachments": [] })
+        };
+        let messages = [
+            message("m1", "x1", "hello", json!("x-elsewhere")),
+            message("m2", "x2", &b64u(&key.to_pkcs8()), Value::Null),
+            message("m3", "x3", "about that", json!("x2")),
+            message("m4", "x4", "and this", json!("x1")),
+        ];
+        let (lines, left_out) = jsonl::write(&messages, None).unwrap();
+        assert_eq!(left_out.iter().map(|l| l.id.as_str()).collect::<Vec<_>>(), ["m2"], "the message holding a key is left out and listed");
+        let replies: Vec<Value> = lines.iter().map(|l| serde_json::from_str::<Value>(l).unwrap()["reply_to"].clone()).collect();
+        assert_eq!(
+            replies,
+            [Value::Null, Value::Null, json!("x1")],
+            "a reply to a message not carried, the left-out one included, is null"
+        );
+        // Batches: the file's msg_ids named by the host decide what is carried.
+        let (lines, _) = jsonl::write(&messages[..1], Some(&["x1", "x-elsewhere"])).unwrap();
+        assert!(lines[0].contains("\"reply_to\":\"x-elsewhere\""));
+        // And it all reads back.
+        let text = lines_to_file(&jsonl::write(&messages, None).unwrap().0);
+        let m = manifest::finish(&w.partial, Some(&sha256_hex(text.as_bytes())), 3).unwrap();
+        let entry = |name: &str| Entry { name: name.into(), size: 1, encrypted: false, mode: 0 };
+        let directory = [entry("manifest.json"), entry("contacts.csv"), entry("threads.csv"), entry("messages.jsonl")];
+        let r = read(&directory, Some(&m), Some(&w.contacts_csv), w.threads_csv.as_deref(), &owner, 0).unwrap();
+        assert!(r.answer.contains("\"their_permissions\":[\"integration.cal\",\"message.media\"]"));
+        let file_lines: Vec<&str> = text.lines().collect();
+        let (threads, contacts) = (["t1"], [peer.as_str()]);
+        let (read_back, _) = jsonl::read(&file_lines, 1, &jsonl::Names { threads: &threads, contacts: &contacts, media: &[] }).unwrap();
+        let ids: Vec<&str> = read_back.iter().filter_map(|m| m["id"].as_str()).collect();
+        assert_eq!(ids, ["m1", "m3", "m4"]);
+        let msg_ids: Vec<&str> = read_back.iter().filter_map(|m| m["msg_id"].as_str()).collect();
+        let reply_tos: Vec<&str> = read_back.iter().filter_map(|m| m["reply_to"].as_str()).collect();
+        read_end(
+            &m,
+            &End {
+                messages_sha256: Some(&sha256_hex(text.as_bytes())),
+                lines: 3,
+                ids: &ids,
+                msg_ids: &msg_ids,
+                reply_tos: &reply_tos,
+                media_seen: &[],
+                media: &[],
+            },
+        )
+        .unwrap();
+    }
+
+    /// `files` lists the text members only (SPEC 2.2.2): an export of 5000 media files has a
+    /// manifest well under 64 KiB, and the reader takes it, counting every file.
+    #[test]
+    fn an_export_of_5000_media_files_has_a_small_manifest_and_reads_back() {
+        let owner = format!("sha256:{}", "O".repeat(43));
+        let hashes: Vec<String> = (0..5000).map(|i| sha256_hex(format!("media {i}").as_bytes())).collect();
+        let media: Vec<Value> = hashes.iter().map(|h| json!({ "hash": h, "size": 1 })).collect();
+        let w = write(&owner, "", 0, "t", &[], &[], &media).unwrap();
+        let m = manifest::finish(&w.partial, None, 0).unwrap();
+        assert!(m.len() < MANIFEST_MAX / 8, "a manifest of {} bytes for 5000 media files", m.len());
+        let entry = |name: String, mode: u32| Entry { name, size: 1, encrypted: false, mode };
+        let mut directory = vec![entry("manifest.json".into(), 0), entry("contacts.csv".into(), 0), entry("media/".into(), 0o040755)];
+        directory.extend(hashes.iter().map(|h| entry(format!("media/{h}"), 0)));
+        let r = read(&directory, Some(&m), Some(&w.contacts_csv), None, &owner, 0).unwrap();
+        let answer: Value = serde_json::from_str(&r.answer).unwrap();
+        assert_eq!(answer["media"].as_array().unwrap().len(), 5000);
+    }
+
+    /// A media file is key material when its bytes are a PKCS #8 or SEC1 key in DER, or text holding
+    /// one in PEM or base64 (SPEC 2.2.2, 9.2#15). A document, and DER that is not a key, are not.
+    #[test]
+    fn a_media_file_is_key_material_in_der_or_pem() {
+        let key = PrivateKey::from_seed(Alg::Ed25519, &seed("export/media-key")).unwrap();
+        let pkcs8 = key.to_pkcs8();
+        let mut sec1 = vec![0x30, 0x25, 0x02, 0x01, 0x01, 0x04, 0x20];
+        sec1.extend_from_slice(&seed("export/media-sec1"));
+        let pem = format!("-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----\n", base64_std(&pkcs8));
+        let sec1_pem = format!("-----BEGIN EC PRIVATE KEY-----\n{}\n-----END EC PRIVATE KEY-----\n", base64_std(&sec1));
+        for (what, bytes) in [
+            ("PKCS #8 DER", pkcs8.to_vec()),
+            ("SEC1 DER", sec1.clone()),
+            ("PKCS #8 PEM", pem.into_bytes()),
+            ("SEC1 PEM", sec1_pem.into_bytes()),
+        ] {
+            assert!(media_holds_private_key(&bytes), "{what} is key material");
+        }
+        for (what, bytes) in
+            [("a document", b"%PDF-1.7\nthe bytes of a.pdf\n".to_vec()), ("DER that is no key", vec![0x30, 0x03, 0x02, 0x01, 0x05])]
+        {
+            assert!(!media_holds_private_key(&bytes), "{what} is not key material");
+        }
+    }
+
+    fn base64_std(b: &[u8]) -> String {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD.encode(b)
+    }
+
+    fn lines_to_file(lines: &[String]) -> String {
+        lines.iter().map(|l| format!("{l}\n")).collect()
     }
 
     /// The export's functions grow linearly in the rows a file holds. Each is timed at N and 4N rows
@@ -940,7 +1122,7 @@ mod tests {
             read(&directory, Some(&manifest_text), Some(&w.contacts_csv), w.threads_csv.as_deref(), &owner, 0).unwrap();
             let t_read = t.elapsed().as_secs_f64();
             let t = clock();
-            let lines = jsonl::write(&d.messages).unwrap();
+            let lines = jsonl::write(&d.messages, None).unwrap().0;
             let t_write_messages = t.elapsed().as_secs_f64();
             let (thread_ids, roots, lines) = (refs(&d.thread_ids), refs(&roots), refs(&lines));
             let names = jsonl::Names { threads: &thread_ids, contacts: &roots, media: &[] };
@@ -959,6 +1141,7 @@ mod tests {
                 msg_ids: &msg_ids,
                 reply_tos: &reply_tos,
                 media_seen: &[],
+                media: &[],
             };
             let t = clock();
             read_end(&with_messages, &end).unwrap();

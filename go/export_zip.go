@@ -15,7 +15,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"hash"
 	"io"
 	"time"
 	"unicode/utf8"
@@ -224,6 +223,10 @@ func ReadExportZip(zr *zip.Reader, owner string, now time.Time, ceiling int64) (
 	}
 
 	end := exportEnd{ids: []string{}, msgIDs: []string{}, replyTos: []string{}, mediaSeen: []string{}}
+	// Every media file of the directory must be named by a message (SPEC §9.2).
+	for _, m := range out.Media {
+		end.media = append(end.media, m.Hash)
+	}
 	if f, has := first["messages.jsonl"]; has {
 		sha, lines, err := h.streamMessages(f, names, &end, out)
 		if err != nil {
@@ -357,8 +360,9 @@ func (h *exportHost) checkMedia(f *zip.File) error {
 		return errors.New(f.Name + ": does not decompress")
 	}
 	defer rc.Close()
-	sum := sha256.New()
-	n, err := io.Copy(sum, io.LimitReader(rc, ExportMediaMax+1))
+	// The bytes are held (5 MiB at the most) to be searched for key material after they are hashed.
+	body, err := io.ReadAll(io.LimitReader(rc, ExportMediaMax+1))
+	n := int64(len(body))
 	h.total += n
 	if h.total > h.ceiling {
 		return h.over()
@@ -369,110 +373,231 @@ func (h *exportHost) checkMedia(f *zip.File) error {
 	if err != nil {
 		return errors.New(f.Name + ": does not decompress")
 	}
-	if hex.EncodeToString(sum.Sum(nil)) != f.Name[6:] {
+	if sha256Hex(body) != f.Name[6:] {
 		return errors.New(f.Name + ": its sha256 is not its name")
+	}
+	if mediaHoldsPrivateKey(body) {
+		return errors.New(f.Name + ": holds a private key")
 	}
 	return nil
 }
 
+// mediaHoldsPrivateKey is SPEC §9.2's key-material rule over a file's bytes: the bytes themselves a
+// PKCS #8 or SEC1 key (DER), or, when they are text, the rule every cell and member is read by
+// (PEM armour, or a word that decodes as base64 to such a key).
+func mediaHoldsPrivateKey(b []byte) bool {
+	return isPrivateKeyDER(b) || utf8.Valid(b) && holdsPrivateKey(string(b))
+}
+
 // WriteExportZip writes an export: contacts.csv, threads.csv when there are threads, messages.jsonl
 // when there are messages, media/ and each media file stored as it comes from media, and
-// manifest.json last. Each media file's sha256 and size are checked against what was declared.
-func WriteExportZip(w io.Writer, in ExportInput, media func(hash string) (io.ReadCloser, error)) error {
-	var contacts, threads, mediaList, messages any
-	for _, c := range []struct{ from, to any }{{in.Contacts, &contacts}, {in.Threads, &threads}, {in.Media, &mediaList}, {in.Messages, &messages}} {
+// manifest.json last.
+//
+// Nothing reaches w until the whole file has passed the reader's rules (SPEC §9.2), so a refused
+// export writes no byte. Before the first byte it reads every media file once (5 MiB at the most at a
+// time) to check its size, its sha256 and whether it is key material, writes the rows and lines, and
+// holds them — and the finished manifest — to what ReadExportZip checks: every message's thread,
+// contact and file, ids and msg_ids unique, every reply_to carried, every file named. The media are
+// then read a second time as they are copied, and checked again; media opens each file twice, which
+// is what lets an export of any size be refused whole without holding it (an export can be
+// gigabytes of files). Only a file whose bytes change between the two reads can fail mid-stream.
+//
+// What a contact controls never stops the export (SPEC §9.2): a message whose body holds what reads
+// as a private key is left out, with the file it carried; a message carrying a file whose bytes are a
+// private key is left out, with that file; a reply to a message not carried is written null. Every
+// message left out is returned for the host to report to the person.
+func WriteExportZip(w io.Writer, in ExportInput, media func(hash string) (io.ReadCloser, error)) ([]ExportLeftOut, error) {
+	// The files, read once and checked, before anything is decided: the size and hash declared, and
+	// whether the bytes are a key.
+	keyFiles := strSet{}
+	handed := make(map[string]ExportMedia, len(in.Media))
+	for _, m := range in.Media {
+		handed[m.Hash] = m
+		body, err := readMedia(media, m)
+		if err != nil {
+			return nil, err
+		}
+		if mediaHoldsPrivateKey(body) {
+			keyFiles.add(m.Hash)
+		}
+	}
+	// A message carrying a file that is a key is left out with it, before the lines are written, so a
+	// reply to it is a reply to a message the file does not carry.
+	var leftOut []ExportLeftOut
+	var kept []MessageRow
+	for _, msg := range in.Messages {
+		carriesKey := ""
+		for _, a := range msg.Attachments {
+			if keyFiles.has(a.File) {
+				carriesKey = a.File
+			}
+		}
+		if carriesKey != "" {
+			leftOut = append(leftOut, ExportLeftOut{ID: msg.ID, Reason: "its file media/" + carriesKey + " holds what reads as a private key, which an export never carries"})
+			continue
+		}
+		kept = append(kept, msg)
+	}
+	var contacts, threads, messages any
+	for _, c := range []struct{ from, to any }{{in.Contacts, &contacts}, {in.Threads, &threads}, {kept, &messages}} {
 		if err := convert(c.from, c.to); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	asList := func(v any) []any {
 		l, _ := v.([]any)
 		return l
 	}
+	lines, bodyLeftOut, err := exportWriteMessages(asList(messages), nil)
+	if err != nil {
+		return nil, err
+	}
+	leftOut = append(leftOut, bodyLeftOut...)
+	// The files the kept messages carry. A file only left-out messages carried goes with them; a
+	// kept message's file must be among those handed in (SPEC §9.2: an exporter never leaves one out).
+	gone := strSet{}
+	for _, l := range leftOut {
+		gone.add(l.ID)
+	}
+	keptFiles, goneFiles := strSet{}, strSet{}
+	for _, msg := range in.Messages {
+		for _, a := range msg.Attachments {
+			if gone.has(msg.ID) {
+				goneFiles.add(a.File)
+				continue
+			}
+			if _, has := handed[a.File]; !has {
+				return nil, fmt.Errorf("media/%s: message %s carries it, and it is not among the files to export", a.File, msg.ID)
+			}
+			keptFiles.add(a.File)
+		}
+	}
+	var files []ExportMedia
+	for _, m := range in.Media {
+		if goneFiles.has(m.Hash) && !keptFiles.has(m.Hash) {
+			continue
+		}
+		files = append(files, m)
+	}
+	var mediaList any
+	if err := convert(files, &mediaList); err != nil {
+		return nil, err
+	}
 	at := time.Unix(in.ExportedAt.Unix(), 0).UTC()
 	written, err := exportWrite(in.Owner, in.OwnerName, at, in.Tool, asList(contacts), asList(threads), asList(mediaList))
 	if err != nil {
-		return err
+		return nil, err
 	}
-	lines, err := exportWriteMessages(asList(messages))
-	if err != nil {
-		return err
-	}
-	zw := zip.NewWriter(w)
-	put := func(name string, method uint16, body io.Reader, check hash.Hash) (int64, error) {
-		fw, err := zw.CreateHeader(&zip.FileHeader{Name: name, Method: method, Modified: at})
-		if err != nil {
-			return 0, err
-		}
-		if check != nil {
-			body = io.TeeReader(body, check)
-		}
-		return io.Copy(fw, body)
-	}
-	if _, err := put("contacts.csv", zip.Deflate, bytes.NewReader([]byte(written.contactsCSV)), nil); err != nil {
-		return err
-	}
-	if written.threadsCSV != nil {
-		if _, err := put("threads.csv", zip.Deflate, bytes.NewReader([]byte(*written.threadsCSV)), nil); err != nil {
-			return err
-		}
+	var jsonl bytes.Buffer
+	for _, l := range lines {
+		jsonl.WriteString(l)
+		jsonl.WriteByte('\n')
 	}
 	var sha *string
 	if len(lines) > 0 {
-		var b bytes.Buffer
-		for _, l := range lines {
-			b.WriteString(l)
-			b.WriteByte('\n')
-		}
-		s := sha256Hex(b.Bytes())
+		s := sha256Hex(jsonl.Bytes())
 		sha = &s
-		if _, err := put("messages.jsonl", zip.Deflate, &b, nil); err != nil {
-			return err
-		}
-	}
-	// SPEC §9.2: an exporter never leaves out a file a message it exports carries. A message whose
-	// attachment is not among the files handed in is a reason to refuse the export, not to write it.
-	for _, msg := range in.Messages {
-		for _, a := range msg.Attachments {
-			held := false
-			for _, m := range in.Media {
-				held = held || m.Hash == a.File
-			}
-			if !held {
-				return fmt.Errorf("media/%s: message %s carries it, and it is not among the files to export", a.File, msg.ID)
-			}
-		}
-	}
-	if len(in.Media) > 0 {
-		if _, err := zw.CreateHeader(&zip.FileHeader{Name: "media/", Method: zip.Store, Modified: at}); err != nil {
-			return err
-		}
-	}
-	for _, m := range in.Media {
-		rc, err := media(m.Hash)
-		if err != nil {
-			return err
-		}
-		sum := sha256.New()
-		n, err := put("media/"+m.Hash, zip.Store, rc, sum)
-		rc.Close()
-		if err != nil {
-			return err
-		}
-		if n != m.Size || hex.EncodeToString(sum.Sum(nil)) != m.Hash {
-			return fmt.Errorf("media/%s: the bytes are not the %d-byte file declared", m.Hash, m.Size)
-		}
 	}
 	partial, err := json.Marshal(written.partial)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	manifest, err := finishManifest(partial, sha, uint64(len(lines)))
 	if err != nil {
+		return nil, err
+	}
+	// The reader's rules over what is about to be written, in the reader's words: every message's
+	// thread, contact and file, then the rules across the whole member.
+	names := messageNames{threads: strSet{}, contacts: strSet{}, media: strSet{}}
+	for _, c := range in.Contacts {
+		names.contacts.add(c.Root)
+	}
+	for _, t := range in.Threads {
+		names.threads.add(t.ID)
+	}
+	for _, m := range files {
+		names.media.add(m.Hash)
+	}
+	read, seen, err := exportReadMessages(lines, 1, names)
+	if err != nil {
+		return nil, err
+	}
+	end := exportEnd{messagesSHA256: sha, lines: uint64(len(lines)), ids: []string{}, msgIDs: []string{}, replyTos: []string{}, mediaSeen: seen}
+	for _, m := range files {
+		end.media = append(end.media, m.Hash)
+	}
+	for _, v := range read {
+		o, _ := v.(map[string]any)
+		id, _ := o["id"].(string)
+		msgID, _ := o["msg_id"].(string)
+		end.ids = append(end.ids, id)
+		end.msgIDs = append(end.msgIDs, msgID)
+		if r, isText := o["reply_to"].(string); isText {
+			end.replyTos = append(end.replyTos, r)
+		}
+	}
+	if err := exportReadEnd(manifest, end); err != nil {
+		return nil, err
+	}
+
+	// Only now does a byte reach w.
+	zw := zip.NewWriter(w)
+	put := func(name string, method uint16, body io.Reader) error {
+		fw, err := zw.CreateHeader(&zip.FileHeader{Name: name, Method: method, Modified: at})
+		if err != nil {
+			return err
+		}
+		_, err = io.Copy(fw, body)
 		return err
 	}
-	if _, err := put("manifest.json", zip.Deflate, bytes.NewReader([]byte(manifest)), nil); err != nil {
-		return err
+	if err := put("contacts.csv", zip.Deflate, bytes.NewReader([]byte(written.contactsCSV))); err != nil {
+		return nil, err
 	}
-	return zw.Close()
+	if written.threadsCSV != nil {
+		if err := put("threads.csv", zip.Deflate, bytes.NewReader([]byte(*written.threadsCSV))); err != nil {
+			return nil, err
+		}
+	}
+	if len(lines) > 0 {
+		if err := put("messages.jsonl", zip.Deflate, &jsonl); err != nil {
+			return nil, err
+		}
+	}
+	if len(files) > 0 {
+		if _, err := zw.CreateHeader(&zip.FileHeader{Name: "media/", Method: zip.Store, Modified: at}); err != nil {
+			return nil, err
+		}
+	}
+	for _, m := range files {
+		// Read again, and checked again: the bytes written are the bytes that were checked.
+		body, err := readMedia(media, m)
+		if err != nil {
+			return nil, err
+		}
+		if err := put("media/"+m.Hash, zip.Store, bytes.NewReader(body)); err != nil {
+			return nil, err
+		}
+	}
+	if err := put("manifest.json", zip.Deflate, bytes.NewReader([]byte(manifest))); err != nil {
+		return nil, err
+	}
+	return leftOut, zw.Close()
+}
+
+// readMedia is one file from the host, whole, held to what was declared of it: at most 5 MiB, the
+// size and the sha256 declared.
+func readMedia(media func(hash string) (io.ReadCloser, error), m ExportMedia) ([]byte, error) {
+	rc, err := media(m.Hash)
+	if err != nil {
+		return nil, err
+	}
+	defer rc.Close()
+	body, err := io.ReadAll(io.LimitReader(rc, ExportMediaMax+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) != m.Size || sha256Hex(body) != m.Hash {
+		return nil, fmt.Errorf("media/%s: the bytes are not the %d-byte file declared", m.Hash, m.Size)
+	}
+	return body, nil
 }

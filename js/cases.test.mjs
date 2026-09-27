@@ -2,7 +2,7 @@
 // Case files are stood in for here, so nothing in js/cases/ is touched. `node --test js/cases.test.mjs`.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { collect, CASE_FILES } from './cases/index.mjs';
 
 const contract = {
@@ -53,7 +53,17 @@ test('a section of the contract with no case file is a problem, except the build
   assert.deepEqual(problems, ["the contract's section cards has no case file (js/cases/cards.mjs)"]);
 });
 
-test('every case file on disk is one the collection runs', () => {
+// A section's cases may be split across files: `<section>-<part>.mjs`, imported by the section's file
+// and called by it. Anything else on disk is a file the collection never runs.
+test('every case file on disk is one the collection runs, as a section or a part its section calls', () => {
   const onDisk = readdirSync(new URL('./cases/', import.meta.url)).filter((f) => f.endsWith('.mjs') && !['index.mjs', 'fixtures.mjs'].includes(f)).map((f) => f.slice(0, -4));
-  assert.deepEqual(onDisk.sort(), [...CASE_FILES].sort());
+  for (const s of CASE_FILES) assert.ok(onDisk.includes(s), `js/cases/${s}.mjs is not on disk`);
+  for (const f of onDisk.filter((f) => !CASE_FILES.includes(f))) {
+    const section = CASE_FILES.find((s) => f.startsWith(`${s}-`));
+    assert.ok(section, `js/cases/${f}.mjs is neither a section of the contract nor a part of one`);
+    const src = readFileSync(new URL(`./cases/${section}.mjs`, import.meta.url), 'utf8');
+    const imported = new RegExp(`^import (\\w+) from '\\./${f}\\.mjs';$`, 'm').exec(src);
+    assert.ok(imported, `js/cases/${section}.mjs does not import ${f}.mjs`);
+    assert.match(src, new RegExp(`^\\s*${imported[1]}\\(\\{ add, expect \\}`, 'm'), `js/cases/${section}.mjs never calls ${f}.mjs's cases`);
+  }
 });
