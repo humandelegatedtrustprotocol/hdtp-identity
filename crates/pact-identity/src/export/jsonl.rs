@@ -14,9 +14,9 @@ const STATUSES: [&str; 4] = ["delivered", "queued", "failed", "read"];
 
 /// What a message may name: the file's threads, contacts and media.
 pub struct Names<'a> {
-    pub threads: &'a [String],
-    pub contacts: &'a [String],
-    pub media: &'a [String],
+    pub threads: &'a [&'a str],
+    pub contacts: &'a [&'a str],
+    pub media: &'a [&'a str],
 }
 
 fn key_material(v: &Value) -> bool {
@@ -38,7 +38,7 @@ pub struct Lookup<'a> {
 
 impl<'a> Lookup<'a> {
     pub fn of(names: &'a Names<'a>) -> Lookup<'a> {
-        let set = |l: &'a [String]| l.iter().map(String::as_str).collect();
+        let set = |l: &'a [&'a str]| l.iter().copied().collect();
         Lookup { threads: set(names.threads), contacts: set(names.contacts), media: set(names.media) }
     }
 }
@@ -131,7 +131,7 @@ pub fn message(doc: &Map<String, Value>, names: Option<&Lookup<'_>>) -> std::res
 
 /// One batch of lines; `first_line` is the number of the first in the whole file. Answers the
 /// messages and the media they name.
-pub fn read(lines: &[String], first_line: u64, names: &Names<'_>) -> Result<(Vec<Value>, Vec<String>)> {
+pub fn read(lines: &[&str], first_line: u64, names: &Names<'_>) -> Result<(Vec<Value>, Vec<String>)> {
     let lookup = Lookup::of(names);
     let mut messages = Vec::new();
     let mut seen: Vec<String> = Vec::new();

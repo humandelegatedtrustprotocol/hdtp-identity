@@ -199,8 +199,15 @@ fn chain_result(r: ChainResult) -> Value {
     }
 }
 
-fn dispatch(name: &str, a: &Value) -> Result<Value> {
-    Ok(match name {
+/// What a function answers: a JSON value, or, for an answer as large as the file it describes, the
+/// JSON text already written — so that no tree of values is built beside it (export_read).
+pub(crate) enum Answer {
+    Json(Value),
+    Text(String),
+}
+
+fn dispatch(name: &str, a: &Value) -> Result<Answer> {
+    Ok(Answer::Json(match name {
         // §1 keys
         "generate_key" => keys::generate_key(a)?,
         "key_from_seed" => keys::key_from_seed(a)?,
@@ -247,7 +254,7 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
         "vault_open" => vault::vault_open(a)?,
         "wallet_issue" => vault::wallet_issue(a)?,
         // §6.2 export
-        "export_read" => export::export_read(a)?,
+        "export_read" => return export::export_read(a),
         "export_read_messages" => export::export_read_messages(a)?,
         "export_read_end" => export::export_read_end(a)?,
         "export_write" => export::export_write(a)?,
@@ -259,7 +266,7 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
         "ledger_check" => ledger::ledger_check(a)?,
         "version" => json!({ "crate": env!("CARGO_PKG_VERSION"), "spec": SPEC_VERSION }),
         other => return err("unsupported", format!("no function named {other}")),
-    })
+    }))
 }
 
 /// What `call` answers arguments holding an unpaired UTF-16 surrogate escape.
@@ -273,6 +280,13 @@ pub fn call(name: &str, args: &str) -> String {
     if crate::util::lone_surrogate(args) {
         return json!({ "error": "bad_request", "why": LONE_SURROGATE }).to_string();
     }
+    // export_read_end's lists can hold an id per message of a file; its arguments are read straight
+    // from their text when they read (api/export.rs), rather than into a tree of values first.
+    if name == "export_read_end" {
+        if let Some(out) = export::export_read_end_lean(args) {
+            return answer(out.map(Answer::Json));
+        }
+    }
     let a: Value = match serde_json::from_str(args) {
         Ok(v @ Value::Object(_)) => v,
         Ok(_) => return json!({ "error": "bad_request", "why": "args is a JSON object" }).to_string(),
@@ -283,8 +297,14 @@ pub fn call(name: &str, args: &str) -> String {
     let out = std::panic::catch_unwind(run).unwrap_or_else(|_| err("internal", "panic"));
     #[cfg(target_arch = "wasm32")]
     let out = run();
+    answer(out)
+}
+
+/// An answer as the boundary writes it.
+fn answer(out: Result<Answer>) -> String {
     match out {
-        Ok(v) => v.to_string(),
+        Ok(Answer::Json(v)) => v.to_string(),
+        Ok(Answer::Text(t)) => t,
         Err(e) => {
             let mut o = Map::new();
             o.insert("error".into(), json!(e.code));
