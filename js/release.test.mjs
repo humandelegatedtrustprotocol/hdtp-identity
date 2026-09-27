@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -35,10 +35,13 @@ function fixture({ branch = 'main' } = {}) {
   mkdirSync(work); mkdirSync(bin); writeFileSync(log, ''); writeFileSync(join(root, 'gitconfig'), '');
   const env = cleanEnv({ GIT_CONFIG_GLOBAL: join(root, 'gitconfig'), GIT_CONFIG_NOSYSTEM: '1' });
   const git = (cwd, ...args) => execFileSync('git', args, { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-  // This working tree's files (tracked, and new ones not ignored), so the recipe under test is the one on disk.
-  const files = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd: repo, encoding: 'utf8' }).split('\0').filter(Boolean);
+  // This tree's TRACKED regular files, as they are on disk (so an uncommitted edit to a recipe is
+  // what runs). Not untracked ones: a checkout can hold anything untracked — a nested worktree, a
+  // symlink to a sibling — and copying those made every test here fail in the main checkout, whose
+  // .claude/ holds exactly that.
+  const files = execFileSync('git', ['ls-files', '-z'], { cwd: repo, encoding: 'utf8' }).split('\0').filter(Boolean);
   for (const f of files) {
-    if (!existsSync(join(repo, f))) continue;
+    if (!existsSync(join(repo, f)) || !lstatSync(join(repo, f)).isFile()) continue;
     mkdirSync(dirname(join(work, f)), { recursive: true });
     cpSync(join(repo, f), join(work, f));
   }
