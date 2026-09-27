@@ -2,3 +2,4 @@ target/
 js/pkg-*/
 js/node_modules/
 go/bin/
+dist/
