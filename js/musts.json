@@ -5,7 +5,7 @@
     "held_by": [
       "scenario:Mallory seals with Alina's chain inside and her own signature"
     ],
-    "why": "the receiver-side half is the node's: internal/public/identify20.go compares the transport chain's leaf key against the envelope's (TestHandshakeAcceptsEveryCertificateAndBelievesOnlyAChain)"
+    "why": "the receiver-side half is the node's: internal/public/decide.go compares the transport chain's leaf key against the envelope's (TestHandshakeAcceptsEveryCertificateAndBelievesOnlyAChain)"
   },
   "2.1#1": {
     "hash": "56c1be33d6c9",
