@@ -7,9 +7,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed here that did not pass.
 
-Specification: **2.1.3**. **52** normative sentences, **558** cross-port parity cases over **40** guarded functions.
+Specification: **2.1.3**. **52** normative sentences, **621** cross-port parity cases over **47** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**41** functions, spec 2.1.3): **1116** answers held to the shape it declares, **0** did not. Of **81** declared error codes, **67** were produced by a case here; the rest are declared for a caller's benefit and no argument in this suite reaches them.
+Every answer of both ports is validated against `contract/contract.json` (**48** functions, spec 2.1.3): **1242** answers held to the shape it declares, **0** did not. Of **90** declared error codes, **74** were produced by a case here; the rest are declared for a caller's benefit and no argument in this suite reaches them.
 
 ## The 52 normative sentences of the specification
 
@@ -156,7 +156,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 558 cross-port parity cases
+## The 621 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -164,7 +164,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **558** cases, **0** disagreements, **40** of **40** functions compared whole on success.
+At the run that generated this file: **621** cases, **0** disagreements, **47** of **47** functions compared whole on success.
 
 ### `address_guard` — 32 cases · whole on success
 
@@ -366,6 +366,90 @@ At the run that generated this file: **558** cases, **0** disagreements, **40** 
 - derive_seed for pact/root/1
 - derive_seed for pact/store-key/1
 - derive_seed for pact/store-id/1
+
+### `export_manifest` — 6 cases · whole on success
+
+- export_manifest: finished with the messages
+- export_manifest: a book
+- export_manifest with no partial
+- export_manifest: messages without their hash
+- export_manifest: a hash the host does not make
+- export_manifest: a partial that already counts messages
+
+### `export_merge` — 2 cases · whole on success
+
+- export_merge: a held pin is never replaced
+- export_merge with rows whose root is no fingerprint
+
+### `export_read` — 26 cases · whole on success
+
+- export_read: what export_write wrote
+- export corpus valid-export.zip: export_read
+- export corpus valid-book.zip: export_read
+- export corpus zip-slip.zip: export_read
+- export corpus absolute-path.zip: export_read
+- export corpus backslash.zip: export_read
+- export corpus unknown-file.zip: export_read
+- export corpus duplicate-name.zip: export_read
+- export corpus encrypted-entry.zip: export_read
+- export corpus symlink.zip: export_read
+- export corpus directory.zip: export_read
+- export corpus oversize-manifest.zip: export_read
+- export corpus missing-contacts.zip: export_read
+- export corpus missing-threads.zip: export_read
+- export corpus unlisted-member.zip: export_read
+- export corpus hash-mismatch.zip: export_read
+- export corpus media-name-not-hash.zip: export_read
+- export corpus count-mismatch.zip: export_read
+- export corpus wrong-owner.zip: export_read
+- export corpus owner-as-contact.zip: export_read
+- export corpus bad-header.zip: export_read
+- export corpus blank-row.zip: export_read
+- export corpus key-in-a-cell.zip: export_read
+- export corpus dangling-thread-contact.zip: export_read
+- export_read with nothing to work from
+- export_read with a directory entry that does not read
+
+### `export_read_end` — 8 cases · whole on success
+
+- export_read_end: what was written
+- export corpus valid-export.zip: export_read_end
+- export corpus valid-book.zip: export_read_end
+- export corpus dangling-reply.zip: export_read_end
+- export corpus unreferenced-media.zip: export_read_end
+- export corpus message-count.zip: export_read_end
+- export corpus messages-hash.zip: export_read_end
+- export_read_end with nothing to work from
+
+### `export_read_messages` — 11 cases · whole on success
+
+- export_read_messages: what export_write_messages wrote
+- export corpus valid-export.zip: export_read_messages
+- export corpus valid-book.zip: export_read_messages
+- export corpus dangling-message-thread.zip: export_read_messages
+- export corpus dangling-attachment.zip: export_read_messages
+- export corpus two-attachments.zip: export_read_messages
+- export corpus body-with-a-file.zip: export_read_messages
+- export corpus key-in-a-body.zip: export_read_messages
+- export corpus unknown-message-member.zip: export_read_messages
+- export_read_messages with nothing to work from
+- export_read_messages from line 0
+
+### `export_write` — 7 cases · whole on success
+
+- export_write: every formula prefix, quoting and line breaks, sorted rows
+- export_write: a book
+- export_write with nothing to work from
+- export_write: the owner as a contact
+- export_write: a permission §8 does not name
+- export_write: a private endpoint
+- export_write: a thread whose contact is in no row
+
+### `export_write_messages` — 3 cases · whole on success
+
+- export_write_messages: a text, a file and a link
+- export_write_messages: two attachments
+- export_write_messages: text beside a file
 
 ### `follow_renewed` — 13 cases · whole on success
 
