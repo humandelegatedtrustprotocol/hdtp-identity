@@ -352,8 +352,8 @@ material behind treats the strings it passes and receives as its own to clear.
      passes a function that replaces that one value with a description of it, and everything else is
      still compared. Narrowing a case to `['error']` to make a disagreement go away is not a fix: a
      differing `why` *is* the finding.
-6. `wasm-bindgen-test` in headless Chrome for the browser build; the gateway's vitest pool for the
-   Worker build (phase 2.0); `pact-cloud`'s `npm run test:ceremony` for the wallet page that loads `pkg-web`.
+6. `wasm-bindgen-test` in headless Chrome for the browser build. A host that runs `pkg-web` in a
+   Worker or a page tests it there, in its own repository, against the bytes it vendored.
 
 ---
 

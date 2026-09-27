@@ -1,4 +1,4 @@
-# The style every commit arrives in: the umbrella's pre-commit hook runs rustfmt over staged Rust
+# The style every commit arrives in: githooks/pre-commit runs rustfmt over staged Rust
 # and re-stages it, so nobody formats by hand and nothing is ever "fixed for style" later.
 #
 # Why that matters HERE more than elsewhere: this workspace ships a PINNED binary. A style fix made

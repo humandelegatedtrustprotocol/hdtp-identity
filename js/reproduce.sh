@@ -5,8 +5,8 @@
 #   sh js/reproduce.sh --pin    rebuild HEAD, install the bytes as js/pkg-web and js/pkg-node, and write
 #                               js/manifest.json from them — after a COMMIT has changed a build input
 #
-# js/manifest.json pins the SHA-256 of the core every host runs: the browser wallet, the cloud's
-# Worker, the CLI. A pin is worth something only if somebody ELSE can make those bytes from the
+# js/manifest.json pins the SHA-256 of the core every host runs: a browser wallet, a Worker, the
+# CLI. A pin is worth something only if somebody ELSE can make those bytes from the
 # source, and "the same hash twice on my laptop" is not that. Measured on 2026-09-20, one commit:
 #
 #   a Mac, natively                     635,480 bytes   (the pin until that day)
@@ -22,11 +22,13 @@
 # usual remedy is to pin the build PLATFORM as well as the toolchain — so the pin IS this
 # build: rust 1.92.0 in an image named by digest, wasm-pack fetched from its release and checked
 # against a hash written here, dependencies locked, paths remapped, wasm-opt off. Any machine with
-# Docker makes the same bytes, and .github/workflows/pact-identity.yml proves it on every push, on
-# a runner that is not the machine the pin was written on.
+# Docker should make the same bytes; `make verify-release VERSION=x.y.z` runs this build again
+# against a published release and compares it with what was published. Nothing runs it on another
+# machine on every push: this repository has no CI (its gate reads a private sibling, and no CI
+# credential will be made for it).
 #
-# linux/arm64 because it runs natively on the machines this is developed on AND on a hosted CI
-# runner. linux/amd64 would be the other choice; under emulation on an arm64 Mac rustc crashes.
+# linux/arm64 because it runs natively on the machines this is developed on. linux/amd64 would be
+# the other choice; under emulation on an arm64 Mac rustc crashes.
 #
 # Needs docker, curl and node.
 set -eu
@@ -106,7 +108,7 @@ if [ "$MODE" = "--pin" ]; then
   rm -rf js/pkg-web js/pkg-node
   cp -r "$WORK/pkg-web" "$WORK/pkg-node" js/
   node js/manifest.mjs "$WORK/toolchain.json"
-  echo "pinned. Commit js/manifest.json, and vendor js/pkg-web into pact-cloud (gateway/vendor/pact-identity/VENDORED.md)."
+  echo "pinned. Commit js/manifest.json; hosts take these bytes from a release (make release)."
   exit 0
 fi
 

@@ -25,7 +25,7 @@ export const H = 3_600_000, D = 86_400_000;
 
 export const ENDPOINTS = {
   alina: 'https://agent.alina.example/mcp',
-  alinaMoved: 'https://alina.pact.contact/alina/mcp',
+  alinaMoved: 'https://alina.host.example/alina/mcp',
   bharat: 'https://agent.bharat.example/mcp',
   mallory: 'https://mallory.example/mcp',
 };

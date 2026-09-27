@@ -471,7 +471,7 @@ func TestNothingThatGoesIntoACardMayCarryALineBreak(t *testing.T) {
 // on the path where the pin moves on the way through. The controls are the calls that must still
 // wait. Mirrors a_pending_contacts_sealed_listing_answers_at_the_pending_tier in tests/findings.rs.
 func TestAPendingContactsSealedListingAnswersAtThePendingTier(t *testing.T) {
-	const movedEndpoint = "https://alina.pact.contact/alina/mcp"
+	const movedEndpoint = "https://alina.host.example/alina/mcp"
 	v := loadVectors(t)
 	c := theCast(t)
 	now := mustTime(t, v.Now)

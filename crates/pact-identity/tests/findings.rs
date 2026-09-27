@@ -264,7 +264,7 @@ fn a_pin_that_names_its_leaf_is_matched_by_name_and_only_the_match_is_parsed() {
 #[test]
 fn a_pending_contacts_sealed_listing_answers_at_the_pending_tier() {
     const E_B: &str = "https://agent.bharat.example/mcp";
-    const E_N: &str = "https://alina.pact.contact/alina/mcp";
+    const E_N: &str = "https://alina.host.example/alina/mcp";
     let (me, them) = (cast(), cast());
     let (my_leaf, their_leaf) = (leaf(&me, E_B, None, None), leaf(&them, E_A, None, None));
     // Their next host: the same root, a newer leaf, another address (§5.3 under `auto`).
