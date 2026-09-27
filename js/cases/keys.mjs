@@ -2,7 +2,7 @@
 import { b64url } from '../../../pact-protocol/vectors/lib/keys.mjs';
 import { read as derRead, children as derChildren, tlv as derTlv, seq as derSeq } from '../../../pact-protocol/vectors/lib/der.mjs';
 
-export default function keys({ add }, f) {
+export default function keys({ add, expect }, f) {
   const { shape, hostSpki, hostPkcs8, p256Pkcs8, p256Spki, rsaSpki, B64_BAD } = f;
   const keyShape = (a) => (a?.pkcs8 ? { ...a, pkcs8: shape(a.pkcs8), spki: shape(a.spki), fingerprint: shape(a.fingerprint) } : a);
   add('generate_key', 'generate_key', { alg: 'ed25519' }, keyShape);
@@ -67,4 +67,9 @@ export default function keys({ add }, f) {
   const withNull = b64url(derSeq(pv.raw, derSeq(oidOnly.raw, derTlv(0x05, Buffer.alloc(0))), pk.raw));
   add('public_key from an Ed25519 PKCS #8 whose algorithm carries a NULL', 'public_key', { pkcs8: withNull });
   add('sign with an Ed25519 PKCS #8 whose algorithm carries a NULL', 'sign', { pkcs8: withNull, data: b64url(Buffer.from('x')) });
+  // Half a UTF-16 surrogate pair in a string: JSON.stringify writes it as a \\u escape, which the
+  // Rust core's parser refused in its own words and Go's read as U+FFFD. Both refuse it now, first,
+  // in one answer (CONTRACT §0).
+  add('verify with args holding a lone high surrogate', 'verify', { spki: 'a\ud800' });
+  expect('verify with args holding a lone high surrogate', { error: 'bad_request', why: 'args: a string holds half of a UTF-16 surrogate pair' });
 }
