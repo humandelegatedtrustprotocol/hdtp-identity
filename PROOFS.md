@@ -7,14 +7,14 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed here that did not pass.
 
-Specification: **2.1.3**. **52** normative sentences, **626** cross-port parity cases over **47** guarded functions.
+Specification: **2.2.0**. **81** normative sentences, **638** cross-port parity cases over **48** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**48** functions, spec 2.1.3): **1252** answers held to the shape it declares, **0** did not. Of **90** declared error codes, **74** were produced by a case here; the rest are declared for a caller's benefit and no argument in this suite reaches them.
+Every answer of both ports is validated against `contract/contract.json` (**49** functions, spec 2.2.0): **1276** answers held to the shape it declares, **0** did not. Of **92** declared error codes, **76** were produced by a case here; the rest are declared for a caller's benefit and no argument in this suite reaches them.
 
-## The 52 normative sentences of the specification
+## The 81 normative sentences of the specification
 
-A sentence carrying MUST, MUST NOT or REQUIRED, one row each, in document order. **38** are
-held by a test or an intrusion scenario in this repository; **14** belong to a wallet, a host
+A sentence carrying MUST, MUST NOT or REQUIRED, one row each, in document order. **57** are
+held by a test or an intrusion scenario in this repository; **24** belong to a wallet, a host
 or a node, and name the artefact that holds them there — checked against the sibling repository
 whenever it is on disk. A row with nothing in its last column would fail `js/musts.mjs`.
 
@@ -85,11 +85,50 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 | # | The sentence | Held by |
 |---|---|---|
 | `9.#1` | A leaf's key does not outlive its leaf: a host MUST stop using the key of a leaf that has expired and MUST destroy it, keeping the key id so that an envelope still sealed to it is answered `certificate_renewed` (§14.4) — past its date every verifier refuses the leaf (§14.2 rule 4), so the key can do nothing legitimate, and a renewal has never needed it. | `gateway:TestAnExpiredCurrentLeafLosesItsKeyInBothPlaces`, `gateway:TestALeafThatRunsOutStopsBeingServedAndLosesItsKey` |
-| `9.#2` | **Moving** is the person issuing a leaf to the new host, the data carried across as an archive — the person's contacts and their conversations, with the media in them, and nothing that is the host's own: no settings, no credentials, no invites, no record of the host's leaves; the archive's format is each host's own, a host that makes one MUST NOT put key material of any kind in it, and a host that imports one MUST refuse any key material in it and SHOULD refuse, rather than ignore, anything else it does not recognise — and the new host reaching every contact by §5.3, *before* the person tells the old host to leave, so that no contact meets a gap. | `gateway:TestAnExportCarriesContactsAndChatsAndNothingElse`, `gateway:TestAnImportRefusesAnythingAnExportDoesNotCarry`, `gateway:TestTheCloudsLeaveFileImports` |
+| `9.#2` | **Moving** is the person issuing a leaf to the new host, the data carried across as an archive — the person's contacts and their conversations, with the media in them, and nothing that is the host's own: no settings, no credentials, no invites, no record of the host's leaves; an archive is the export of §9.2, a host that makes one MUST NOT put key material of any kind in it, and a host that imports one MUST refuse any key material in it and MUST refuse, rather than ignore, anything else it does not recognise — and the new host reaching every contact by §5.3, *before* the person tells the old host to leave, so that no contact meets a gap. | `rust:read_export_answers_the_whole_corpus`, `go:TestReadExportZipAnswersTheWholeCorpus`, `rust:export_write_refuses_a_row_or_message_holding_a_private_key`, `go:TestAnExportWrittenIsReadBackWhole` |
 | `9.#3` | An address an identity has vacated MUST NOT be assigned to another identity until the last leaf issued for it has expired, so a contact that missed the move never reaches a stranger where it expects a friend. | *node, by declaration* |
 | `9.#4` | A host that exports an identity toward a destination that cannot carry its chain MUST say so before the export; the remedy is a destination that can. | *node, by declaration* |
 | `9.#5` | It issues one live leaf per identity at a time — a second endpoint is a move, not a second home, because contacts keep one pin and the newest leaf wins — and MUST NOT issue a second while one is live except as its replacement. | `rust:issues_from_the_vault`, `go:TestWalletIssue`, `go:TestVaultRulesMirrorTheCore`, `rust:ledger_check_names_each_kind_and_refuses_only_a_second_home`, `go:TestLedgerCheckNamesEachKindAndRefusesOnlyASecondHome`, `rust:ledger_check_takes_the_newest_leaf_and_not_the_newest_unexpired_one`, `go:TestLedgerCheckTakesTheNewestLeafAndNotTheNewestUnexpiredOne`, `rust:a_card_held_root_is_held_to_the_ledger_by_the_core` |
 | `9.#6` | A wallet MUST NOT write a leaf, a ledger entry or a contact into the file, and writes it once, when the root is made, and again only when the root is re-bound or a hardware key takes it. | `rust:a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates`, `rust:issues_from_the_vault` |
+
+### 9.1 Signing requests
+
+| # | The sentence | Held by |
+|---|---|---|
+| `9.1#1` | A wallet MUST refuse a request that is not a top-level navigation, as the browser's fetch metadata reports it (`Sec-Fetch-Mode: navigate`, `Sec-Fetch-Dest: document`), so that a script on another page cannot probe it. | *wallet, by declaration* |
+| `9.1#2` | A wallet MUST refuse a request whose `Origin` is absent, `null`, or different from the origin of `redirect`: the host that asks is the host that collects. | `rust:signing_request_check_passes_one_request_and_refuses_one_per_rule`, `go:TestSigningRequestCheckPassesOneRequestAndRefusesOnePerRule`, `rust:redirect_allowed_is_https_or_http_to_loopback_only`, `go:TestRedirectAllowedIsHTTPSOrHTTPToLoopbackOnly` |
+| `9.1#3` | A wallet MUST refuse a request whose fields break the table above, and a request that has expired or expires more than ten minutes ahead. | `rust:signing_request_check_passes_one_request_and_refuses_one_per_rule`, `go:TestSigningRequestCheckPassesOneRequestAndRefusesOnePerRule`, `rust:redirect_allowed_is_https_or_http_to_loopback_only`, `go:TestRedirectAllowedIsHTTPSOrHTTPToLoopbackOnly` |
+| `9.1#4` | A wallet MUST refuse a request whose CSR fails the checks of §9 — its own signature, and a key that is not a root — or names an endpoint that is not in the normal form of §14.1 or fails the address guard of §3. | `rust:signing_request_check_passes_one_request_and_refuses_one_per_rule`, `go:TestSigningRequestCheckPassesOneRequestAndRefusesOnePerRule` |
+| `9.1#5` | A wallet MUST prove the root against `expect_root` (§2.2) before it signs. | *wallet, by declaration* |
+| `9.1#6` | It MUST show the person the asking origin, the `recipient` as the host's own claim, the endpoint, the validity and whether the host is new. | *wallet, by declaration* |
+| `9.1#7` | The wallet MUST NOT keep anything of the request once it has answered, and MUST NOT write its body to a log. | *wallet, by declaration* |
+| `9.1#8` | A host MUST accept an answer only once, only with the `state` it minted for a pending request, and only a chain whose leaf carries that request's key and validates at its endpoint (§14.2). | *node, by declaration* |
+
+### 9.2 The export
+
+| # | The sentence | Held by |
+|---|---|---|
+| `9.2#1` | An exporter MUST NOT leave out a media file it holds for a message it exports: a file it cannot include is a reason to refuse the export, never to omit the file. | `go:TestWriteExportZipRefusesRatherThanOmitsAFile` |
+| `9.2#2` | **Spreadsheet formulas.** A writer MUST write a CSV cell that begins with `=`, `+`, `-`, `@`, `'`, a tab or a carriage return with one `'` before it, and a reader strips one leading `'`. base64url DER cannot begin that way: it starts with `M`, from its first byte `0x30`. | `rust:csv_writes_what_it_reads_back_and_guards_every_formula_prefix`, `go:TestCSVWritesWhatItReadsBackAndGuardsEveryFormulaPrefix` |
+| `9.2#3` | **Unencrypted.** Every surface that writes an export MUST tell the person, before the file is written, that it is not encrypted, that anyone who gets it can read their contact list and all their conversations and files, and that it holds no keys, so it cannot be used to speak as them. | `rust:a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates` |
+| `9.2#4` | A host that delivers an export over a network MUST NOT keep it at rest: it builds the file when the signed-in person asks and streams it to them. | *host, by declaration* |
+| `9.2#5` | **Validation.** An importer MUST check the whole file before it writes anything, and MUST refuse the whole file if any check below fails: | `rust:read_export_answers_the_whole_corpus`, `go:TestReadExportZipAnswersTheWholeCorpus` |
+| `9.2#6` | An importer MUST refuse any entry whose name is not exactly `manifest.json`, `contacts.csv`, `threads.csv`, `messages.jsonl`, `media/`, or `media/` followed by 64 lowercase hex digits — so no `..`, no absolute path, no backslash and no other file — and it MUST read the zip's central directory as the only index | `rust:read_export_answers_the_whole_corpus`, `go:TestReadExportZipAnswersTheWholeCorpus` |
+| `9.2#7` | An importer MUST refuse a file in which one name appears twice | `rust:read_export_answers_the_whole_corpus`, `go:TestReadExportZipAnswersTheWholeCorpus` |
+| `9.2#8` | An importer MUST refuse a file that lacks a member; a file MAY omit `threads.csv`, `messages.jsonl` and `media/` only when its manifest counts them zero, which is what a book does | `rust:read_export_answers_the_whole_corpus`, `go:TestReadExportZipAnswersTheWholeCorpus` |
+| `9.2#9` | An importer MUST refuse an encrypted entry, a symbolic link (a Unix mode in the external attributes), and any directory but `media/` | `rust:read_export_answers_the_whole_corpus`, `go:TestReadExportZipAnswersTheWholeCorpus` |
+| `9.2#10` | An importer MUST count sizes by the bytes it actually decompresses, never by the sizes a header states, and MUST refuse a manifest over 64 KiB, a `contacts.csv` over 4 MiB or 5000 rows, a `threads.csv` over 16 MiB, a line of `messages.jsonl` over 64 KiB, a media file over 5 MiB, and a whole file over the ceiling the host sets | `rust:read_export_answers_the_whole_corpus`, `go:TestReadExportZipAnswersTheWholeCorpus`, `go:TestAnExportWrittenIsReadBackWhole` |
+| `9.2#11` | An importer MUST refuse a member that `manifest.files` does not list or whose sha256 differs from it, a listed member the file lacks, a media member whose sha256 differs from its own name, and counts that differ from what the file holds | `rust:read_export_answers_the_whole_corpus`, `go:TestReadExportZipAnswersTheWholeCorpus` |
+| `9.2#12` | An importer MUST refuse a file whose `owner` is not the root of the identity importing it, and a contact row whose `root` is `owner` | `rust:read_export_answers_the_whole_corpus`, `go:TestReadExportZipAnswersTheWholeCorpus` |
+| `9.2#13` | An importer MUST refuse a header that is not exactly the one shown, a row or a message that breaks what its column or member holds above, a message with a member not listed or one missing, and a message with more than one attachment, and a message that carries an attachment and a `body` that is not empty | `rust:read_export_answers_the_whole_corpus`, `go:TestReadExportZipAnswersTheWholeCorpus`, `go:TestAMessageCarriesAtMostOneFile` |
+| `9.2#14` | An importer MUST refuse a thread whose `contact`, a message whose `thread`, `contact` or non-null `reply_to`, or an attachment whose `file` names nothing in the file, and a media file that nothing names | `rust:read_export_answers_the_whole_corpus`, `go:TestReadExportZipAnswersTheWholeCorpus` |
+| `9.2#15` | An importer MUST refuse any cell or member that decodes as a private key (PKCS #8, SEC1), and MUST parse a certificate only as a certificate of §14.1's profile | `rust:read_export_answers_the_whole_corpus`, `go:TestReadExportZipAnswersTheWholeCorpus` |
+| `9.2#16` | It MUST show the person the contacts, and write nothing until the person agrees. | *host, by declaration* |
+| `9.2#17` | An imported leaf MUST NOT replace a pin the host validated itself, and a row's `leaf` is pinned only when `[leaf, root_cert]` validates at the row's `endpoint` (§14.2). | `rust:export_merge_never_replaces_a_held_pin`, `go:TestExportMergeNeverReplacesAHeldPin`, `rust:read_export_answers_the_whole_corpus`, `go:TestReadExportZipAnswersTheWholeCorpus` |
+| `9.2#18` | A host MUST NOT send a message it imported, whatever its `status`: retries belonged to the host that exported it. | *host, by declaration* |
+| `9.2#19` | The import MUST end with a new leaf from the person's wallet for the importing endpoint, asked for with `expect_root` equal to `owner`: a `move` to an endpoint new to the identity, a `renew` at the endpoint it already serves. | *host, by declaration* |
+| `9.2#20` | Once that leaf is installed, the host MUST call `update_contact` at every imported contact that is not blocked and whose leaf it holds (step 2), since a contact whose leaf it does not hold cannot be sealed to, and MUST report every other contact that is not blocked as unreached, without retrying it; that contact stays pinned by its root. | *host, by declaration* |
+| `9.2#21` | A contact that refuses the call — `update_contact` is a contact-tier tool, and that contact does not hold the identity as one — MUST then be sent `request_contact`, which that contact decides under its own policy. | *host, by declaration* |
 
 ### 13.1 Format
 
@@ -156,7 +195,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 626 cross-port parity cases
+## The 638 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -164,7 +203,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **626** cases, **0** disagreements, **47** of **47** functions compared whole on success.
+At the run that generated this file: **638** cases, **0** disagreements, **48** of **48** functions compared whole on success.
 
 ### `address_guard` — 32 cases · whole on success
 
@@ -215,6 +254,17 @@ At the run that generated this file: **626** cases, **0** disagreements, **47** 
 - assemble_root of a TBS that is not one
 - assemble_root with nothing to work from
 - assemble_root
+
+### `book_rows` — 8 cases · whole on success
+
+- book_rows: a contact with everything, one with the least
+- book_rows: an empty book
+- book_rows: a contact with a member a book does not keep
+- book_rows: a contact with no endpoint
+- book_rows: a name that is not a string
+- book_rows: a contact that is not an object
+- book_rows with nothing to work from
+- book_rows with an exported_at that does not read
 
 ### `build_leaf` — 7 cases · whole on success
 
@@ -440,10 +490,11 @@ At the run that generated this file: **626** cases, **0** disagreements, **47** 
 - export_read_messages with nothing to work from
 - export_read_messages from line 0
 
-### `export_write` — 7 cases · whole on success
+### `export_write` — 8 cases · whole on success
 
 - export_write: every formula prefix, quoting and line breaks, sorted rows
 - export_write: a book
+- export_write: the rows book_rows made
 - export_write with nothing to work from
 - export_write: the owner as a contact
 - export_write: a permission §8 does not name
@@ -520,7 +571,7 @@ At the run that generated this file: **626** cases, **0** disagreements, **47** 
 - ip_is_private ::1
 - ip_is_private ::
 
-### `is_normal_https` — 26 cases · whole on success
+### `is_normal_https` — 28 cases · whole on success
 
 - is_normal_https "https://agent.alina.example/mcp"
 - is_normal_https "https://agent.alina.example:8443/mcp"
@@ -548,6 +599,8 @@ At the run that generated this file: **626** cases, **0** disagreements, **47** 
 - is_normal_https "https://"
 - is_normal_https with no url
 - is_normal_https with nothing to work from
+- is_normal_https with args holding a lone low surrogate
+- is_normal_https with args holding a surrogate pair
 
 ### `issue_from_csr` — 8 cases · whole on success
 
@@ -890,12 +943,13 @@ At the run that generated this file: **626** cases, **0** disagreements, **47** 
 - vault_seal of a plaintext that is a string
 - vault_seal with nothing to work from
 
-### `verify` — 4 cases · whole on success
+### `verify` — 5 cases · whole on success
 
 - verify a signature that is not one
 - verify with an empty signature
 - verify with nothing to work from
 - verify a signature the other port made
+- verify with args holding a lone high surrogate
 
 ### `wallet_issue` — 36 cases · whole on success
 
