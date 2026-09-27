@@ -1,6 +1,6 @@
 {
   "name": "@pact-protocol/identity",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "type": "module",
   "description": "PACT 2.0 identity core (Rust, compiled to WebAssembly): loaders for the browser, Cloudflare Workers and Node, and the Node proofs",
