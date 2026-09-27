@@ -9,6 +9,7 @@
     "keys": "Keys",
     "certificates": "Certificates",
     "csr": "Certificate signing requests",
+    "signing": "Signing requests",
     "cards": "Cards",
     "envelopes": "Envelopes",
     "vault": "Vault",
@@ -410,6 +411,23 @@
         "ct": { "$ref": "#/$defs/B64url" }
       },
       "required": ["format", "kdf", "salt", "nonce", "ct"],
+      "additionalProperties": false
+    },
+    "SigningRequest": {
+      "type": "object",
+      "description": "A host's signing request (SPEC \u00a79.1), the members of its form as the form carries them: every one a string. Bounds are bytes, and characters (Unicode scalar values) for `recipient`; the whole body is bounded by the wallet's host.",
+      "properties": {
+        "csr": { "type": "string", "maxLength": 4096, "description": "base64url PKCS #10: the recipient's key and the endpoint." },
+        "purpose": { "enum": ["renew", "move"] },
+        "expect_root": { "$ref": "#/$defs/Fingerprint" },
+        "root_cert": { "type": "string", "maxLength": 4096, "description": "base64url DER of the root, if the host holds it." },
+        "redirect": { "type": "string", "maxLength": 2048, "description": "Where the answer goes: https, or http to a loopback host; no userinfo, no fragment." },
+        "state": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$", "description": "32 random bytes, base64url, echoed back." },
+        "recipient": { "type": "string", "maxLength": 200, "description": "What the host calls itself: shown as its claim, never trusted." },
+        "valid_days": { "type": "string", "pattern": "^[1-9][0-9]{0,2}$", "description": "The validity the host asks for, 1 to 398, as the form's text: a suggestion; the person chooses." },
+        "expires": { "type": "string", "description": "RFC 3339 UTC, after now and at most ten minutes ahead." }
+      },
+      "required": ["csr", "purpose", "expect_root", "redirect", "state", "recipient", "valid_days", "expires"],
       "additionalProperties": false
     },
     "LedgerEntry": {
@@ -1401,6 +1419,44 @@
       },
       "errors": ["bad_request", "parse"],
       "notes": "The wallet's ledger rules, as facts, in the one place they are written: `wallet_issue` applies them, the `pact` CLI applies them for a card-held root, and a wallet page or a host renders the move notice from them. In order: `root` (absent or empty: `root is required`), `endpoint`, `now`, `move` (present and not a boolean: `move is required`); then `endpoint` not in normal form is refused (`endpoint is not an https URL in normal form`); then every ledger entry, every root's, is read as `wallet_issue` reads it (`the record's ledger is a list`; `the record's ledger entry <i> does not read: <member>`) — an entry that does not read is REFUSED, a `not_before` that does not parse included, never skipped: skipped, it could be the live leaf. The **live leaf** is this root's newest entry by `not_before` (§14.3; the first of equals, in ledger order), if its `not_after` is after `now`; an older entry still in its validity is history, not live. `notice.kind`: with no ledger, `no_ledger`; a leaf live at another endpoint, `move_back` when this endpoint has been issued to before and `move` when it has not (both with `from` and `until`, the live leaf's endpoint and `not_after`); otherwise `renew` when this endpoint has been issued to, and `new_host` when it has not. The kind does not depend on `move`; only `refusal` does."
+    },
+    "signing_request_check": {
+      "section": "signing",
+      "params": {
+        "type": "object",
+        "properties": {
+          "request": { "type": "object", "description": "A SigningRequest as it arrived: held to that schema by this function, which names what is wrong, rather than by the caller." },
+          "origin": { "type": "string", "description": "The request's `Origin` header, as the browser serialised it." },
+          "now": { "$ref": "#/$defs/InstantIn" },
+          "root_spkis": { "type": "array", "items": { "$ref": "#/$defs/Spki" }, "description": "The roots the wallet holds, for `csr_check`'s root-key refusal. Absent is none; present and unreadable is an error." }
+        },
+        "required": ["request", "origin", "now"],
+        "additionalProperties": false
+      },
+      "result": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "ok": { "const": true },
+              "csr": { "$ref": "#/$defs/Csr", "description": "The request's `csr` member, exactly as given: not re-encoded." },
+              "redirect": { "type": "string", "description": "The request's `redirect`, exactly as given." },
+              "purpose": { "enum": ["renew", "move"] },
+              "valid_days": { "type": "integer", "minimum": 1, "maximum": 398 }
+            },
+            "required": ["ok", "csr", "redirect", "purpose", "valid_days"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": { "ok": { "const": false }, "why": { "type": "string" } },
+            "required": ["ok", "why"],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "errors": ["bad_request", "parse"],
+      "notes": "What a web wallet decides about a host's signing request before a person sees it. The arguments first: `request` absent or not an object, `origin` absent or not a string, `now` absent (each `<name> is required`), `now` unreadable (`parse`), `root_spkis` unreadable — these are errors. Everything about the request itself is `{ok: false, why}`, the first thing wrong, in this order: a member a request does not carry (the first in sorted order: `a signing request does not carry <m>`); a member that is not a string (`<m> is a string, as a form carries it`) or over its bound (`<m> is longer than <n>`), in the order of SigningRequest's members; a required member absent or empty (`<m> is required`); an `origin` empty or `null` (`the request has no origin: a wallet answers only the origin that asked`); the redirect — not ASCII without spaces or backslashes (`the redirect is not an absolute URL`), a fragment (`the redirect carries a fragment`), not `https://` or `http://` (`the redirect is not https, or http to a loopback host`), userinfo (`the redirect carries userinfo`), a host not in lower-case normal form (`the redirect's host is not in normal form`), a port that is not 1–65535 without a leading zero (`the redirect's port is not in normal form`), `http` to a host that is not `localhost`, a dotted quad in `127.0.0.0/8` in normal form, or `[::1]` (`the redirect is not https, or http to a loopback host`); the redirect's origin (`scheme://host[:port]`, the default port left out) not equal to `origin` (`the redirect's origin is not the origin that asked`); `expires` not an RFC 3339 UTC instant (`expires is not an RFC 3339 instant`), not after `now` (`the request has expired`), or more than 600 seconds after it (`the request expires more than ten minutes ahead`); `purpose` not `renew` or `move` (`purpose is renew or move`; `signup` is not taken from a host); `valid_days` not a whole number 1–398 without a leading zero (`valid_days is a whole number of days from 1 to 398`); `state` not 43 base64url characters of 32 bytes (`state is 32 bytes, base64url`); `expect_root` not `sha256:` and 43 base64url characters (`expect_root is not a root fingerprint`); `root_cert`, when present, not base64url, not a certificate, not a root of §14.1's profile, or not the root `expect_root` names; `csr` not base64url (`csr is not base64url`); then `csr_check` with `root_spkis`, whose refusal is answered in its words. What stays the wallet's: proving the root against `expect_root` (§2.2), showing the asking origin, the `recipient` as the host's claim, the endpoint, the validity and whether the host is new, and the validity the person chooses. Nothing of the request is kept."
     }
   }
 }

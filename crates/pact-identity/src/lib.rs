@@ -13,6 +13,7 @@ pub mod envelope;
 pub mod hpke;
 pub mod keys;
 pub mod ledger;
+pub mod signing;
 pub mod time;
 pub mod util;
 pub mod vault;
