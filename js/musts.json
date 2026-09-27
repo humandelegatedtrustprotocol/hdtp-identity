@@ -171,10 +171,10 @@
     "held_by": [
       "scenario:a guest whose card carries a different certificate than the chain"
     ],
-    "why": "the certificate equality is this library's guest binding (the scenario); the refusal CODE is a host's answer from update_contact: the node answers bad_request (TestACardThatDisagreesWithTheProofIsABadRequest) and so does the cloud (public-surface-20.test.ts), review P-24",
+    "why": "the certificate equality is this library's guest binding (the scenario); the refusal CODE is a host's answer from update_contact: the node answers bad_request (TestACardThatDisagreesWithTheProofIsABadRequest) and so does the cloud (public-surface-certificates.test.ts), review P-24",
     "elsewhere_names": [
       "gateway:TestACardThatDisagreesWithTheProofIsABadRequest",
-      "cloud:gateway/test/public-surface-20.test.ts"
+      "cloud:gateway/test/public-surface-certificates.test.ts"
     ]
   },
   "6.2#3": {
@@ -201,23 +201,23 @@
     "hash": "874aaad41c95",
     "text": "**Moving** is the person issuing a leaf to the new host, the data carried across as an archive — the person's ",
     "elsewhere": "node",
-    "why": "both halves are a host's. The host that MAKES an archive writes a person's contacts and conversations and nothing else, and no key of any kind: pact-gateway's export is written through its Store interface, so it holds what it asks for, and the test searches the archive's BYTES for a planted leaf key, ledger key, setting, token, invite and integration endpoint (TestAnExportCarriesContactsAndChatsAndNothingElse); pact-cloud's builder selects from an allow-list of tables and columns and its export is searched the same way (leave-20.test.ts). The host that IMPORTS one refuses key material and everything else it does not recognise — a member, a kind of line, a single field — before a write: pact-gateway (TestAnImportRefusesAnythingAnExportDoesNotCarry), pact-cloud (import-20.test.ts). And the two formats are proven against each other: the node's suite runs the cloud's converter and imports the file it wrote (TestTheCloudsLeaveFileImports)",
+    "why": "both halves are a host's. The host that MAKES an archive writes a person's contacts and conversations and nothing else, and no key of any kind: pact-gateway's export is written through its Store interface, so it holds what it asks for, and the test searches the archive's BYTES for a planted leaf key, ledger key, setting, token, invite and integration endpoint (TestAnExportCarriesContactsAndChatsAndNothingElse); pact-cloud's builder selects from an allow-list of tables and columns and its export is searched the same way (leave.test.ts). The host that IMPORTS one refuses key material and everything else it does not recognise — a member, a kind of line, a single field — before a write: pact-gateway (TestAnImportRefusesAnythingAnExportDoesNotCarry), pact-cloud (import.test.ts). And the two formats are proven against each other: the node's suite runs the cloud's converter and imports the file it wrote (TestTheCloudsLeaveFileImports)",
     "elsewhere_names": [
       "gateway:TestAnExportCarriesContactsAndChatsAndNothingElse",
       "gateway:TestAnImportRefusesAnythingAnExportDoesNotCarry",
       "gateway:TestTheCloudsLeaveFileImports",
-      "cloud:gateway/test/leave-20.test.ts",
-      "cloud:gateway/test/import-20.test.ts"
+      "cloud:gateway/test/leave.test.ts",
+      "cloud:gateway/test/import.test.ts"
     ]
   },
   "9.#3": {
     "hash": "6fd3ca8f5633",
     "text": "An address an identity has vacated MUST NOT be assigned to another identity until the last leaf issued for it ",
     "elsewhere": "node",
-    "why": "address reassignment is a host's allocation policy; pact-cloud marks the hostname `vacated` with a `vacated_until` taken from the latest notAfter of any leaf that named the endpoint, keeps the row in the taken set, and answers a claimant `address_vacated` with the date (move-20.test.ts, leave-20.test.ts)",
+    "why": "address reassignment is a host's allocation policy; pact-cloud marks the hostname `vacated` with a `vacated_until` taken from the latest notAfter of any leaf that named the endpoint, keeps the row in the taken set, and answers a claimant `address_vacated` with the date (move.test.ts, leave.test.ts)",
     "elsewhere_names": [
-      "cloud:gateway/test/move-20.test.ts",
-      "cloud:gateway/test/leave-20.test.ts"
+      "cloud:gateway/test/move.test.ts",
+      "cloud:gateway/test/leave.test.ts"
     ]
   },
   "9.#4": {
