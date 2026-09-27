@@ -41,6 +41,9 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 
+step "One version everywhere it is written"
+node scripts/version.mjs --check
+
 step "Go port: vet, tests, adapter"
 ( cd go && go vet ./... && go test ./... && make build )
 
