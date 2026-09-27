@@ -45,6 +45,11 @@ the tables is `contract/CONTRACT.template.md` and is written by hand.
 - **`why` is part of the answer.** Two ports refusing the same call in different words is a
   divergence, not a detail: it is what a person debugging reads, and what a caller's test asserts. No
   `why` may be a library's own error text — one port cannot reproduce another library's wording.
+- **Half a surrogate pair is refused before anything else.** Arguments holding a `\u` escape of half
+  a UTF-16 surrogate pair (a high one not followed by a low one, or a low one alone) answer
+  `{"error": "bad_request", "why": "args: a string holds half of a UTF-16 surrogate pair"}` from
+  every function, before the arguments are read: one JSON parser refuses such text and another reads
+  it as U+FFFD, and a port must not answer by its parser's choice.
 - **`version` is the one exception.** It describes the port, not a rule, so its answer differs and
   nothing compares it.
 

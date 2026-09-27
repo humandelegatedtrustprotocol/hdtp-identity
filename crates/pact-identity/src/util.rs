@@ -86,3 +86,36 @@ pub fn random(n: usize) -> Result<Vec<u8>> {
 pub fn seed(label: &str) -> [u8; 32] {
     sha256(format!("pact-2.0-vectors/{label}").as_bytes())
 }
+
+/// Whether JSON text holds a `\u` escape of half of a UTF-16 surrogate pair: a high one not followed
+/// by a low one, or a low one on its own. An escaped backslash before a `u` is text, not an escape.
+/// The Go port's `loneSurrogate` is the same scan.
+pub fn lone_surrogate(text: &str) -> bool {
+    let b = text.as_bytes();
+    let hex4 = |i: usize| -> Option<u32> {
+        b.get(i..i + 4).and_then(|h| std::str::from_utf8(h).ok()).and_then(|h| u32::from_str_radix(h, 16).ok())
+    };
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] != b'\\' || i + 1 >= b.len() {
+            i += 1;
+            continue;
+        }
+        if b[i + 1] != b'u' {
+            i += 2;
+            continue;
+        }
+        match hex4(i + 2) {
+            Some(0xdc00..=0xdfff) => return true,
+            Some(0xd800..=0xdbff) => {
+                let low = if b.get(i + 6) == Some(&b'\\') && b.get(i + 7) == Some(&b'u') { hex4(i + 8) } else { None };
+                if !matches!(low, Some(0xdc00..=0xdfff)) {
+                    return true;
+                }
+                i += 12;
+            }
+            _ => i += 6,
+        }
+    }
+    false
+}
