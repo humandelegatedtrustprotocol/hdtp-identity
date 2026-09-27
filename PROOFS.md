@@ -29,7 +29,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 
 | # | The sentence | Held by |
 |---|---|---|
-| `2.1#1` | A wallet that can use a WebAuthn credential MUST **derive the root's private key from one** rather than generate and store it; a wallet that cannot — a command-line tool — generates the key and keeps it as §9 says. | `cloud:gateway/src/ceremony/ceremony.js` |
+| `2.1#1` | A wallet that can use a WebAuthn credential MUST **derive the root's private key from one** rather than generate and store it; a wallet that cannot — a command-line tool — generates the key and keeps it as §9 says. | *wallet, by declaration* |
 | `2.1#2` | A wallet MUST use exactly these values. | `rust:derivation_vectors`, `go:TestDerivationVectors`, `rust:derivation_refuses_what_would_silently_differ`, `go:TestDerivationRefusesWhatWouldSilentlyDiffer` |
 | `2.1#3` | A wallet MUST NOT present this as a guarantee: whether a given provider carries the PRF secret across its own sync is that provider's property and not the protocol's, and a wallet that has not verified it SHOULD say so rather than imply otherwise. | *wallet, by declaration* |
 | `2.1#4` | A wallet holding more than one credential for its origin MUST name the intended credential when it knows which one that is, and MUST prove the derived root before signing (§2.2). | `rust:a_vault_entry_that_disagrees_with_its_own_certificate_signs_nothing`, `go:TestVaultRulesMirrorTheCore` |
@@ -41,7 +41,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `2.2#1` | Before issuing any certificate, a wallet MUST establish that the root it is about to sign with is the root the identity already has. | `rust:a_vault_entry_that_disagrees_with_its_own_certificate_signs_nothing`, `go:TestVaultRulesMirrorTheCore` |
 | `2.2#2` | A wallet MUST refuse to sign unless all three hold: | `rust:a_card_whose_certificate_and_key_disagree_gets_no_leaf`, `rust:another_card_signs_nothing_for_this_identity`, `rust:a_card_that_swaps_its_key_after_the_check_signs_nothing_that_is_kept` |
-| `2.2#3` | The challenge MUST be domain-separated from certificate bytes — the ASCII `PACT root proof v1` followed by a newline and at least 32 random bytes — so that proving possession can never be made to sign a certificate. | `cloud:gateway/src/ceremony/ceremony.js`, `cloud:gateway/scripts/check-ceremony.mjs` |
+| `2.2#3` | The challenge MUST be domain-separated from certificate bytes — the ASCII `PACT root proof v1` followed by a newline and at least 32 random bytes — so that proving possession can never be made to sign a certificate. | *wallet, by declaration* |
 | `2.2#4` | A wallet MUST validate a chain it has assembled (§14.2) against the expected root and endpoint before returning it. | `rust:a_leaf_the_card_signed_validates_to_that_root_at_its_endpoint`, `go:TestWalletIssue` |
 | `2.2#5` | **A root certificate is issued once.** A wallet MUST NOT rebuild a root certificate for an identity that already has one. | `rust:a_root_the_card_signed_is_a_root`, `go:TestWalletIssue` |
 
@@ -58,7 +58,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 
 | # | The sentence | Held by |
 |---|---|---|
-| `4.#1` | The same URL serves two audiences by content negotiation: a browser gets the human landing page; a client sending `Accept: application/pact-invite+json` (or appending `?format=json`) gets `{"card","card_sig","chain"}` — the signed card and the issuer's chain (§2), whose leaf MUST byte-equal the card's `X-PACT-CERT` and which the redeemer MUST validate (§14.2) before use, so it can seal its very first call. | `gateway:TestLandingNoOracle404`, `cloud:gateway/test/invite-landing.test.ts` |
+| `4.#1` | The same URL serves two audiences by content negotiation: a browser gets the human landing page; a client sending `Accept: application/pact-invite+json` (or appending `?format=json`) gets `{"card","card_sig","chain"}` — the signed card and the issuer's chain (§2), whose leaf MUST byte-equal the card's `X-PACT-CERT` and which the redeemer MUST validate (§14.2) before use, so it can seal its very first call. | `gateway:TestLandingNoOracle404` |
 
 ### 5.2 Manual flow (vCard shared over existing channels)
 
@@ -77,19 +77,19 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 | # | The sentence | Held by |
 |---|---|---|
 | `6.2#1` | A `msg_id` MUST be a non-empty string — idempotency keyed on nothing protects nothing. | `scenario:an empty msg_id` |
-| `6.2#2` | `ok` — a card refresh, or `status: pending` from a new address under `ask` (§5.3). The caller's chain is the authority: the card's certificate MUST equal the chain's leaf, and a card that names another root or carries a certificate that is not that leaf MUST be refused `bad_request`, the card-intake code of §3 | `scenario:a guest whose card carries a different certificate than the chain`, `gateway:TestACardThatDisagreesWithTheProofIsABadRequest`, `cloud:gateway/test/public-surface-certificates.test.ts` |
+| `6.2#2` | `ok` — a card refresh, or `status: pending` from a new address under `ask` (§5.3). The caller's chain is the authority: the card's certificate MUST equal the chain's leaf, and a card that names another root or carries a certificate that is not that leaf MUST be refused `bad_request`, the card-intake code of §3 | `scenario:a guest whose card carries a different certificate than the chain`, `gateway:TestACardThatDisagreesWithTheProofIsABadRequest` |
 | `6.2#3` | `get_status` answers from that fixed four-value vocabulary; an implementation whose upstream presence source knows richer states MUST map any state not listed to `busy`. | `gateway:TestOwnerPresenceTracksLiveSessionsOnly` |
 
 ### 9. Hosting
 
 | # | The sentence | Held by |
 |---|---|---|
-| `9.#1` | A leaf's key does not outlive its leaf: a host MUST stop using the key of a leaf that has expired and MUST destroy it, keeping the key id so that an envelope still sealed to it is answered `certificate_renewed` (§14.4) — past its date every verifier refuses the leaf (§14.2 rule 4), so the key can do nothing legitimate, and a renewal has never needed it. | `gateway:TestAnExpiredCurrentLeafLosesItsKeyInBothPlaces`, `gateway:TestALeafThatRunsOutStopsBeingServedAndLosesItsKey`, `cloud:gateway/test/leaf-expiry.test.ts` |
-| `9.#2` | **Moving** is the person issuing a leaf to the new host, the data carried across as an archive — the person's contacts and their conversations, with the media in them, and nothing that is the host's own: no settings, no credentials, no invites, no record of the host's leaves; the archive's format is each host's own, a host that makes one MUST NOT put key material of any kind in it, and a host that imports one MUST refuse any key material in it and SHOULD refuse, rather than ignore, anything else it does not recognise — and the new host reaching every contact by §5.3, *before* the person tells the old host to leave, so that no contact meets a gap. | `gateway:TestAnExportCarriesContactsAndChatsAndNothingElse`, `gateway:TestAnImportRefusesAnythingAnExportDoesNotCarry`, `gateway:TestTheCloudsLeaveFileImports`, `cloud:gateway/test/leave.test.ts`, `cloud:gateway/test/import.test.ts` |
-| `9.#3` | An address an identity has vacated MUST NOT be assigned to another identity until the last leaf issued for it has expired, so a contact that missed the move never reaches a stranger where it expects a friend. | `cloud:gateway/test/move.test.ts`, `cloud:gateway/test/leave.test.ts` |
-| `9.#4` | A host that exports an identity toward a destination that cannot carry its chain MUST say so before the export; the remedy is a destination that can. | `cloud:gateway/src/leave/convert.ts` |
+| `9.#1` | A leaf's key does not outlive its leaf: a host MUST stop using the key of a leaf that has expired and MUST destroy it, keeping the key id so that an envelope still sealed to it is answered `certificate_renewed` (§14.4) — past its date every verifier refuses the leaf (§14.2 rule 4), so the key can do nothing legitimate, and a renewal has never needed it. | `gateway:TestAnExpiredCurrentLeafLosesItsKeyInBothPlaces`, `gateway:TestALeafThatRunsOutStopsBeingServedAndLosesItsKey` |
+| `9.#2` | **Moving** is the person issuing a leaf to the new host, the data carried across as an archive — the person's contacts and their conversations, with the media in them, and nothing that is the host's own: no settings, no credentials, no invites, no record of the host's leaves; the archive's format is each host's own, a host that makes one MUST NOT put key material of any kind in it, and a host that imports one MUST refuse any key material in it and SHOULD refuse, rather than ignore, anything else it does not recognise — and the new host reaching every contact by §5.3, *before* the person tells the old host to leave, so that no contact meets a gap. | `gateway:TestAnExportCarriesContactsAndChatsAndNothingElse`, `gateway:TestAnImportRefusesAnythingAnExportDoesNotCarry`, `gateway:TestTheCloudsLeaveFileImports` |
+| `9.#3` | An address an identity has vacated MUST NOT be assigned to another identity until the last leaf issued for it has expired, so a contact that missed the move never reaches a stranger where it expects a friend. | *node, by declaration* |
+| `9.#4` | A host that exports an identity toward a destination that cannot carry its chain MUST say so before the export; the remedy is a destination that can. | *node, by declaration* |
 | `9.#5` | It issues one live leaf per identity at a time — a second endpoint is a move, not a second home, because contacts keep one pin and the newest leaf wins — and MUST NOT issue a second while one is live except as its replacement. | `rust:issues_from_the_vault`, `go:TestWalletIssue`, `go:TestVaultRulesMirrorTheCore` |
-| `9.#6` | A wallet MUST NOT write a leaf, a ledger entry or a contact into the file, and writes it once, when the root is made, and again only when the root is re-bound or a hardware key takes it. | `rust:a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates`, `rust:issues_from_the_vault`, `cloud:gateway/src/ceremony/ceremony.js` |
+| `9.#6` | A wallet MUST NOT write a leaf, a ledger entry or a contact into the file, and writes it once, when the root is made, and again only when the root is re-bound or a hardware key takes it. | `rust:a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates`, `rust:issues_from_the_vault` |
 
 ### 13.1 Format
 

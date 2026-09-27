@@ -11,7 +11,7 @@
 // refuses to pin while it is dirty. Paths are relative to pact-identity/. The CLI crate is not on
 // it on purpose — it is not in the Wasm — but anything it does to the lock file is, through
 // Cargo.lock. This is the early warning; the proof is still the container build
-// (js/reproduce.sh, and the `reproduce` job that runs it on every push).
+// (js/reproduce.sh, which `make verify-release` runs again against every published release).
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';

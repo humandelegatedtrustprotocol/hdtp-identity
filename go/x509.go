@@ -593,8 +593,8 @@ func ProfileError(c *Cert, kind string) string {
 	// The ADMITTED set, not the excluded one. This asked `AlgorithmOf`, which errors only on an
 	// EMPTY `Alg` — and `ParseSPKI` sets `Alg = AlgX25519` for OID 1.3.101.110, so an X25519-keyed
 	// leaf was inside the profile to this port and outside it to Rust (x509.rs: an explicit X25519
-	// refusal). The node pins on this verdict, so it would pin a chain the wallet and the cloud
-	// both refuse, leaving the peer stuck rather than cleanly rejected.
+	// refusal). The node pins on this verdict, so it would pin a chain every Wasm host (a wallet, a
+	// Worker) refuses, leaving the peer stuck rather than cleanly rejected.
 	if c.PublicKey == nil || (c.PublicKey.Alg != AlgEd25519 && c.PublicKey.Alg != AlgP256) {
 		return "key algorithm not in the profile"
 	}

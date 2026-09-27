@@ -14,7 +14,7 @@
 // compat-card encoder the source had deleted — and nothing had noticed, because this check only
 // ran where somebody had just rebuilt. So the first thing to ask is whether `crates/` changed
 // since `manifest.json` did (`git log -1 -- crates js/manifest.json`); if it did, pin again with
-// `sh js/reproduce.sh --pin`, commit the manifest, and vendor the bytes wherever they are copied.
+// `sh js/reproduce.sh --pin` and commit the manifest; hosts take the bytes from a release.
 //
 // **The other ordinary cause is that the bytes were built HERE.** The pin is the build one
 // container makes (js/reproduce.sh), because cargo lays the same code out differently on every
@@ -52,7 +52,7 @@ if (!head) {
   failures++;
   console.log(`FAIL pin-of-commit: HEAD's build inputs (${head.sha256.slice(0, 16)}…) are not the ones the pin was built from (${manifest.source.inputs_sha256.slice(0, 16)}…).`);
   console.log('     A commit changed the Rust source, the lock file, the toolchain or js/build.sh after the pin.');
-  console.log('     sh js/reproduce.sh --pin   then commit js/manifest.json and re-vendor into pact-cloud.');
+  console.log('     sh js/reproduce.sh --pin   then commit js/manifest.json.');
 } else {
   console.log(`ok   pin-of-commit: HEAD's ${head.files} build inputs are the ones the pin was built from`);
 }
@@ -84,7 +84,7 @@ if (failures) {
   console.log('  code out differently per host. `sh js/reproduce.sh` rebuilds in the container and compares.');
   console.log('  If the container\'s bytes differ too, the source changed after the pin:');
   console.log('    git log -1 --format=%ad -- crates ; git log -1 --format=%ad -- js/manifest.json');
-  console.log('  Then `sh js/reproduce.sh --pin`, commit js/manifest.json, and re-vendor into pact-cloud.');
+  console.log('  Then `sh js/reproduce.sh --pin`, and commit js/manifest.json.');
   console.log('  If crates/ is NOT newer, somebody shipped bytes nobody recorded — which is what this guards.');
 }
 process.exit(failures ? 1 : 0);

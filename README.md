@@ -14,7 +14,6 @@ port presents: bytes in, JSON out, no state.
 | `js/` | loaders (`index.mjs` for Node and the browser, `worker.mjs` for Workers), `build.sh`, `reproduce.sh` (the canonical, containerised build), `manifest.json` + `verify.mjs`, and the Node proofs `check.mjs` and `intrude.mjs` |
 | `go/` | the Go port and its `pact-identity-go` adapter binary (built by the Go side; one JSON request per line on stdin, one answer per line out) |
 | `contract/` | `contract.json` — the boundary as data, and the source `CONTRACT.md` is rendered from (`render.mjs`); `schema.mjs` + `schema.test.mjs`, the JSON Schema subset it is written in; `contract.mjs`, which judges one answer by it |
-| `docs/` | `contract-one-place.md` — the proposal this came from. Phases 1 and 2 are built; 3 (typed bindings, an OpenAPI view), 4 (the Rust library validating against the file, which costs a re-pin) and 5 (the wire contract's schema bundle) are not |
 
 ## Build and prove
 
@@ -96,7 +95,7 @@ matching. After a change under `crates/`:
 ```sh
 git commit …                    # the hook styles it and lints it
 sh js/reproduce.sh --pin        # the canonical build of THAT commit; writes js/manifest.json
-git commit js/manifest.json …   # then re-vendor into pact-cloud (gateway/vendor/pact-identity/VENDORED.md)
+git commit js/manifest.json …   # hosts take the bytes from a release (make release)
 ```
 
 **The gate is local, and CI holds one job.** `sh gate.sh` is the list above as one command — all

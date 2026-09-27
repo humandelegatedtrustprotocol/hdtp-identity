@@ -1,6 +1,6 @@
 package pactidentity
 
-// The vault of §9 in the format the ceremony and the CLI share (CONTRACT §6): Argon2id
+// The vault of §9 in the format a browser wallet and the CLI share (CONTRACT §6): Argon2id
 // to a key, AES-256-GCM over the plaintext, the document's own header as AAD.
 
 import (

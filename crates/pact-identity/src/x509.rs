@@ -786,7 +786,7 @@ mod tests {
     #[test]
     fn normal_form() {
         assert!(is_normal_https("https://agent.alina.example/mcp"));
-        assert!(is_normal_https("https://alina.pact.contact/alina/mcp"));
+        assert!(is_normal_https("https://alina.host.example/alina/mcp"));
         assert!(is_normal_https("https://203.0.113.9/mcp"));
         for good in [
             "https://a.example/x/y-z_~",
