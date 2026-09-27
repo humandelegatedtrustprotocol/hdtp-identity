@@ -22,7 +22,7 @@ mod vault;
 /// It read `2.0.0-draft` for days after the draft shipped as 2.0.0, and through 2.1.0, because a
 /// literal in a dispatch arm has nothing to fail against. `tests/vectors.rs` now compares it with
 /// the version line of the document the vectors are read from, so the two cannot part quietly.
-pub const SPEC_VERSION: &str = "2.1.3";
+pub const SPEC_VERSION: &str = "2.2.0";
 
 /// A required string member that carries an identifier: present, and not empty. §13's `msg_id` is
 /// what pairs a result with its request, so the empty string is not a value it can take — one port
@@ -254,6 +254,7 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
         "export_write_messages" => export::export_write_messages(a)?,
         "export_manifest" => export::export_manifest(a)?,
         "export_merge" => export::export_merge(a)?,
+        "book_rows" => export::book_rows(a)?,
         // §6.1 ledger
         "ledger_check" => ledger::ledger_check(a)?,
         "version" => json!({ "crate": env!("CARGO_PKG_VERSION"), "spec": SPEC_VERSION }),
@@ -261,8 +262,17 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
     })
 }
 
+/// What `call` answers arguments holding an unpaired UTF-16 surrogate escape.
+pub const LONE_SURROGATE: &str = "args: a string holds half of a UTF-16 surrogate pair";
+
 /// The boundary. `args` is one JSON object; the answer is one JSON object, never an exception.
 pub fn call(name: &str, args: &str) -> String {
+    // A \u escape of half a surrogate pair: serde_json refuses it in words of its own, and Go's
+    // encoding/json reads it as U+FFFD, so the two ports answered it two ways. Both name it first,
+    // in these words, before anything reads the arguments.
+    if crate::util::lone_surrogate(args) {
+        return json!({ "error": "bad_request", "why": LONE_SURROGATE }).to_string();
+    }
     let a: Value = match serde_json::from_str(args) {
         Ok(v @ Value::Object(_)) => v,
         Ok(_) => return json!({ "error": "bad_request", "why": "args is a JSON object" }).to_string(),
@@ -297,6 +307,14 @@ mod tests {
             assert!(call("verify", args).contains("args is a JSON object"), "verify({args})");
         }
         assert!(call("verify", "{").contains("args:"));
+        // Half a surrogate pair, in either order and at the end, is refused in fixed words; a whole
+        // pair, and an escaped backslash before a `u`, are text.
+        for args in [r#"{"spki":"a\ud800"}"#, r#"{"spki":"\udc00b"}"#, r#"{"spki":"\ud800\u0041"}"#] {
+            assert!(call("verify", args).contains(LONE_SURROGATE), "{args}");
+        }
+        for args in [r#"{"x":"\ud83d\ude00"}"#, r#"{"x":"\\ud800"}"#] {
+            assert!(!call("version", args).contains(LONE_SURROGATE), "{args}");
+        }
         let k: Value = serde_json::from_str(&call("generate_key", r#"{"alg":"ed25519"}"#)).unwrap();
         assert_eq!(k["alg"], "ed25519");
         let v: Value = serde_json::from_str(&call("version", "{}")).unwrap();
