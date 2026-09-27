@@ -90,6 +90,7 @@ func TestRedirectAllowedIsHTTPSOrHTTPToLoopbackOnly(t *testing.T) {
 		"http://[::2]/r", "http://sub.localhost/r", "ftp://localhost/r", "//localhost/r", "http://user@localhost/r",
 		"http://localhost/r#f", "http://LOCALHOST/r", "http://localhost:0/r", "http://localhost:99999/r", "http://localhost:80a/r",
 		"http://localhost\\@evil.example/", "http://localhost/ r", "http://localhost/é",
+		"https://[2001:DB8::1]/r", "https://node..alina.example/r", "https://.alina.example/r", "https://alina.example./r",
 	} {
 		if _, err := redirectAllowed(redirect); err == nil {
 			t.Errorf("%s was allowed", redirect)

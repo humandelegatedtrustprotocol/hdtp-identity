@@ -248,7 +248,7 @@ func callExportReadEnd(args json.RawMessage) json.RawMessage {
 	for _, f := range []struct {
 		k  string
 		to *[]string
-	}{{"ids", &e.ids}, {"msg_ids", &e.msgIDs}, {"reply_tos", &e.replyTos}, {"media_seen", &e.mediaSeen}} {
+	}{{"ids", &e.ids}, {"msg_ids", &e.msgIDs}, {"reply_tos", &e.replyTos}, {"media_seen", &e.mediaSeen}, {"media", &e.media}} {
 		if *f.to, err = a.strings(f.k); err != nil {
 			return failErr(codeArgs, err)
 		}

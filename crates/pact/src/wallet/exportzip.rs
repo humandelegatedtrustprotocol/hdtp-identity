@@ -4,17 +4,19 @@
 //! is what only a host can do — list the central directory, count the bytes it actually
 //! decompresses, refuse what is not UTF-8, hash `messages.jsonl` and each media file as it streams
 //! them — in the words the Go port's `ReadExportZip` uses for the same refusals.
+use pact_identity::export;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
-const MANIFEST_MAX: u64 = 64 * 1024;
-const CONTACTS_MAX: u64 = 4 * 1024 * 1024;
-const THREADS_MAX: u64 = 16 * 1024 * 1024;
-const LINE_MAX: usize = 64 * 1024;
-const MEDIA_MAX: u64 = 5 * 1024 * 1024;
+// The bounds of SPEC §9.2 are the core's, one copy of them (a test holds contract.json to them).
+const MANIFEST_MAX: u64 = export::MANIFEST_MAX as u64;
+const CONTACTS_MAX: u64 = export::CONTACTS_MAX as u64;
+const THREADS_MAX: u64 = export::THREADS_MAX as u64;
+const LINE_MAX: usize = export::LINE_MAX;
+const MEDIA_MAX: u64 = export::MEDIA_MAX as u64;
 const BATCH: usize = 500;
 
 /// The host's words for this ceiling, as the Go port has them.
@@ -296,12 +298,17 @@ pub fn read_export(path: &Path, owner: &str, now: &str, ceiling: u64) -> Result<
         if pact_identity::util::hex(&Sha256::digest(&bytes)) != name[6..] {
             return Err(format!("{name}: its sha256 is not its name"));
         }
+        // SPEC 2.2.2, 9.2#15: a media file that is a private key is refused, in the Go port's words.
+        if export::media_holds_private_key(&bytes) {
+            return Err(format!("{name}: holds a private key"));
+        }
     }
     call(
         "export_read_end",
         json!({
             "manifest": text("manifest.json").unwrap_or_default(), "messages_sha256": messages_sha256, "lines": lines_read,
             "ids": ids, "msg_ids": msg_ids, "reply_tos": reply_tos, "media_seen": media_seen,
+            "media": read["media"].as_array().into_iter().flatten().filter_map(|m| m["hash"].as_str()).collect::<Vec<_>>(),
         }),
     )?;
     Ok(Contents {

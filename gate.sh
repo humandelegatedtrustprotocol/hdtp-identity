@@ -41,12 +41,17 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 
-step "Every Rust dependency's licence is one deny.toml allows"
-command -v cargo-deny >/dev/null 2>&1 || {
-  echo "gate: cargo-deny is not installed, and this step needs it: cargo install cargo-deny --locked" >&2
-  exit 2
-}
-cargo deny --locked check licenses
+step "Every Rust dependency's licence is one deny.toml allows, and its source is crates.io"
+# One version of cargo-deny, so a check's meaning does not move with whatever a machine installed.
+DENY_VERSION=0.20.2
+case "$(cargo deny --version 2>/dev/null)" in
+  "cargo-deny $DENY_VERSION") ;;
+  *)
+    echo "gate: this step runs cargo-deny $DENY_VERSION: cargo install cargo-deny --version $DENY_VERSION --locked" >&2
+    exit 2
+    ;;
+esac
+cargo deny --locked check licenses sources
 
 step "One version everywhere it is written"
 node scripts/version.mjs --check

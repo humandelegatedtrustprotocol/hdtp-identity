@@ -21,8 +21,9 @@ ureq = { version = "3", default-features = false, features = ["rustls"] }
 pcsc = { version = "2", optional = true }
 # The export's container (SPEC §9.2), in the CLI only: the Wasm core never opens a zip. Deflate
 # through flate2's pure-Rust miniz_oxide backend and nothing else; zip's own `deflate` feature would
-# also bring zopfli, a compressor this has no use for.
-zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2"] }
+# also bring zopfli, a compressor this has no use for. Pinned exactly: what the reader refuses rests on
+# how this crate walks a central directory, so a new version is read before it is taken.
+zip = { version = "=8.6.0", default-features = false, features = ["deflate-flate2"] }
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 sha2 = "0.10"
 

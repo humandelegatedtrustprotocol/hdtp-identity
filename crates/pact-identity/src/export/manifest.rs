@@ -1,6 +1,6 @@
 //! `manifest.json` (SPEC §9.2): read strictly, and written as RFC 8785 JSON so both ports write the
 //! same bytes.
-use super::{is_fingerprint, is_hash, is_media, refuse, MANIFEST_MAX};
+use super::{holds_private_key, is_fingerprint, is_hash, refuse, MANIFEST_MAX};
 use crate::util::Result;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
@@ -39,8 +39,10 @@ pub fn check(doc: &Map<String, Value>, owner: Option<&str>) -> Result<Manifest> 
         return at(format!("owner: the file is {file_owner}'s, not this identity's ({owner})"));
     }
     for m in ["owner_name", "tool"] {
-        if !doc[m].is_string() {
-            return at(format!("{m} is a string"));
+        let Some(text) = doc[m].as_str() else { return at(format!("{m} is a string")) };
+        // SPEC §9.2, key material: every string member of the manifest, as every cell.
+        if holds_private_key(text) {
+            return at(format!("{m} holds a private key"));
         }
     }
     if doc["exported_at"].as_str().is_none_or(|t| crate::time::parse_rfc3339(t).is_err()) {
@@ -59,14 +61,14 @@ pub fn check(doc: &Map<String, Value>, owner: Option<&str>) -> Result<Manifest> 
     }
     let Some(listed) = doc["files"].as_object() else { return at("files is an object") };
     let mut files = BTreeMap::new();
+    // SPEC 2.2.2, 9.2#11: `files` lists the text members only. A media member is bound by its name,
+    // which is the sha256 of its bytes, and counted by `counts.media`; listing each one made a
+    // manifest's 64 KiB hold at most some 460 of them.
     for (name, hash) in listed {
-        if !LISTED.contains(&name.as_str()) && !is_media(name) {
+        if !LISTED.contains(&name.as_str()) {
             return at(format!("files: {} is not a member an export lists", crate::canonical::string(name)));
         }
         let Some(hash) = hash.as_str().filter(|h| is_hash(h)) else { return at(format!("files: {name}: not a lowercase hex sha256")) };
-        if is_media(name) && name[6..] != *hash {
-            return at(format!("files: {name}: the hash is not the name"));
-        }
         files.insert(name.clone(), hash.to_string());
     }
     Ok(Manifest { contacts: n[0], threads: n[1], messages: n[2], media: n[3], files })

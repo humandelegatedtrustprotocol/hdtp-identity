@@ -107,7 +107,7 @@ func TestExportReadEndAllocatesABoundedAmountPerID(t *testing.T) {
 		hash := strings.Repeat("a", 64)
 		manifest, _ := json.Marshal(map[string]any{"pact_export": 2, "owner": "sha256:" + strings.Repeat("O", 43), "owner_name": "", "exported_at": "2026-09-27T00:00:00Z",
 			"tool": "t", "counts": map[string]any{"contacts": 0, "threads": 0, "messages": rows, "media": 0}, "files": map[string]any{"messages.jsonl": hash}})
-		args, _ := json.Marshal(map[string]any{"manifest": string(manifest), "messages_sha256": hash, "lines": rows, "ids": ids, "msg_ids": msgIDs, "reply_tos": msgIDs[1:], "media_seen": []string{}})
+		args, _ := json.Marshal(map[string]any{"manifest": string(manifest), "messages_sha256": hash, "lines": rows, "ids": ids, "msg_ids": msgIDs, "reply_tos": msgIDs[1:], "media_seen": []string{}, "media": []string{}})
 		lists, _ := json.Marshal([]any{ids, msgIDs, msgIDs[1:]})
 		n, out := memOf(t, "export_read_end", args)
 		if !strings.Contains(string(out), `"ok":true`) {

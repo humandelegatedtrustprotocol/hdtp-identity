@@ -30,6 +30,7 @@ pub const LINE_MAX: usize = 64 * 1024;
 pub const MEDIA_MAX: usize = 5 * 1024 * 1024;
 pub const BODY_MAX: usize = 16 * 1024;
 pub const NAME_MAX: usize = 200;
+pub const ATTACHMENTS_MAX: usize = 1;
 
 pub const CONTACT_COLUMNS: [&str; 11] =
     ["root", "endpoint", "name", "display_name", "status", "was_active", "permissions", "their_permissions", "leaf", "root_cert", "added"];
@@ -82,6 +83,12 @@ fn is_private_key_der(bytes: &[u8]) -> bool {
         && f[1].tag == 0x04
         && f[2..].iter().enumerate().all(|(k, n)| n.tag == 0xa0 + k as u8 || (k == 0 && n.tag == 0xa1));
     pkcs8 || sec1
+}
+
+/// Whether a media file's bytes are a private key (SPEC 2.2.2, 9.2#15): PKCS #8 or SEC1 in DER, or
+/// text that holds one (PEM, or a base64 word) — the rule a cell is held to, over the file.
+pub fn media_holds_private_key(bytes: &[u8]) -> bool {
+    is_private_key_der(bytes) || std::str::from_utf8(bytes).is_ok_and(holds_private_key)
 }
 
 /// Whether text holds a private key (SPEC §9.2, "key material"): PEM armour naming one, or any
@@ -489,7 +496,7 @@ pub fn read<'a>(
     let Some(manifest_text) = manifest_text else { return refuse("manifest is required") };
     let m = manifest::parse(manifest_text, Some(owner))?;
     for e in directory {
-        if e.name == "manifest.json" || e.name == "media/" {
+        if e.name == "manifest.json" || e.name == "media/" || is_media(&e.name) {
             continue;
         }
         if !m.files.contains_key(&e.name) {
@@ -631,10 +638,12 @@ pub struct End<'a> {
     pub msg_ids: &'a [&'a str],
     pub reply_tos: &'a [&'a str],
     pub media_seen: &'a [&'a str],
+    /// The file's media members, by hash: export_read's `media`. Each must be named by a message.
+    pub media: &'a [&'a str],
 }
 
 pub fn read_end(manifest_text: &str, end: &End<'_>) -> Result<()> {
-    let End { messages_sha256, lines, ids, msg_ids, reply_tos, media_seen } = *end;
+    let End { messages_sha256, lines, ids, msg_ids, reply_tos, media_seen, media } = *end;
     let m = manifest::parse(manifest_text, None)?;
     if lines != m.messages {
         return refuse(format!("manifest.json: counts: messages is {}, and messages.jsonl holds {lines} lines", m.messages));
@@ -660,9 +669,9 @@ pub fn read_end(manifest_text: &str, end: &End<'_>) -> Result<()> {
     if let Some(r) = reply_tos.iter().find(|r| msg_ids.binary_search(r).is_err()) {
         return refuse(format!("messages.jsonl: reply_to {} names no message in the file", crate::canonical::string(r)));
     }
-    for name in m.files.keys().filter(|k| is_media(k)) {
-        if !media_seen.contains(&name[6..]) {
-            return refuse(format!("{name}: nothing names it"));
+    for hash in media {
+        if !media_seen.contains(hash) {
+            return refuse(format!("media/{hash}: nothing names it"));
         }
     }
     Ok(())
@@ -740,6 +749,13 @@ pub fn write(
     if !is_fingerprint(owner) {
         return refuse("owner is not a fingerprint");
     }
+    // SPEC 2.2.2, 9.2#28: the owner's and the host's own strings are refused, naming the member —
+    // there is nothing of a contact's to leave out.
+    for (m, text) in [("owner_name", owner_name), ("tool", tool)] {
+        if holds_private_key(text) {
+            return refuse(format!("{m} holds a private key"));
+        }
+    }
     let cells = Cells { owner };
     let mut rows: Vec<(String, Vec<String>)> = Vec::new();
     let mut written: HashSet<String> = HashSet::new();
@@ -803,6 +819,8 @@ pub fn write(
     if let Some(t) = &threads_csv {
         files.insert("threads.csv".into(), json!(sha256_hex(t.as_bytes())));
     }
+    // The media are counted, never listed: `files` holds the text members alone (SPEC 2.2.2, 9.2#11).
+    let mut hashes: HashSet<&str> = HashSet::with_capacity(media.len());
     for (i, item) in media.iter().enumerate() {
         let hash = item.get("hash").and_then(|h| h.as_str()).unwrap_or("");
         if !is_hash(hash) {
@@ -812,7 +830,7 @@ pub fn write(
             Some(s) if s <= MEDIA_MAX as u64 => {}
             _ => return refuse(format!("media[{i}]: size is a number of bytes up to {MEDIA_MAX}")),
         }
-        if files.insert(format!("media/{hash}"), json!(hash)).is_some() {
+        if !hashes.insert(hash) {
             return refuse(format!("media[{i}]: appears twice"));
         }
     }
@@ -883,6 +901,20 @@ mod tests {
         let write = |name: &str| write(&owner, "", 0, "t", &[row(name)], &[], &[]).map(|_| ()).map_err(|e| e.why);
         assert_eq!(write("Bharat"), Ok(()), "the control");
         assert_eq!(write(&pkcs8), Err("contacts[0], column name: holds a private key".to_string()));
+        // The owner's and the host's own strings are refused, naming the member (SPEC 9.2#28), and a
+        // manifest someone else wrote with one is refused on read (9.2#15).
+        let own = |owner_name: &str, tool: &str| super::write(&owner, owner_name, 0, tool, &[], &[], &[]).map(|_| ()).map_err(|e| e.why);
+        assert_eq!(own(&pkcs8, "t"), Err("owner_name holds a private key".to_string()));
+        let pem = format!("-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----", base64_std(&key.to_pkcs8()));
+        assert_eq!(own("Alina", &pem), Err("tool holds a private key".to_string()));
+        let partial = super::write(&owner, "Alina", 0, "t", &[], &[], &[]).unwrap().partial;
+        let finished = manifest::finish(&partial, None, 0).unwrap();
+        assert!(manifest::parse(&finished, Some(&owner)).is_ok(), "the control reads");
+        let with_key = finished.replace("\"owner_name\":\"Alina\"", &format!("\"owner_name\":\"{pkcs8}\""));
+        assert_eq!(
+            manifest::parse(&with_key, Some(&owner)).map(|_| ()).map_err(|e| e.why),
+            Err("manifest.json: owner_name holds a private key".to_string())
+        );
         let mut sec1 = vec![0x30, 0x25, 0x02, 0x01, 0x01, 0x04, 0x20];
         sec1.extend_from_slice(&seed("export/sec1"));
         use base64::Engine;
@@ -968,9 +1000,58 @@ mod tests {
                 msg_ids: &msg_ids,
                 reply_tos: &reply_tos,
                 media_seen: &[],
+                media: &[],
             },
         )
         .unwrap();
+    }
+
+    /// `files` lists the text members only (SPEC 2.2.2): an export of 5000 media files has a
+    /// manifest well under 64 KiB, and the reader takes it, counting every file.
+    #[test]
+    fn an_export_of_5000_media_files_has_a_small_manifest_and_reads_back() {
+        let owner = format!("sha256:{}", "O".repeat(43));
+        let hashes: Vec<String> = (0..5000).map(|i| sha256_hex(format!("media {i}").as_bytes())).collect();
+        let media: Vec<Value> = hashes.iter().map(|h| json!({ "hash": h, "size": 1 })).collect();
+        let w = write(&owner, "", 0, "t", &[], &[], &media).unwrap();
+        let m = manifest::finish(&w.partial, None, 0).unwrap();
+        assert!(m.len() < MANIFEST_MAX / 8, "a manifest of {} bytes for 5000 media files", m.len());
+        let entry = |name: String, mode: u32| Entry { name, size: 1, encrypted: false, mode };
+        let mut directory = vec![entry("manifest.json".into(), 0), entry("contacts.csv".into(), 0), entry("media/".into(), 0o040755)];
+        directory.extend(hashes.iter().map(|h| entry(format!("media/{h}"), 0)));
+        let r = read(&directory, Some(&m), Some(&w.contacts_csv), None, &owner, 0).unwrap();
+        let answer: Value = serde_json::from_str(&r.answer).unwrap();
+        assert_eq!(answer["media"].as_array().unwrap().len(), 5000);
+    }
+
+    /// A media file is key material when its bytes are a PKCS #8 or SEC1 key in DER, or text holding
+    /// one in PEM or base64 (SPEC 2.2.2, 9.2#15). A document, and DER that is not a key, are not.
+    #[test]
+    fn a_media_file_is_key_material_in_der_or_pem() {
+        let key = PrivateKey::from_seed(Alg::Ed25519, &seed("export/media-key")).unwrap();
+        let pkcs8 = key.to_pkcs8();
+        let mut sec1 = vec![0x30, 0x25, 0x02, 0x01, 0x01, 0x04, 0x20];
+        sec1.extend_from_slice(&seed("export/media-sec1"));
+        let pem = format!("-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----\n", base64_std(&pkcs8));
+        let sec1_pem = format!("-----BEGIN EC PRIVATE KEY-----\n{}\n-----END EC PRIVATE KEY-----\n", base64_std(&sec1));
+        for (what, bytes) in [
+            ("PKCS #8 DER", pkcs8.to_vec()),
+            ("SEC1 DER", sec1.clone()),
+            ("PKCS #8 PEM", pem.into_bytes()),
+            ("SEC1 PEM", sec1_pem.into_bytes()),
+        ] {
+            assert!(media_holds_private_key(&bytes), "{what} is key material");
+        }
+        for (what, bytes) in
+            [("a document", b"%PDF-1.7\nthe bytes of a.pdf\n".to_vec()), ("DER that is no key", vec![0x30, 0x03, 0x02, 0x01, 0x05])]
+        {
+            assert!(!media_holds_private_key(&bytes), "{what} is not key material");
+        }
+    }
+
+    fn base64_std(b: &[u8]) -> String {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD.encode(b)
     }
 
     fn lines_to_file(lines: &[String]) -> String {
@@ -1060,6 +1141,7 @@ mod tests {
                 msg_ids: &msg_ids,
                 reply_tos: &reply_tos,
                 media_seen: &[],
+                media: &[],
             };
             let t = clock();
             read_end(&with_messages, &end).unwrap();

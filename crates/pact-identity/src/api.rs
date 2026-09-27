@@ -22,7 +22,7 @@ mod vault;
 /// It read `2.0.0-draft` for days after the draft shipped as 2.0.0, and through 2.1.0, because a
 /// literal in a dispatch arm has nothing to fail against. `tests/vectors.rs` now compares it with
 /// the version line of the document the vectors are read from, so the two cannot part quietly.
-pub const SPEC_VERSION: &str = "2.2.1";
+pub const SPEC_VERSION: &str = "2.2.2";
 
 /// A required string member that carries an identifier: present, and not empty. §13's `msg_id` is
 /// what pairs a result with its request, so the empty string is not a value it can take — one port
@@ -283,7 +283,12 @@ pub fn call(name: &str, args: &str) -> String {
     // export_read_end's lists can hold an id per message of a file; its arguments are read straight
     // from their text when they read (api/export.rs), rather than into a tree of values first.
     if name == "export_read_end" {
-        if let Some(out) = export::export_read_end_lean(args) {
+        let lean = || export::export_read_end_lean(args);
+        #[cfg(not(target_arch = "wasm32"))]
+        let lean = std::panic::catch_unwind(lean).unwrap_or_else(|_| Some(err("internal", "panic")));
+        #[cfg(target_arch = "wasm32")]
+        let lean = lean();
+        if let Some(out) = lean {
             return answer(out.map(Answer::Json));
         }
     }
@@ -332,6 +337,10 @@ mod tests {
         for args in [r#"{"spki":"a\ud800"}"#, r#"{"spki":"\udc00b"}"#, r#"{"spki":"\ud800\u0041"}"#] {
             assert!(call("verify", args).contains(LONE_SURROGATE), "{args}");
         }
+        // export_read_end's lean path answers what the ordinary one does, a number out of range in a
+        // member it does not read included: serde's range error, never `ok`.
+        let wide = r#"{"x":1e400,"manifest":"{}","lines":0,"ids":[],"msg_ids":[],"reply_tos":[],"media_seen":[],"media":[]}"#;
+        assert!(call("export_read_end", wide).contains("\"why\":\"args: number out of range"), "{}", call("export_read_end", wide));
         for args in [r#"{"x":"\ud83d\ude00"}"#, r#"{"x":"\\ud800"}"#] {
             assert!(!call("version", args).contains(LONE_SURROGATE), "{args}");
         }

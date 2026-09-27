@@ -96,6 +96,34 @@ export default function readerCases({ add, expect }) {
   }
   // The control: the valid export's own lines, with the same names, read.
   add('export_read_messages: the valid export\'s lines', 'export_read_messages', { lines, ...names });
+
+  // ── 9.2#13: one instant grammar, on read (SPEC 2.2.2) ────────────────────────────────────────
+  // `Z` and `T` upper-case, no offset, `.` alone before a fraction: in a contact's `added`, a thread's
+  // `created_at`, the manifest's `exported_at` and a message's `time`. The valid export is the control.
+  const threadCell = (row, col, cell) => (m) => {
+    const tl = m.threads.split('\r\n');
+    tl[row - 1] = cells(tl[row - 1]).map((c, k) => (k === col ? cell : c)).join(',');
+    m.threads = tl.join('\r\n');
+  };
+  const csvCell = (v) => (v.includes(',') ? `"${v}"` : v);
+  for (const [what, instant] of [
+    ['a lower-case z', '2026-09-04T09:00:00z'],
+    ['a lower-case t', '2026-09-04t09:00:00Z'],
+    ['a comma before the fraction', '2026-09-04T09:00:00,5Z'],
+    ['an offset', '2026-09-04T09:00:00+00:00'],
+  ]) {
+    for (const [where, change, why] of [
+      ['a contact added', withCell(2, 10, csvCell(instant)), 'contacts.csv: row 2, column added: not an RFC 3339 instant'],
+      ['a thread created', threadCell(2, 3, csvCell(instant)), 'threads.csv: row 2, column created_at: not an RFC 3339 instant'],
+      ['a manifest exported', (m) => { m.manifest.exported_at = instant; }, 'manifest.json: exported_at is not an RFC 3339 instant'],
+    ]) {
+      add(`export_read: ${where} at an instant with ${what}`, 'export_read', readArgs(change));
+      expect(`export_read: ${where} at an instant with ${what}`, refused(why));
+    }
+    add(`export_read_messages: a message time with ${what}`, 'export_read_messages', { lines: withMember('time', instant), ...names });
+    expect(`export_read_messages: a message time with ${what}`, refused('messages.jsonl: line 1, member time: not an RFC 3339 instant'));
+  }
+  add('export_read: instants in the one grammar, a fraction included', 'export_read', readArgs(withCell(2, 10, '2026-09-04T09:00:00.25Z')));
 }
 
 /** One CSV record's cells as written, quotes kept: the rows here hold no line break inside a cell. */
