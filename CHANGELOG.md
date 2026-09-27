@@ -10,6 +10,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+## 0.3.3 — 2026-09-27
+
 SPEC 2.2.2: `version` answers spec 2.2.2, and `js/musts.json` holds each of its 88 MUSTs.
 
 **This patch version changes the contract and the Go API.** The preamble above keeps that for a
