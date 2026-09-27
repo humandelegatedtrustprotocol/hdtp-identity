@@ -801,7 +801,7 @@ dependencies = [
 
 [[package]]
 name = "pact"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "assert_cmd",
  "base64 0.22.1",
@@ -820,7 +820,7 @@ dependencies = [
 
 [[package]]
 name = "pact-identity"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -840,7 +840,7 @@ dependencies = [
 
 [[package]]
 name = "pact-identity-wasm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "pact-identity",
  "wasm-bindgen",
