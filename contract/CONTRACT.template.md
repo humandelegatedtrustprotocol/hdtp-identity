@@ -295,8 +295,10 @@ that does not read is refused, never skipped.
 An export is one unencrypted zip — `manifest.json`, `contacts.csv`, `threads.csv`, `messages.jsonl`,
 `media/<sha256>` — and a wallet's book is one holding the manifest and `contacts.csv` only. The core
 never opens a zip: a host reads the container and hands over what it read, and every rule that can
-be decided on that is decided here, once. Every refusal is `bad_request`, and its `why` begins with
-where: the member, then the row (the header is row 1) or the line, then the column or member.
+be decided on that is decided here, once. Every refusal of what a file holds, or of rows to write,
+is `bad_request`, and its `why` begins with where: the member, then the row (the header is row 1) or
+the line, then the column or member. An argument that is not an instant (`now`, `exported_at`) is
+`parse`, as everywhere in this contract.
 
 **Reading.** The host passes `export_read` the central directory and the three text members, then
 streams `messages.jsonl` through `export_read_messages` in batches of lines (`first_line` numbering

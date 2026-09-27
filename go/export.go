@@ -489,13 +489,52 @@ func checkManifest(doc map[string]any, order []string, owner string) (*exportMan
 	return &exportManifest{contacts: n[0], threads: n[1], messages: n[2], media: n[3], files: files}, nil
 }
 
+// loneSurrogate reports a \u escape of a UTF-16 surrogate that is not half of a pair. serde_json
+// refuses such JSON; encoding/json reads it as U+FFFD, so without this the two ports answered one
+// manifest or message line two ways. An escaped backslash before a `u` is text, not an escape.
+func loneSurrogate(text []byte) bool {
+	hex4 := func(i int) (int, bool) {
+		if i+4 > len(text) {
+			return 0, false
+		}
+		n, err := strconv.ParseUint(string(text[i:i+4]), 16, 16)
+		return int(n), err == nil
+	}
+	for i := 0; i < len(text); i++ {
+		if text[i] != '\\' || i+1 >= len(text) {
+			continue
+		}
+		if text[i+1] != 'u' {
+			i++ // the escaped character, whatever it is, is not the start of another escape
+			continue
+		}
+		u, ok := hex4(i + 2)
+		switch {
+		case !ok:
+		case u >= 0xdc00 && u <= 0xdfff:
+			return true
+		case u >= 0xd800 && u <= 0xdbff:
+			low, ok := 0, false
+			if i+7 < len(text) && text[i+6] == '\\' && text[i+7] == 'u' {
+				low, ok = hex4(i + 8)
+			}
+			if !ok || low < 0xdc00 || low > 0xdfff {
+				return true
+			}
+			i += 6
+		}
+		i += 5
+	}
+	return false
+}
+
 func parseManifest(text, owner string) (*exportManifest, error) {
 	if len(text) > ExportManifestMax {
 		return nil, manifestAt(fmt.Sprintf("over %d bytes", ExportManifestMax))
 	}
 	v, err := decodeJSON([]byte(text))
 	doc, isObj := v.(map[string]any)
-	if err != nil || !isObj {
+	if err != nil || !isObj || loneSurrogate([]byte(text)) {
 		return nil, manifestAt("not a JSON object")
 	}
 	return checkManifest(doc, filesOrder([]byte(text)), owner)
@@ -961,7 +1000,7 @@ func exportReadMessages(lines []string, firstLine uint64, names messageNames) ([
 		}
 		v, err := decodeJSON([]byte(line))
 		doc, isObj := v.(map[string]any)
-		if err != nil || !isObj {
+		if err != nil || !isObj || loneSurrogate([]byte(line)) {
 			return nil, nil, exportRefuse(fmt.Sprintf("messages.jsonl: line %d: not a JSON object", n))
 		}
 		m, bad := checkMessage(doc, &names)
