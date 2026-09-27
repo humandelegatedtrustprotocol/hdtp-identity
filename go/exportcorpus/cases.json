@@ -1,0 +1,242 @@
+{
+  "owner": "sha256:H4AJOf8K4oFNTYdiswQJ5PCC41Bj8Z73c2Ib5GLr8S8",
+  "now": "2026-09-27T12:00:00Z",
+  "cases": [
+    {
+      "file": "valid-export.zip",
+      "about": "the control: every member, formula-led cells, a leaf that pins and one that does not, a link message and a file message",
+      "accept": {
+        "contacts": 4,
+        "threads": 2,
+        "messages": 4,
+        "media": 1,
+        "pinned": 1,
+        "leafless": [
+          "sha256:bfrVPTYIFPebr1NGsRnHeKhO2gj5MuvVAZbh5OLdajk"
+        ]
+      }
+    },
+    {
+      "file": "valid-book.zip",
+      "about": "the control: a wallet's book, manifest.json and contacts.csv only",
+      "accept": {
+        "contacts": 2,
+        "threads": 0,
+        "messages": 0,
+        "media": 0,
+        "pinned": 1,
+        "leafless": []
+      }
+    },
+    {
+      "file": "zip-slip.zip",
+      "about": "a name that climbs out of the directory",
+      "stage": "core",
+      "refusal": "entry \"../contacts.csv\": not a name an export holds"
+    },
+    {
+      "file": "absolute-path.zip",
+      "about": "an absolute name",
+      "stage": "core",
+      "refusal": "entry \"/contacts.csv\": not a name an export holds"
+    },
+    {
+      "file": "backslash.zip",
+      "about": "a name with a backslash",
+      "stage": "core",
+      "refusal": "entry \"media\\\\e6c8d0d8cfd770fc7f214bffb285c69f88546b90c4810c3a7b8a463569bf0ca5\": not a name an export holds"
+    },
+    {
+      "file": "unknown-file.zip",
+      "about": "a member §9.2 does not name",
+      "stage": "core",
+      "refusal": "entry \"notes.txt\": not a name an export holds"
+    },
+    {
+      "file": "duplicate-name.zip",
+      "about": "the same name twice",
+      "stage": "core",
+      "refusal": "entry \"contacts.csv\": appears twice"
+    },
+    {
+      "file": "encrypted-entry.zip",
+      "about": "an encrypted entry",
+      "stage": "core",
+      "refusal": "entry \"contacts.csv\": encrypted"
+    },
+    {
+      "file": "symlink.zip",
+      "about": "a symbolic link",
+      "stage": "core",
+      "refusal": "entry \"threads.csv\": a symbolic link"
+    },
+    {
+      "file": "directory.zip",
+      "about": "a directory that is not media/",
+      "stage": "core",
+      "refusal": "entry \"threads.csv\": a directory"
+    },
+    {
+      "file": "oversize-manifest.zip",
+      "about": "a manifest over 64 KiB, as its header says",
+      "stage": "core",
+      "refusal": "entry \"manifest.json\": 65537 bytes, over the 65536 an export allows"
+    },
+    {
+      "file": "understated-size.zip",
+      "about": "a manifest whose headers state 16 bytes and which holds 70000",
+      "stage": "host",
+      "refusal_prefix": "manifest.json: "
+    },
+    {
+      "file": "missing-contacts.zip",
+      "about": "no contacts.csv",
+      "stage": "core",
+      "refusal": "contacts.csv: the file lacks it"
+    },
+    {
+      "file": "missing-threads.zip",
+      "about": "threads counted and threads.csv absent",
+      "stage": "core",
+      "refusal": "threads.csv: manifest.json's files lists it, and the file lacks it"
+    },
+    {
+      "file": "unlisted-member.zip",
+      "about": "a member manifest.json's files does not list",
+      "stage": "core",
+      "refusal": "messages.jsonl: manifest.json's files does not list it"
+    },
+    {
+      "file": "hash-mismatch.zip",
+      "about": "contacts.csv changed after the manifest hashed it",
+      "stage": "core",
+      "refusal": "contacts.csv: its sha256 is not manifest.json's"
+    },
+    {
+      "file": "media-name-not-hash.zip",
+      "about": "manifest.json lists a media file under another hash",
+      "stage": "core",
+      "refusal": "manifest.json: files: media/e6c8d0d8cfd770fc7f214bffb285c69f88546b90c4810c3a7b8a463569bf0ca5: the hash is not the name"
+    },
+    {
+      "file": "media-bytes-not-name.zip",
+      "about": "a media file whose bytes are not its name",
+      "stage": "host",
+      "refusal": "media/e6c8d0d8cfd770fc7f214bffb285c69f88546b90c4810c3a7b8a463569bf0ca5: its sha256 is not its name"
+    },
+    {
+      "file": "count-mismatch.zip",
+      "about": "counts that are not what the file holds",
+      "stage": "core",
+      "refusal": "manifest.json: counts: contacts is 5, and contacts.csv holds 4"
+    },
+    {
+      "file": "wrong-owner.zip",
+      "about": "another identity's export",
+      "stage": "core",
+      "refusal": "manifest.json: owner: the file is sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA's, not this identity's (sha256:H4AJOf8K4oFNTYdiswQJ5PCC41Bj8Z73c2Ib5GLr8S8)"
+    },
+    {
+      "file": "owner-as-contact.zip",
+      "about": "a contact row whose root is the owner",
+      "stage": "core",
+      "refusal": "contacts.csv: row 2, column root: the owner's own root"
+    },
+    {
+      "file": "bad-header.zip",
+      "about": "a header that is not the one §9.2 shows",
+      "stage": "core",
+      "refusal": "contacts.csv: row 1: the header is not root,endpoint,name,display_name,status,was_active,permissions,their_permissions,leaf,root_cert,added"
+    },
+    {
+      "file": "blank-row.zip",
+      "about": "a blank row in contacts.csv",
+      "stage": "core",
+      "refusal": "contacts.csv: row 3: a blank row"
+    },
+    {
+      "file": "not-utf8.zip",
+      "about": "a contacts.csv that is not UTF-8",
+      "stage": "host",
+      "refusal": "contacts.csv: not UTF-8 text"
+    },
+    {
+      "file": "key-in-a-cell.zip",
+      "about": "a PKCS #8 private key in a contact's name",
+      "stage": "core",
+      "refusal": "contacts.csv: row 5, column name: holds a private key"
+    },
+    {
+      "file": "dangling-thread-contact.zip",
+      "about": "a thread whose contact is in no row",
+      "stage": "core",
+      "refusal": "threads.csv: row 2, column contact: names no contact in contacts.csv"
+    },
+    {
+      "file": "dangling-message-thread.zip",
+      "about": "a message in no thread",
+      "stage": "core",
+      "refusal": "messages.jsonl: line 1, member thread: names no thread in threads.csv"
+    },
+    {
+      "file": "dangling-reply.zip",
+      "about": "a reply to a message the file lacks",
+      "stage": "core",
+      "refusal": "messages.jsonl: reply_to \"msg-9\" names no message in the file"
+    },
+    {
+      "file": "dangling-attachment.zip",
+      "about": "an attachment naming no media member",
+      "stage": "core",
+      "refusal": "messages.jsonl: line 2, member attachments: file names no media member"
+    },
+    {
+      "file": "unreferenced-media.zip",
+      "about": "a media file nothing names",
+      "stage": "core",
+      "refusal": "media/e6c8d0d8cfd770fc7f214bffb285c69f88546b90c4810c3a7b8a463569bf0ca5: nothing names it"
+    },
+    {
+      "file": "two-attachments.zip",
+      "about": "a message with two files",
+      "stage": "core",
+      "refusal": "messages.jsonl: line 2, member attachments: more than one attachment: a message carries at most one file"
+    },
+    {
+      "file": "body-with-a-file.zip",
+      "about": "a message carrying a file and text",
+      "stage": "core",
+      "refusal": "messages.jsonl: line 2, member body: not empty, and the message carries a file: a message with an attachment has no text"
+    },
+    {
+      "file": "key-in-a-body.zip",
+      "about": "a SEC1 private key in a message body",
+      "stage": "core",
+      "refusal": "messages.jsonl: line 1, member body: holds a private key"
+    },
+    {
+      "file": "unknown-message-member.zip",
+      "about": "a message with a member §9.2 does not list",
+      "stage": "core",
+      "refusal": "messages.jsonl: line 1: \"note\" is not a member of a message"
+    },
+    {
+      "file": "long-line.zip",
+      "about": "a line of messages.jsonl over 64 KiB",
+      "stage": "host",
+      "refusal": "messages.jsonl: line 1: over 65536 bytes"
+    },
+    {
+      "file": "message-count.zip",
+      "about": "messages counted that are not there",
+      "stage": "core",
+      "refusal": "manifest.json: counts: messages is 5, and messages.jsonl holds 4 lines"
+    },
+    {
+      "file": "messages-hash.zip",
+      "about": "messages.jsonl changed after the manifest hashed it",
+      "stage": "core",
+      "refusal": "messages.jsonl: its sha256 is not manifest.json's"
+    }
+  ]
+}

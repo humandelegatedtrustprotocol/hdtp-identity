@@ -13,7 +13,8 @@
     "cards": "Cards",
     "envelopes": "Envelopes",
     "vault": "Vault",
-    "ledger": "The ledger"
+    "ledger": "The ledger",
+    "export": "The export"
   },
   "failure": {
     "type": "object",
@@ -428,6 +429,100 @@
         "expires": { "type": "string", "description": "RFC 3339 UTC, after now and at most ten minutes ahead." }
       },
       "required": ["csr", "purpose", "expect_root", "redirect", "state", "recipient", "valid_days", "expires"],
+      "additionalProperties": false
+    },
+    "ExportLimits": {
+      "description": "The bounds of SPEC §9.2, in bytes unless named otherwise. A host counts the bytes it actually decompresses against them; the core holds the directory's sizes and the text it is handed to them. A host also sets a whole-file ceiling of its own, and names it when it refuses.",
+      "const": { "manifest": 65536, "contacts_csv": 4194304, "contacts_rows": 5000, "threads_csv": 16777216, "messages_line": 65536, "media_file": 5242880, "body": 16384, "name_characters": 200, "attachments": 1 }
+    },
+    "Sha256Hex": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "A sha256, lowercase hex." },
+    "ExportManifest": {
+      "type": "object",
+      "description": "manifest.json (SPEC §9.2), exactly these members.",
+      "properties": {
+        "pact_export": { "const": 2 },
+        "owner": { "$ref": "#/$defs/Fingerprint" },
+        "owner_name": { "type": "string" },
+        "exported_at": { "type": "string" },
+        "tool": { "type": "string" },
+        "counts": {
+          "type": "object",
+          "properties": { "contacts": { "type": "integer", "minimum": 0 }, "threads": { "type": "integer", "minimum": 0 }, "messages": { "type": "integer", "minimum": 0 }, "media": { "type": "integer", "minimum": 0 } },
+          "required": ["contacts", "threads", "messages", "media"],
+          "additionalProperties": false
+        },
+        "files": { "type": "object", "additionalProperties": { "$ref": "#/$defs/Sha256Hex" }, "description": "contacts.csv, threads.csv, messages.jsonl and each media/<sha256>, to the sha256 of their bytes." }
+      },
+      "required": ["pact_export", "owner", "owner_name", "exported_at", "tool", "counts", "files"],
+      "additionalProperties": false
+    },
+    "ContactRow": {
+      "type": "object",
+      "description": "One row of contacts.csv (SPEC §9.2), as JSON: the permissions as lists, was_active a boolean, an empty leaf or root_cert null.",
+      "properties": {
+        "root": { "$ref": "#/$defs/Fingerprint" },
+        "endpoint": { "type": "string" },
+        "name": { "type": "string" },
+        "display_name": { "type": "string" },
+        "status": { "enum": ["active", "blocked", "pending_out"] },
+        "was_active": { "type": "boolean" },
+        "permissions": { "type": "array", "items": { "type": "string" } },
+        "their_permissions": { "type": "array", "items": { "type": "string" } },
+        "leaf": { "oneOf": [{ "$ref": "#/$defs/CertDer" }, { "type": "null" }] },
+        "root_cert": { "oneOf": [{ "$ref": "#/$defs/CertDer" }, { "type": "null" }] },
+        "added": { "$ref": "#/$defs/InstantIn" }
+      },
+      "required": ["root", "endpoint", "name", "display_name", "status", "was_active", "permissions", "their_permissions", "added"],
+      "additionalProperties": false
+    },
+    "ThreadRow": {
+      "type": "object",
+      "description": "One row of threads.csv (SPEC §9.2).",
+      "properties": {
+        "id": { "type": "string" },
+        "contact": { "$ref": "#/$defs/Fingerprint" },
+        "topic": { "type": "string" },
+        "created_at": { "$ref": "#/$defs/InstantIn" },
+        "last_at": { "$ref": "#/$defs/InstantIn" }
+      },
+      "required": ["id", "contact", "topic", "created_at", "last_at"],
+      "additionalProperties": false
+    },
+    "Attachment": {
+      "type": "object",
+      "properties": {
+        "file": { "$ref": "#/$defs/Sha256Hex" },
+        "filename": { "type": "string" },
+        "mime": { "type": "string" },
+        "size": { "type": "integer", "minimum": 0, "maximum": 5242880 }
+      },
+      "required": ["file", "filename", "mime", "size"],
+      "additionalProperties": false
+    },
+    "MessageRow": {
+      "type": "object",
+      "description": "One line of messages.jsonl (SPEC §9.2): at most one attachment, and a message with one has an empty body.",
+      "properties": {
+        "id": { "type": "string" },
+        "thread": { "type": "string" },
+        "contact": { "type": "string" },
+        "msg_id": { "type": "string" },
+        "direction": { "enum": ["in", "out"] },
+        "sender": { "enum": ["agent", "human"] },
+        "time": { "$ref": "#/$defs/InstantIn" },
+        "body": { "type": "string" },
+        "reply_to": { "type": ["string", "null"] },
+        "status": { "enum": ["delivered", "queued", "failed", "read"] },
+        "attachments": { "type": "array", "items": { "$ref": "#/$defs/Attachment" }, "maxItems": 1 }
+      },
+      "required": ["id", "thread", "contact", "msg_id", "direction", "sender", "time", "body", "status", "attachments"],
+      "additionalProperties": false
+    },
+    "DirectoryEntry": {
+      "type": "object",
+      "description": "One entry of the zip's central directory, as the host read it: the name as stored, the uncompressed size the header states, whether the entry is encrypted (general-purpose flag bit 0), and its Unix mode (the external attributes' high 16 bits; 0 when there is none).",
+      "properties": { "name": { "type": "string" }, "size": { "type": "integer", "minimum": 0 }, "encrypted": { "type": "boolean" }, "mode": { "type": "integer", "minimum": 0 } },
+      "required": ["name", "size", "encrypted", "mode"],
       "additionalProperties": false
     },
     "LedgerEntry": {
@@ -1457,6 +1552,156 @@
       },
       "errors": ["bad_request", "parse"],
       "notes": "What a web wallet decides about a host's signing request before a person sees it. The arguments first: `request` absent or not an object, `origin` absent or not a string, `now` absent (each `<name> is required`), `now` unreadable (`parse`), `root_spkis` unreadable — these are errors. Everything about the request itself is `{ok: false, why}`, the first thing wrong, in this order: a member a request does not carry (the first in sorted order: `a signing request does not carry <m>`); a member that is not a string (`<m> is a string, as a form carries it`) or over its bound (`<m> is longer than <n>`), in the order of SigningRequest's members; a required member absent or empty (`<m> is required`); an `origin` empty or `null` (`the request has no origin: a wallet answers only the origin that asked`); the redirect — not ASCII without spaces or backslashes (`the redirect is not an absolute URL`), a fragment (`the redirect carries a fragment`), not `https://` or `http://` (`the redirect is not https, or http to a loopback host`), userinfo (`the redirect carries userinfo`), a host not in lower-case normal form (`the redirect's host is not in normal form`), a port that is not 1–65535 without a leading zero (`the redirect's port is not in normal form`), `http` to a host that is not `localhost`, a dotted quad in `127.0.0.0/8` in normal form, or `[::1]` (`the redirect is not https, or http to a loopback host`); the redirect's origin (`scheme://host[:port]`, the default port left out) not equal to `origin` (`the redirect's origin is not the origin that asked`); `expires` not an RFC 3339 UTC instant (`expires is not an RFC 3339 instant`), not after `now` (`the request has expired`), or more than 600 seconds after it (`the request expires more than ten minutes ahead`); `purpose` not `renew` or `move` (`purpose is renew or move`; `signup` is not taken from a host); `valid_days` not a whole number 1–398 without a leading zero (`valid_days is a whole number of days from 1 to 398`); `state` not 43 base64url characters of 32 bytes (`state is 32 bytes, base64url`); `expect_root` not `sha256:` and 43 base64url characters (`expect_root is not a root fingerprint`); `root_cert`, when present, not base64url, not a certificate, not a root of §14.1's profile, or not the root `expect_root` names; `csr` not base64url (`csr is not base64url`); then `csr_check` with `root_spkis`, whose refusal is answered in its words. What stays the wallet's: proving the root against `expect_root` (§2.2), showing the asking origin, the `recipient` as the host's claim, the endpoint, the validity and whether the host is new, and the validity the person chooses. Nothing of the request is kept."
+    },
+    "export_read": {
+      "section": "export",
+      "params": {
+        "type": "object",
+        "properties": {
+          "directory": { "type": "array", "items": { "$ref": "#/$defs/DirectoryEntry" } },
+          "manifest": { "type": "string", "description": "manifest.json's text, exactly as its bytes decode." },
+          "contacts_csv": { "type": "string" },
+          "threads_csv": { "type": "string", "description": "Required when the file has threads.csv; refused when it has none." },
+          "owner": { "$ref": "#/$defs/Fingerprint" },
+          "now": { "$ref": "#/$defs/InstantIn" }
+        },
+        "required": ["directory", "owner", "now"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "contacts": { "type": "array", "items": { "$ref": "#/$defs/ContactRow" } },
+          "threads": { "type": "array", "items": { "$ref": "#/$defs/ThreadRow" } },
+          "media": { "type": "array", "items": { "type": "object", "properties": { "hash": { "$ref": "#/$defs/Sha256Hex" }, "size": { "type": "integer", "minimum": 0 } }, "required": ["hash", "size"], "additionalProperties": false } }
+        },
+        "required": ["contacts", "threads", "media"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "parse"],
+      "notes": "SPEC §9.2's validation of everything but the messages and the media bytes, refusing the whole file at the first fault; every refusal is `bad_request` whose `why` names the member, then the row (the header is row 1) and the column. In order: each directory entry, in the order given (a name that is not exactly `manifest.json`, `contacts.csv`, `threads.csv`, `messages.jsonl`, `media/` or `media/` and 64 lowercase hex: `entry \"<name>\": not a name an export holds`; `appears twice`; `encrypted`; a symbolic link; a directory but `media/`; a stated size over its bound); `manifest.json` and `contacts.csv` present; the manifest (exactly its members, `pact_export` 2, `owner` a fingerprint and the importing identity's, the counts whole numbers, `files` naming only members an export lists, each a lowercase hex sha256, a media member's hash its own name); every member but the manifest and `media/` listed in `files`, and every listed member present; `threads.csv`, `messages.jsonl` and `media/` present when counted; the media entries as many as counted; `contacts.csv` (its sha256, its header exactly, at most 5000 rows, each row's cells — a cell that holds a private key is refused before its column's rule — the root a fingerprint, unique, not the owner; the endpoint in normal form and passing the address guard; names at most 200 characters; the status; `true` or `false`; §8's permissions, single-spaced, none twice; the leaf a leaf and the root certificate a root of §14.1's profile, the latter for the row's root; `added` an instant) and its count; then `threads.csv` the same way (ids unique, the contact a root in `contacts.csv`). One leading `'` is stripped from every cell. A row's `leaf` is answered only when `[leaf, root_cert]` validates at the row's endpoint at `now` (§14.2); otherwise it is null and pins nothing. `media` is each media member's hash and stated size, sorted by hash: the host checks each file's bytes against both as it streams it."
+    },
+    "export_read_messages": {
+      "section": "export",
+      "params": {
+        "type": "object",
+        "properties": {
+          "lines": { "type": "array", "items": { "type": "string" } },
+          "threads": { "type": "array", "items": { "type": "string" }, "description": "The thread ids export_read answered." },
+          "contacts": { "type": "array", "items": { "$ref": "#/$defs/Fingerprint" } },
+          "media": { "type": "array", "items": { "$ref": "#/$defs/Sha256Hex" } },
+          "first_line": { "type": "integer", "minimum": 1, "description": "The line number of `lines[0]` in the whole member. Absent is 1." }
+        },
+        "required": ["lines", "threads", "contacts", "media"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "messages": { "type": "array", "items": { "$ref": "#/$defs/MessageRow" } },
+          "media_seen": { "type": "array", "items": { "$ref": "#/$defs/Sha256Hex" }, "description": "The media these messages name, sorted, once each." }
+        },
+        "required": ["messages", "media_seen"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request"],
+      "notes": "One batch of messages.jsonl's lines as the host streams it (each line without its `\\n`). Each line: at most 65536 bytes, one JSON object, exactly the members of a message (a stranger first, then a missing one), no member holding a private key, then each member's rule: `id` and `msg_id` not empty, `thread` and `contact` naming the file's, `direction`, `sender`, `time`, `body` at most 16384 bytes, `reply_to` a msg_id or null, `status`, and `attachments` at most one, each exactly `{file, filename, mime, size}` naming a media member; a message with an attachment has an empty body. A refusal is `messages.jsonl: line <n>, member <m>: <why>`. What only the whole member can decide is export_read_end's."
+    },
+    "export_read_end": {
+      "section": "export",
+      "params": {
+        "type": "object",
+        "properties": {
+          "manifest": { "type": "string" },
+          "messages_sha256": { "oneOf": [{ "$ref": "#/$defs/Sha256Hex" }, { "type": "null" }], "description": "The sha256 of messages.jsonl's bytes as the host streamed them; null when the file has no messages.jsonl." },
+          "lines": { "type": "integer", "minimum": 0 },
+          "ids": { "type": "array", "items": { "type": "string" } },
+          "msg_ids": { "type": "array", "items": { "type": "string" } },
+          "reply_tos": { "type": "array", "items": { "type": "string" }, "description": "Every non-null reply_to." },
+          "media_seen": { "type": "array", "items": { "$ref": "#/$defs/Sha256Hex" } }
+        },
+        "required": ["manifest", "lines", "ids", "msg_ids", "reply_tos", "media_seen"],
+        "additionalProperties": false
+      },
+      "result": { "type": "object", "properties": { "ok": { "const": true } }, "required": ["ok"], "additionalProperties": false },
+      "errors": ["bad_request"],
+      "notes": "SPEC §9.2's rules across the whole of messages.jsonl, once it is streamed: the line count against `counts.messages`, the member's sha256 against `files`, `id` unique in the file, every `reply_to` naming a `msg_id` in the file, and every media member named by some attachment (`media/<h>: nothing names it`)."
+    },
+    "export_write": {
+      "section": "export",
+      "params": {
+        "type": "object",
+        "properties": {
+          "owner": { "$ref": "#/$defs/Fingerprint" },
+          "owner_name": { "type": "string" },
+          "exported_at": { "$ref": "#/$defs/InstantIn" },
+          "tool": { "type": "string" },
+          "contacts": { "type": "array", "items": { "$ref": "#/$defs/ContactRow" } },
+          "threads": { "type": "array", "items": { "$ref": "#/$defs/ThreadRow" } },
+          "media": { "type": "array", "items": { "type": "object", "properties": { "hash": { "$ref": "#/$defs/Sha256Hex" }, "size": { "type": "integer", "minimum": 0 } }, "required": ["hash", "size"], "additionalProperties": false } }
+        },
+        "required": ["owner", "owner_name", "exported_at", "tool", "contacts"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "partial": { "$ref": "#/$defs/ExportManifest", "description": "The manifest without the messages: counts.messages 0 and no messages.jsonl in files, for export_manifest to finish." },
+          "contacts_csv": { "type": "string" },
+          "threads_csv": { "type": ["string", "null"], "description": "Null when there are no threads: the member is then left out, as §9.2 allows when it counts zero." }
+        },
+        "required": ["partial", "contacts_csv", "threads_csv"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "parse"],
+      "notes": "The canonical members, the same bytes from every port: each row checked by the reader's rules (`contacts[<i>], column <c>: <why>`), contacts sorted by root and threads by id, a permission list sorted, instants written as RFC 3339 UTC seconds, every cell that begins with `=` `+` `-` `@` `'` a tab or a carriage return written with one `'` before it, a cell quoted exactly when it holds `,` `\"` CR or LF, CRLF after every record. A book is this with no threads and no media."
+    },
+    "export_write_messages": {
+      "section": "export",
+      "params": { "type": "object", "properties": { "messages": { "type": "array", "items": { "$ref": "#/$defs/MessageRow" } } }, "required": ["messages"], "additionalProperties": false },
+      "result": { "type": "object", "properties": { "lines": { "type": "array", "items": { "type": "string" } } }, "required": ["lines"], "additionalProperties": false },
+      "errors": ["bad_request"],
+      "notes": "One line per message, in the order given, as RFC 8785 JSON; each message held to the reader's rules but its references, which the host holds (`messages[<i>], member <m>: <why>`). The host writes each line followed by `\\n`, hashes the member's bytes and counts its lines for export_manifest."
+    },
+    "export_manifest": {
+      "section": "export",
+      "params": {
+        "type": "object",
+        "properties": {
+          "partial": { "$ref": "#/$defs/ExportManifest" },
+          "hashes": { "type": "object", "properties": { "messages.jsonl": { "$ref": "#/$defs/Sha256Hex" } }, "additionalProperties": false },
+          "messages": { "type": "integer", "minimum": 0, "description": "The lines written to messages.jsonl. Absent is 0." }
+        },
+        "required": ["partial"],
+        "additionalProperties": false
+      },
+      "result": { "type": "object", "properties": { "manifest": { "type": "string", "description": "manifest.json's text, RFC 8785 JSON." } }, "required": ["manifest"], "additionalProperties": false },
+      "errors": ["bad_request"],
+      "notes": "export_write's partial manifest finished with what the host counted and hashed: held to the manifest's rules first, refused if it already counts or lists messages, `messages.jsonl` required in `hashes` when there are messages."
+    },
+    "export_merge": {
+      "section": "export",
+      "params": {
+        "type": "object",
+        "properties": {
+          "held": { "type": "array", "items": { "$ref": "#/$defs/ContactRow" }, "description": "The contacts the importing host holds, as rows." },
+          "rows": { "type": "array", "items": { "$ref": "#/$defs/ContactRow" }, "description": "export_read's contacts." }
+        },
+        "required": ["held", "rows"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "write": { "type": "array", "items": { "$ref": "#/$defs/ContactRow" } },
+          "keep": { "type": "array", "items": { "$ref": "#/$defs/Fingerprint" } },
+          "conflicts": { "type": "array", "items": { "type": "object", "properties": { "root": { "$ref": "#/$defs/Fingerprint" }, "field": { "enum": ["endpoint", "leaf", "root_cert"] }, "held": true, "row": true }, "required": ["root", "field", "held", "row"], "additionalProperties": false } }
+        },
+        "required": ["write", "keep", "conflicts"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request"],
+      "notes": "SPEC §9.2's import step 2: an imported leaf never replaces a pin the host validated itself (§14.5). A row whose root is not held is written; a row whose root is held WITHOUT a leaf is written when the row carries one (export_read kept it only because it validated); every other held root is kept as held, and each of its endpoint, leaf and root certificate that the row would change is a conflict, for the host to show."
     }
   }
 }

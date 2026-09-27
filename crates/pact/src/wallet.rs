@@ -17,6 +17,7 @@
 //! on a PIV card; `id` the identity commands; `contacts` the contact book.
 mod card;
 mod contacts;
+mod exportzip;
 mod files;
 mod id;
 

@@ -302,6 +302,15 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 	"vault_open":   callVaultOpen,
 	"wallet_issue": callWalletIssue,
 
+	// Export: api_export.go
+	"export_read":           callExportRead,
+	"export_read_messages":  callExportReadMessages,
+	"export_read_end":       callExportReadEnd,
+	"export_write":          callExportWrite,
+	"export_write_messages": callExportWriteMessages,
+	"export_manifest":       callExportManifest,
+	"export_merge":          callExportMerge,
+
 	// Ledger: api_ledger.go
 	"ledger_check": callLedgerCheck,
 }

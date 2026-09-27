@@ -11,6 +11,7 @@ mod cards;
 mod certificates;
 mod csr;
 mod envelopes;
+mod export;
 mod keys;
 mod ledger;
 mod signing;
@@ -245,6 +246,14 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
         "vault_seal" => vault::vault_seal(a)?,
         "vault_open" => vault::vault_open(a)?,
         "wallet_issue" => vault::wallet_issue(a)?,
+        // §6.2 export
+        "export_read" => export::export_read(a)?,
+        "export_read_messages" => export::export_read_messages(a)?,
+        "export_read_end" => export::export_read_end(a)?,
+        "export_write" => export::export_write(a)?,
+        "export_write_messages" => export::export_write_messages(a)?,
+        "export_manifest" => export::export_manifest(a)?,
+        "export_merge" => export::export_merge(a)?,
         // §6.1 ledger
         "ledger_check" => ledger::ledger_check(a)?,
         "version" => json!({ "crate": env!("CARGO_PKG_VERSION"), "spec": SPEC_VERSION }),

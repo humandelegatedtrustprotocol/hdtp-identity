@@ -372,6 +372,41 @@ type VaultContact struct {
 	Added    string `json:"added,omitempty"`
 }
 
+// ContactRowOf is a contact of the wallet's book as a row of contacts.csv (SPEC §9.2): the book
+// keeps the root, the endpoint, the name, the leaf, the root certificate and when the contact was
+// added; the row's other columns are what a contact the wallet keeps is (active, ever active,
+// nothing granted), and added is the export's time when the book has none. The pact CLI's
+// contacts export writes the same row (crates/pact/src/wallet/contacts.rs, row_of).
+func ContactRowOf(c VaultContact, exportedAt time.Time) ContactRow {
+	r := ContactRow{Root: c.Root, Endpoint: c.Endpoint, Name: c.Name, Status: "active", WasActive: true,
+		Permissions: []string{}, TheirPermissions: []string{}, Added: c.Added}
+	if r.Added == "" {
+		r.Added = timeOut(exportedAt)
+	}
+	if c.Leaf != "" {
+		leaf := c.Leaf
+		r.Leaf = &leaf
+	}
+	if c.RootCert != "" {
+		cert := c.RootCert
+		r.RootCert = &cert
+	}
+	return r
+}
+
+// VaultContactOf is a row of an export as the wallet's book keeps it: its leaf only when export_read
+// kept it, which is only when it validated (contact_of in the pact CLI).
+func VaultContactOf(r ContactRow) VaultContact {
+	c := VaultContact{Root: r.Root, Endpoint: r.Endpoint, Name: r.Name, Added: r.Added}
+	if r.Leaf != nil {
+		c.Leaf = *r.Leaf
+	}
+	if r.RootCert != nil {
+		c.RootCert = *r.RootCert
+	}
+	return c
+}
+
 // VaultPasskey names the credential a derived root belongs to (SPEC §2.1); not secret.
 type VaultPasskey struct {
 	CredentialID string `json:"credential_id"`
