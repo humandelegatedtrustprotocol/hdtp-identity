@@ -119,6 +119,26 @@ export default function exportCases({ add, expect }, f) {
   expect('export_read_messages: a line with a lone low surrogate escape', { error: 'bad_request', why: 'messages.jsonl: line 1: not a JSON object' });
   add('export_read_messages: a line with a surrogate pair', 'export_read_messages', { lines: [lineWith('\\ud83d\\ude00 \\\\ud800')], ...lineNames });
 
+  // export_read_end reads its lists straight from the argument text (0.3.2): every shape a list can
+  // take, answered as the parsed arguments were.
+  const endWith = (over) => ({ manifest: manifestWith('x'), messages_sha256: null, lines: 0, ids: [], msg_ids: [], reply_tos: [], media_seen: [], ...over });
+  for (const [what, over] of [
+    ['ids holding null', { ids: [null] }],
+    ['ids holding a number', { ids: ['a', 5] }],
+    ['ids holding a list', { ids: [['a']] }],
+    ['ids given as null', { ids: null }],
+    ['ids given as a string', { ids: 'a' }],
+    ['no ids at all', { ids: undefined }],
+    ['ids that hold the word null and an escaped quote', { ids: ['null', 'a"null', 'b\\n'], lines: 0 }],
+    ['msg_ids holding an object', { msg_ids: [{}] }],
+    ['a manifest given as a number', { manifest: 5 }],
+    ['lines given as text', { lines: '3' }],
+  ]) {
+    const args = endWith(over);
+    for (const k of Object.keys(args)) if (args[k] === undefined) delete args[k];
+    add(`export_read_end with ${what}`, 'export_read_end', args);
+  }
+
   // ── the merge ───────────────────────────────────────────────────────────────────────────────
   const held = [row({}), row({ root: other('C'), endpoint: 'https://c.example/mcp', leaf: null, root_cert: null })];
   const rows = [

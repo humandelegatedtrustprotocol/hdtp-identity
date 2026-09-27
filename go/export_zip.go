@@ -211,9 +211,7 @@ func ReadExportZip(zr *zip.Reader, owner string, now time.Time, ceiling int64) (
 	if err := convert(r.contacts, &out.Contacts); err != nil {
 		return nil, err
 	}
-	if err := convert(r.threads, &out.Threads); err != nil {
-		return nil, err
-	}
+	out.Threads = r.threads
 	names := messageNames{threads: strSet{}, contacts: strSet{}, media: strSet{}}
 	for _, c := range out.Contacts {
 		names.contacts.add(c.Root)

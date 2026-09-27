@@ -174,12 +174,23 @@ func holdsPrivateKey(text string) bool {
 	if strings.Contains(text, "PRIVATE KEY-----") {
 		return true
 	}
-	for _, w := range strings.FieldsFunc(text, asciiSpace) {
-		if isBase64Text(w) {
+	// Word by word, without a list of the words: a cell of a 16 MiB member is read once and kept.
+	// A private key's DER begins with 0x30, which base64 of either alphabet writes as `M`, so only a
+	// word that begins so is decoded.
+	for start := 0; start < len(text); {
+		for start < len(text) && asciiSpace(rune(text[start])) {
+			start++
+		}
+		end := start
+		for end < len(text) && !asciiSpace(rune(text[end])) {
+			end++
+		}
+		if w := text[start:end]; len(w) > 0 && w[0] == 'M' && isBase64Text(w) {
 			if der, err := decodeB64url(w); err == nil && isPrivateKeyDER(der) {
 				return true
 			}
 		}
+		start = end
 	}
 	return false
 }
@@ -335,31 +346,42 @@ func contactRow(cells []string, owner string, pinAt *time.Time) (map[string]any,
 	}, nil
 }
 
-// threadRow checks one thread row's cells against the contacts' roots.
-func threadRow(cells []string, roots strSet) (map[string]any, *cellRefusal) {
+// threadRow checks one thread row's cells against the contacts' roots: the row, its cells shared
+// with the member's text.
+func threadRow(cells []string, roots strSet) (ThreadRow, *cellRefusal) {
 	for k, c := range cells {
 		if holdsPrivateKey(c) {
-			return nil, &cellRefusal{k, "holds a private key"}
+			return ThreadRow{}, &cellRefusal{k, "holds a private key"}
 		}
 	}
 	if len(cells) != 5 {
-		return nil, &cellRefusal{0, fmt.Sprintf("%d fields, not 5", len(cells))}
+		return ThreadRow{}, &cellRefusal{0, fmt.Sprintf("%d fields, not 5", len(cells))}
 	}
 	if cells[0] == "" {
-		return nil, &cellRefusal{0, "empty"}
+		return ThreadRow{}, &cellRefusal{0, "empty"}
 	}
 	if !roots.has(cells[1]) {
-		return nil, &cellRefusal{1, "names no contact in contacts.csv"}
+		return ThreadRow{}, &cellRefusal{1, "names no contact in contacts.csv"}
 	}
-	var times []string
-	for _, k := range []int{3, 4} {
+	var times [2]string
+	for j, k := range []int{3, 4} {
 		t, ok := parseInstantZ(cells[k])
 		if !ok {
-			return nil, &cellRefusal{k, "not an RFC 3339 instant"}
+			return ThreadRow{}, &cellRefusal{k, "not an RFC 3339 instant"}
 		}
-		times = append(times, timeOut(t))
+		times[j] = instantOut(cells[k], t)
 	}
-	return map[string]any{"id": cells[0], "contact": cells[1], "topic": cells[2], "created_at": times[0], "last_at": times[1]}, nil
+	return ThreadRow{ID: cells[0], Contact: cells[1], Topic: cells[2], CreatedAt: times[0], LastAt: times[1]}, nil
+}
+
+// instantOut is an instant as an answer writes it: the cell itself when it is already written that
+// way (no copy), else written again.
+func instantOut(cell string, t time.Time) string {
+	var buf [32]byte
+	if w := t.UTC().AppendFormat(buf[:0], time.RFC3339); string(w) == cell {
+		return cell
+	}
+	return timeOut(t)
 }
 
 type tableRow struct {
@@ -367,23 +389,45 @@ type tableRow struct {
 	cells []string
 }
 
-func csvTable(member, text string, columns []string) ([]tableRow, error) {
-	records, bad := csvRead(text)
-	if bad != nil {
-		return nil, exportRefuse(fmt.Sprintf("%s: row %d: %s", member, bad.record, bad.why))
-	}
-	if len(records) == 0 || strings.Join(records[0], "\x00") != strings.Join(columns, "\x00") || len(records[0]) != len(columns) {
-		return nil, exportRefuse(fmt.Sprintf("%s: row 1: the header is not %s", member, strings.Join(columns, ",")))
-	}
-	var rows []tableRow
-	for i, r := range records[1:] {
-		cells := make([]string, len(r))
-		for k, c := range r {
-			cells[k] = csvUnguard(c)
+// csvTable checks a CSV member whole (every record reads, and the header is `columns`) and then
+// hands fn its data records one at a time, each with its row number (the header is row 1), one
+// leading ' stripped from every cell. Two passes over the text and never a copy of it: the first
+// refuses what the second would otherwise find partway, so a syntax fault anywhere is still the
+// first thing named. count is the data records'.
+func csvTable(member, text string, columns []string, count *int, fn func(r tableRow) error) error {
+	header, rows := false, 0
+	bad := csvEach(text, func(n int, fields []string) bool {
+		if n == 1 {
+			header = strings.Join(fields, "\x00") == strings.Join(columns, "\x00") && len(fields) == len(columns)
+		} else {
+			rows++
 		}
-		rows = append(rows, tableRow{i + 2, cells})
+		return true
+	})
+	if bad != nil {
+		return exportRefuse(fmt.Sprintf("%s: row %d: %s", member, bad.record, bad.why))
 	}
-	return rows, nil
+	if !header {
+		return exportRefuse(fmt.Sprintf("%s: row 1: the header is not %s", member, strings.Join(columns, ",")))
+	}
+	if count != nil {
+		*count = rows
+		if fn == nil {
+			return nil
+		}
+	}
+	var err error
+	csvEach(text, func(n int, fields []string) bool {
+		if n == 1 {
+			return true
+		}
+		for k, c := range fields {
+			fields[k] = csvUnguard(c)
+		}
+		err = fn(tableRow{n, fields})
+		return err == nil
+	})
+	return err
 }
 
 // ── the manifest ────────────────────────────────────────────────────────────────────────────────
@@ -633,7 +677,7 @@ func memberLimit(name string) int {
 
 type exportReadResult struct {
 	contacts []any
-	threads  []any
+	threads  []ThreadRow
 	media    []ExportMedia
 }
 
@@ -727,34 +771,38 @@ func exportRead(directory []ExportEntry, manifestText, contactsCSV, threadsCSV *
 	if sha256Hex([]byte(*contactsCSV)) != m.files["contacts.csv"] {
 		return nil, exportRefuse("contacts.csv: its sha256 is not manifest.json's")
 	}
-	rows, err := csvTable("contacts.csv", *contactsCSV, contactColumns)
-	if err != nil {
+	var count int
+	if err := csvTable("contacts.csv", *contactsCSV, contactColumns, &count, nil); err != nil {
 		return nil, err
 	}
-	if len(rows) > ExportContactsRowMax {
+	if count > ExportContactsRowMax {
 		return nil, exportRefuse(fmt.Sprintf("contacts.csv: over %d rows", ExportContactsRowMax))
 	}
-	contacts := []any{}
+	contacts := make([]any, 0, count)
 	roots := strSet{}
-	for _, r := range rows {
+	err = csvTable("contacts.csv", *contactsCSV, contactColumns, nil, func(r tableRow) error {
 		if len(r.cells) != len(contactColumns) {
-			return nil, exportRefuse(fmt.Sprintf("contacts.csv: row %d: %d fields, not %d", r.n, len(r.cells), len(contactColumns)))
+			return exportRefuse(fmt.Sprintf("contacts.csv: row %d: %d fields, not %d", r.n, len(r.cells), len(contactColumns)))
 		}
 		row, bad := contactRow(r.cells, owner, &now)
 		if bad != nil {
-			return nil, exportRefuse(fmt.Sprintf("contacts.csv: row %d, column %s: %s", r.n, contactColumns[bad.col], bad.why))
+			return exportRefuse(fmt.Sprintf("contacts.csv: row %d, column %s: %s", r.n, contactColumns[bad.col], bad.why))
 		}
 		if roots.has(row["root"].(string)) {
-			return nil, exportRefuse(fmt.Sprintf("contacts.csv: row %d, column root: appears twice", r.n))
+			return exportRefuse(fmt.Sprintf("contacts.csv: row %d, column root: appears twice", r.n))
 		}
 		roots.add(row["root"].(string))
 		contacts = append(contacts, row)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	if uint64(len(contacts)) != m.contacts {
 		return nil, exportRefuse(fmt.Sprintf("manifest.json: counts: contacts is %d, and contacts.csv holds %d", m.contacts, len(contacts)))
 	}
 
-	threads := []any{}
+	var threads []ThreadRow
 	if has("threads.csv") {
 		if threadsCSV == nil {
 			return nil, exportRefuse("threads_csv is required: the file has threads.csv")
@@ -765,24 +813,29 @@ func exportRead(directory []ExportEntry, manifestText, contactsCSV, threadsCSV *
 		if sha256Hex([]byte(*threadsCSV)) != m.files["threads.csv"] {
 			return nil, exportRefuse("threads.csv: its sha256 is not manifest.json's")
 		}
-		trows, err := csvTable("threads.csv", *threadsCSV, threadColumns)
-		if err != nil {
+		if err := csvTable("threads.csv", *threadsCSV, threadColumns, &count, nil); err != nil {
 			return nil, err
 		}
-		ids := strSet{}
-		for _, r := range trows {
+		threads = make([]ThreadRow, 0, count)
+		// The ids seen: the rows' own id strings, which share the member's text — no copy of any.
+		ids := make(strSet, count)
+		err = csvTable("threads.csv", *threadsCSV, threadColumns, nil, func(r tableRow) error {
 			if len(r.cells) != len(threadColumns) {
-				return nil, exportRefuse(fmt.Sprintf("threads.csv: row %d: %d fields, not %d", r.n, len(r.cells), len(threadColumns)))
+				return exportRefuse(fmt.Sprintf("threads.csv: row %d: %d fields, not %d", r.n, len(r.cells), len(threadColumns)))
 			}
 			row, bad := threadRow(r.cells, roots)
 			if bad != nil {
-				return nil, exportRefuse(fmt.Sprintf("threads.csv: row %d, column %s: %s", r.n, threadColumns[bad.col], bad.why))
+				return exportRefuse(fmt.Sprintf("threads.csv: row %d, column %s: %s", r.n, threadColumns[bad.col], bad.why))
 			}
-			if ids.has(row["id"].(string)) {
-				return nil, exportRefuse(fmt.Sprintf("threads.csv: row %d, column id: appears twice", r.n))
+			if ids.has(row.ID) {
+				return exportRefuse(fmt.Sprintf("threads.csv: row %d, column id: appears twice", r.n))
 			}
-			ids.add(row["id"].(string))
+			ids.add(row.ID)
 			threads = append(threads, row)
+			return nil
+		})
+		if err != nil {
+			return nil, err
 		}
 		if uint64(len(threads)) != m.threads {
 			return nil, exportRefuse(fmt.Sprintf("manifest.json: counts: threads is %d, and threads.csv holds %d", m.threads, len(threads)))
@@ -824,9 +877,12 @@ func exportReadEnd(manifestText string, e exportEnd) error {
 			return exportRefuse("messages.jsonl: id " + jsonString(sorted[i]) + " appears twice")
 		}
 	}
-	msgIDs := setOf(e.msgIDs)
+	// The msg_ids sorted, looked up by binary search: a list of the strings already held, 16 bytes
+	// each, where a set of them cost some 50.
+	msgIDs := append([]string{}, e.msgIDs...)
+	sort.Strings(msgIDs)
 	for _, r := range e.replyTos {
-		if !msgIDs.has(r) {
+		if i := sort.SearchStrings(msgIDs, r); i == len(msgIDs) || msgIDs[i] != r {
 			return exportRefuse("messages.jsonl: reply_to " + jsonString(r) + " names no message in the file")
 		}
 	}
@@ -1227,7 +1283,7 @@ func exportWrite(owner, ownerName string, exportedAt time.Time, tool string, con
 		if bad != nil {
 			return nil, located(bad)
 		}
-		r[3], r[4] = row["created_at"].(string), row["last_at"].(string)
+		r[3], r[4] = row.CreatedAt, row.LastAt
 		if threadIDs.has(r[0]) {
 			return nil, exportRefuse(fmt.Sprintf("threads[%d], column id: appears twice", i))
 		}

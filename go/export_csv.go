@@ -18,46 +18,65 @@ type csvRefusal struct {
 	why    string
 }
 
-func csvRead(text string) ([][]string, *csvRefusal) {
-	b := []byte(text)
-	var records [][]string
+// csvEach reads the records of a CSV text one at a time, handing each to fn with its number (1 is
+// the header); fn returns false to stop. A field is a substring of the text — Go shares its bytes —
+// unless it had to be unescaped (a quoted field holding a doubled quote): a reader of a 16 MiB
+// member holds the text and one record, never a copy of every cell.
+func csvEach(text string, fn func(n int, fields []string) bool) *csvRefusal {
+	b := text
 	i, n := 0, 0
+	// One list of fields, used again for every record: fn may keep the strings, never the list.
+	fields := make([]string, 0, 16)
 	for i < len(b) {
 		n++
-		var fields []string
+		fields = fields[:0]
 		for {
-			var field []byte
 			if i < len(b) && b[i] == '"' {
 				i++
+				start := i
+				var owned *strings.Builder
 				for {
 					if i >= len(b) {
-						return nil, &csvRefusal{n, "a quoted field is never closed"}
+						return &csvRefusal{n, "a quoted field is never closed"}
 					}
 					if b[i] == '"' {
 						if i+1 < len(b) && b[i+1] == '"' {
-							field = append(field, '"')
+							if owned == nil {
+								owned = &strings.Builder{}
+								owned.WriteString(b[start:i])
+							}
+							owned.WriteByte('"')
 							i += 2
+							run := i
+							for i < len(b) && b[i] != '"' {
+								i++
+							}
+							owned.WriteString(b[run:i])
 							continue
 						}
-						i++
 						break
 					}
-					field = append(field, b[i])
 					i++
 				}
+				if owned != nil {
+					fields = append(fields, owned.String())
+				} else {
+					fields = append(fields, b[start:i])
+				}
+				i++
 				if i < len(b) && b[i] != ',' && b[i] != '\r' && b[i] != '\n' {
-					return nil, &csvRefusal{n, "a character follows a closing quote"}
+					return &csvRefusal{n, "a character follows a closing quote"}
 				}
 			} else {
+				start := i
 				for i < len(b) && b[i] != ',' && b[i] != '\r' && b[i] != '\n' {
 					if b[i] == '"' {
-						return nil, &csvRefusal{n, "a quote inside an unquoted field"}
+						return &csvRefusal{n, "a quote inside an unquoted field"}
 					}
-					field = append(field, b[i])
 					i++
 				}
+				fields = append(fields, b[start:i])
 			}
-			fields = append(fields, string(field))
 			if i < len(b) && b[i] == ',' {
 				i++
 				continue
@@ -68,15 +87,30 @@ func csvRead(text string) ([][]string, *csvRefusal) {
 			if i+1 < len(b) && b[i+1] == '\n' {
 				i += 2
 			} else {
-				return nil, &csvRefusal{n, "a carriage return that ends no line"}
+				return &csvRefusal{n, "a carriage return that ends no line"}
 			}
 		} else if i < len(b) && b[i] == '\n' {
 			i++
 		}
 		if len(fields) == 1 && fields[0] == "" {
-			return nil, &csvRefusal{n, "a blank row"}
+			return &csvRefusal{n, "a blank row"}
 		}
-		records = append(records, fields)
+		if !fn(n, fields) {
+			return nil
+		}
+	}
+	return nil
+}
+
+// csvRead is every record, at once.
+func csvRead(text string) ([][]string, *csvRefusal) {
+	var records [][]string
+	bad := csvEach(text, func(_ int, fields []string) bool {
+		records = append(records, append([]string(nil), fields...))
+		return true
+	})
+	if bad != nil {
+		return nil, bad
 	}
 	return records, nil
 }
