@@ -19,6 +19,7 @@ use crate::der;
 use crate::util::{err, from_b64u, hex, sha256, Error, Result};
 use crate::{address, x509};
 use serde_json::{json, Value};
+use std::borrow::Cow;
 use std::collections::HashSet;
 
 pub const MANIFEST_MAX: usize = 64 * 1024;
@@ -89,7 +90,9 @@ pub fn holds_private_key(text: &str) -> bool {
     if text.contains("PRIVATE KEY-----") {
         return true;
     }
-    text.split_ascii_whitespace().any(|w| is_base64_text(w) && from_b64u(w).is_ok_and(|der| is_private_key_der(&der)))
+    // A private key's DER begins with 0x30, which base64 of either alphabet writes as `M`: only a word
+    // that begins so is decoded, so no other cell of a file costs a decoded copy of itself.
+    text.split_ascii_whitespace().any(|w| w.starts_with('M') && is_base64_text(w) && from_b64u(w).is_ok_and(|der| is_private_key_der(&der)))
 }
 
 /// A cell's own rules, as `contacts.csv` holds it and as `export_write` is handed it.
@@ -97,11 +100,12 @@ pub struct Cells<'a> {
     pub owner: &'a str,
 }
 
-fn permissions(cell: &str) -> std::result::Result<Vec<String>, String> {
+/// A permissions cell checked: §8's names, single-spaced, none twice. The names are the cell's own
+/// words; a reader answers them by splitting the cell, never a copy of it.
+fn permissions(cell: &str) -> std::result::Result<(), String> {
     if cell.is_empty() {
-        return Ok(Vec::new());
+        return Ok(());
     }
-    let mut seen: Vec<String> = Vec::new();
     let mut have: HashSet<&str> = HashSet::new();
     for p in cell.split(' ') {
         let integration = p.strip_prefix("integration.").is_some_and(|n| {
@@ -116,9 +120,8 @@ fn permissions(cell: &str) -> std::result::Result<Vec<String>, String> {
         if !have.insert(p) {
             return Err(format!("{p} twice"));
         }
-        seen.push(p.to_string());
     }
-    Ok(seen)
+    Ok(())
 }
 
 fn certificate(cell: &str) -> std::result::Result<Option<x509::Cert>, &'static str> {
@@ -132,51 +135,152 @@ fn certificate(cell: &str) -> std::result::Result<Option<x509::Cert>, &'static s
     x509::parse(&der).map(Some).map_err(|_| "not a certificate")
 }
 
-/// One contact row's cells, in column order, checked: the row as a ContactRow, or the column and why.
-/// `pin_at` decides the leaf: a leaf is kept only when `[leaf, root_cert]` validates at the row's
-/// endpoint at that instant, and is null otherwise (it pins nothing). `None` keeps it as written.
-pub fn contact_row(cells: &[String], c: &Cells<'_>, pin_at: Option<i64>) -> std::result::Result<Value, (usize, String)> {
+/// One contact row, checked, holding its cells as the reader found them: borrowed from the member's
+/// text wherever the CSV did not escape them. `added` is kept as the instant it names.
+pub struct ContactRow<'a> {
+    pub root: Cow<'a, str>,
+    pub endpoint: Cow<'a, str>,
+    pub name: Cow<'a, str>,
+    pub display_name: Cow<'a, str>,
+    pub status: Cow<'a, str>,
+    pub was_active: bool,
+    pub permissions: Cow<'a, str>,
+    pub their_permissions: Cow<'a, str>,
+    pub leaf: Option<Cow<'a, str>>,
+    pub root_cert: Option<Cow<'a, str>>,
+    pub added: i64,
+}
+
+/// One thread row, checked, likewise.
+pub struct ThreadRow<'a> {
+    pub id: Cow<'a, str>,
+    pub contact: Cow<'a, str>,
+    pub topic: Cow<'a, str>,
+    pub created_at: i64,
+    pub last_at: i64,
+}
+
+/// A JSON string, written into an answer being built: serde_json's escaping, no Value between.
+fn json_str(out: &mut Vec<u8>, s: &str) {
+    // Writing into a Vec cannot fail.
+    let _ = serde_json::to_writer(&mut *out, s);
+}
+
+fn json_names(out: &mut Vec<u8>, cell: &str) {
+    out.push(b'[');
+    for (k, p) in cell.split(' ').filter(|p| !p.is_empty()).enumerate() {
+        if k > 0 {
+            out.push(b',');
+        }
+        json_str(out, p);
+    }
+    out.push(b']');
+}
+
+fn json_opt(out: &mut Vec<u8>, v: &Option<Cow<'_, str>>) {
+    match v {
+        Some(s) => json_str(out, s),
+        None => out.extend_from_slice(b"null"),
+    }
+}
+
+impl ContactRow<'_> {
+    /// The row as `export_read` answers it (CONTRACT §6.2, `ContactRow`).
+    pub fn write_json(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(b"{\"root\":");
+        json_str(out, &self.root);
+        out.extend_from_slice(b",\"endpoint\":");
+        json_str(out, &self.endpoint);
+        out.extend_from_slice(b",\"name\":");
+        json_str(out, &self.name);
+        out.extend_from_slice(b",\"display_name\":");
+        json_str(out, &self.display_name);
+        out.extend_from_slice(b",\"status\":");
+        json_str(out, &self.status);
+        out.extend_from_slice(if self.was_active { b",\"was_active\":true" } else { b",\"was_active\":false" });
+        out.extend_from_slice(b",\"permissions\":");
+        json_names(out, &self.permissions);
+        out.extend_from_slice(b",\"their_permissions\":");
+        json_names(out, &self.their_permissions);
+        out.extend_from_slice(b",\"leaf\":");
+        json_opt(out, &self.leaf);
+        out.extend_from_slice(b",\"root_cert\":");
+        json_opt(out, &self.root_cert);
+        out.extend_from_slice(b",\"added\":");
+        json_str(out, &crate::time::format_rfc3339(self.added));
+        out.push(b'}');
+    }
+}
+
+impl ThreadRow<'_> {
+    /// The row as `export_read` answers it (CONTRACT §6.2, `ThreadRow`).
+    pub fn write_json(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(b"{\"id\":");
+        json_str(out, &self.id);
+        out.extend_from_slice(b",\"contact\":");
+        json_str(out, &self.contact);
+        out.extend_from_slice(b",\"topic\":");
+        json_str(out, &self.topic);
+        out.extend_from_slice(b",\"created_at\":");
+        json_str(out, &crate::time::format_rfc3339(self.created_at));
+        out.extend_from_slice(b",\"last_at\":");
+        json_str(out, &crate::time::format_rfc3339(self.last_at));
+        out.push(b'}');
+    }
+}
+
+/// One contact row's cells, in column order, checked: the row, or the column and why. `pin_at`
+/// decides the leaf: a leaf is kept only when `[leaf, root_cert]` validates at the row's endpoint at
+/// that instant, and is null otherwise (it pins nothing). `None` keeps it as written.
+pub fn contact_row<'a>(
+    cells: Vec<Cow<'a, str>>,
+    c: &Cells<'_>,
+    pin_at: Option<i64>,
+) -> std::result::Result<ContactRow<'a>, (usize, String)> {
     let at = |k: usize, why: String| Err((k, why));
     for (k, cell) in cells.iter().enumerate() {
         if holds_private_key(cell) {
             return at(k, "holds a private key".into());
         }
     }
-    let [root, endpoint, name, display_name, status, was_active, perms, theirs, leaf, root_cert, added] = cells else {
-        return at(0, format!("{} fields, not 11", cells.len()));
+    let count = cells.len();
+    let Ok([root, endpoint, name, display_name, status, was_active, perms, theirs, leaf, root_cert, added]) =
+        <[Cow<'a, str>; 11]>::try_from(cells)
+    else {
+        return at(0, format!("{count} fields, not 11"));
     };
-    if !is_fingerprint(root) {
+    if !is_fingerprint(&root) {
         return at(0, "not a fingerprint".into());
     }
     if root == c.owner {
         return at(0, "the owner's own root".into());
     }
-    if !x509::is_normal_https(endpoint) {
+    if !x509::is_normal_https(&endpoint) {
         return at(1, "not an https URL in normal form".into());
     }
-    if let Err(e) = address::address_guard(endpoint, None, false) {
+    if let Err(e) = address::address_guard(&endpoint, None, false) {
         return at(1, e.why);
     }
-    for (k, v) in [(2, name), (3, display_name)] {
+    for (k, v) in [(2, &name), (3, &display_name)] {
         if v.chars().count() > NAME_MAX {
             return at(k, format!("over {NAME_MAX} characters"));
         }
     }
-    if !STATUSES.contains(&status.as_str()) {
+    if !STATUSES.contains(&status.as_ref()) {
         return at(4, "not active, blocked or pending_out".into());
     }
-    let was = match was_active.as_str() {
+    let was = match was_active.as_ref() {
         "true" => true,
         "false" => false,
         _ => return at(5, "not true or false".into()),
     };
-    let granted = permissions(perms).map_err(|why| (6, why))?;
-    let told = permissions(theirs).map_err(|why| (7, why))?;
-    let leaf_cert = certificate(leaf).map_err(|why| (8, why.to_string()))?;
+    permissions(&perms).map_err(|why| (6, why))?;
+    permissions(&theirs).map_err(|why| (7, why))?;
+    let leaf_cert = certificate(&leaf).map_err(|why| (8, why.to_string()))?;
     if leaf_cert.as_ref().is_some_and(|l| x509::profile_error(l, "leaf").is_some()) {
         return at(8, "not a leaf of §14.1's profile".into());
     }
-    let root_parsed = certificate(root_cert).map_err(|why| (9, why.to_string()))?;
+    let root_parsed = certificate(&root_cert).map_err(|why| (9, why.to_string()))?;
     if let Some(r) = &root_parsed {
         if x509::profile_error(r, "root").is_some() {
             return at(9, "not a root of §14.1's profile".into());
@@ -185,68 +289,116 @@ pub fn contact_row(cells: &[String], c: &Cells<'_>, pin_at: Option<i64>) -> std:
             return at(9, "not the certificate of this row's root".into());
         }
     }
-    let Ok(added_at) = crate::time::parse_rfc3339(added) else { return at(10, "not an RFC 3339 instant".into()) };
-    let pinned = match (pin_at, &leaf_cert, &root_parsed) {
-        (None, Some(_), _) => Some(leaf.clone()),
+    let Ok(added_at) = crate::time::parse_rfc3339(&added) else { return at(10, "not an RFC 3339 instant".into()) };
+    let pins = match (pin_at, &leaf_cert, &root_parsed) {
+        (None, Some(_), _) => true,
         (Some(now), Some(l), Some(r)) => {
-            matches!(x509::validate_chain(&[l.der.clone(), r.der.clone()], now, Some(root), Some(endpoint)), x509::ChainResult::Ok(_))
-                .then(|| leaf.clone())
+            matches!(x509::validate_chain(&[l.der.clone(), r.der.clone()], now, Some(&root), Some(&endpoint)), x509::ChainResult::Ok(_))
         }
-        _ => None,
+        _ => false,
     };
-    Ok(json!({
-        "root": root, "endpoint": endpoint, "name": name, "display_name": display_name, "status": status,
-        "was_active": was, "permissions": granted, "their_permissions": told,
-        "leaf": pinned, "root_cert": root_parsed.map(|_| root_cert.clone()),
-        "added": crate::time::format_rfc3339(added_at),
-    }))
+    let has_root_cert = root_parsed.is_some();
+    Ok(ContactRow {
+        root,
+        endpoint,
+        name,
+        display_name,
+        status,
+        was_active: was,
+        permissions: perms,
+        their_permissions: theirs,
+        leaf: pins.then_some(leaf),
+        root_cert: has_root_cert.then_some(root_cert),
+        added: added_at,
+    })
 }
 
 /// One thread row's cells, checked against the contacts' roots.
-pub fn thread_row(cells: &[String], roots: &HashSet<&str>) -> std::result::Result<Value, (usize, String)> {
+pub fn thread_row<'a>(cells: Vec<Cow<'a, str>>, roots: &HashSet<&str>) -> std::result::Result<ThreadRow<'a>, (usize, String)> {
     for (k, cell) in cells.iter().enumerate() {
         if holds_private_key(cell) {
             return Err((k, "holds a private key".into()));
         }
     }
-    let [id, contact, topic, created_at, last_at] = cells else { return Err((0, format!("{} fields, not 5", cells.len()))) };
+    let count = cells.len();
+    let Ok([id, contact, topic, created_at, last_at]) = <[Cow<'a, str>; 5]>::try_from(cells) else {
+        return Err((0, format!("{count} fields, not 5")));
+    };
     if id.is_empty() {
         return Err((0, "empty".into()));
     }
-    if !roots.contains(&contact.as_str()) {
+    if !roots.contains(contact.as_ref()) {
         return Err((1, "names no contact in contacts.csv".into()));
     }
-    let mut times = Vec::new();
-    for (k, t) in [(3, created_at), (4, last_at)] {
-        match crate::time::parse_rfc3339(t) {
-            Ok(v) => times.push(crate::time::format_rfc3339(v)),
-            Err(_) => return Err((k, "not an RFC 3339 instant".into())),
-        }
-    }
-    Ok(json!({ "id": id, "contact": contact, "topic": topic, "created_at": times[0], "last_at": times[1] }))
+    let Ok(created) = crate::time::parse_rfc3339(&created_at) else { return Err((3, "not an RFC 3339 instant".into())) };
+    let Ok(last) = crate::time::parse_rfc3339(&last_at) else { return Err((4, "not an RFC 3339 instant".into())) };
+    Ok(ThreadRow { id, contact, topic, created_at: created, last_at: last })
 }
 
-/// The CSV member's text parsed and its header held to `columns`: the data records, each with its
-/// row number (the header is row 1).
-fn table(member: &str, text: &str, columns: &[&str]) -> Result<Vec<(usize, Vec<String>)>> {
-    let records = csv::read(text).map_err(|(n, why)| Error::new("bad_request", format!("{member}: row {n}: {why}")))?;
-    let header: Vec<&str> = records.first().map(|r| r.iter().map(String::as_str).collect()).unwrap_or_default();
-    if header != columns {
+/// The CSV member's text checked whole (every record reads, and the header is `columns`), and then
+/// its data records one at a time, each with its row number (the header is row 1), one leading `'`
+/// stripped from every cell. Two passes over the text, and never a copy of it: the first refuses
+/// what the second would otherwise find partway, so a syntax fault anywhere is still the first thing
+/// named. The count is the data records'.
+/// One data record of a CSV member: its row number and its cells.
+type Record<'a> = (usize, Vec<Cow<'a, str>>);
+
+fn table<'a>(member: &str, text: &'a str, columns: &[&str]) -> Result<(usize, impl Iterator<Item = Record<'a>>)> {
+    let mut count = 0;
+    let mut header_ok = true;
+    for r in csv::Records::new(text) {
+        let (n, fields) = r.map_err(|(n, why)| Error::new("bad_request", format!("{member}: row {n}: {why}")))?;
+        if n == 1 {
+            header_ok = fields.iter().map(|f| f.as_ref()).eq(columns.iter().copied());
+        } else {
+            count += 1;
+        }
+    }
+    if count == 0 && text.is_empty() {
+        header_ok = columns.is_empty();
+    }
+    if !header_ok {
         return refuse(format!("{member}: row 1: the header is not {}", columns.join(",")));
     }
-    Ok(records
-        .into_iter()
-        .enumerate()
-        .skip(1)
-        .map(|(i, r)| (i + 1, r.into_iter().map(|c| csv::unguard(&c).to_string()).collect()))
-        .collect())
+    let rows =
+        csv::Records::new(text).skip(1).filter_map(|r| r.ok()).map(|(n, fields)| (n, fields.into_iter().map(csv::unguard_cow).collect()));
+    Ok((count, rows))
 }
 
 /// What `export_read` reads: the directory, the manifest, `contacts.csv` and `threads.csv`.
 pub struct Read {
-    pub contacts: Vec<Value>,
-    pub threads: Vec<Value>,
-    pub media: Vec<(String, u64)>,
+    /// The answer of `export_read`, JSON text written as each row was checked: the rows are never
+    /// held twice, as rows and again as a tree of values.
+    pub answer: String,
+}
+
+/// Thread ids as they pass, to find the earliest row that repeats one (see `read`).
+struct Repeats {
+    seen: Vec<([u8; 32], usize)>,
+}
+
+impl Repeats {
+    fn with_capacity(n: usize) -> Repeats {
+        Repeats { seen: Vec::with_capacity(n) }
+    }
+    fn push(&mut self, id: &str, row: usize) {
+        self.seen.push((crate::util::sha256(id.as_bytes()), row));
+    }
+    /// The refusal of the earliest row whose id an earlier row has, if any row has one.
+    fn refuse_first(&mut self) -> Result<()> {
+        self.seen.sort_unstable();
+        let repeat = self.seen.windows(2).filter(|w| w[0].0 == w[1].0).map(|w| w[1].1).min();
+        match repeat {
+            Some(n) => refuse(format!("threads.csv: row {n}, column id: appears twice")),
+            None => Ok(()),
+        }
+    }
+}
+
+fn json_list_open(out: &mut Vec<u8>, first: &mut bool) {
+    if !std::mem::take(first) {
+        out.push(b',');
+    }
 }
 
 /// One entry of the zip's central directory, as the host read it.
@@ -287,11 +439,11 @@ fn entry_label(name: &str) -> String {
 /// §9.2's validation of everything but the messages and the media bytes, in this order: the
 /// directory, the members the file must have, the manifest, the directory against the manifest's
 /// `files` and `counts`, `contacts.csv`, `threads.csv`.
-pub fn read(
+pub fn read<'a>(
     directory: &[Entry],
     manifest_text: Option<&str>,
-    contacts_csv: Option<&str>,
-    threads_csv: Option<&str>,
+    contacts_csv: Option<&'a str>,
+    threads_csv: Option<&'a str>,
     owner: &str,
     now: i64,
 ) -> Result<Read> {
@@ -365,20 +517,22 @@ pub fn read(
     if Some(&sha256_hex(contacts_text.as_bytes())) != m.files.get("contacts.csv") {
         return refuse("contacts.csv: its sha256 is not manifest.json's");
     }
-    let rows = table("contacts.csv", contacts_text, &CONTACT_COLUMNS)?;
-    if rows.len() > CONTACTS_ROWS_MAX {
+    let (count, rows) = table("contacts.csv", contacts_text, &CONTACT_COLUMNS)?;
+    if count > CONTACTS_ROWS_MAX {
         return refuse(format!("contacts.csv: over {CONTACTS_ROWS_MAX} rows"));
     }
     let cells = Cells { owner };
-    let mut contacts: Vec<Value> = Vec::new();
-    let mut roots: HashSet<String> = HashSet::new();
-    for (n, r) in &rows {
+    let mut contacts: Vec<ContactRow<'a>> = Vec::with_capacity(count);
+    // The roots, as sha256 digests: 5000 rows at most, and a fixed 32 bytes each whatever a root
+    // cell holds; a digest collision cannot pass a duplicate, and 2^-256 cannot fail a distinct one.
+    let mut roots: HashSet<[u8; 32]> = HashSet::with_capacity(count);
+    for (n, r) in rows {
         if r.len() != CONTACT_COLUMNS.len() {
             return refuse(format!("contacts.csv: row {n}: {} fields, not {}", r.len(), CONTACT_COLUMNS.len()));
         }
         let row = contact_row(r, &cells, Some(now))
             .map_err(|(k, why)| Error::new("bad_request", format!("contacts.csv: row {n}, column {}: {why}", CONTACT_COLUMNS[k])))?;
-        if !roots.insert(row["root"].as_str().unwrap_or_default().to_string()) {
+        if !roots.insert(crate::util::sha256(row.root.as_bytes())) {
             return refuse(format!("contacts.csv: row {n}, column root: appears twice"));
         }
         contacts.push(row);
@@ -387,35 +541,77 @@ pub fn read(
         return refuse(format!("manifest.json: counts: contacts is {}, and contacts.csv holds {}", m.contacts, contacts.len()));
     }
 
-    let mut threads: Vec<Value> = Vec::new();
-    if has("threads.csv") {
-        let Some(threads_text) = threads_csv else { return refuse("threads_csv is required: the file has threads.csv") };
+    // The answer, written as each row passes: its size is about the members' text plus the keys, so
+    // it is reserved once from their lengths rather than grown by doubling.
+    let threads_text = if has("threads.csv") {
+        let Some(t) = threads_csv else { return refuse("threads_csv is required: the file has threads.csv") };
+        Some(t)
+    } else if threads_csv.is_some() {
+        return refuse("threads_csv is given, and the file has no threads.csv");
+    } else {
+        None
+    };
+    let mut out: Vec<u8> = Vec::new();
+    out.extend_from_slice(b"{\"contacts\":[");
+    let mut first = true;
+    for c in &contacts {
+        json_list_open(&mut out, &mut first);
+        c.write_json(&mut out);
+    }
+    out.extend_from_slice(b"],\"threads\":[");
+    let mut threads: u64 = 0;
+    if let Some(threads_text) = threads_text {
         if threads_text.len() > THREADS_MAX {
             return refuse(format!("threads.csv: over {THREADS_MAX} bytes"));
         }
         if Some(&sha256_hex(threads_text.as_bytes())) != m.files.get("threads.csv") {
             return refuse("threads.csv: its sha256 is not manifest.json's");
         }
-        let roots: HashSet<&str> = roots.iter().map(String::as_str).collect();
-        let mut ids: HashSet<String> = HashSet::new();
-        for (n, r) in table("threads.csv", threads_text, &THREAD_COLUMNS)? {
-            if r.len() != THREAD_COLUMNS.len() {
-                return refuse(format!("threads.csv: row {n}: {} fields, not {}", r.len(), THREAD_COLUMNS.len()));
-            }
-            let row = thread_row(&r, &roots)
-                .map_err(|(k, why)| Error::new("bad_request", format!("threads.csv: row {n}, column {}: {why}", THREAD_COLUMNS[k])))?;
-            if !ids.insert(row["id"].as_str().unwrap_or_default().to_string()) {
-                return refuse(format!("threads.csv: row {n}, column id: appears twice"));
-            }
-            threads.push(row);
+        let roots: HashSet<&str> = contacts.iter().map(|c| c.root.as_ref()).collect();
+        let (count, rows) = table("threads.csv", threads_text, &THREAD_COLUMNS)?;
+        // A thread's answer is its CSV row and some 57 bytes of keys and quotes.
+        out.reserve_exact(threads_text.len() + 64 * count + 96 * media.len() + 16);
+        // The thread ids seen, as sha256 digests beside their row numbers: a fixed 40 bytes a row,
+        // never a copy of an id of any length, and no hash table's slack. A digest collision cannot pass
+        // a duplicate (at 2^-256 it could refuse a distinct pair). A repeat is looked for when a row is
+        // refused and when the rows end, and the earliest row that repeats an id is the one named, as
+        // it was when each row was looked up as it came.
+        let mut ids = Repeats::with_capacity(count);
+        let mut first = true;
+        for (n, r) in rows {
+            let checked = if r.len() != THREAD_COLUMNS.len() {
+                Err(format!("threads.csv: row {n}: {} fields, not {}", r.len(), THREAD_COLUMNS.len()))
+            } else {
+                thread_row(r, &roots).map_err(|(k, why)| format!("threads.csv: row {n}, column {}: {why}", THREAD_COLUMNS[k]))
+            };
+            let row = match checked {
+                Ok(row) => row,
+                Err(why) => {
+                    ids.refuse_first()?;
+                    return refuse(why);
+                }
+            };
+            ids.push(&row.id, n);
+            json_list_open(&mut out, &mut first);
+            row.write_json(&mut out);
+            threads += 1;
         }
-        if threads.len() as u64 != m.threads {
-            return refuse(format!("manifest.json: counts: threads is {}, and threads.csv holds {}", m.threads, threads.len()));
+        ids.refuse_first()?;
+        if threads != m.threads {
+            return refuse(format!("manifest.json: counts: threads is {}, and threads.csv holds {threads}", m.threads));
         }
-    } else if threads_csv.is_some() {
-        return refuse("threads_csv is given, and the file has no threads.csv");
     }
-    Ok(Read { contacts, threads, media })
+    out.extend_from_slice(b"],\"media\":[");
+    let mut first = true;
+    for (hash, size) in &media {
+        json_list_open(&mut out, &mut first);
+        out.extend_from_slice(b"{\"hash\":");
+        json_str(&mut out, hash);
+        out.extend_from_slice(format!(",\"size\":{size}}}").as_bytes());
+    }
+    out.extend_from_slice(b"]}");
+    // Everything written is JSON text: UTF-8 by construction.
+    Ok(Read { answer: String::from_utf8(out).unwrap_or_default() })
 }
 
 /// §9.2's cross-batch rules, once the host has streamed `messages.jsonl` through `jsonl::read`: the
@@ -426,10 +622,10 @@ pub struct End<'a> {
     /// The lowercase hex sha256 of the member's bytes, when the file has the member.
     pub messages_sha256: Option<&'a str>,
     pub lines: u64,
-    pub ids: &'a [String],
-    pub msg_ids: &'a [String],
-    pub reply_tos: &'a [String],
-    pub media_seen: &'a [String],
+    pub ids: &'a [&'a str],
+    pub msg_ids: &'a [&'a str],
+    pub reply_tos: &'a [&'a str],
+    pub media_seen: &'a [&'a str],
 }
 
 pub fn read_end(manifest_text: &str, end: &End<'_>) -> Result<()> {
@@ -444,14 +640,19 @@ pub fn read_end(manifest_text: &str, end: &End<'_>) -> Result<()> {
         (None, Some(_)) => return refuse("messages.jsonl: manifest.json's files does not list it"),
         (None, None) => {}
     }
-    let mut sorted: Vec<&String> = ids.iter().collect();
-    sorted.sort();
+    // `id` unique in the file, and every reply_to a msg_id in it: the ids sorted in a list of the
+    // borrowed strings, 16 bytes each, no copy and no hash table's slack. The least id that repeats
+    // is the one named.
+    let mut sorted: Vec<&str> = ids.to_vec();
+    sorted.sort_unstable();
     if let Some(w) = sorted.windows(2).find(|w| w[0] == w[1]) {
         return refuse(format!("messages.jsonl: id {} appears twice", crate::canonical::string(w[0])));
     }
-    let msg_ids: HashSet<&str> = msg_ids.iter().map(String::as_str).collect();
-    let media_seen: HashSet<&str> = media_seen.iter().map(String::as_str).collect();
-    if let Some(r) = reply_tos.iter().find(|r| !msg_ids.contains(r.as_str())) {
+    drop(sorted);
+    let mut msg_ids: Vec<&str> = msg_ids.to_vec();
+    msg_ids.sort_unstable();
+    let media_seen: HashSet<&str> = media_seen.iter().copied().collect();
+    if let Some(r) = reply_tos.iter().find(|r| msg_ids.binary_search(r).is_err()) {
         return refuse(format!("messages.jsonl: reply_to {} names no message in the file", crate::canonical::string(r)));
     }
     for name in m.files.keys().filter(|k| is_media(k)) {
@@ -529,9 +730,9 @@ pub fn write(
     for (i, c) in contacts.iter().enumerate() {
         let located = |(k, why): (usize, String)| Error::new("bad_request", format!("contacts[{i}], column {}: {why}", CONTACT_COLUMNS[k]));
         let r = contact_cells(c).map_err(located)?;
-        let row = contact_row(&r, &cells, None).map_err(located)?;
+        let added = contact_row(r.iter().map(|c| Cow::Borrowed(c.as_str())).collect(), &cells, None).map_err(located)?.added;
         let mut r = r;
-        r[10] = row["added"].as_str().unwrap_or_default().to_string();
+        r[10] = crate::time::format_rfc3339(added);
         if !written.insert(r[0].clone()) {
             return refuse(format!("contacts[{i}], column root: appears twice"));
         }
@@ -557,9 +758,12 @@ pub fn write(
     for (i, t) in threads.iter().enumerate() {
         let located = |(k, why): (usize, String)| Error::new("bad_request", format!("threads[{i}], column {}: {why}", THREAD_COLUMNS[k]));
         let mut r = thread_cells(t).map_err(located)?;
-        let row = thread_row(&r, &root_refs).map_err(located)?;
-        r[3] = row["created_at"].as_str().unwrap_or_default().to_string();
-        r[4] = row["last_at"].as_str().unwrap_or_default().to_string();
+        let (created, last) = {
+            let row = thread_row(r.iter().map(|c| Cow::Borrowed(c.as_str())).collect(), &root_refs).map_err(located)?;
+            (row.created_at, row.last_at)
+        };
+        r[3] = crate::time::format_rfc3339(created);
+        r[4] = crate::time::format_rfc3339(last);
         if !thread_ids.insert(r[0].clone()) {
             return refuse(format!("threads[{i}], column id: appears twice"));
         }
@@ -738,17 +942,22 @@ mod tests {
             let t = clock();
             let lines = jsonl::write(&d.messages).unwrap();
             let t_write_messages = t.elapsed().as_secs_f64();
-            let names = jsonl::Names { threads: &d.thread_ids, contacts: &roots, media: &[] };
+            let (thread_ids, roots, lines) = (refs(&d.thread_ids), refs(&roots), refs(&lines));
+            let names = jsonl::Names { threads: &thread_ids, contacts: &roots, media: &[] };
             let t = clock();
             jsonl::read(&lines, 1, &names).unwrap();
             let t_read_messages = t.elapsed().as_secs_f64();
             let with_messages = manifest::finish(&w.partial, Some(&hash), d.rows as u64).unwrap();
+            fn refs(l: &[String]) -> Vec<&str> {
+                l.iter().map(String::as_str).collect()
+            }
+            let (ids, msg_ids, reply_tos) = (refs(&d.ids), refs(&d.msg_ids), refs(&d.reply_tos));
             let end = End {
                 messages_sha256: Some(&hash),
                 lines: d.rows as u64,
-                ids: &d.ids,
-                msg_ids: &d.msg_ids,
-                reply_tos: &d.reply_tos,
+                ids: &ids,
+                msg_ids: &msg_ids,
+                reply_tos: &reply_tos,
                 media_seen: &[],
             };
             let t = clock();
