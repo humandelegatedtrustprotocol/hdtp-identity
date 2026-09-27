@@ -19,6 +19,12 @@ rpassword = "7"
 base64 = "0.22"
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 pcsc = { version = "2", optional = true }
+# The export's container (SPEC §9.2), in the CLI only: the Wasm core never opens a zip. Deflate
+# through flate2's pure-Rust miniz_oxide backend and nothing else; zip's own `deflate` feature would
+# also bring zopfli, a compressor this has no use for.
+zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2"] }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+sha2 = "0.10"
 
 [features]
 default = ["piv"]

@@ -1,16 +1,60 @@
-//! The contact book the record keeps: `pact contacts export` and `pact contacts import`.
-use super::files::{open_record, open_vault, save_record};
-use crate::io::{confirm, core, fail, instant, now_or, read_input, Fail, Res};
+//! The contact book the record keeps: `pact contacts export` writes it as a book (SPEC §9.2: an
+//! export holding `manifest.json` and `contacts.csv` only), and `pact contacts import` reads an export
+//! or a book, uses its `contacts.csv`, and shows every difference before the book is replaced.
+use super::exportzip::{read_export, write_book};
+use super::files::{open_record, open_vault, pick_root, save_record};
+use crate::io::{check_writable, confirm, fail, instant, now_or, Fail, Res};
 use serde_json::{json, Value};
+use std::path::Path;
 
-pub fn contacts_export(vault: &str) -> Res<i32> {
+/// The most `contacts import` decompresses from one file: a whole export is read and checked, its
+/// messages and files included, though only its contacts are kept.
+pub const IMPORT_CEILING: u64 = 1 << 30;
+
+/// §9.2's notice, before any surface writes an export or a book.
+pub const UNENCRYPTED: &str = "This file is not encrypted. Anyone who gets it can read your contact list and all your conversations and files. It holds no keys, so it cannot be used to speak as you. Keep it where you keep private documents, and delete it once it has been imported.";
+
+/// A contact of the book as a row of `contacts.csv`: the book keeps the root, the endpoint, the name,
+/// the leaf, the root certificate and when it was added; a row's other columns are what a contact the
+/// wallet keeps is (`active`, ever active, nothing granted), and `added` is the export's time when the
+/// book has none.
+fn row_of(c: &Value, exported_at: &str) -> Value {
+    json!({
+        "root": c["root"], "endpoint": c["endpoint"], "name": c["name"].as_str().unwrap_or(""), "display_name": "",
+        "status": "active", "was_active": true, "permissions": [], "their_permissions": [],
+        "leaf": c.get("leaf").cloned().unwrap_or(Value::Null), "root_cert": c.get("root_cert").cloned().unwrap_or(Value::Null),
+        "added": c["added"].as_str().unwrap_or(exported_at),
+    })
+}
+
+/// And back: a row as the book keeps a contact. The row's leaf is there only when it validated.
+fn contact_of(r: &Value) -> Value {
+    let mut c = json!({ "root": r["root"], "endpoint": r["endpoint"], "name": r["name"], "added": r["added"] });
+    for k in ["leaf", "root_cert"] {
+        if let Some(v) = r[k].as_str() {
+            c[k] = json!(v);
+        }
+    }
+    c
+}
+
+pub fn contacts_export(vault: &str, out: &str) -> Res<i32> {
+    check_writable(Some(out))?;
+    if Path::new(out).exists() {
+        return fail(format!("{out} exists: a book is not written over a file"));
+    }
     // The vault first, as `id ledger`: it proves the passphrase and refuses a mistyped path.
     let v = open_vault(vault, false)?;
     let r = open_record(&v)?;
     if !r.found {
         eprintln!("no record at {}: this vault's contact book is not here", r.path);
     }
-    println!("{}", serde_json::to_string_pretty(&r.plaintext["contacts"])?);
+    let root = pick_root(&v.plaintext, None)?;
+    let now = instant(now_or(None)?);
+    let rows: Vec<Value> = r.plaintext["contacts"].as_array().into_iter().flatten().map(|c| row_of(c, &now)).collect();
+    eprintln!("{UNENCRYPTED}");
+    write_book(Path::new(out), root["fingerprint"].as_str().unwrap_or(""), root["cn"].as_str().unwrap_or(""), &now, &rows).map_err(Fail)?;
+    eprintln!("wrote {out}: {} contact{}", rows.len(), if rows.len() == 1 { "" } else { "s" });
     Ok(0)
 }
 
@@ -18,49 +62,23 @@ fn contact_line(c: &Value) -> String {
     format!("{}  {}  {}", c["root"].as_str().unwrap_or("?"), c["endpoint"].as_str().unwrap_or("?"), c["name"].as_str().unwrap_or(""))
 }
 
-/// A root fingerprint as §2 writes one: `sha256:` and the base64url of a 32-byte hash.
-fn is_fingerprint(v: &Value) -> bool {
-    v.as_str().is_some_and(|f| {
-        f.strip_prefix("sha256:").is_some_and(|b| b.len() == 43 && b.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_'))
-    })
-}
-
-/// A contact's `root_cert` is what proves a leaf of theirs off the wire (an archive's, say), so it
-/// is worth exactly as much as its binding to the fingerprint the book pins. A certificate that
-/// hashes to something else is a former host's certificate under a friend's name: refused here, not
-/// stored and shown later as a difference.
-fn check_root_cert(c: &Value) -> Res<()> {
-    let Some(cert) = c["root_cert"].as_str() else { return Ok(()) };
-    let root = c["root"].as_str().unwrap_or("?");
-    let parsed =
-        core("parse_certificate", json!({ "der": cert })).map_err(|e| Fail(format!("{root}: root_cert does not parse ({})", e.0)))?;
-    if parsed["fingerprint"].as_str() != Some(root) {
-        return fail(format!(
-            "{root}: root_cert is a certificate for {}, not for the root this contact is pinned by",
-            parsed["fingerprint"].as_str().unwrap_or("an unreadable key")
-        ));
-    }
-    if parsed["kind"].as_str() != Some("root") {
-        return fail(format!(
-            "{root}: root_cert is not a root certificate ({})",
-            parsed["profile_error"].as_str().unwrap_or("not self-signed")
-        ));
-    }
-    Ok(())
-}
-
 pub fn contacts_import(vault: &str, file: &str, yes: bool) -> Res<i32> {
-    let incoming: Vec<Value> =
-        serde_json::from_slice(&read_input(file)?).map_err(|e| Fail(format!("{file}: a JSON array of contacts ({e})")))?;
-    for c in &incoming {
-        if !is_fingerprint(&c["root"]) || c["endpoint"].as_str().is_none() {
-            return fail(format!("{file}: every contact needs a root fingerprint and an endpoint"));
-        }
-        check_root_cert(c)?;
-    }
-    // The vault first: a record is sealed under the passphrase it proves, never under one nothing
-    // checked (an absent record used to be started under whatever was typed).
+    // The vault first: the file is checked against the identity it is imported into (§9.2's owner),
+    // and a record is sealed under the passphrase the vault proves, never under one nothing checked.
     let v = open_vault(vault, false)?;
+    let root = pick_root(&v.plaintext, None)?;
+    let now = instant(now_or(None)?);
+    let contents = read_export(Path::new(file), root["fingerprint"].as_str().unwrap_or(""), &now, IMPORT_CEILING)
+        .map_err(|why| Fail(format!("{file}: {why}")))?;
+    let incoming: Vec<Value> = contents.contacts.iter().map(contact_of).collect();
+    let plural = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    eprintln!(
+        "{file}: {}, {}, {} and {}, all checked; the wallet keeps only the contacts",
+        plural(contents.contacts.len(), "contact", "contacts"),
+        plural(contents.threads.len(), "thread", "threads"),
+        plural(contents.messages.len(), "message", "messages"),
+        plural(contents.media.len(), "file", "files")
+    );
     let mut r = open_record(&v)?;
     if !r.found {
         eprintln!("no record at {}: starting one with this contact book", r.path);
@@ -105,17 +123,7 @@ pub fn contacts_import(vault: &str, file: &str, yes: bool) -> Res<i32> {
         eprintln!("nothing written");
         return Ok(1);
     }
-    let now = instant(now_or(None)?);
-    let merged: Vec<Value> = incoming
-        .into_iter()
-        .map(|mut c| {
-            if c.get("added").is_none() {
-                c["added"] = json!(mine.iter().find(|m| m["root"] == c["root"]).and_then(|m| m["added"].as_str()).unwrap_or(&now));
-            }
-            c
-        })
-        .collect();
-    r.plaintext["contacts"] = Value::Array(merged);
+    r.plaintext["contacts"] = Value::Array(incoming);
     save_record(&v, &r)?;
     eprintln!("written");
     Ok(0)

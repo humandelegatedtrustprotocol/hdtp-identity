@@ -10,6 +10,7 @@ pub mod card;
 pub mod csr;
 pub mod der;
 pub mod envelope;
+pub mod export;
 pub mod hpke;
 pub mod keys;
 pub mod ledger;
