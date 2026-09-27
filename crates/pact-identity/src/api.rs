@@ -262,8 +262,17 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
     })
 }
 
+/// What `call` answers arguments holding an unpaired UTF-16 surrogate escape.
+pub const LONE_SURROGATE: &str = "args: a string holds half of a UTF-16 surrogate pair";
+
 /// The boundary. `args` is one JSON object; the answer is one JSON object, never an exception.
 pub fn call(name: &str, args: &str) -> String {
+    // A \u escape of half a surrogate pair: serde_json refuses it in words of its own, and Go's
+    // encoding/json reads it as U+FFFD, so the two ports answered it two ways. Both name it first,
+    // in these words, before anything reads the arguments.
+    if crate::util::lone_surrogate(args) {
+        return json!({ "error": "bad_request", "why": LONE_SURROGATE }).to_string();
+    }
     let a: Value = match serde_json::from_str(args) {
         Ok(v @ Value::Object(_)) => v,
         Ok(_) => return json!({ "error": "bad_request", "why": "args is a JSON object" }).to_string(),
@@ -298,6 +307,14 @@ mod tests {
             assert!(call("verify", args).contains("args is a JSON object"), "verify({args})");
         }
         assert!(call("verify", "{").contains("args:"));
+        // Half a surrogate pair, in either order and at the end, is refused in fixed words; a whole
+        // pair, and an escaped backslash before a `u`, are text.
+        for args in [r#"{"spki":"a\ud800"}"#, r#"{"spki":"\udc00b"}"#, r#"{"spki":"\ud800\u0041"}"#] {
+            assert!(call("verify", args).contains(LONE_SURROGATE), "{args}");
+        }
+        for args in [r#"{"x":"\ud83d\ude00"}"#, r#"{"x":"\\ud800"}"#] {
+            assert!(!call("version", args).contains(LONE_SURROGATE), "{args}");
+        }
         let k: Value = serde_json::from_str(&call("generate_key", r#"{"alg":"ed25519"}"#)).unwrap();
         assert_eq!(k["alg"], "ed25519");
         let v: Value = serde_json::from_str(&call("version", "{}")).unwrap();
