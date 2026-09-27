@@ -280,6 +280,9 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 	"issue_from_csr":     callIssueFromCSR,
 	"issue_tbs_from_csr": callIssueTBSFromCSR,
 
+	// Signing requests: api_signing.go
+	"signing_request_check": callSigningRequestCheck,
+
 	// Cards: api_cards.go
 	"card_encode": callCardEncode,
 	"card_decode": callCardDecode,
