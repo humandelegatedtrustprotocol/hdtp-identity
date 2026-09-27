@@ -10,6 +10,101 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+SPEC 2.2.2: `version` answers spec 2.2.2, and `js/musts.json` holds each of its 88 MUSTs.
+
+**This patch version changes the contract and the Go API.** The preamble above keeps that for a
+minor version; 0.3.3 breaks it, to carry SPEC 2.2.2 to the node and the cloud now:
+- `export_read_end` requires `media`;
+- `WriteExportZip` returns `([]ExportLeftOut, error)`;
+- the Go port's `ContactRowOf` and `VaultContactOf` are gone.
+
+- **What a contact controls never stops an export** (SPEC 2.2.1, 9.2#22–25). The writers now:
+  - write a `reply_to` as null when the message it names is not in the file. A host writing in
+    batches names the file's msg_ids in `export_write_messages`'s new optional `msg_ids`;
+  - leave out a message whose body is a private key and list it in `left_out: [{id, reason}]`;
+  - keep only §8's names in `their_permissions`, once each;
+  - cut `display_name` to 200 characters, on a character boundary.
+  
+  Go's `WriteExportZip` also leaves out every message carrying a file whose bytes are a key, with
+  the file. It now returns `([]ExportLeftOut, error)`: **a change to its Go signature.** The reader
+  still refuses each of these in a file someone else wrote.
+- **The manifest lists the text members only** (SPEC 2.2.2, 9.2#11). `files` names `contacts.csv`,
+  `threads.csv` and `messages.jsonl`, never a media member. A media member is bound by its name, the
+  sha256 of its bytes, and counted by `counts.media`. The number of files an export can carry is no
+  longer bounded by the manifest's 64 KiB; 5000 media files make a manifest of a few hundred bytes.
+  - `export_read` refuses a `files` entry naming anything else.
+  - `export_write` no longer lists media.
+  - **`export_read_end` takes `media` (required).** This is the hashes of the directory's media
+    members, which `export_read` answers. It refuses one no message names. This is a contract
+    change: a host passes the list it already has.
+- **Key material** (SPEC 2.2.2, 9.2#15, #28):
+  - A manifest whose `owner_name` or `tool` holds a private key is refused on read.
+  - `export_write` refuses one, naming the member.
+  - Both hosts refuse a media file whose bytes are a key, in DER or PEM: `media/<h>: holds a private
+    key`. These are the Go port's `ReadExportZip` and the pact CLI. The rule over a file's bytes is
+    tested in each port with PKCS #8 and SEC1, in DER and in PEM, against a document and DER that is
+    no key.
+- **One instant grammar** (SPEC 2.2.2, 9.1#3, 9.2#13). An instant is `YYYY-MM-DDTHH:MM:SS`, an
+  optional `.` fraction, then `Z`: upper-case T and Z, no offset, and no `,` before the fraction.
+  This now holds everywhere either port reads one: the export, the ledger, a signing request's
+  `expires`, and every `now` argument.
+  - The Go port read a `,` fraction, an offset and a lower-case `t`/`z` in places; the Rust core
+    read a lower-case `t`/`z`.
+  - `$defs.InstantIn` says the same.
+  - Read-side parity cases hold it in a contact's `added`, a thread's `created_at`, the manifest's
+    `exported_at` and a message's `time`: a lower-case `z` or `t`, a `,` fraction and an offset are
+    each refused, in both ports.
+- `WriteExportZip` runs the reader's rules on what it was handed before it writes the first byte.
+  Before, a refusal could come after part of the file was written.
+- `export_merge` keeps what the person decided about a held contact. When a file brings the leaf of
+  a contact held without one, the row is written for the leaf, but a blocked contact stays blocked
+  and the held permissions stay. Every difference in `status` or `permissions` is a conflict, and
+  `conflicts[].field` gains `status` and `permissions`. Permissions compare as a set.
+- `redirect_allowed` (the signing request's redirect) refuses upper-case IPv6 hex and a host name
+  with an empty label.
+- `export_read_end`'s lean reader answers exactly as the parsed arguments would, and outside the
+  Wasm build it runs under `catch_unwind`.
+- **Removed:** the Go port's `ContactRowOf` and `VaultContactOf`. Nothing called them; `book_rows`
+  is the one mapping from a wallet's book to rows.
+- The pact CLI:
+  - `contacts export` now gives a book's own notice, which names the contact list and not the
+    conversations and files a book does not hold. Its test shows the notice is given before the
+    file is written, including when the write itself fails.
+  - It reads the export's bounds from the core's constants instead of its own copies.
+- The bounds of `$defs.ExportLimits` are held to the Rust and Go constants by a test in each port.
+  The at-most-one attachment is a named constant in both.
+- **The corpus** is now 44 cases (41 hostile, 3 accepted), 45 files and 465,320 bytes. New files:
+  - `local-names-differ.zip` (9.2#6): every local header names a path that climbs out, and the
+    central directory is true. It is accepted.
+  - One file per size bound, each deflated so the repository holds kilobytes: contacts.csv over
+    4 MiB, contacts.csv over 5000 rows, threads.csv over 16 MiB, a media file over 5 MiB.
+  - `root-cert-not-a-root.zip`: a certificate outside §14.1's profile.
+  - `media-is-a-key.zip`: a host-stage file.
+  - `media-listed-in-files.zip` replaces `media-name-not-hash.zip`.
+
+  `js/cases/export-reader.mjs` adds one read-side parity case per rule of 9.2#10, #13 and #15 that
+  no file reached. Both hosts' corpus tests count the accepted files from `cases.json`.
+- `js/musts.json`'s citations were corrected where they claimed more than the cited test shows:
+  - 9.#2 cited `TestAnExportWrittenIsReadBackWhole`, which holds no key material;
+  - 9.2#10 cited one file for every bound;
+  - 9.2#15 held only its first half;
+  - 9.2#3's test did not show the notice's order.
+
+  Host MUSTs now name the node's tests where they exist, with `elsewhere_names`, and name the
+  node's and the cloud's MUST tables.
+- Deliberate deviations from the plan of record (pact-gateway `docs/release/identity-boundary-build-2026-09-27.md`):
+  - the Go port's CSV is hand-written, not `encoding/csv`. That reader skips a blank line and
+    rewrites a quoted CRLF to LF, and a reader that repairs what it reads is not the rule both
+    ports hold;
+  - the CLI's `zip` takes `deflate-flate2` (flate2's pure-Rust miniz_oxide), not `deflate`, which
+    would also bring zopfli.
+- `js/cases.test.mjs` takes a section's cases split across files (`<section>-<part>.mjs`) only when
+  the section's file imports and calls the part; before, `export-reader.mjs` failed it.
+- `zip` is pinned exactly (`=8.6.0`).
+- `deny.toml` holds the sources: crates.io and nothing else.
+- `gate.sh` runs `cargo deny check licenses sources` with cargo-deny 0.20.2, pinned; another
+  version stops the gate with the install command.
+
 ## 0.3.2 — 2026-09-27
 
 - **Fixed: the export's readers held many times what they were handed.** In 0.3.1 `export_read` built
@@ -72,9 +167,12 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   decided on those is decided once. A strict RFC 4180 reader and writer are written in the crate
   (the Wasm core gains no dependency), and the written bytes are the same from both ports.
 - The Go port's `ReadExportZip` and `WriteExportZip` (`archive/zip`), conveniences over those
-  functions, and `ContactRowOf` / `VaultContactOf` between the wallet's book and a row.
-- `go/exportcorpus`: a valid export, a valid book, and one hostile file per check of §9.2, each
-  naming its refusal (`cases.json`), generated by `go run ./exportcorpus/gen` and held to the
+  functions, and `ContactRowOf` / `VaultContactOf` between the wallet's book and a row (removed in
+  0.3.3: nothing called them).
+- `go/exportcorpus`: a valid export, a valid book, and 35 hostile files, each
+  naming its refusal. (Corrected in 0.3.3: this entry said "one hostile file per check of §9.2". The
+  size bounds past the manifest's, the certificate profile and most column and member rules had no
+  file.) (`cases.json`), generated by `go run ./exportcorpus/gen` and held to the
   generator by a test; the Go port, the pact CLI and `js/parity.mjs` all read the whole of it.
 - The pact CLI: `contacts export --out FILE` writes the wallet's book as an unencrypted zip, saying
   so first, and `contacts import` reads a book or a whole export (checked whole), keeping its
@@ -86,7 +184,7 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 - SPEC 2.2.0: `version` answers spec 2.2.0, and `js/musts.json` holds each of its 81 MUSTs (29 new,
   9.#2 re-read). `WriteExportZip` refuses a message whose file is not among those exported.
 - `book_rows` (contract §6.2): the wallet's book as `contacts.csv` rows, the one mapping the `pact`
-  CLI's `contacts export` and the Go port's `ContactRowOf` use.
+  CLI's `contacts export` and the Go port's `ContactRowOf` use (`ContactRowOf` removed in 0.3.3).
 - Arguments holding half a UTF-16 surrogate pair are refused by every function of both ports, in one
   answer, before anything reads them (CONTRACT §0).
 - The release carries `pact-identity-exportcorpus-X.Y.Z.tgz`: `go/exportcorpus`'s `cases.json` and

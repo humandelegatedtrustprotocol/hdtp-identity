@@ -11,6 +11,8 @@
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { readZip } from '../zip.mjs';
+import readerCases from './export-reader.mjs';
+import exportInstants from './export-instants.mjs';
 
 const CORPUS = new URL('../../go/exportcorpus/', import.meta.url);
 const sha = (b) => createHash('sha256').update(b).digest('hex');
@@ -64,7 +66,7 @@ export default function exportCases({ add, expect }, f) {
   const read = wasm.call('export_read', readArgs);
   const names = { threads: read.threads.map((t) => t.id), contacts: read.contacts.map((c) => c.root), media: read.media.map((m) => m.hash) };
   add('export_read_messages: what export_write_messages wrote', 'export_read_messages', { lines, ...names });
-  add('export_read_end: what was written', 'export_read_end', { manifest, messages_sha256: sha(jsonl), lines: lines.length, ids: ['m1', 'm2', 'm3'], msg_ids: ['x-1', 'x-2', 'x-3'], reply_tos: ['x-1'], media_seen: [file] });
+  add('export_read_end: what was written', 'export_read_end', { manifest, messages_sha256: sha(jsonl), lines: lines.length, ids: ['m1', 'm2', 'm3'], msg_ids: ['x-1', 'x-2', 'x-3'], reply_tos: ['x-1'], media_seen: [file], media: [file] });
 
   // ── the corpus ──────────────────────────────────────────────────────────────────────────────
   const index = JSON.parse(readFileSync(new URL('cases.json', CORPUS), 'utf8'));
@@ -99,6 +101,7 @@ export default function exportCases({ add, expect }, f) {
       manifest: args.manifest, messages_sha256: text('messages.jsonl') === undefined ? null : sha(Buffer.from(body, 'utf8')), lines: fileLines.length,
       ids: second.messages.map((m) => m.id), msg_ids: second.messages.map((m) => m.msg_id),
       reply_tos: second.messages.map((m) => m.reply_to).filter((r) => r !== null), media_seen: second.media_seen,
+      media: first.media.map((m) => m.hash),
     };
     add(`${label}: export_read_end`, 'export_read_end', endArgs);
     expect(`${label}: export_read_end`, want ?? { ok: true });
@@ -108,7 +111,7 @@ export default function exportCases({ add, expect }, f) {
   // was replaced with U+FFFD by Go's encoding/json. A manifest and a message are JSON inside a string,
   // so a file carries one to both; the ports must refuse it alike. A pair is one character, and reads.
   const manifestWith = (name) => `{"pact_export":2,"owner":"${owner}","owner_name":"${name}","exported_at":"2026-09-27T10:00:00Z","tool":"t","counts":{"contacts":0,"threads":0,"messages":0,"media":0},"files":{}}`;
-  const end = (m) => ({ manifest: m, messages_sha256: null, lines: 0, ids: [], msg_ids: [], reply_tos: [], media_seen: [] });
+  const end = (m) => ({ manifest: m, messages_sha256: null, lines: 0, ids: [], msg_ids: [], reply_tos: [], media_seen: [], media: [] });
   add('export_read_end: a manifest with a lone surrogate escape', 'export_read_end', end(manifestWith('\\ud800')));
   expect('export_read_end: a manifest with a lone surrogate escape', { error: 'bad_request', why: 'manifest.json: not a JSON object' });
   add('export_read_end: a manifest with a surrogate pair', 'export_read_end', end(manifestWith('\\ud83d\\ude00')));
@@ -121,7 +124,7 @@ export default function exportCases({ add, expect }, f) {
 
   // export_read_end reads its lists straight from the argument text (0.3.2): every shape a list can
   // take, answered as the parsed arguments were.
-  const endWith = (over) => ({ manifest: manifestWith('x'), messages_sha256: null, lines: 0, ids: [], msg_ids: [], reply_tos: [], media_seen: [], ...over });
+  const endWith = (over) => ({ manifest: manifestWith('x'), messages_sha256: null, lines: 0, ids: [], msg_ids: [], reply_tos: [], media_seen: [], media: [], ...over });
   for (const [what, over] of [
     ['ids holding null', { ids: [null] }],
     ['ids holding a number', { ids: ['a', 5] }],
@@ -133,6 +136,8 @@ export default function exportCases({ add, expect }, f) {
     ['msg_ids holding an object', { msg_ids: [{}] }],
     ['a manifest given as a number', { manifest: 5 }],
     ['lines given as text', { lines: '3' }],
+    ['media holding a number', { media: [5] }],
+    ['no media at all', { media: undefined }],
   ]) {
     const args = endWith(over);
     for (const k of Object.keys(args)) if (args[k] === undefined) delete args[k];
@@ -148,6 +153,49 @@ export default function exportCases({ add, expect }, f) {
   ];
   add('export_merge: a held pin is never replaced', 'export_merge', { held, rows });
   add('export_merge with rows whose root is no fingerprint', 'export_merge', { held, rows: [{ root: 'alina' }] });
+  // What the person decided about a held contact outlives an export that says otherwise (SPEC 9.2#16):
+  // a blocked contact stays blocked and keeps its permissions even when the row is written for its
+  // leaf, and each disagreement is a conflict. Permissions are a set: an order is no disagreement.
+  const blocked = row({ root: other('E'), endpoint: 'https://e.example/mcp', status: 'blocked', permissions: ['message.media', 'message.text'], leaf: null, root_cert: null });
+  add('export_merge: a held blocked contact keeps what the person decided', 'export_merge', {
+    held: [blocked, row({ root: other('F'), endpoint: 'https://f.example/mcp', permissions: ['message.text', 'status.view'] })],
+    rows: [
+      row({ root: other('E'), endpoint: 'https://e.example/mcp', status: 'active', permissions: ['message.text'] }),
+      row({ root: other('F'), endpoint: 'https://f.example/mcp', permissions: ['status.view', 'message.text'] }),
+    ],
+  });
+
+  // ── what a contact controls (SPEC §9.2, 9.2#22–25): it never stops the owner's export, and what is
+  //    written reads back ─────────────────────────────────────────────────────────────────────────
+  const keyBody = f.hostPkcs8;
+  const theirs = [
+    { ...messages[0], id: 'k1', msg_id: 'k-1', reply_to: 'x-elsewhere' },
+    { ...messages[0], id: 'k2', msg_id: 'k-2', body: keyBody },
+    { ...messages[0], id: 'k3', msg_id: 'k-3', reply_to: 'k-2' },
+    { ...messages[0], id: 'k4', msg_id: 'k-4', reply_to: 'k-1' },
+  ];
+  add('export_write_messages: a dangling reply, a key in a body, a reply to what was left out', 'export_write_messages', { messages: theirs });
+  add('export_write_messages: in batches, the file names its msg_ids', 'export_write_messages', { messages: theirs.slice(0, 1), msg_ids: ['k-1', 'x-elsewhere'] });
+  add('export_write_messages: msg_ids that are not strings', 'export_write_messages', { messages: theirs.slice(0, 1), msg_ids: [5] });
+  const claimed = row({ root: other('B'), endpoint: 'https://b.example/mcp', display_name: 'é'.repeat(150) + 'x'.repeat(150), their_permissions: ['message.media', 'root.everything', 'message.media', 'integration.cal-x'], leaf: null, root_cert: null });
+  const claimsArgs = { owner, owner_name: '', exported_at: now, tool: 'parity', contacts: [claimed], threads: [{ ...threads[1] }] };
+  add('export_write: a 300-character display name and permissions §8 does not have', 'export_write', claimsArgs);
+  // Read back: what was written is a file the reader takes whole.
+  const cw = wasm.call('export_write', claimsArgs);
+  const cl = wasm.call('export_write_messages', { messages: theirs.map((m) => ({ ...m, thread: 't1', contact: other('B') })) });
+  const cjsonl = cl.lines.map((l) => l + '\n').join('');
+  const cman = wasm.call('export_manifest', { partial: cw.partial, hashes: { 'messages.jsonl': sha(cjsonl) }, messages: cl.lines.length }).manifest;
+  const cdir = [['manifest.json', cman], ['contacts.csv', cw.contacts_csv], ['threads.csv', cw.threads_csv], ['messages.jsonl', cjsonl]]
+    .map(([name, text]) => ({ name, size: Buffer.byteLength(text), encrypted: false, mode: 0o100644 }));
+  add('export_read: what a contact controls, as written, reads back', 'export_read', { directory: cdir, manifest: cman, contacts_csv: cw.contacts_csv, threads_csv: cw.threads_csv, owner, now });
+  const cread = wasm.call('export_read', { directory: cdir, manifest: cman, contacts_csv: cw.contacts_csv, threads_csv: cw.threads_csv, owner, now });
+  add('export_read_messages: what a contact controls, as written, reads back', 'export_read_messages', { lines: cl.lines, threads: cread.threads.map((t) => t.id), contacts: cread.contacts.map((c) => c.root), media: [] });
+  const cback = wasm.call('export_read_messages', { lines: cl.lines, threads: cread.threads.map((t) => t.id), contacts: cread.contacts.map((c) => c.root), media: [] }).messages;
+  add('export_read_end: what a contact controls, as written, reads back', 'export_read_end', {
+    manifest: cman, messages_sha256: sha(cjsonl), lines: cl.lines.length, ids: cback.map((m) => m.id), msg_ids: cback.map((m) => m.msg_id),
+    reply_tos: cback.map((m) => m.reply_to).filter((r) => r !== null), media_seen: [], media: [],
+  });
+  expect('export_read_end: what a contact controls, as written, reads back', { ok: true });
 
   // ── the wallet's book as rows ───────────────────────────────────────────────────────────────
   const kept = { root: rootFp, endpoint: ENDPOINT, name: 'Alina', leaf: leafDer, root_cert: rootDer, added: '2026-09-02T09:00:00Z' };
@@ -183,4 +231,33 @@ export default function exportCases({ add, expect }, f) {
   add('export_manifest: a partial that already counts messages', 'export_manifest', { partial: { ...written.partial, counts: { ...written.partial.counts, messages: 2 } } });
   expect('export_write_messages: two attachments', { error: 'bad_request', why: 'messages[0], member attachments: more than one attachment: a message carries at most one file' });
   expect('export_write_messages: text beside a file', { error: 'bad_request', why: 'messages[0], member body: not empty, and the message carries a file: a message with an attachment has no text' });
+
+  // Key material in the owner's and the host's own strings (SPEC 9.2#28): the writer refuses it,
+  // naming the member, and so does the reader, in a manifest someone else wrote.
+  add('export_write: a private key as the owner_name', 'export_write', { ...writeArgs, owner_name: f.hostPkcs8 });
+  add('export_write: a private key as the tool', 'export_write', { ...writeArgs, tool: `-----BEGIN PRIVATE KEY-----\n${f.hostPkcs8}\n-----END PRIVATE KEY-----` });
+  const keyManifest = (m) => JSON.stringify({ pact_export: 2, owner, owner_name: '', exported_at: '2026-09-27T10:00:00Z', tool: 't', counts: { contacts: 0, threads: 0, messages: 0, media: 0 }, files: {}, ...m });
+  add('export_read_end: a manifest whose owner_name is a private key', 'export_read_end', end(keyManifest({ owner_name: f.hostPkcs8 })));
+  add('export_read_end: a manifest whose tool is a private key', 'export_read_end', end(keyManifest({ tool: f.hostPkcs8 })));
+  add('export_read_end: a manifest that lists a media member in files', 'export_read_end', end(keyManifest({ files: { [`media/${file}`]: file } })));
+  for (const [id, why] of [
+    ['export_write: a private key as the owner_name', 'owner_name holds a private key'],
+    ['export_write: a private key as the tool', 'tool holds a private key'],
+    ['export_read_end: a manifest whose owner_name is a private key', 'manifest.json: owner_name holds a private key'],
+    ['export_read_end: a manifest whose tool is a private key', 'manifest.json: tool holds a private key'],
+    ['export_read_end: a manifest that lists a media member in files', `manifest.json: files: "media/${file}" is not a member an export lists`],
+  ]) expect(id, { error: 'bad_request', why });
+
+  // `files` lists the text members only (SPEC 2.2.2): an export of 5000 media files still has a
+  // manifest under 64 KiB, and the reader counts them.
+  const many = Array.from({ length: 5000 }, (_, i) => ({ hash: sha(`media ${i}`), size: 1 }));
+  const manyWritten = wasm.call('export_write', { owner, owner_name: '', exported_at: now, tool: 'parity', contacts: [], media: many });
+  add('export_write: 5000 media files', 'export_write', { owner, owner_name: '', exported_at: now, tool: 'parity', contacts: [], media: many });
+  add('export_manifest: 5000 media files, the manifest under 64 KiB', 'export_manifest', { partial: manyWritten.partial });
+  if (Buffer.byteLength(wasm.call('export_manifest', { partial: manyWritten.partial }).manifest) >= 64 * 1024) throw new Error('export_manifest: 5000 media files make a manifest of 64 KiB or more');
+
+  // The reader's refusals, one per rule §9.2 names (SPEC 9.2#10, #13, #15): js/cases/export-reader.mjs.
+  readerCases({ add, expect }, f);
+  // One instant grammar in the export (SPEC 2.2.2): js/cases/export-instants.mjs.
+  exportInstants({ add, expect });
 }

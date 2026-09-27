@@ -81,7 +81,7 @@ test('export_read_end holds at most 2.5 bytes per byte of its lists, at N and 4N
     const msgIds = ids.map((x) => 'x' + x);
     const hash = 'a'.repeat(64);
     const manifest = JSON.stringify({ pact_export: 2, owner, owner_name: '', exported_at: '2026-09-27T00:00:00Z', tool: 't', counts: { contacts: 0, threads: 0, messages: rows, media: 0 }, files: { 'messages.jsonl': hash } });
-    const args = { manifest, messages_sha256: hash, lines: rows, ids, msg_ids: msgIds, reply_tos: msgIds.slice(1), media_seen: [] };
+    const args = { manifest, messages_sha256: hash, lines: rows, ids, msg_ids: msgIds, reply_tos: msgIds.slice(1), media_seen: [], media: [] };
     const listBytes = JSON.stringify([ids, msgIds, msgIds.slice(1)]).length;
     const { bytes } = grows('export_read_end', args);
     console.log(`  export_read_end, ${rows} ids (${listBytes} bytes of lists): linear memory grew ${bytes} bytes, ${(bytes / listBytes).toFixed(2)}× the lists`);

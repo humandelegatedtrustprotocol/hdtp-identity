@@ -248,7 +248,7 @@ func callExportReadEnd(args json.RawMessage) json.RawMessage {
 	for _, f := range []struct {
 		k  string
 		to *[]string
-	}{{"ids", &e.ids}, {"msg_ids", &e.msgIDs}, {"reply_tos", &e.replyTos}, {"media_seen", &e.mediaSeen}} {
+	}{{"ids", &e.ids}, {"msg_ids", &e.msgIDs}, {"reply_tos", &e.replyTos}, {"media_seen", &e.mediaSeen}, {"media", &e.media}} {
 		if *f.to, err = a.strings(f.k); err != nil {
 			return failErr(codeArgs, err)
 		}
@@ -312,11 +312,17 @@ func callExportWriteMessages(args json.RawMessage) json.RawMessage {
 	if err != nil {
 		return failErr(codeArgs, err)
 	}
-	lines, err := exportWriteMessages(messages)
+	var fileMsgIDs []string
+	if raw, has := a["msg_ids"]; has && string(raw) != "null" {
+		if fileMsgIDs, err = a.strings("msg_ids"); err != nil {
+			return failErr(codeArgs, err)
+		}
+	}
+	lines, leftOut, err := exportWriteMessages(messages, fileMsgIDs)
 	if err != nil {
 		return fail(codeArgs, err.Error())
 	}
-	return ok(map[string]any{"lines": lines})
+	return ok(map[string]any{"lines": lines, "left_out": leftOut})
 }
 
 func callExportManifest(args json.RawMessage) json.RawMessage {

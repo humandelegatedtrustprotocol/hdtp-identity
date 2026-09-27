@@ -235,12 +235,9 @@ func invalid(why string) Decision {
 	return Decision{Result: map[string]any{"code": "envelope_invalid", "why": why}, Effects: []map[string]any{}}
 }
 
+// parseInstant is parseInstantZ: one grammar for every instant this port reads (SPEC 2.2.2).
 func parseInstant(s string) (time.Time, bool) {
-	t, err := time.Parse(time.RFC3339, s)
-	if err != nil {
-		return time.Time{}, false
-	}
-	return t, true
+	return parseInstantZ(s)
 }
 
 func numberOf(v any) (float64, bool) {

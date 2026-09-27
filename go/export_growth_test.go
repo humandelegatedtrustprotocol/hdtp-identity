@@ -80,7 +80,7 @@ func TestExportFunctionsGrowLinearlyInTheRowsOfAFile(t *testing.T) {
 		must(err)
 		out[1] = time.Since(clock).Seconds()
 		clock = time.Now()
-		lines, err := exportWriteMessages(d.messages)
+		lines, _, err := exportWriteMessages(d.messages, nil)
 		must(err)
 		out[2] = time.Since(clock).Seconds()
 		clock = time.Now()
