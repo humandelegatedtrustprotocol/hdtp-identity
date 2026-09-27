@@ -51,6 +51,26 @@ var (
 	pinFields        = []string{"endpoint", "leaf", "root_cert"}
 )
 
+// strSet is a set of strings. Every name the export's rules look up in a list the FILE sizes (the
+// directory, the roots, the thread ids, the msg_ids, the media) is looked up in one of these, never
+// by a scan: a scan per row made export_read quadratic in threads.csv's rows (16k threads: 12 s in
+// the Wasm core), and a file within every bound pinned a host for minutes.
+type strSet map[string]struct{}
+
+func setOf(list []string) strSet {
+	s := make(strSet, len(list))
+	for _, x := range list {
+		s[x] = struct{}{}
+	}
+	return s
+}
+
+func (s strSet) has(x string) bool { _, in := s[x]; return in }
+
+func (s strSet) add(x string) { s[x] = struct{}{} }
+
+// contains is for the short lists the rules name (statuses, members, permissions), never for one
+// the file sizes: those are strSets.
 func contains(list []string, s string) bool {
 	for _, x := range list {
 		if x == s {
@@ -169,7 +189,7 @@ func exportPermissions(cell string) ([]any, string) {
 	if cell == "" {
 		return out, ""
 	}
-	var seen []string
+	seen := strSet{}
 	for _, p := range strings.Split(cell, " ") {
 		integration := false
 		if n, found := strings.CutPrefix(p, "integration."); found && n != "" && len(n) <= 64 {
@@ -187,10 +207,10 @@ func exportPermissions(cell string) ([]any, string) {
 		if !contains(exportPerms, p) && !integration {
 			return nil, jsonString(p) + " is not a permission of §8"
 		}
-		if contains(seen, p) {
+		if seen.has(p) {
 			return nil, p + " twice"
 		}
-		seen = append(seen, p)
+		seen.add(p)
 		out = append(out, p)
 	}
 	return out, ""
@@ -316,7 +336,7 @@ func contactRow(cells []string, owner string, pinAt *time.Time) (map[string]any,
 }
 
 // threadRow checks one thread row's cells against the contacts' roots.
-func threadRow(cells []string, roots []string) (map[string]any, *cellRefusal) {
+func threadRow(cells []string, roots strSet) (map[string]any, *cellRefusal) {
 	for k, c := range cells {
 		if holdsPrivateKey(c) {
 			return nil, &cellRefusal{k, "holds a private key"}
@@ -328,7 +348,7 @@ func threadRow(cells []string, roots []string) (map[string]any, *cellRefusal) {
 	if cells[0] == "" {
 		return nil, &cellRefusal{0, "empty"}
 	}
-	if !contains(roots, cells[1]) {
+	if !roots.has(cells[1]) {
 		return nil, &cellRefusal{1, "names no contact in contacts.csv"}
 	}
 	var times []string
@@ -381,13 +401,15 @@ func orderedKeys(raw json.RawMessage) []string {
 		return nil
 	}
 	var keys []string
+	have := strSet{}
 	for d.More() {
 		t, err := d.Token()
 		if err != nil {
 			return keys
 		}
 		k, _ := t.(string)
-		if !contains(keys, k) {
+		if !have.has(k) {
+			have.add(k)
 			keys = append(keys, k)
 		}
 		var skip json.RawMessage
@@ -460,9 +482,10 @@ func checkManifest(doc map[string]any, order []string, owner string) (*exportMan
 	}
 	// Document order, as the core reads it; a name order does not know comes after, sorted.
 	names := append([]string{}, order...)
+	ordered := setOf(order)
 	var rest []string
 	for k := range listed {
-		if !contains(names, k) {
+		if !ordered.has(k) {
 			rest = append(rest, k)
 		}
 	}
@@ -617,16 +640,16 @@ type exportReadResult struct {
 // exportRead is §9.2's validation of everything but the messages and the media bytes, in the core's
 // order.
 func exportRead(directory []ExportEntry, manifestText, contactsCSV, threadsCSV *string, owner string, now time.Time) (*exportReadResult, error) {
-	var seen []string
+	seen := strSet{}
 	for _, e := range directory {
 		label := "entry " + jsonString(e.Name)
 		if !allowedExportName(e.Name) {
 			return nil, exportRefuse(label + ": not a name an export holds")
 		}
-		if contains(seen, e.Name) {
+		if seen.has(e.Name) {
 			return nil, exportRefuse(label + ": appears twice")
 		}
-		seen = append(seen, e.Name)
+		seen.add(e.Name)
 		if e.Encrypted {
 			return nil, exportRefuse(label + ": encrypted")
 		}
@@ -640,7 +663,7 @@ func exportRead(directory []ExportEntry, manifestText, contactsCSV, threadsCSV *
 			return nil, exportRefuse(fmt.Sprintf("%s: %d bytes, over the %d an export allows", label, e.Size, limit))
 		}
 	}
-	has := func(n string) bool { return contains(seen, n) }
+	has := seen.has
 	for _, required := range []string{"manifest.json", "contacts.csv"} {
 		if !has(required) {
 			return nil, exportRefuse(required + ": the file lacks it")
@@ -712,7 +735,7 @@ func exportRead(directory []ExportEntry, manifestText, contactsCSV, threadsCSV *
 		return nil, exportRefuse(fmt.Sprintf("contacts.csv: over %d rows", ExportContactsRowMax))
 	}
 	contacts := []any{}
-	var roots []string
+	roots := strSet{}
 	for _, r := range rows {
 		if len(r.cells) != len(contactColumns) {
 			return nil, exportRefuse(fmt.Sprintf("contacts.csv: row %d: %d fields, not %d", r.n, len(r.cells), len(contactColumns)))
@@ -721,10 +744,10 @@ func exportRead(directory []ExportEntry, manifestText, contactsCSV, threadsCSV *
 		if bad != nil {
 			return nil, exportRefuse(fmt.Sprintf("contacts.csv: row %d, column %s: %s", r.n, contactColumns[bad.col], bad.why))
 		}
-		if contains(roots, row["root"].(string)) {
+		if roots.has(row["root"].(string)) {
 			return nil, exportRefuse(fmt.Sprintf("contacts.csv: row %d, column root: appears twice", r.n))
 		}
-		roots = append(roots, row["root"].(string))
+		roots.add(row["root"].(string))
 		contacts = append(contacts, row)
 	}
 	if uint64(len(contacts)) != m.contacts {
@@ -746,7 +769,7 @@ func exportRead(directory []ExportEntry, manifestText, contactsCSV, threadsCSV *
 		if err != nil {
 			return nil, err
 		}
-		var ids []string
+		ids := strSet{}
 		for _, r := range trows {
 			if len(r.cells) != len(threadColumns) {
 				return nil, exportRefuse(fmt.Sprintf("threads.csv: row %d: %d fields, not %d", r.n, len(r.cells), len(threadColumns)))
@@ -755,10 +778,10 @@ func exportRead(directory []ExportEntry, manifestText, contactsCSV, threadsCSV *
 			if bad != nil {
 				return nil, exportRefuse(fmt.Sprintf("threads.csv: row %d, column %s: %s", r.n, threadColumns[bad.col], bad.why))
 			}
-			if contains(ids, row["id"].(string)) {
+			if ids.has(row["id"].(string)) {
 				return nil, exportRefuse(fmt.Sprintf("threads.csv: row %d, column id: appears twice", r.n))
 			}
-			ids = append(ids, row["id"].(string))
+			ids.add(row["id"].(string))
 			threads = append(threads, row)
 		}
 		if uint64(len(threads)) != m.threads {
@@ -801,8 +824,9 @@ func exportReadEnd(manifestText string, e exportEnd) error {
 			return exportRefuse("messages.jsonl: id " + jsonString(sorted[i]) + " appears twice")
 		}
 	}
+	msgIDs := setOf(e.msgIDs)
 	for _, r := range e.replyTos {
-		if !contains(e.msgIDs, r) {
+		if !msgIDs.has(r) {
 			return exportRefuse("messages.jsonl: reply_to " + jsonString(r) + " names no message in the file")
 		}
 	}
@@ -811,8 +835,9 @@ func exportReadEnd(manifestText string, e exportEnd) error {
 		names = append(names, k)
 	}
 	sort.Strings(names)
+	mediaSeen := setOf(e.mediaSeen)
 	for _, name := range names {
-		if isExportMedia(name) && !contains(e.mediaSeen, name[6:]) {
+		if isExportMedia(name) && !mediaSeen.has(name[6:]) {
 			return exportRefuse(name + ": nothing names it")
 		}
 	}
@@ -821,7 +846,8 @@ func exportReadEnd(manifestText string, e exportEnd) error {
 
 // ── messages.jsonl ──────────────────────────────────────────────────────────────────────────────
 
-type messageNames struct{ threads, contacts, media []string }
+// messageNames is what a message may name, as sets built once per call.
+type messageNames struct{ threads, contacts, media strSet }
 
 type memberRefusal struct {
 	member string // "" for the message as a whole
@@ -898,10 +924,10 @@ func checkMessage(doc map[string]any, names *messageNames) (map[string]any, *mem
 		return nil, bad
 	}
 	if names != nil {
-		if !contains(names.threads, thread) {
+		if !names.threads.has(thread) {
 			return nil, &memberRefusal{"thread", "names no thread in threads.csv"}
 		}
-		if !contains(names.contacts, contact) {
+		if !names.contacts.has(contact) {
 			return nil, &memberRefusal{"contact", "names no contact in contacts.csv"}
 		}
 	}
@@ -964,7 +990,7 @@ func checkMessage(doc map[string]any, names *messageNames) (map[string]any, *mem
 		if !isText || !isExportHash(file) {
 			return refuse("file is not a lowercase hex sha256")
 		}
-		if names != nil && !contains(names.media, file) {
+		if names != nil && !names.media.has(file) {
 			return refuse("file names no media member")
 		}
 		_, fn := o["filename"].(string)
@@ -993,6 +1019,7 @@ func checkMessage(doc map[string]any, names *messageNames) (map[string]any, *mem
 func exportReadMessages(lines []string, firstLine uint64, names messageNames) ([]any, []string, error) {
 	messages := []any{}
 	seen := []string{}
+	seenSet := strSet{}
 	for i, line := range lines {
 		n := firstLine + uint64(i)
 		if len(line) > ExportLineMax {
@@ -1012,7 +1039,8 @@ func exportReadMessages(lines []string, firstLine uint64, names messageNames) ([
 		}
 		for _, a := range m["attachments"].([]any) {
 			f := a.(map[string]any)["file"].(string)
-			if !contains(seen, f) {
+			if !seenSet.has(f) {
+				seenSet.add(f)
 				seen = append(seen, f)
 			}
 		}
@@ -1143,6 +1171,7 @@ func exportWrite(owner, ownerName string, exportedAt time.Time, tool string, con
 		return nil, exportRefuse("owner is not a fingerprint")
 	}
 	var rows []csvRowSort
+	written := strSet{}
 	for i, c := range contacts {
 		located := func(b *cellRefusal) error {
 			return exportRefuse(fmt.Sprintf("contacts[%d], column %s: %s", i, contactColumns[b.col], b.why))
@@ -1156,21 +1185,17 @@ func exportWrite(owner, ownerName string, exportedAt time.Time, tool string, con
 			return nil, located(bad)
 		}
 		r[10] = row["added"].(string)
-		for _, x := range rows {
-			if x.key == r[0] {
-				return nil, exportRefuse(fmt.Sprintf("contacts[%d], column root: appears twice", i))
-			}
+		if written.has(r[0]) {
+			return nil, exportRefuse(fmt.Sprintf("contacts[%d], column root: appears twice", i))
 		}
+		written.add(r[0])
 		rows = append(rows, csvRowSort{r[0], r})
 	}
 	if len(rows) > ExportContactsRowMax {
 		return nil, exportRefuse(fmt.Sprintf("contacts: over %d rows", ExportContactsRowMax))
 	}
 	sortRows(rows)
-	var roots []string
-	for _, r := range rows {
-		roots = append(roots, r.key)
-	}
+	roots := written
 	guarded := func(cells []string) []string {
 		out := make([]string, len(cells))
 		for k, c := range cells {
@@ -1189,6 +1214,7 @@ func exportWrite(owner, ownerName string, exportedAt time.Time, tool string, con
 	}
 
 	var trows []csvRowSort
+	threadIDs := strSet{}
 	for i, t := range threads {
 		located := func(b *cellRefusal) error {
 			return exportRefuse(fmt.Sprintf("threads[%d], column %s: %s", i, threadColumns[b.col], b.why))
@@ -1202,11 +1228,10 @@ func exportWrite(owner, ownerName string, exportedAt time.Time, tool string, con
 			return nil, located(bad)
 		}
 		r[3], r[4] = row["created_at"].(string), row["last_at"].(string)
-		for _, x := range trows {
-			if x.key == r[0] {
-				return nil, exportRefuse(fmt.Sprintf("threads[%d], column id: appears twice", i))
-			}
+		if threadIDs.has(r[0]) {
+			return nil, exportRefuse(fmt.Sprintf("threads[%d], column id: appears twice", i))
 		}
+		threadIDs.add(r[0])
 		trows = append(trows, csvRowSort{r[0], r})
 	}
 	sortRows(trows)
@@ -1264,18 +1289,17 @@ func mergeRoot(v any, what string, i int) (string, error) {
 
 // exportMerge is SPEC §9.2's import step 2: an imported leaf never replaces a pin the host holds.
 func exportMerge(held, rows []any) (write []any, keep []any, conflicts []any, err error) {
-	type heldRow struct {
-		root string
-		row  map[string]any
-	}
-	var hs []heldRow
+	// The held rows by root, the first of each kept, as a scan would have found it.
+	heldBy := map[string]map[string]any{}
 	for i, h := range held {
 		r, err := mergeRoot(h, "held", i)
 		if err != nil {
 			return nil, nil, nil, err
 		}
 		o, _ := h.(map[string]any)
-		hs = append(hs, heldRow{r, o})
+		if _, dup := heldBy[r]; !dup {
+			heldBy[r] = o
+		}
 	}
 	write, keep, conflicts = []any{}, []any{}, []any{}
 	for i, v := range rows {
@@ -1284,14 +1308,7 @@ func exportMerge(held, rows []any) (write []any, keep []any, conflicts []any, er
 			return nil, nil, nil, err
 		}
 		r, _ := v.(map[string]any)
-		var h map[string]any
-		found := false
-		for _, x := range hs {
-			if x.root == root {
-				h, found = x.row, true
-				break
-			}
-		}
+		h, found := heldBy[root]
 		if !found {
 			write = append(write, v)
 			continue
