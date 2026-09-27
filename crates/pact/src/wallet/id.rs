@@ -1,6 +1,6 @@
 //! The identity commands but `id create --piv`, which makes a root on a card (card.rs): `id create`,
 //! `id issue` and `id renew`, `id ledger`, `id show`, `id backup` and `id restore`.
-use super::card::{card_for, card_holder, issue_on_card, live_leaf_refusal, root_key};
+use super::card::{card_for, card_holder, issue_on_card, root_key};
 use super::files::{empty_record, land_all, open_record, open_vault, pick_root, real, record_of, roots, save_record, sealed_bytes};
 use crate::io::{
     check_writable, confirm, core, fail, instant, now_or, passphrase, pem, read_der, read_input, write_new_private, write_output, Fail, Res,
@@ -102,11 +102,16 @@ pub fn id_issue(a: IssueArgs<'_>) -> Res<i32> {
     check_writable(a.out)?;
     check_writable(a.chain_out)?;
     let fp = root["fingerprint"].as_str().unwrap_or("").to_string();
-    let ledger: Vec<Value> = rec.plaintext["ledger"].as_array().cloned().unwrap_or_default();
-    let mine: Vec<&Value> = ledger.iter().filter(|l| l["root"].as_str() == Some(&fp)).collect();
-    let host = x509::host_of(&request.endpoint).to_string();
-    let known_endpoint = mine.iter().any(|l| l["endpoint"].as_str() == Some(request.endpoint.as_str()));
-    let new_host = !mine.iter().any(|l| l["endpoint"].as_str().map(|e| x509::host_of(e) == host).unwrap_or(false));
+    // The ledger's rules, from the one place they are written (the core's `ledger_check`): the
+    // software path's `wallet_issue` applies the same ones, and the card path has only this.
+    let mut ask = json!({ "root": fp, "endpoint": request.endpoint, "now": instant(now), "move": a.moving });
+    if !replacing {
+        ask["ledger"] = rec.plaintext["ledger"].clone();
+    }
+    let facts = core("ledger_check", ask)?;
+    let known_endpoint = facts["known_endpoint"].as_bool().unwrap_or(false);
+    let new_host = facts["new_host"].as_bool().unwrap_or(true);
+    let previous = facts["previous_not_before"].as_str().map(parse_rfc3339).transpose().map_err(|e| Fail(e.why))?;
     if a.renew_only && replacing {
         return fail(format!(
             "no record at {}: a renewal is for an endpoint the ledger knows, and the ledger is not here; restore the record, or issue a replacement with pact id issue",
@@ -119,7 +124,6 @@ pub fn id_issue(a: IssueArgs<'_>) -> Res<i32> {
             request.endpoint
         ));
     }
-    let previous = mine.iter().filter_map(|l| l["not_before"].as_str().and_then(|t| parse_rfc3339(t).ok())).max();
     let (nb, na) = csr::validity(now, previous, a.valid_days).map_err(|e| Fail(e.why))?;
 
     eprintln!("identity    {} ({})", fp, root["cn"].as_str().unwrap_or(""));
@@ -139,8 +143,14 @@ pub fn id_issue(a: IssueArgs<'_>) -> Res<i32> {
     eprintln!("origin      {}", a.origin.unwrap_or("(not given)"));
     eprintln!("host key    {} ({})", request.key.fingerprint(), request.key.alg().name());
     eprintln!("valid       {} to {}  ({} days)", instant(nb), instant(na), a.valid_days);
-    if a.moving {
-        eprintln!("move        the live leaf at the previous endpoint is superseded once contacts see this one");
+    if let Some(why) = facts["refusal"].as_str() {
+        return fail(format!("bad_request: {why}"));
+    }
+    let name = root["cn"].as_str().unwrap_or("this identity");
+    if let Some(words) = move_notice(&facts, name, &request.endpoint) {
+        eprintln!();
+        eprintln!("{words}");
+        eprintln!();
     }
     if replacing {
         eprintln!("record      none at {}: this vault's ledger is not here, so it cannot say which leaf is live", rec.path);
@@ -187,11 +197,8 @@ pub fn id_issue(a: IssueArgs<'_>) -> Res<i32> {
     let r = match &card {
         // A card-held root: the core checks the request and makes the bytes, the card signs them,
         // the core assembles. The one rule `wallet_issue` would have applied and cannot here —
-        // one live leaf per identity — is applied just above, against the same ledger.
+        // one live leaf per identity — was applied above by `ledger_check`, against the same ledger.
         Some(c) => {
-            if let Some(why) = live_leaf_refusal(&mine, &request.endpoint, now, a.moving) {
-                return fail(format!("bad_request: {why}"));
-            }
             let mut out = issue_on_card(c.as_ref(), &root, &roots(&v.plaintext), &csr_der, now, previous, a.valid_days)?;
             // The endpoint and the dates, as the core's entry: never the leaf.
             out["ledger_entry"] = json!({
@@ -230,6 +237,31 @@ pub fn id_issue(a: IssueArgs<'_>) -> Res<i32> {
     }
     eprintln!("issued      {} for {}", x509::parse(&leaf).map(|c| c.public_key.fingerprint()).unwrap_or_default(), request.endpoint);
     Ok(0)
+}
+
+/// The move notice (design §3), in the words a person reads before signing, from `ledger_check`'s
+/// facts: for a move or a move back, and for a signer with no ledger, whose words say what it cannot
+/// see. None for a renewal or a first leaf, which move nobody.
+pub(super) fn move_notice(facts: &Value, name: &str, endpoint: &str) -> Option<String> {
+    let notice = &facts["notice"];
+    match notice["kind"].as_str()? {
+        "move" | "move_back" => {
+            let from = notice["from"].as_str().unwrap_or("?");
+            let until = notice["until"].as_str().unwrap_or("?");
+            let old_host = x509::host_of(from);
+            Some(format!(
+                "You are moving {name} to {endpoint}. Nothing cancels a certificate in PACT. The one at {from} stays valid until {until}.\n\n\
+                 Each contact switches to the new address the moment it sees this certificate. Your new host contacts each of them to show it. A contact it does not reach keeps using {from} until {until}.\n\n\
+                 {old_host} is not told by this signature. It keeps serving and keeps its key until you delete the identity there. Do that after your new host reports your contacts reached. The address stays reserved until {until}.\n\n\
+                 Renewing at {old_host} later would move your contacts back. This wallet refuses that unless you choose to move back."
+            ))
+        }
+        "no_ledger" => Some(
+            "This wallet cannot see the ledger your other wallet keeps. That wallet will not know about this certificate, and a renewal there would move your contacts back. Sign your moves in one wallet."
+                .to_string(),
+        ),
+        _ => None,
+    }
 }
 
 pub fn id_ledger(vault: &str, root: Option<&str>, json: bool) -> Res<i32> {

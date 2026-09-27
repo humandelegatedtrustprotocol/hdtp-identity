@@ -4,9 +4,9 @@
 use crate::canonical::canonical;
 use crate::csr;
 use crate::keys::PrivateKey;
-use crate::time::{format_rfc3339, parse_rfc3339};
+use crate::ledger::{self, stranger};
+use crate::time::format_rfc3339;
 use crate::util::{b64u, err, from_b64u, Error, Result};
-use crate::x509;
 use aes_gcm::aead::{Aead, KeyInit, Payload};
 use serde_json::{json, Map, Value};
 use zeroize::Zeroizing;
@@ -24,17 +24,6 @@ fn plaintext_v(plaintext: &Value) -> Option<u64> {
 const GENERATION: &str = "a vault plaintext is v 2: the root, or the record";
 const FILE_MEMBERS: &[&str] = &["v", "roots", "prf", "passkey"];
 const RECORD_MEMBERS: &[&str] = &["v", "roots", "ledger", "contacts", "passkey", "backup_verified_at"];
-const ENTRY_REQUIRED: &[&str] = &["root", "endpoint", "not_before", "not_after", "issued_at"];
-const ENTRY_MEMBERS: &[&str] = &["root", "endpoint", "not_before", "not_after", "issued_at", "origin"];
-const ENTRY_INSTANTS: &[&str] = &["not_before", "not_after", "issued_at"];
-
-/// The first member, in sorted order, that `allowed` does not name: sorted, so that two ports that
-/// iterate a map differently name the same one.
-fn stranger(doc: &Map<String, Value>, allowed: &[&str]) -> Option<String> {
-    let mut extra: Vec<&String> = doc.keys().filter(|k| !allowed.contains(&k.as_str())).collect();
-    extra.sort();
-    extra.first().map(|k| k.to_string())
-}
 
 /// The file's plaintext as CONTRACT §6 has it, or the refusal that names what is wrong with it.
 /// Held here, where the rules read it, and not at `seal`/`open`: those carry the documents a live
@@ -69,25 +58,10 @@ pub fn check_record(record: &Value) -> Result<()> {
             format!("record_plaintext holds v, roots, ledger, contacts, passkey and backup_verified_at, and nothing else: {k}"),
         );
     }
-    let Some(ledger) = doc.get("ledger") else { return Ok(()) };
-    let Some(entries) = ledger.as_array() else { return err("bad_request", "the record's ledger is a list") };
-    for (i, e) in entries.iter().enumerate() {
-        let Some(o) = e.as_object() else { return err("bad_request", format!("the record's ledger entry {i} does not read")) };
-        let unread = |m: &str| err("bad_request", format!("the record's ledger entry {i} does not read: {m}"));
-        for m in ENTRY_REQUIRED {
-            let Some(text) = o.get(*m).and_then(|v| v.as_str()) else { return unread(m) };
-            if ENTRY_INSTANTS.contains(m) && parse_rfc3339(text).is_err() {
-                return unread(m);
-            }
-        }
-        if o.get("origin").is_some_and(|v| !v.is_string()) {
-            return unread("origin");
-        }
-        if let Some(k) = stranger(o, ENTRY_MEMBERS) {
-            return unread(&k);
-        }
+    match doc.get("ledger") {
+        Some(ledger) => ledger::read(ledger),
+        None => Ok(()),
     }
-    Ok(())
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -264,7 +238,6 @@ pub fn wallet_issue(
     check_file(vault)?;
     check_record(record)?;
     let roots = vault.get("roots").and_then(|r| r.as_array()).cloned().unwrap_or_default();
-    let ledger = record.get("ledger").and_then(|r| r.as_array()).cloned().unwrap_or_default();
     // EVERY root this vault holds, and a root is held as its certificate: a software root has a
     // `pkcs8` beside it and a card-held one has not. This read `pkcs8` alone, so a request carrying a
     // CARD-held sibling's key was not "a request whose key is a root" (§9) and was given a leaf. The
@@ -291,35 +264,21 @@ pub fn wallet_issue(
     let root_key = PrivateKey::from_pkcs8(&Zeroizing::new(from_b64u(pkcs8)?))?;
     let root_cn = root.get("cn").and_then(|c| c.as_str()).unwrap_or("");
     let request = csr::check(csr_der, &root_spkis)?;
-    let host = x509::host_of(&request.endpoint).to_string();
-    let mine: Vec<&Value> = ledger.iter().filter(|l| l.get("root").and_then(|r| r.as_str()) == Some(root_fingerprint)).collect();
+    // The ledger's rules, in the one place they are written (ledger.rs): the record was read whole
+    // above, so what is refused here is the one live leaf per identity, and nothing else.
+    let facts = ledger::check(record.get("ledger"), root_fingerprint, &request.endpoint, now, moving)?;
+    if let Some(why) = facts.refusal {
+        return err("bad_request", why);
+    }
     let mut warnings = Vec::new();
-    let new_host = !mine.iter().any(|l| l.get("endpoint").and_then(|e| e.as_str()).map(|e| x509::host_of(e) == host).unwrap_or(false));
+    let new_host = facts.new_host;
     if new_host {
         warnings.push(json!("new host: this endpoint's host has never been issued to"));
     }
-    // The live leaf is the newest one issued (§14.3: a later notBefore supersedes every earlier
-    // leaf the instant it is seen), if it has not expired. Earlier entries are history.
-    let newest = mine
-        .iter()
-        .filter_map(|l| l.get("not_before").and_then(|t| t.as_str()).and_then(|t| parse_rfc3339(t).ok()).map(|t| (t, *l)))
-        .max_by_key(|(t, _)| *t)
-        .map(|(_, l)| l);
-    let live = newest
-        .filter(|l| l.get("not_after").and_then(|t| t.as_str()).and_then(|t| parse_rfc3339(t).ok()).map(|t| t > now).unwrap_or(false));
-    if let Some(other) = live.filter(|l| l.get("endpoint").and_then(|e| e.as_str()) != Some(request.endpoint.as_str())) {
-        if !moving {
-            return err(
-                "bad_request",
-                format!(
-                    "a leaf is live for {}: a second endpoint is a move, not a second home",
-                    other.get("endpoint").and_then(|e| e.as_str()).unwrap_or("?")
-                ),
-            );
-        }
+    if matches!(facts.kind, ledger::Kind::Move | ledger::Kind::MoveBack) {
         warnings.push(json!("move: the live leaf at the previous endpoint is superseded once contacts see this one"));
     }
-    let previous = mine.iter().filter_map(|l| l.get("not_before").and_then(|t| t.as_str()).and_then(|t| parse_rfc3339(t).ok())).max();
+    let previous = facts.previous_not_before;
     let issued = csr::issue(&request, root_cn, &root_key, now, previous, valid_days)?;
     // The endpoint and the dates: what every rule above reads. Never the leaf, which is the host's
     // to serve and grants nothing (SPEC §9).
@@ -340,6 +299,7 @@ mod tests {
     use super::*;
     use crate::keys::Alg;
     use crate::util::seed;
+    use crate::x509;
 
     fn small() -> Kdf {
         Kdf { m_kib: 8192, t: 1, p: 1 }
