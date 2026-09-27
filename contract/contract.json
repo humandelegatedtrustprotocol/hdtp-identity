@@ -3,7 +3,7 @@
   "$id": "urn:pact:identity:contract",
   "title": "pact-identity: the library boundary",
   "description": "Every function a port of pact-identity presents, as `call(name, args) -> answer`: what it takes, what it answers, and which error codes it can fail with. This file is the source; CONTRACT.md is rendered from it and js/parity.mjs holds both ports to it.",
-  "spec": "2.2.2",
+  "spec": "2.2.3",
   "sections": {
     "build": "The build",
     "keys": "Keys",
