@@ -81,6 +81,10 @@ node js/parity.mjs --manifest "$PACT_RESULTS/parity-manifest.json"
 step "The harness's own tests: the live battery against the seed's node, the Go adapter, the readers"
 node_tests js-tests js/*.test.mjs
 
+step "No tracked file carries a name PACT 1.x had, and the list of names is the protocol's"
+node js/check-no-1x.mjs --selftest
+node js/check-no-1x.mjs
+
 step "Every MUST in the specification names something that holds it, and the record is current"
 node js/musts.mjs
 node js/record.mjs --check --manifest "$PACT_RESULTS/parity-manifest.json"
