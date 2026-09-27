@@ -10,6 +10,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+## 0.3.1 — 2026-09-27
+
 - **Fixed: the export's readers and writers were quadratic in the rows of a file.** In 0.3.0
   `export_read` scanned the threads it had read for each new thread id, and the other functions
   scanned the lists the file sizes too. The scans were for contacts' roots, thread ids, message
