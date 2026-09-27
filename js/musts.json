@@ -319,12 +319,12 @@
     ]
   },
   "9.2#3": {
-    "hash": "184489c578f1",
+    "hash": "b47e15be6dcf",
     "text": "**Unencrypted.** Every surface that writes an export MUST tell the person, before the file is written, that it",
     "held_by": [
       "rust:a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates"
     ],
-    "why": "the pact CLI writes a contact book, never a full export, and says before it writes one that the file is not encrypted, that anyone who gets it can read the contact list (a book holds nothing else, so it names no conversations or files), and that it holds no keys: that test holds the words exactly, finds them ahead of the line reporting the write, and finds them said when the write itself fails (an --out that is a dangling link passes every check made before the vault is opened and refuses the create), with no file written. The full export is written by hosts, whose surfaces are theirs to hold: the node's table is pact-gateway's docs/conformance.md, and the hosting platform's is pact-cloud's docs/must-holders.json"
+    "why": "the pact CLI writes a contact book, never a full export, and says before it writes one that the file is not encrypted, that anyone who gets it can read their contact list, and that it holds no keys: that test holds the book's words exactly, holds that they name no conversations or files, finds them ahead of the line reporting the write, and finds them said when the write itself fails (an --out that is a dangling link passes every check made before the vault is opened and refuses the create), with no file written. This library writes no full export's notice: the full export is written by hosts, whose notices are theirs to hold — the node's table is pact-gateway's docs/conformance.md, and the hosting platform's is pact-cloud's docs/must-holders.json"
   },
   "9.2#4": {
     "hash": "642ebd3f0504",
