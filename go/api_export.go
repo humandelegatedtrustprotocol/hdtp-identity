@@ -5,6 +5,7 @@ package pactidentity
 // its words (api/export.rs), so a caller's mistake is one answer from both ports.
 
 import (
+	"bytes"
 	"encoding/json"
 	"time"
 )
@@ -33,9 +34,23 @@ func (a exportArgs) value(k string) any {
 	return v
 }
 
+// text is a string member, decoded straight into a string: a 16 MiB CSV member decoded through a
+// generic Decoder was buffered twice over before it was a string once.
+func (a exportArgs) text(k string) (string, bool) {
+	raw, has := a[k]
+	if !has || len(raw) == 0 || raw[0] != '"' {
+		return "", false
+	}
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		return "", false
+	}
+	return s, true
+}
+
 // str is the core's `s`: a string, or `<k> is required`.
 func (a exportArgs) str(k string) (string, error) {
-	s, isText := a.value(k).(string)
+	s, isText := a.text(k)
 	if !isText {
 		return "", errArg(k + " is required")
 	}
@@ -44,7 +59,7 @@ func (a exportArgs) str(k string) (string, error) {
 
 // optStr is the core's `opt_s`: anything but a string is absent.
 func (a exportArgs) optStr(k string) *string {
-	s, isText := a.value(k).(string)
+	s, isText := a.text(k)
 	if !isText {
 		return nil
 	}
@@ -81,20 +96,36 @@ func (a exportArgs) optList(k string) ([]any, error) {
 	return nil, errArg(k + " is required")
 }
 
+// strings is a list of strings, decoded straight into one: a list of an id per message decoded as
+// a list of interfaces first held each id twice over. A member that is not a list is `<k> is
+// required`; a list holding anything but strings — null included, which a decoder into strings
+// would quietly read as "" — is `<k> is a list of strings`.
 func (a exportArgs) strings(k string) ([]string, error) {
-	l, err := a.list(k)
-	if err != nil {
-		return nil, err
+	raw, has := a[k]
+	if !has || len(raw) == 0 || raw[0] != '[' {
+		return nil, errArg(k + " is required")
 	}
 	out := []string{}
-	for _, v := range l {
-		s, isText := v.(string)
-		if !isText {
-			return nil, errArg(k + " is a list of strings")
-		}
-		out = append(out, s)
+	if json.Unmarshal(raw, &out) != nil || holdsNull(raw) {
+		return nil, errArg(k + " is a list of strings")
 	}
 	return out, nil
+}
+
+// holdsNull is whether JSON text holds a null outside every string in it.
+func holdsNull(raw []byte) bool {
+	in := false
+	for i := 0; i < len(raw); i++ {
+		switch c := raw[i]; {
+		case in && c == '\\':
+			i++
+		case c == '"':
+			in = !in
+		case !in && c == 'n':
+			return true
+		}
+	}
+	return false
 }
 
 func (a exportArgs) count(k string) (uint64, error) {
@@ -146,11 +177,16 @@ func callExportRead(args json.RawMessage) json.RawMessage {
 	if bad != nil {
 		return bad
 	}
-	r, err := exportRead(directory, a.optStr("manifest"), a.optStr("contacts_csv"), a.optStr("threads_csv"), owner, now)
+	threadsCSV := a.optStr("threads_csv")
+	r, err := exportRead(directory, a.optStr("manifest"), a.optStr("contacts_csv"), threadsCSV, owner, now)
 	if err != nil {
 		return fail(codeArgs, err.Error())
 	}
-	return ok(map[string]any{"contacts": r.contacts, "threads": r.threads, "media": mediaOut(r.media)})
+	threadsBytes := 0
+	if threadsCSV != nil {
+		threadsBytes = len(*threadsCSV)
+	}
+	return readAnswer(r, threadsBytes)
 }
 
 func callExportReadMessages(args json.RawMessage) json.RawMessage {
@@ -360,4 +396,44 @@ func callBookRows(args json.RawMessage) json.RawMessage {
 		return fail(codeArgs, err.Error())
 	}
 	return ok(map[string]any{"rows": rows})
+}
+
+// readAnswer is export_read's answer, written straight from the rows: the threads, which a file can
+// hold by the hundred thousand, are never turned into maps to be marshalled. The contacts (5000 at
+// most) and the media go through encoding/json as every other answer does.
+func readAnswer(r *exportReadResult, threadsBytes int) json.RawMessage {
+	contacts, err := json.Marshal(r.contacts)
+	if err != nil {
+		return fail("internal", err.Error())
+	}
+	media, err := json.Marshal(mediaOut(r.media))
+	if err != nil {
+		return fail("internal", err.Error())
+	}
+	var b bytes.Buffer
+	// A thread's answer is its CSV row and some 57 bytes of keys and quotes.
+	b.Grow(len(contacts) + len(media) + threadsBytes + 64*len(r.threads) + 64)
+	b.WriteString(`{"contacts":`)
+	b.Write(contacts)
+	b.WriteString(`,"threads":[`)
+	for k, t := range r.threads {
+		if k > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(`{"id":`)
+		writeJSONString(&b, t.ID)
+		b.WriteString(`,"contact":`)
+		writeJSONString(&b, t.Contact)
+		b.WriteString(`,"topic":`)
+		writeJSONString(&b, t.Topic)
+		b.WriteString(`,"created_at":`)
+		writeJSONString(&b, t.CreatedAt)
+		b.WriteString(`,"last_at":`)
+		writeJSONString(&b, t.LastAt)
+		b.WriteByte('}')
+	}
+	b.WriteString(`],"media":`)
+	b.Write(media)
+	b.WriteByte('}')
+	return b.Bytes()
 }

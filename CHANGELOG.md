@@ -10,6 +10,29 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+- **Fixed: the export's readers held many times what they were handed.** In 0.3.1 `export_read` built
+  every row as a tree of JSON values, beside two copies of each cell, before it wrote its answer. The
+  C2 builder measured it through the Wasm core: the linear memory grew about 2.2 KB per row of
+  threads.csv, about 16× the CSV — 35 MB at 16k threads, 137 MB at 60k, 260 MB at 120k — and a Wasm
+  instance's memory never shrinks. `export_read_end` held each id three times over, 618 bytes an
+  id. In 0.3.2:
+  - the CSV is read in two passes, as slices of the text, and each thread is written into the
+    answer as it passes; no row is held as a value, and a thread id is remembered as a 32-byte
+    digest, never a copy;
+  - `export_read_end` reads its lists straight from the argument text, borrowed and sorted, never
+    copied;
+  - only a word that could begin a private key's DER (base64 `M`) is decoded when the cells are
+    searched for key material.
+  - Measured through the Wasm core: 4.9× the CSV at 16k threads (was 15.2×) and 4.8× at 64k. The
+    largest threads.csv the bound allows (16 MiB, 120,684 threads) now grows the memory by 67.9 MB,
+    where it was 271.2 MB. `export_read_end` now holds 1.7× its lists (was 5.1×).
+  - The Go port allocates 6.5–6.8× the CSV (was 28–30×) and 4.4–4.7× the lists (was 10.3–10.9×).
+  - A 64 MiB messages.jsonl read in batches of 500 lines stays under 2.3 MB of linear memory
+    throughout.
+  - Held by memory tests in the core (`tests/memory.rs`, its own peak), the Go port (bytes
+    allocated) and the Wasm build (`js/export-memory.test.mjs`, linear memory), each a bound per
+    byte handed in, at N and 4N rows.
+
 ## 0.3.1 — 2026-09-27
 
 - **Fixed: the export's readers and writers were quadratic in the rows of a file.** In 0.3.0

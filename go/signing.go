@@ -294,7 +294,10 @@ func parseInstantZ(s string) (time.Time, bool) {
 	if len(s) < 20 || (s[len(s)-1] != 'Z' && s[len(s)-1] != 'z') || (s[10] != 'T' && s[10] != 't') {
 		return time.Time{}, false
 	}
-	t, err := time.Parse(time.RFC3339Nano, s[:10]+"T"+s[11:len(s)-1]+"Z")
+	if s[10] != 'T' || s[len(s)-1] != 'Z' {
+		s = s[:10] + "T" + s[11:len(s)-1] + "Z"
+	}
+	t, err := time.Parse(time.RFC3339Nano, s)
 	if err != nil {
 		return time.Time{}, false
 	}
