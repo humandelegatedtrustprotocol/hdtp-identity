@@ -372,26 +372,22 @@ type VaultContact struct {
 	Added    string `json:"added,omitempty"`
 }
 
-// ContactRowOf is a contact of the wallet's book as a row of contacts.csv (SPEC §9.2): the book
-// keeps the root, the endpoint, the name, the leaf, the root certificate and when the contact was
-// added; the row's other columns are what a contact the wallet keeps is (active, ever active,
-// nothing granted), and added is the export's time when the book has none. The pact CLI's
-// contacts export writes the same row (crates/pact/src/wallet/contacts.rs, row_of).
-func ContactRowOf(c VaultContact, exportedAt time.Time) ContactRow {
-	r := ContactRow{Root: c.Root, Endpoint: c.Endpoint, Name: c.Name, Status: "active", WasActive: true,
-		Permissions: []string{}, TheirPermissions: []string{}, Added: c.Added}
-	if r.Added == "" {
-		r.Added = timeOut(exportedAt)
+// ContactRowOf is a contact of the wallet's book as a row of contacts.csv (SPEC §9.2), through the
+// contract's book_rows: the one mapping every wallet uses, the pact CLI's contacts export included.
+func ContactRowOf(c VaultContact, exportedAt time.Time) (ContactRow, error) {
+	var in []any
+	if err := convert([]VaultContact{c}, &in); err != nil {
+		return ContactRow{}, err
 	}
-	if c.Leaf != "" {
-		leaf := c.Leaf
-		r.Leaf = &leaf
+	rows, err := bookRows(in, exportedAt)
+	if err != nil {
+		return ContactRow{}, err
 	}
-	if c.RootCert != "" {
-		cert := c.RootCert
-		r.RootCert = &cert
+	var out []ContactRow
+	if err := convert(rows, &out); err != nil {
+		return ContactRow{}, err
 	}
-	return r
+	return out[0], nil
 }
 
 // VaultContactOf is a row of an export as the wallet's book keeps it: its leaf only when export_read
