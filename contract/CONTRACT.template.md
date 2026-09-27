@@ -88,6 +88,17 @@ Strict DER, nothing trailing.
 
 {{table:csr}}
 
+### 3.1 Signing requests (SPEC §9.1)
+
+A host asks a web wallet for a leaf with a form POSTed by top-level navigation, carrying a
+`SigningRequest`: the CSR, `renew` or `move`, the root it expects, where the answer goes, an opaque
+`state`, what the host calls itself, the validity it asks for, and when the request expires. The
+wallet runs `signing_request_check` on it before a person sees anything, and answers by navigating
+to `redirect` with `#chain=<leaf>.<root>&state=<state>` or `#error=<code>&state=<state>`. The
+check is stateless: nothing of a request is kept.
+
+{{table:signing}}
+
 ## 4. Cards (SPEC §3)
 
 {{table:cards}}
