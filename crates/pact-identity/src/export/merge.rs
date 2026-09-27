@@ -24,18 +24,19 @@ fn root_of(v: &Value, what: &str, i: usize) -> Result<String> {
 /// written when the row carries one (export_read kept it only because `[leaf, root_cert]` validated).
 /// Every other held root is kept as held, and each pin field the row would change is a conflict.
 pub fn merge(held: &[Value], rows: &[Value]) -> Result<Merged> {
-    let mut held_by_root = Vec::new();
+    // The held rows by root, the first of each kept (a map: a scan per row was quadratic).
+    let mut held_by_root: std::collections::HashMap<String, &Value> = std::collections::HashMap::new();
     for (i, h) in held.iter().enumerate() {
-        held_by_root.push((root_of(h, "held", i)?, h));
+        held_by_root.entry(root_of(h, "held", i)?).or_insert(h);
     }
     let mut out = Merged { write: Vec::new(), keep: Vec::new(), conflicts: Vec::new() };
     for (i, r) in rows.iter().enumerate() {
         let root = root_of(r, "rows", i)?;
         let held_leaf = |h: &Value| h.get("leaf").is_some_and(|l| !l.is_null());
-        match held_by_root.iter().find(|(k, _)| *k == root) {
+        match held_by_root.get(&root) {
             None => out.write.push(r.clone()),
-            Some((_, h)) if !held_leaf(h) && r.get("leaf").is_some_and(|l| !l.is_null()) => out.write.push(r.clone()),
-            Some((_, h)) => {
+            Some(h) if !held_leaf(h) && r.get("leaf").is_some_and(|l| !l.is_null()) => out.write.push(r.clone()),
+            Some(h) => {
                 for f in PIN {
                     let (was, now) = (h.get(f).unwrap_or(&Value::Null), r.get(f).unwrap_or(&Value::Null));
                     if !now.is_null() && was != now {
