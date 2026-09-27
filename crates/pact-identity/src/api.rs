@@ -1,17 +1,18 @@
 //! One surface for every host: `call(name, args_json) -> json`, the CONTRACT's functions by name.
 //! Never panics across the boundary; every failure is `{"error", "why"}`.
-use crate::address;
-use crate::card;
-use crate::csr;
-use crate::envelope::{self, CallerPin, Form, OpenResultArgs, SealRequest, SealResult, Wire};
-use crate::hpke::{self, Suite};
-use crate::keys::{self, Alg, PrivateKey, PublicKey};
+use crate::keys::{PrivateKey, PublicKey};
 use crate::time::{format_rfc3339, parse_rfc3339};
 use crate::util::{b64u, err, from_b64u, Error, Result};
-use crate::vault::{self};
 use crate::x509::{self, ChainResult, Extra, LeafSpec};
 use serde_json::{json, Map, Value};
 use zeroize::Zeroizing;
+
+mod cards;
+mod certificates;
+mod csr;
+mod envelopes;
+mod keys;
+mod vault;
 
 /// The version of `pact-protocol/SPEC.md` this core implements.
 ///
@@ -198,262 +199,48 @@ fn chain_result(r: ChainResult) -> Value {
 fn dispatch(name: &str, a: &Value) -> Result<Value> {
     Ok(match name {
         // §1 keys
-        "generate_key" => key_json(&PrivateKey::generate(Alg::parse(s(a, "alg")?)?)?),
-        "key_from_seed" => {
-            let seed = seed32(a, "seed")?.ok_or_else(|| Error::new("bad_request", "seed is required"))?;
-            key_json(&PrivateKey::from_seed(Alg::parse(s(a, "alg")?)?, &seed)?)
-        }
-        // §2.1. Two calls rather than one so a wallet never hardcodes the salt: the constant lives
-        // here, the vectors prove it, and a page that gets it wrong fails loudly instead of quietly
-        // becoming somebody else.
-        "prf_salt" => json!({ "salt": b64u(&keys::prf_salt()), "infos": keys::DERIVATION_INFOS }),
-        "derive_seed" => json!({ "seed": b64u(&keys::derive_seed(&bytes(a, "prf")?, s(a, "info")?)?) }),
-        "public_key" => {
-            let k = private(a, "pkcs8")?;
-            let p = k.public();
-            json!({ "alg": k.alg().name(), "spki": b64u(p.spki()), "fingerprint": p.fingerprint() })
-        }
-        "key_info" => {
-            let p = public(a, "spki")?;
-            json!({ "alg": p.alg().name(), "fingerprint": p.fingerprint(), "key_id": b64u(&p.key_id()) })
-        }
-        "sign" => json!({ "sig": b64u(&private(a, "pkcs8")?.sign(&bytes(a, "data")?)) }),
-        "verify" => json!({ "valid": public(a, "spki")?.verify(&bytes(a, "data")?, &bytes(a, "sig")?) }),
-
+        "generate_key" => keys::generate_key(a)?,
+        "key_from_seed" => keys::key_from_seed(a)?,
+        "prf_salt" => keys::prf_salt(a)?,
+        "derive_seed" => keys::derive_seed(a)?,
+        "public_key" => keys::public_key(a)?,
+        "key_info" => keys::key_info(a)?,
+        "sign" => keys::sign(a)?,
+        "verify" => keys::verify(a)?,
         // §2 certificates
-        "build_root" => {
-            let k = private(a, "pkcs8")?;
-            let der = x509::build_root(s(a, "cn")?, &k, instant(a, "not_before")?, &serial(a)?)?;
-            json!({ "der": b64u(&der), "fingerprint": k.public().fingerprint() })
-        }
-        "root_tbs" => {
-            let u = x509::root_tbs(s(a, "cn")?, &public(a, "spki")?, instant(a, "not_before")?, &serial(a)?)?;
-            json!({ "tbs": b64u(&u.tbs), "sig_alg": b64u(&x509::sig_alg(&u.sig_alg)) })
-        }
-        "assemble_root" | "assemble_leaf" => {
-            let tbs = bytes(a, "tbs")?;
-            // The algorithm outside is the TBS's own third field; a `sig_alg` handed back (base64url
-            // DER of the AlgorithmIdentifier) must equal it, so the two can never differ.
-            let declared = x509::declared_alg(&tbs)?;
-            if let Some(given) = opt_bytes(a, "sig_alg")? {
-                if given != declared {
-                    return err("bad_request", "sig_alg is not the algorithm the tbs declares");
-                }
-            }
-            json!({ "der": b64u(&x509::assemble_raw(&tbs, &declared, &bytes(a, "sig")?)) })
-        }
-        "build_leaf" => {
-            let root = private(a, "root_pkcs8")?;
-            let issuer = root.public();
-            let host = public(a, "host_spki")?;
-            let spec = leaf_spec(a, &issuer, &host, serial(a)?)?;
-            json!({ "der": b64u(&x509::build_leaf(&spec, &root)?) })
-        }
-        "leaf_tbs" => {
-            let issuer = public(a, "root_spki")?;
-            let host = public(a, "host_spki")?;
-            let spec = leaf_spec(a, &issuer, &host, serial(a)?)?;
-            let u = x509::leaf_tbs(&spec)?;
-            json!({ "tbs": b64u(&u.tbs), "sig_alg": b64u(&x509::sig_alg(&u.sig_alg)) })
-        }
-        "parse_certificate" => cert_json(&x509::parse(&bytes(a, "der")?)?),
-        "profile_error" => json!({ "error": x509::profile_error(&x509::parse(&bytes(a, "der")?)?, s(a, "kind")?) }),
-        "validate_chain" => chain_result(x509::validate_chain(
-            &chain(a, "chain")?,
-            instant(a, "now")?,
-            opt_s(a, "expected_root"),
-            opt_s(a, "expected_endpoint"),
-        )),
-        "compare_leaves" => json!({ "order": x509::compare_leaves(&bytes(a, "pinned")?, &bytes(a, "presented")?)? }),
-        "is_normal_https" => json!({ "normal": x509::is_normal_https(s(a, "url")?) }),
-        "address_guard" => match address::address_guard(s(a, "endpoint")?, opt_s(a, "self_endpoint"), boolean(a, "guest")) {
-            Ok(()) => json!({ "ok": true }),
-            Err(e) => json!({ "ok": false, "why": e.why }),
-        },
-        "ip_is_private" => json!({ "private": address::ip_is_private(s(a, "ip")?) }),
-
+        "build_root" => certificates::build_root(a)?,
+        "root_tbs" => certificates::root_tbs(a)?,
+        "assemble_root" | "assemble_leaf" => certificates::assemble(a)?,
+        "build_leaf" => certificates::build_leaf(a)?,
+        "leaf_tbs" => certificates::leaf_tbs(a)?,
+        "parse_certificate" => certificates::parse_certificate(a)?,
+        "profile_error" => certificates::profile_error(a)?,
+        "validate_chain" => certificates::validate_chain(a)?,
+        "compare_leaves" => certificates::compare_leaves(a)?,
+        "is_normal_https" => certificates::is_normal_https(a)?,
+        "address_guard" => certificates::address_guard(a)?,
+        "ip_is_private" => certificates::ip_is_private(a)?,
         // §3 CSR
-        "csr_new" => {
-            json!({ "der": b64u(&csr::csr_new(s(a, "cn")?, &private(a, "host_pkcs8")?, s(a, "endpoint")?, opt_s(a, "dns_name"))?) })
-        }
-        "csr_check" => match csr::check(&bytes(a, "der")?, &opt_chain(a, "root_spkis")?) {
-            Ok(c) => {
-                json!({ "ok": true, "cn": c.cn, "spki": b64u(c.key.spki()), "fingerprint": c.key.fingerprint(), "alg": c.key.alg().name(), "endpoint": c.endpoint, "dns_name": c.dns_name })
-            }
-            Err(e) => json!({ "ok": false, "why": e.why }),
-        },
-        "issue_from_csr" => {
-            let root = private(a, "root_pkcs8")?;
-            let mut roots = opt_chain(a, "root_spkis")?;
-            roots.push(root.public().spki().to_vec());
-            let req = csr::check(&bytes(a, "csr")?, &roots)?;
-            let i = csr::issue(&req, s(a, "root_cn")?, &root, instant(a, "now")?, opt_instant(a, "previous_not_before")?, valid_days(a)?)?;
-            json!({ "der": b64u(&i.der), "endpoint": req.endpoint, "not_before": format_rfc3339(i.not_before), "not_after": format_rfc3339(i.not_after) })
-        }
-        "issue_tbs_from_csr" => {
-            let root = public(a, "root_spki")?;
-            let mut roots = opt_chain(a, "root_spkis")?;
-            roots.push(root.spki().to_vec());
-            let req = csr::check(&bytes(a, "csr")?, &roots)?;
-            let (u, nb, na) =
-                csr::issue_tbs(&req, s(a, "root_cn")?, &root, instant(a, "now")?, opt_instant(a, "previous_not_before")?, valid_days(a)?)?;
-            json!({ "tbs": b64u(&u.tbs), "sig_alg": b64u(&x509::sig_alg(&u.sig_alg)), "endpoint": req.endpoint, "not_before": format_rfc3339(nb), "not_after": format_rfc3339(na) })
-        }
-
+        "csr_new" => csr::csr_new(a)?,
+        "csr_check" => csr::csr_check(a)?,
+        "issue_from_csr" => csr::issue_from_csr(a)?,
+        "issue_tbs_from_csr" => csr::issue_tbs_from_csr(a)?,
         // §4 cards
-        "card_encode" => {
-            let extra: Vec<String> = a
-                .get("extra")
-                .and_then(|e| e.as_array())
-                .map(|items| items.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
-                .unwrap_or_default();
-            json!({ "vcard": card::encode(s(a, "fn")?, &bytes(a, "cert")?, opt_s(a, "seal"), &extra)? })
-        }
-        "card_decode" => {
-            // `now` is what `expired` MEANS. It was optional, and absent it was 1970: every card ever
-            // made decoded, and answered `expired: false`.
-            let now = instant(a, "now")?;
-            let text = s(a, "vcard")?;
-            let c = card::decode(text, now)?;
-            json!({ "fn": c.fn_, "version": 2, "seal": c.seal, "cert": b64u(&c.cert), "root": c.root, "endpoint": c.endpoint, "expired": c.expired, "ignored": c.ignored, "bytes": text.len(), "leaf": cert_json(&c.leaf) })
-        }
-
+        "card_encode" => cards::card_encode(a)?,
+        "card_decode" => cards::card_decode(a)?,
         // §5 envelopes
-        "suite_for" => json!({ "suite": envelope::suite_name(&bytes(a, "spki")?)? }),
-        "hpke_seal" => {
-            let suite = Suite::parse(s(a, "suite")?).ok_or_else(|| Error::new("envelope_invalid", "version or suite"))?;
-            let (enc, ct) = hpke::seal(
-                suite,
-                &public(a, "recipient_spki")?,
-                s(a, "info")?.as_bytes(),
-                &opt_bytes(a, "aad")?.unwrap_or_default(),
-                &bytes(a, "plaintext")?,
-                seed32(a, "ephemeral_seed")?,
-            )?;
-            json!({ "enc": b64u(&enc), "ct": b64u(&ct) })
-        }
-        "hpke_open" => {
-            let suite = Suite::parse(s(a, "suite")?).ok_or_else(|| Error::new("envelope_invalid", "version or suite"))?;
-            let pt = hpke::open(
-                suite,
-                &private(a, "recipient_pkcs8")?,
-                s(a, "info")?.as_bytes(),
-                &opt_bytes(a, "aad")?.unwrap_or_default(),
-                &bytes(a, "enc")?,
-                &bytes(a, "ct")?,
-            )?;
-            json!({ "plaintext": b64u(&pt) })
-        }
-        "seal_request" => {
-            let leaf = x509::parse(&bytes(a, "recipient_leaf")?)?;
-            let sender = private(a, "sender_pkcs8")?;
-            let sender_chain = present_chain(a, "sender_chain")?;
-            let wire = envelope::seal_request(SealRequest {
-                recipient: &leaf.public_key,
-                sender: &sender,
-                form: Form::parse(opt_s(a, "form").unwrap_or("chain"))?,
-                sender_chain: sender_chain.as_deref(),
-                method: opt_s(a, "method").unwrap_or("tools/call").to_string(),
-                params: a.get("params").cloned().unwrap_or(json!({})),
-                msg_id: id(a, "msg_id")?.to_string(),
-                ts: int(a, "ts")?,
-                exp: opt_int(a, "exp"),
-                cty: opt_s(a, "cty").map(|c| c.to_string()),
-                ephemeral_seed: seed32(a, "ephemeral_seed")?,
-            })?;
-            serde_json::to_value(wire).map_err(|e| Error::new("internal", e.to_string()))?
-        }
-        "seal_result" => {
-            let recipient = public(a, "recipient_spki")?;
-            let sender = private(a, "sender_pkcs8")?;
-            let sender_chain = present_chain(a, "sender_chain")?;
-            let wire = envelope::seal_result(SealResult {
-                recipient: &recipient,
-                sender: &sender,
-                form: Form::parse(opt_s(a, "form").unwrap_or("chain"))?,
-                sender_chain: sender_chain.as_deref(),
-                result: a.get("result").cloned(),
-                error: a.get("error").cloned(),
-                msg_id: id(a, "msg_id")?.to_string(),
-                ts: int(a, "ts")?,
-                exp: opt_int(a, "exp"),
-                ephemeral_seed: seed32(a, "ephemeral_seed")?,
-            })?;
-            serde_json::to_value(wire).map_err(|e| Error::new("internal", e.to_string()))?
-        }
-        "open_result" => {
-            let wire: Wire = serde_json::from_value(a.get("envelope").cloned().unwrap_or(Value::Null))
-                .map_err(|_| Error::new("envelope_invalid", "envelope members"))?;
-            let key = private(a, "my_pkcs8")?;
-            let pins: Vec<CallerPin> = serde_json::from_value(a.get("pins").cloned().unwrap_or(json!([])))
-                .map_err(|e| Error::new("bad_request", format!("pins: {e}")))?;
-            envelope::open_result(OpenResultArgs {
-                envelope: &wire,
-                my_key: &key,
-                msg_id: s(a, "msg_id")?,
-                now: instant(a, "now")?,
-                pins: &pins,
-                expected_root: opt_s(a, "expected_root"),
-                expected_endpoint: opt_s(a, "expected_endpoint"),
-            })?
-        }
-        "follow_renewed" => envelope::follow_renewed(
-            a.get("answer").unwrap_or(&Value::Null),
-            s(a, "pinned_root")?,
-            &bytes(a, "pinned_leaf")?,
-            s(a, "dialed")?,
-            instant(a, "now")?,
-        ),
-        "decide" => {
-            // A missing `node` is not a decision against an empty node, and the member is named the
-            // way the caller wrote it rather than the way serde reports a missing field — the Go port
-            // cannot reproduce another library's wording, and CONTRACT §0 promises it will not have to.
-            for k in ["node", "envelope", "now"] {
-                if a.get(k).is_none_or(Value::is_null) {
-                    return err("bad_request", format!("{k} is required"));
-                }
-            }
-            let input: envelope::DecideInput =
-                serde_json::from_value(a.clone()).map_err(|_| Error::new("bad_request", "decide input does not read"))?;
-            serde_json::to_value(envelope::decide(&input)?).map_err(|e| Error::new("internal", e.to_string()))?
-        }
-
+        "suite_for" => envelopes::suite_for(a)?,
+        "hpke_seal" => envelopes::hpke_seal(a)?,
+        "hpke_open" => envelopes::hpke_open(a)?,
+        "seal_request" => envelopes::seal_request(a)?,
+        "seal_result" => envelopes::seal_result(a)?,
+        "open_result" => envelopes::open_result(a)?,
+        "follow_renewed" => envelopes::follow_renewed(a)?,
+        "decide" => envelopes::decide(a)?,
         // §6 vault
-        "vault_seal" => {
-            // In the order the function needs them (CONTRACT §0): the passphrase, the plaintext and
-            // its generation, and only then the KDF — read before, a v 1 plaintext under a KDF out
-            // of range was named for the KDF here and for its generation in the other port.
-            let passphrase = s(a, "passphrase")?;
-            // Sealing an absent plaintext sealed the JSON literal `null` and handed back a
-            // well-formed vault with nothing in it — a file a person would keep, and restore from.
-            let Some(plaintext) = a.get("plaintext").filter(|v| !v.is_null()) else {
-                return err("bad_request", "plaintext is required");
-            };
-            vault::check_sealable(passphrase, plaintext)?;
-            // ONE parser, shared with `vault_open`, so the bounds cannot diverge between sealing and
-            // opening and `name` is checked on both.
-            let kdf = match a.get("kdf") {
-                None | Some(Value::Null) => None,
-                Some(_) => Some(vault::kdf_from_args(a.get("kdf"))?),
-            };
-            json!({ "vault": vault::seal(passphrase, plaintext, kdf, opt_bytes(a, "salt")?, opt_bytes(a, "nonce")?)? })
-        }
-        "vault_open" => {
-            let Some(doc) = a.get("vault").filter(|v| !v.is_null()) else {
-                return err("bad_request", "vault is required");
-            };
-            json!({ "plaintext": vault::open(s(a, "passphrase")?, doc)? })
-        }
-        "wallet_issue" => vault::wallet_issue(
-            a.get("vault_plaintext").unwrap_or(&Value::Null),
-            a.get("record_plaintext").unwrap_or(&Value::Null),
-            s(a, "root_fingerprint")?,
-            &bytes(a, "csr")?,
-            instant(a, "now")?,
-            valid_days(a)?,
-            boolean(a, "move"),
-        )?,
-
+        "vault_seal" => vault::vault_seal(a)?,
+        "vault_open" => vault::vault_open(a)?,
+        "wallet_issue" => vault::wallet_issue(a)?,
         "version" => json!({ "crate": env!("CARGO_PKG_VERSION"), "spec": SPEC_VERSION }),
         other => return err("unsupported", format!("no function named {other}")),
     })
