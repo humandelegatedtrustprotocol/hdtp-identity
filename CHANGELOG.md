@@ -10,6 +10,19 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+- **Fixed: the export's readers and writers were quadratic in the rows of a file.** In 0.3.0
+  `export_read` scanned the threads it had read for each new thread id, and the other functions
+  scanned the lists the file sizes too. The scans were for contacts' roots, thread ids, message
+  msg_ids and reply_tos, media, the directory, a cell's permissions, and the held rows of
+  `export_merge`, and in Go also the streamed media and the manifest's keys. Measured through the
+  Wasm core, `export_read` of 200 contacts took 0.22 s at 2k threads, 0.76 s at 4k, 3.1 s at 8k and
+  12.2 s at 16k; a 14.7 MB file of 120k threads, within the 16 MiB bound, ran for more than 9
+  CPU-minutes. Every such lookup is now a set or a map, in both ports. In 0.3.1 the same reads take
+  19, 28, 50 and 96 ms, and the largest file the bounds allow (5000 contacts, 163,962 threads,
+  16 MiB) is read in about 1 s. Guarded in both ports by a growth test that fails if a function
+  takes more than 8× as long on 4× the rows, and by an absolute ceiling of 10 s for that largest
+  file (js/export-limits.test.mjs).
+
 ## 0.3.0 — 2026-09-27
 
 - `ledger_check` (contract §6.1, section `ledger`): the wallet's ledger rules as facts — the refusal

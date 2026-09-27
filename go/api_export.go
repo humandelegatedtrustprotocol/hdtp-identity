@@ -165,11 +165,13 @@ func callExportReadMessages(args json.RawMessage) json.RawMessage {
 	var names messageNames
 	for _, f := range []struct {
 		k  string
-		to *[]string
+		to *strSet
 	}{{"threads", &names.threads}, {"contacts", &names.contacts}, {"media", &names.media}} {
-		if *f.to, err = a.strings(f.k); err != nil {
+		list, err := a.strings(f.k)
+		if err != nil {
 			return failErr(codeArgs, err)
 		}
+		*f.to = setOf(list)
 	}
 	first := uint64(1)
 	if v := a.value("first_line"); v != nil {

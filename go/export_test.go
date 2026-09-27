@@ -142,7 +142,7 @@ func TestAMessageCarriesAtMostOneFile(t *testing.T) {
 		t.Errorf("the writer: %v", err)
 	}
 	line := `{"attachments":[{"file":"` + in.Media[0].Hash + `","filename":"a","mime":"b","size":1},{"file":"` + in.Media[0].Hash + `","filename":"a","mime":"b","size":1}],"body":"","contact":"` + exportPeer + `","direction":"in","id":"1","msg_id":"m","reply_to":null,"sender":"human","status":"read","thread":"t-1","time":"2026-09-02T00:00:00Z"}`
-	_, _, err = exportReadMessages([]string{line}, 7, messageNames{threads: []string{"t-1"}, contacts: []string{exportPeer}, media: []string{in.Media[0].Hash}})
+	_, _, err = exportReadMessages([]string{line}, 7, messageNames{threads: setOf([]string{"t-1"}), contacts: setOf([]string{exportPeer}), media: setOf([]string{in.Media[0].Hash})})
 	if err == nil || err.Error() != "messages.jsonl: line 7, member attachments: more than one attachment: a message carries at most one file" {
 		t.Errorf("the reader: %v", err)
 	}
