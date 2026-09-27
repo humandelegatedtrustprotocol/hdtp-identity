@@ -48,3 +48,27 @@ pub fn merge(held: &[Value], rows: &[Value]) -> Result<Merged> {
     }
     Ok(out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// SPEC §9.2, import step 2: an imported leaf never replaces a pin the host validated itself,
+    /// and a row the host holds without a leaf takes the row's (export_read kept it only because it
+    /// validated).
+    #[test]
+    fn export_merge_never_replaces_a_held_pin() {
+        let [a, b, c] = ["A", "B", "C"].map(|x| format!("sha256:{}", x.repeat(43)));
+        let row = |root: &str, endpoint: &str, leaf: Value| json!({ "root": root, "endpoint": endpoint, "leaf": leaf, "root_cert": null });
+        let held = [row(&a, "https://a.example/mcp", json!("MIIheld")), row(&b, "https://b.example/mcp", Value::Null)];
+        let rows = [
+            row(&a, "https://moved.example/mcp", json!("MIIrow")),
+            row(&b, "https://b.example/mcp", json!("MIIrow")),
+            row(&c, "https://c.example/mcp", Value::Null),
+        ];
+        let m = merge(&held, &rows).unwrap();
+        assert_eq!(m.write.iter().map(|w| w["root"].as_str().unwrap().to_string()).collect::<Vec<_>>(), [b, c]);
+        assert_eq!(m.keep, [a]);
+        assert_eq!(m.conflicts.len(), 2, "the held pin's endpoint and leaf: {:?}", m.conflicts);
+    }
+}
