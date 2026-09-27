@@ -92,6 +92,8 @@ export default function vault({ add, expect }, f) {
     ['a ledger entry whose root is not a string', { record_plaintext: { ...record, ledger: [{ ...entry, root: 5 }] } }],
     ['a ledger entry carrying the leaf', { record_plaintext: { ...record, ledger: [{ ...entry, leaf: 'MIIB' }] } }],
     ['a ledger entry that is not an object', { record_plaintext: { ...record, ledger: ['an entry'] } }],
+    ['a ledger entry whose root is empty', { record_plaintext: { ...record, ledger: [{ ...entry, root: '' }] } }],
+    ['a ledger entry whose endpoint is empty', { record_plaintext: { ...record, ledger: [{ ...entry, endpoint: '' }] } }],
     ['a root held on a card, which this function cannot sign with', { vault_plaintext: { ...held, roots: held.roots.map(({ pkcs8: _k, ...r }) => ({ ...r, holder: { kind: 'piv' } })) } }],
   ]) {
     const args = issueWith(over);
@@ -122,6 +124,8 @@ export default function vault({ add, expect }, f) {
     ['a ledger entry whose not_before does not read', unread('not_before')],
     ['a ledger entry whose not_after does not read', unread('not_after')],
     ['a ledger entry whose root is not a string', unread('root')],
+    ['a ledger entry whose root is empty', unread('root')],
+    ['a ledger entry whose endpoint is empty', unread('endpoint')],
     ['a ledger entry carrying the leaf', unread('leaf')],
     ['a ledger entry that is not an object', unread('')],
     ['a record whose ledger is not a list', { error: 'bad_request', why: "the record's ledger is a list" }],
