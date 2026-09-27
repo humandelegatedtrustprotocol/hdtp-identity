@@ -25,6 +25,11 @@ self-hoster needs nothing installed beside it. Two halves:
   the file is read again, so what the re-check proves is that the file still opens the vault, not
   that a person is present; a backup refuses to write over a file unless told `--force`; no command
   ever prints a root key — there is no `id export`.
+  The contact book travels as a **book** (SPEC §9.2): `contacts export --out book.zip` writes an
+  unencrypted zip of `manifest.json` and `contacts.csv`, and says it is unencrypted before it
+  writes; `contacts import` reads a book or a whole export, checks all of it (messages and files
+  included) against the identity it is imported into, keeps only its contacts, and shows every
+  difference before the wallet's book is replaced.
 
 ```
 $ pact --help
