@@ -23,7 +23,7 @@ repository is private, so Go must fetch it over SSH and not through the public p
 ```sh
 export GOPRIVATE=github.com/pact-cloud/*
 git config --global url.git@github.com:.insteadOf https://github.com/   # or per process: GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.git@github.com:.insteadOf GIT_CONFIG_VALUE_0=https://github.com/
-go get github.com/pact-cloud/pact-identity/go@v0.2.0
+go get github.com/pact-cloud/pact-identity/go@v0.3.3
 ```
 
 ```go
@@ -41,13 +41,14 @@ bytes are what every other host runs. Each GitHub release `vX.Y.Z` carries:
 | Asset | What |
 |---|---|
 | `pact-identity-wasm-web-X.Y.Z.tgz` | `pkg-web/` exactly as pinned: the `.wasm`, its wasm-bindgen glue and types, `package.json`, `.gitignore` |
+| `pact-identity-exportcorpus-X.Y.Z.tgz` | `exportcorpus/`: the export's fixture corpus (SPEC §9.2) — `cases.json` and every zip it names, each hostile file with the refusal it must produce and each valid one with what it holds — for a host that does not import the Go package `github.com/pact-cloud/pact-identity/go/exportcorpus` |
 | `manifest.json` | `js/manifest.json` of the tagged commit (the sha256 and size of every package file, the builder image by digest, the source inputs), plus `version`, `commit`, `tags`, `protocol_commit` and the sha256 and size of every other asset |
 | `SHA256SUMS` | every other asset, `<hex>  <name>` |
 | `pact-X.Y.Z-darwin-arm64`, `-linux-arm64`, `-linux-amd64` | the `pact` CLI. The Linux builds link `libpcsclite` dynamically (the PIV feature): `apt install libpcsclite1` |
 
 ```sh
-gh release download v0.2.0 -R pact-cloud/pact-identity -D vendor/
-( cd vendor && shasum -a 256 -c SHA256SUMS ) && tar -xzf vendor/pact-identity-wasm-web-0.2.0.tgz -C vendor/
+gh release download v0.3.3 -R pact-cloud/pact-identity -D vendor/
+( cd vendor && shasum -a 256 -c SHA256SUMS ) && tar -xzf vendor/pact-identity-wasm-web-0.3.3.tgz -C vendor/
 ```
 
 Check every unpacked file against `manifest.json`'s `files["pkg-web/<name>"]` before shipping it.

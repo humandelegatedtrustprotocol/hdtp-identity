@@ -378,25 +378,63 @@ func (h *exportHost) checkMedia(f *zip.File) error {
 // WriteExportZip writes an export: contacts.csv, threads.csv when there are threads, messages.jsonl
 // when there are messages, media/ and each media file stored as it comes from media, and
 // manifest.json last. Each media file's sha256 and size are checked against what was declared.
-func WriteExportZip(w io.Writer, in ExportInput, media func(hash string) (io.ReadCloser, error)) error {
-	var contacts, threads, mediaList, messages any
-	for _, c := range []struct{ from, to any }{{in.Contacts, &contacts}, {in.Threads, &threads}, {in.Media, &mediaList}, {in.Messages, &messages}} {
+//
+// What a contact controls never stops the export (SPEC §9.2): a message whose body holds what reads
+// as a private key is left out, with the file it carried, and every message left out is returned for
+// the host to report to the person.
+func WriteExportZip(w io.Writer, in ExportInput, media func(hash string) (io.ReadCloser, error)) ([]ExportLeftOut, error) {
+	var contacts, threads, messages any
+	for _, c := range []struct{ from, to any }{{in.Contacts, &contacts}, {in.Threads, &threads}, {in.Messages, &messages}} {
 		if err := convert(c.from, c.to); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	asList := func(v any) []any {
 		l, _ := v.([]any)
 		return l
 	}
+	lines, leftOut, err := exportWriteMessages(asList(messages), nil)
+	if err != nil {
+		return nil, err
+	}
+	// The files the kept messages carry. A file only left-out messages carried goes with them; a
+	// kept message's file must be among those handed in (SPEC §9.2: an exporter never leaves one out).
+	gone := strSet{}
+	for _, l := range leftOut {
+		gone.add(l.ID)
+	}
+	handed := strSet{}
+	for _, m := range in.Media {
+		handed.add(m.Hash)
+	}
+	keptFiles, goneFiles := strSet{}, strSet{}
+	for _, msg := range in.Messages {
+		for _, a := range msg.Attachments {
+			if gone.has(msg.ID) {
+				goneFiles.add(a.File)
+				continue
+			}
+			if !handed.has(a.File) {
+				return nil, fmt.Errorf("media/%s: message %s carries it, and it is not among the files to export", a.File, msg.ID)
+			}
+			keptFiles.add(a.File)
+		}
+	}
+	var files []ExportMedia
+	for _, m := range in.Media {
+		if goneFiles.has(m.Hash) && !keptFiles.has(m.Hash) {
+			continue
+		}
+		files = append(files, m)
+	}
+	var mediaList any
+	if err := convert(files, &mediaList); err != nil {
+		return nil, err
+	}
 	at := time.Unix(in.ExportedAt.Unix(), 0).UTC()
 	written, err := exportWrite(in.Owner, in.OwnerName, at, in.Tool, asList(contacts), asList(threads), asList(mediaList))
 	if err != nil {
-		return err
-	}
-	lines, err := exportWriteMessages(asList(messages))
-	if err != nil {
-		return err
+		return nil, err
 	}
 	zw := zip.NewWriter(w)
 	put := func(name string, method uint16, body io.Reader, check hash.Hash) (int64, error) {
@@ -410,11 +448,11 @@ func WriteExportZip(w io.Writer, in ExportInput, media func(hash string) (io.Rea
 		return io.Copy(fw, body)
 	}
 	if _, err := put("contacts.csv", zip.Deflate, bytes.NewReader([]byte(written.contactsCSV)), nil); err != nil {
-		return err
+		return nil, err
 	}
 	if written.threadsCSV != nil {
 		if _, err := put("threads.csv", zip.Deflate, bytes.NewReader([]byte(*written.threadsCSV)), nil); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	var sha *string
@@ -427,52 +465,39 @@ func WriteExportZip(w io.Writer, in ExportInput, media func(hash string) (io.Rea
 		s := sha256Hex(b.Bytes())
 		sha = &s
 		if _, err := put("messages.jsonl", zip.Deflate, &b, nil); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	// SPEC §9.2: an exporter never leaves out a file a message it exports carries. A message whose
-	// attachment is not among the files handed in is a reason to refuse the export, not to write it.
-	for _, msg := range in.Messages {
-		for _, a := range msg.Attachments {
-			held := false
-			for _, m := range in.Media {
-				held = held || m.Hash == a.File
-			}
-			if !held {
-				return fmt.Errorf("media/%s: message %s carries it, and it is not among the files to export", a.File, msg.ID)
-			}
-		}
-	}
-	if len(in.Media) > 0 {
+	if len(files) > 0 {
 		if _, err := zw.CreateHeader(&zip.FileHeader{Name: "media/", Method: zip.Store, Modified: at}); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	for _, m := range in.Media {
+	for _, m := range files {
 		rc, err := media(m.Hash)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		sum := sha256.New()
 		n, err := put("media/"+m.Hash, zip.Store, rc, sum)
 		rc.Close()
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if n != m.Size || hex.EncodeToString(sum.Sum(nil)) != m.Hash {
-			return fmt.Errorf("media/%s: the bytes are not the %d-byte file declared", m.Hash, m.Size)
+			return nil, fmt.Errorf("media/%s: the bytes are not the %d-byte file declared", m.Hash, m.Size)
 		}
 	}
 	partial, err := json.Marshal(written.partial)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	manifest, err := finishManifest(partial, sha, uint64(len(lines)))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := put("manifest.json", zip.Deflate, bytes.NewReader([]byte(manifest)), nil); err != nil {
-		return err
+		return nil, err
 	}
-	return zw.Close()
+	return leftOut, zw.Close()
 }
