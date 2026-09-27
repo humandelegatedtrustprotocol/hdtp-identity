@@ -180,3 +180,48 @@ func TestAVaultContactTravelsAsARowAndComesBack(t *testing.T) {
 		t.Errorf("%+v\n  came back as\n%+v", kept, back)
 	}
 }
+
+// SPEC §9.2: an exporter never leaves a file out. A file that cannot be read, and a message whose
+// file is not among those handed in, each refuse the export; a control with the file writes.
+func TestWriteExportZipRefusesRatherThanOmitsAFile(t *testing.T) {
+	in, files := exportFixture(t)
+	open := func(h string) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(files[h])), nil }
+	var b bytes.Buffer
+	if err := WriteExportZip(&b, in, open); err != nil {
+		t.Fatalf("the control: %v", err)
+	}
+	lost := func(string) (io.ReadCloser, error) { return nil, io.ErrUnexpectedEOF }
+	if err := WriteExportZip(&bytes.Buffer{}, in, lost); err == nil {
+		t.Error("a file that cannot be read was left out rather than refusing the export")
+	}
+	without := in
+	without.Media = nil
+	err := WriteExportZip(&bytes.Buffer{}, without, open)
+	if err == nil || !strings.Contains(err.Error(), "it is not among the files to export") {
+		t.Errorf("a message's file left out of the export: %v", err)
+	}
+}
+
+// SPEC §9.2, import step 2: an imported leaf never replaces a pin the host validated itself, and a
+// row the host holds without a leaf takes the row's (export_read kept it only because it validated).
+func TestExportMergeNeverReplacesAHeldPin(t *testing.T) {
+	a, b, c := "sha256:"+strings.Repeat("A", 43), "sha256:"+strings.Repeat("B", 43), "sha256:"+strings.Repeat("C", 43)
+	row := func(root, endpoint string, leaf any) map[string]any {
+		return map[string]any{"root": root, "endpoint": endpoint, "leaf": leaf, "root_cert": nil}
+	}
+	held := []any{row(a, "https://a.example/mcp", "MIIheld"), row(b, "https://b.example/mcp", nil)}
+	rows := []any{row(a, "https://moved.example/mcp", "MIIrow"), row(b, "https://b.example/mcp", "MIIrow"), row(c, "https://c.example/mcp", nil)}
+	write, keep, conflicts, err := exportMerge(held, rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(write) != 2 || write[0].(map[string]any)["root"] != b || write[1].(map[string]any)["root"] != c {
+		t.Errorf("written: %v", write)
+	}
+	if len(keep) != 1 || keep[0] != a {
+		t.Errorf("kept: %v", keep)
+	}
+	if len(conflicts) != 2 {
+		t.Errorf("the held pin's endpoint and leaf are two conflicts: %v", conflicts)
+	}
+}

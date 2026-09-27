@@ -17,7 +17,7 @@ import (
 // writes it here and holds it equal to the crates' and the Wasm package's).
 const (
 	ModuleVersion = "0.2.0"
-	SpecVersion   = "2.1.3"
+	SpecVersion   = "2.2.0"
 )
 
 type apiError struct {
