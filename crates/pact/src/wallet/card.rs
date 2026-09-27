@@ -5,7 +5,6 @@
 use super::files::{empty_record, land_all, open_vault, pick_root, real, record_of, roots, save_vault, sealed_bytes};
 use crate::io::{check_writable, core, fail, instant, now_or, passphrase, Fail, Res};
 use crate::piv::{digest_of, CardSigner};
-use pact_identity::time::parse_rfc3339;
 use pact_identity::util::{b64u, from_b64u};
 use pact_identity::x509;
 use serde_json::{json, Value};
@@ -94,23 +93,6 @@ fn root_from_card(card: &dyn CardSigner, name: &str, now: i64) -> Res<(Vec<u8>, 
     )
     .map_err(|e| Fail(e.why))?;
     Ok((cert, key))
-}
-
-/// SPEC §9's one-live-leaf rule, which the core applies for a software root inside `wallet_issue`
-/// and which the card path must apply for itself — the core cannot, because there is no key to hand
-/// it. `live_leaf_refusal` and the core's rule are held to the same behaviour by a test that runs a
-/// software root and a card-held root through the same vault and expects the same refusal.
-pub(super) fn live_leaf_refusal(mine: &[&Value], endpoint: &str, now: i64, moving: bool) -> Option<String> {
-    let newest = mine.iter().max_by_key(|l| l["not_before"].as_str().and_then(|t| parse_rfc3339(t).ok()).unwrap_or(0))?;
-    let live = newest["not_after"].as_str().and_then(|t| parse_rfc3339(t).ok()).is_some_and(|t| t > now);
-    let elsewhere = newest["endpoint"].as_str() != Some(endpoint);
-    if live && elsewhere && !moving {
-        return Some(format!(
-            "a leaf is live for {}: a second endpoint is a move, not a second home",
-            newest["endpoint"].as_str().unwrap_or("?")
-        ));
-    }
-    None
 }
 
 /// The key this identity *is*: read out of the root certificate the vault holds, which is the
@@ -411,38 +393,6 @@ mod card_tests {
         assert_eq!(card_holder(&root).and_then(|h| h["mode"].as_str()), Some("generated"));
         // And the thing it does keep is the certificate, which is public.
         assert!(root["cert"].as_str().is_some());
-    }
-
-    #[test]
-    fn one_live_leaf_is_refused_the_same_way_on_both_paths() {
-        // The core applies this rule for a software root inside `wallet_issue`; the card path
-        // applies it in `live_leaf_refusal`, because there is no key to hand the core. The two must
-        // not drift, so here they are asked the same question about the same ledger.
-        let key = PrivateKey::generate(Alg::P256).expect("a key");
-        let cert = x509::build_root("Alina Rao", &key, NOW, &x509::serial_of("both-paths")).expect("a root");
-        let fp = key.public().fingerprint();
-        let software =
-            json!({ "fingerprint": fp, "cn": "Alina Rao", "pkcs8": b64u(&key.to_pkcs8()), "cert": b64u(&cert), "created": instant(NOW) });
-        let first = core(
-            "wallet_issue",
-            json!({ "vault_plaintext": { "v": 2, "roots": [software.clone()] }, "record_plaintext": { "v": 2, "ledger": [] }, "root_fingerprint": fp, "csr": b64u(&a_request(ENDPOINT)), "now": instant(NOW), "valid_days": 365 }),
-        )
-        .expect("a first leaf");
-        let ledger = vec![first["ledger_entry"].clone()];
-        let mine: Vec<&Value> = ledger.iter().collect();
-
-        let elsewhere = "https://agent.alina.example/second/mcp";
-        let core_says = core(
-            "wallet_issue",
-            json!({ "vault_plaintext": { "v": 2, "roots": [software] }, "record_plaintext": { "v": 2, "ledger": ledger.clone() }, "root_fingerprint": fp, "csr": b64u(&a_request(elsewhere)), "now": instant(NOW + 10), "valid_days": 365 }),
-        )
-        .unwrap_err();
-        let cli_says = live_leaf_refusal(&mine, elsewhere, NOW + 10, false).expect("the card path refuses too");
-        assert!(core_says.0.contains(&cli_says), "the same words on both paths:\n  core: {}\n  card: {cli_says}", core_says.0);
-        // And a move says so on both.
-        assert!(live_leaf_refusal(&mine, elsewhere, NOW + 10, true).is_none(), "--move allows it, as the core does");
-        // A renewal at the same endpoint is never a second home.
-        assert!(live_leaf_refusal(&mine, ENDPOINT, NOW + 10, false).is_none());
     }
 
     /// A card whose certificate names one key and whose slot holds another. Nothing it signs may

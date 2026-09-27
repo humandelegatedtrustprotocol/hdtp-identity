@@ -12,6 +12,7 @@ mod certificates;
 mod csr;
 mod envelopes;
 mod keys;
+mod ledger;
 mod vault;
 
 /// The version of `pact-protocol/SPEC.md` this core implements.
@@ -241,6 +242,8 @@ fn dispatch(name: &str, a: &Value) -> Result<Value> {
         "vault_seal" => vault::vault_seal(a)?,
         "vault_open" => vault::vault_open(a)?,
         "wallet_issue" => vault::wallet_issue(a)?,
+        // §6.1 ledger
+        "ledger_check" => ledger::ledger_check(a)?,
         "version" => json!({ "crate": env!("CARGO_PKG_VERSION"), "spec": SPEC_VERSION }),
         other => return err("unsupported", format!("no function named {other}")),
     })
