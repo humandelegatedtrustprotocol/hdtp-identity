@@ -30,8 +30,13 @@ pub(crate) fn stranger(doc: &Map<String, Value>, allowed: &[&str]) -> Option<Str
     extra.first().map(|k| k.to_string())
 }
 
+/// `sha256:` and 43 base64url characters: a root fingerprint as SPEC §2 writes one.
+pub fn is_fingerprint(s: &str) -> bool {
+    s.strip_prefix("sha256:").is_some_and(|h| h.len() == 43 && h.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_'))
+}
+
 /// Every entry of a ledger read as CONTRACT §6's `LedgerEntry`: a list, each entry an object with
-/// the required members as strings, the instants parsing, `origin` a string if present, and nothing
+/// the required members as strings, the root a fingerprint, the endpoint not empty, the instants parsing, `origin` a string if present, and nothing
 /// else. The first that does not read is named by its index and member.
 pub fn read(ledger: &Value) -> Result<()> {
     let Some(entries) = ledger.as_array() else { return err("bad_request", "the record's ledger is a list") };
@@ -40,7 +45,14 @@ pub fn read(ledger: &Value) -> Result<()> {
         let unread = |m: &str| err("bad_request", format!("the record's ledger entry {i} does not read: {m}"));
         for m in ENTRY_REQUIRED {
             let Some(text) = o.get(*m).and_then(|v| v.as_str()) else { return unread(m) };
-            if ENTRY_INSTANTS.contains(m) && parse_rfc3339(text).is_err() {
+            // The root is a fingerprint and the endpoint is not empty (contract: LedgerEntry), so no
+            // entry can name nobody and still be read.
+            let wrong = match *m {
+                "root" => !is_fingerprint(text),
+                "endpoint" => text.is_empty(),
+                _ => ENTRY_INSTANTS.contains(m) && parse_rfc3339(text).is_err(),
+            };
+            if wrong {
                 return unread(m);
             }
         }
@@ -241,6 +253,13 @@ mod tests {
         let ledger = json!([entry(ROOT, A, NOW - day, NOW + 300 * day), bad]);
         assert_eq!(check(Some(&ledger), ROOT, A, NOW, false).unwrap_err().why, "the record's ledger entry 1 does not read: not_before");
         assert_eq!(check(Some(&json!({})), ROOT, A, NOW, false).unwrap_err().why, "the record's ledger is a list");
+        // A root that is no fingerprint, and an empty endpoint, name nobody: refused, not read.
+        for (m, v) in [("root", ""), ("root", "alina"), ("endpoint", "")] {
+            let mut e = entry(OTHER, B, NOW - day, NOW + 300 * day);
+            e[m] = json!(v);
+            let why = check(Some(&json!([e])), ROOT, A, NOW, false).unwrap_err().why;
+            assert_eq!(why, format!("the record's ledger entry 0 does not read: {m}"), "{m} = {v:?}");
+        }
         assert_eq!(
             check(Some(&json!([])), ROOT, "http://agent.alina.example/mcp", NOW, false).unwrap_err().why,
             "endpoint is not an https URL in normal form"
