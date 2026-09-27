@@ -10,6 +10,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+## 0.3.2 — 2026-09-27
+
 - **Fixed: the export's readers held many times what they were handed.** In 0.3.1 `export_read` built
   every row as a tree of JSON values, beside two copies of each cell, before it wrote its answer. The
   C2 builder measured it through the Wasm core: the linear memory grew about 2.2 KB per row of
