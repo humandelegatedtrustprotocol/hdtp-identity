@@ -8,7 +8,7 @@ One library, several homes: a Rust core (`crates/pact-identity`) compiled to Web
 browser, Cloudflare Workers and Node (`crates/pact-identity-wasm`, loaders in `js/`), compiled
 natively for the `pact` CLI (`crates/pact`), and an independent Go port (`go/`) that the vectors tie
 to the first. This file is the boundary all of them present: **bytes in, JSON out**, no state, the
-same names, the same shapes. The specification is `pact-protocol/SPEC.md` (2.2.2) and, where
+same names, the same shapes. The specification is `pact-protocol/SPEC.md` (2.2.3) and, where
 the spec leaves a byte to the implementer, `pact-protocol/vectors/lib/*.mjs` — the seed library —
 which every port must match byte for byte on the vectors in
 `pact-protocol/vectors/pact-2.0-vectors.json` and in SPEC.md Appendix B.
