@@ -264,7 +264,8 @@ async function rpc(endpoint, message, fetchImpl, session) {
   if (session) headers['mcp-session-id'] = session;
   // A hung receiver hung the whole battery; the Rust driver has had a 20s global timeout all along.
   const res = await fetchImpl(endpoint, { method: 'POST', headers, body: JSON.stringify(message), signal: AbortSignal.timeout(20_000) });
-  return { status: res.status, text: await res.text(), session: res.headers.get('mcp-session-id') };
+  const wait = Number.parseInt(res.headers.get('retry-after') ?? '', 10);
+  return { status: res.status, text: await res.text(), session: res.headers.get('mcp-session-id'), retryAfter: Number.isInteger(wait) && wait >= 0 ? wait : null };
 }
 
 /**
@@ -285,18 +286,61 @@ export async function initialize(endpoint, fetchImpl = fetch) {
 export async function post(endpoint, envelope, fetchImpl = fetch, session = null) {
   const res = await rpc(endpoint, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'sealed_call', arguments: envelope } }, fetchImpl, session);
   const code = answerCode(res.text);
-  return { status: res.status, text: res.text, code: code.startsWith('unknown:not-json') && res.status >= 400 ? `http_${res.status}` : code };
+  return {
+    status: res.status, text: res.text, code: code.startsWith('unknown:not-json') && res.status >= 400 ? `http_${res.status}` : code,
+    retryAfter: retryAfterOf(res.text) ?? res.retryAfter,
+  };
 }
 
-/** An answer that is no PACT answer at all: the scenario never reached the layer it tests. */
-const unreached = (code) => code.startsWith('http_') || code.startsWith('unknown');
+// ── rate limits ──────────────────────────────────────────────────────────────────────────────────
+// A target over a budget answers `rate_limited` (SPEC §5, with `retry_after` in seconds) or, at an
+// edge, HTTP 429. Both refuse the ATTEMPT before the target has judged the attack, so neither is a
+// verdict: a rate-limited post is paused as asked and posted again up to a bound, and one still
+// rate-limited is UNREACHED. The same constants as crates/pact/src/vectors/intrude.rs, held equal by
+// js/live.test.mjs.
+export const RATE_RETRIES = 3;
+export const RATE_PAUSE_MAX = 60;
+export const RATE_PAUSE_DEFAULT = 10;
+
+export const isRateLimited = (code) => code === 'rate_limited' || code === 'http_429';
+
+/** `retry_after`, in whole seconds, wherever an answer carries it beside its code. */
+export function retryAfterOf(text) {
+  const { body } = rpcBody(text);
+  if (!body) return null;
+  const places = [body.error?.data?.retry_after, body.error?.retry_after, body.result?.retry_after];
+  for (const item of body.result?.content ?? []) {
+    if (typeof item?.text !== 'string') continue;
+    try { const r = JSON.parse(item.text); places.push(r?.retry_after, r?.error?.retry_after); } catch { /* not JSON */ }
+  }
+  return places.find((p) => Number.isInteger(p) && p >= 0) ?? null;
+}
+
+/** Posts until the answer is not a rate limit, pausing as the target asks; the last answer is returned. */
+export async function throughRateLimits(postOnce, pause, log = () => {}) {
+  let answer = await postOnce();
+  for (let attempt = 1; attempt <= RATE_RETRIES && isRateLimited(answer.code); attempt++) {
+    const wait = answer.retryAfter ?? RATE_PAUSE_DEFAULT;
+    if (wait > RATE_PAUSE_MAX) { log(`  ${''.padEnd(10)} rate-limited for ${wait} s, over the ${RATE_PAUSE_MAX} s this run waits`); break; }
+    log(`  ${''.padEnd(10)} rate-limited: pausing ${wait} s as asked, then posting again (${attempt} of ${RATE_RETRIES})`);
+    await pause(wait);
+    answer = await postOnce();
+  }
+  return answer;
+}
+
+/** An answer that is no PACT answer at all, or a refusal of the attempt: the scenario never reached the layer it tests. */
+const unreached = (got) => got.split(' then ').some((c) => c.startsWith('http_') || c.startsWith('unknown') || isRateLimited(c));
+
+/** The verdict on one scenario's answer, as the Rust driver's `verdict`. */
+export const verdictOf = (got, expect, control) => (got === expect ? 'blocked' : unreached(got) ? 'UNREACHED' : control ? 'CONTROL REFUSED' : 'REPRODUCES');
 
 /**
  * `endpoint` is what gets DIALLED. It is usually the address in the target's leaf, and for a node
  * on your own machine it is not (the leaf names the public address; you dial 127.0.0.1) — so this
  * dials what it was given, as `pact vectors intrude --against` does, and seals to the card.
  */
-export async function runLive({ endpoint, card = null, fetchImpl = fetch, now = Date.now(), log = console.log }) {
+export async function runLive({ endpoint, card = null, fetchImpl = fetch, now = Date.now(), log = console.log, pause = (s) => new Promise((r) => setTimeout(r, s * 1000)) }) {
   const dial = endpoint.replace(/\/+$/, '');
   const target = await fetchTargetLeaf(dial, fetchImpl, card);
   log(`target: ${target.endpoint} (root ${target.root})${dial === target.endpoint ? '' : `, dialled at ${dial}`}`);
@@ -304,13 +348,14 @@ export async function runLive({ endpoint, card = null, fetchImpl = fetch, now = 
   if (session) log(`session: ${session}`);
   const results = [];
   for (const s of scenarios({ targetLeaf: target.leaf, now })) {
-    const first = await post(dial, s.envelope, fetchImpl, session);
+    const postOnce = () => throughRateLimits(() => post(dial, s.envelope, fetchImpl, session), pause, log);
+    const first = await postOnce();
     let got = first.code;
-    if (s.twice) { const second = await post(dial, s.envelope, fetchImpl, session); got = second.code === first.code ? first.code : `${first.code} then ${second.code}`; }
+    if (s.twice) { const second = await postOnce(); got = second.code === first.code ? first.code : `${first.code} then ${second.code}`; }
     // A refused CONTROL is the opposite of an intrusion: the one call that must get through was
     // blocked, which is what a receiver refusing everything does. It was scored `REPRODUCES` —
     // "something got in" — here, after the Rust driver had been given its own verdict for it.
-    let verdict = got === s.expect ? 'blocked' : unreached(got) ? 'UNREACHED' : s.expect === 'sealed' ? 'CONTROL REFUSED' : 'REPRODUCES';
+    let verdict = verdictOf(got, s.expect, s.expect === 'sealed');
     // …and an answer that LOOKS sealed is opened, with the key this driver has held all along. Only
     // the expected `sealed` is worth opening: a refusal and an unreached run have said what they are.
     let unopened = null;
@@ -326,9 +371,10 @@ export async function runLive({ endpoint, card = null, fetchImpl = fetch, now = 
   const unreachedCount = results.filter((r) => r.verdict === 'UNREACHED').length;
   const controlRefused = results.filter((r) => r.verdict === 'CONTROL REFUSED').length;
   const controlUnopened = results.filter((r) => r.verdict === 'CONTROL UNOPENED').length;
+  const limited = results.filter((r) => r.verdict === 'UNREACHED' && r.got.split(' then ').some(isRateLimited)).length;
   const total = seedScenarioCount();
-  log(`\n${results.length} scenarios against ${target.endpoint}: ${results.length - reproduces - unreachedCount - controlRefused - controlUnopened} blocked, ${reproduces} reproduce, ${unreachedCount} never reached a PACT answer${controlRefused ? ', and the CONTROL was refused: this receiver refuses a legitimate call too' : ''}${controlUnopened ? ", and the CONTROL's answer looked sealed and did not open: nothing here shows a call can get through" : ''}; ${Math.max(0, total - results.length)} of the seed's ${total} were not run here`);
-  return { results, reproduces, unreached: unreachedCount, controlRefused, controlUnopened, skipped: total - results.length, seedScenarios: total };
+  log(`\n${results.length} scenarios against ${target.endpoint}: ${results.length - reproduces - unreachedCount - controlRefused - controlUnopened} blocked, ${reproduces} reproduce, ${unreachedCount} never reached a PACT answer${limited ? ` (${limited} of them rate-limited: the target refused the attempt before judging the attack, so nothing is known of it; wait out its budget and run again)` : ''}${controlRefused ? ', and the CONTROL was refused: this receiver refuses a legitimate call too' : ''}${controlUnopened ? ", and the CONTROL's answer looked sealed and did not open: nothing here shows a call can get through" : ''}; ${Math.max(0, total - results.length)} of the seed's ${total} were not run here`);
+  return { results, reproduces, unreached: unreachedCount, rateLimited: limited, controlRefused, controlUnopened, skipped: total - results.length, seedScenarios: total };
 }
 
 const readCard = (file) => (file ? readFileSync(file, 'utf8') : null);

@@ -4,7 +4,7 @@ One native binary, built from the same core as the Wasm module (`crates/pact-ide
 self-hoster needs nothing installed beside it. Two halves:
 
 - **The implementer's tools.** `card show|check`, `chain check`, `cert show`, `csr new|check`,
-  `key new`, `vectors gen|check|intrude`. Every verdict is the core's; the terminal formats it.
+  `key new`, `vectors gen|check|corpus|intrude`. Every verdict is the core's; the terminal formats it.
 - **The wallet.** `id create|issue|renew|ledger|show|backup|restore`, `contacts export|import`.
   An identity is two files under one passphrase (SPEC §9): the **vault**, `<name>.pact-vault.json`,
   the root and nothing else, written when the identity is made and again only when a card takes
@@ -39,7 +39,8 @@ Commands:
   cert      One certificate: what it says and whether it is in the profile (§14.1)
   csr       Certificate signing requests: a host makes one, a wallet checks one (§9)
   key       Leaf keys for a host
-  vectors   Appendix B: regenerate, prove, and aim the intrusion scenarios at a live endpoint
+  vectors   Appendix B: regenerate, prove, write the export corpus for an owner, and aim the
+            intrusion scenarios at a live endpoint
   id        The wallet: an identity is a root in a vault, and this is where leaves come from
   contacts  The wallet's contact book, which outlives any host
 ```
@@ -74,7 +75,17 @@ parse). `pact vectors intrude --against https://host/slug` sends the black-box s
 endpoint can be judged on by its answer code alone — a stranger in the small form, a replay, a
 forged signature, an unknown `kid`, a header member the version does not list, the wrong suite,
 an expired leaf, a chain of one, a sealed `tools/list` from a stranger, an envelope an hour old —
-and prints blocked / REPRODUCES per scenario. It writes nothing on the target.
+and prints a verdict per scenario: blocked, REPRODUCES, UNREACHED (no PACT answer), CONTROL
+REFUSED or CONTROL UNOPENED. A `rate_limited` answer, or HTTP 429, refuses the attempt before the
+target judges the attack. The post is paused for the answer's `retry_after` (10 s when it names
+none, never more than 60 s) and posted again, at most three times. One still rate-limited is
+UNREACHED, and the run fails saying so. It writes nothing on the target.
+
+`pact vectors corpus --owner <root> --out <dir>` writes the export corpus (`go/exportcorpus`,
+embedded in the binary) for another owner root. Every file keeps its one defect, and `cases.json`
+names the same refusal. The committed corpus names one fixed owner, so a host whose identities
+cannot hold that root refuses each hostile file at the owner check, before the check the file
+targets; this corpus reaches them all. A root the corpus already gives someone else is refused.
 
 ## A root on a smartcard
 

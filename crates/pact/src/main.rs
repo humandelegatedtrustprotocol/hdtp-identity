@@ -200,6 +200,17 @@ enum VectorsCmd {
         #[arg(long)]
         file: Option<String>,
     },
+    /// Write the export corpus (go/exportcorpus) for another owner root: every file keeps its one
+    /// defect and cases.json its refusal, so a host that holds that root can reach every check
+    Corpus {
+        /// The owner's root fingerprint, sha256:<43 base64url>: an identity the host under test holds
+        #[arg(long)]
+        owner: String,
+        /// The directory to write cases.json and the zips into (created if missing; nothing in it is
+        /// written over)
+        #[arg(long)]
+        out: String,
+    },
     /// Aim the black-box intrusion scenarios at a live endpoint and judge by the answers
     Intrude {
         /// The endpoint, https://host/slug
@@ -381,6 +392,7 @@ fn run(cli: Cli) -> Res<i32> {
         Cmd::Vectors { cmd } => match cmd {
             VectorsCmd::Gen { out } => vectors::gen(out.as_deref()),
             VectorsCmd::Check { spec, file } => vectors::check(spec.as_deref(), file.as_deref()),
+            VectorsCmd::Corpus { owner, out } => vectors::corpus(&owner, &out),
             VectorsCmd::Intrude { against, card, allow_insecure, now } => {
                 vectors::intrude(&against, card.as_deref(), allow_insecure, now.as_deref())
             }
@@ -494,6 +506,7 @@ mod tests {
             ("io.rs", include_str!("io.rs")),
             ("vectors.rs", include_str!("vectors.rs")),
             ("vectors/check.rs", include_str!("vectors/check.rs")),
+            ("vectors/corpus.rs", include_str!("vectors/corpus.rs")),
             ("vectors/intrude.rs", include_str!("vectors/intrude.rs")),
             ("implementer.rs", include_str!("implementer.rs")),
             ("README.md", include_str!("../README.md")),
