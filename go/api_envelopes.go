@@ -66,6 +66,7 @@ func callHPKEOpen(args json.RawMessage) json.RawMessage {
 	var a struct {
 		Suite          *string `json:"suite"`
 		RecipientPKCS8 B64     `json:"recipient_pkcs8"`
+		RecipientSPKI  B64     `json:"recipient_spki"`
 		Info           string  `json:"info"`
 		AAD            B64     `json:"aad"`
 		Enc            B64     `json:"enc"`
@@ -85,7 +86,11 @@ func callHPKEOpen(args json.RawMessage) json.RawMessage {
 	if err2 != nil {
 		return failErr(codeFor(err2, "parse"), err2)
 	}
-	pt, err := Open(suite, priv, []byte(a.Info), a.AAD, a.Enc, a.Ct)
+	pub, err2 := pubIn(a.RecipientSPKI, "recipient_spki")
+	if err2 != nil {
+		return failErr(codeFor(err2, "parse"), err2)
+	}
+	pt, err := Open(suite, priv, pub, []byte(a.Info), a.AAD, a.Enc, a.Ct)
 	if err != nil {
 		return failErr("envelope_invalid", err)
 	}
@@ -141,6 +146,7 @@ func callOpenResult(args json.RawMessage) json.RawMessage {
 	var a struct {
 		Envelope         *Envelope `json:"envelope"`
 		MyPKCS8          B64       `json:"my_pkcs8"`
+		MySPKI           B64       `json:"my_spki"`
 		MsgID            string    `json:"msg_id"`
 		Now              *string   `json:"now"`
 		Pins             []Pin     `json:"pins"`
@@ -157,11 +163,15 @@ func callOpenResult(args json.RawMessage) json.RawMessage {
 	if err != nil {
 		return failErr(codeFor(err, "parse"), err)
 	}
+	me, err := pubIn(a.MySPKI, "my_spki")
+	if err != nil {
+		return failErr(codeFor(err, "parse"), err)
+	}
 	now, err := timeIn(a.Now, "now")
 	if err != nil {
 		return failErr(codeFor(err, "parse"), err)
 	}
-	opened, err := OpenResult(*a.Envelope, OpenOpts{Recipient: priv, MsgID: a.MsgID, Now: now, Pins: a.Pins, ExpectedRoot: a.ExpectedRoot, ExpectedEndpoint: a.ExpectedEndpoint})
+	opened, err := OpenResult(*a.Envelope, OpenOpts{Recipient: priv, RecipientPublic: me, MsgID: a.MsgID, Now: now, Pins: a.Pins, ExpectedRoot: a.ExpectedRoot, ExpectedEndpoint: a.ExpectedEndpoint})
 	if err != nil {
 		return failErr(codeFor(err, "envelope_invalid"), err)
 	}

@@ -158,8 +158,12 @@ pub fn fingerprint_of_id(id: &[u8]) -> String {
     format!("sha256:{}", b64u(id))
 }
 
+/// A private key as it was read. An Ed25519 key is its 32-byte seed and nothing derived from it:
+/// `from_pkcs8` used to build an `ed25519_dalek::SigningKey`, which derives the verifying key at
+/// once (11 us a parse, measured 2026-09-28), and the open path, which needs only the X25519
+/// scalar, never used it. Signing and `public()` derive what they need when they are asked.
 pub enum PrivateKey {
-    Ed25519(ed25519_dalek::SigningKey),
+    Ed25519(Zeroizing<[u8; 32]>),
     P256(p256::SecretKey),
 }
 
@@ -185,7 +189,7 @@ impl PrivateKey {
     /// The vectors' derivation: Ed25519 uses the seed as its secret; P-256 takes the seed mod n, zero becoming one.
     pub fn from_seed(alg: Alg, seed: &[u8; 32]) -> Result<PrivateKey> {
         match alg {
-            Alg::Ed25519 => Ok(PrivateKey::Ed25519(ed25519_dalek::SigningKey::from_bytes(seed))),
+            Alg::Ed25519 => Ok(PrivateKey::Ed25519(Zeroizing::new(*seed))),
             Alg::P256 => {
                 use p256::elliptic_curve::ops::Reduce;
                 use p256::elliptic_curve::Field;
@@ -220,7 +224,7 @@ impl PrivateKey {
                     return err("parse", "Ed25519 private key shape");
                 }
                 let seed: [u8; 32] = inner.content.try_into().map_err(|_| Error::new("parse", "Ed25519 seed is not 32 bytes"))?;
-                Ok(PrivateKey::Ed25519(ed25519_dalek::SigningKey::from_bytes(&seed)))
+                Ok(PrivateKey::Ed25519(Zeroizing::new(seed)))
             }
             OID_EC_PUBLIC_KEY
                 if alg.len() == 2 && alg[1].tag == 0x06 && der::oid_minimal(&alg[1]) && read_oid(&alg[1]) == OID_PRIME256V1 =>
@@ -245,7 +249,7 @@ impl PrivateKey {
     pub fn to_pkcs8(&self) -> Zeroizing<Vec<u8>> {
         match self {
             PrivateKey::Ed25519(k) => {
-                Zeroizing::new(der::seq(&[der::int(0), der::seq(&[der::oid(OID_ED25519)]), der::octet(&der::octet(k.as_bytes()))]))
+                Zeroizing::new(der::seq(&[der::int(0), der::seq(&[der::oid(OID_ED25519)]), der::octet(&der::octet(&k[..]))]))
             }
             PrivateKey::P256(k) => {
                 let d = Zeroizing::new(k.to_bytes());
@@ -267,8 +271,8 @@ impl PrivateKey {
 
     pub fn public(&self) -> PublicKey {
         match self {
-            PrivateKey::Ed25519(k) => {
-                let vk = k.verifying_key();
+            PrivateKey::Ed25519(seed) => {
+                let vk = ed25519_dalek::SigningKey::from_bytes(seed).verifying_key();
                 PublicKey { spki: spki_of(der::seq(&[der::oid(OID_ED25519)]), vk.as_bytes()), inner: Public::Ed25519(vk) }
             }
             PrivateKey::P256(k) => {
@@ -285,7 +289,7 @@ impl PrivateKey {
     /// §13.1: Ed25519 pure, or ECDSA P-256/SHA-256 in DER (RFC 6979 deterministic), by the signer's own algorithm.
     pub fn sign(&self, data: &[u8]) -> Vec<u8> {
         match self {
-            PrivateKey::Ed25519(k) => k.sign(data).to_bytes().to_vec(),
+            PrivateKey::Ed25519(seed) => ed25519_dalek::SigningKey::from_bytes(seed).sign(data).to_bytes().to_vec(),
             PrivateKey::P256(k) => {
                 let sk = p256::ecdsa::SigningKey::from(k);
                 let sig: p256::ecdsa::Signature = sk.sign(data);
@@ -300,8 +304,8 @@ impl PrivateKey {
     /// RFC 8032 §5.1.5: the clamped low half of SHA-512(seed) is the X25519 scalar.
     pub fn x25519(&self) -> Result<x25519_dalek::StaticSecret> {
         match self {
-            PrivateKey::Ed25519(k) => {
-                let h = Zeroizing::new(Sha512::digest(k.as_bytes()));
+            PrivateKey::Ed25519(seed) => {
+                let h = Zeroizing::new(Sha512::digest(&seed[..]));
                 let mut a = Zeroizing::new([0u8; 32]);
                 a.copy_from_slice(&h[..32]);
                 a[0] &= 248;

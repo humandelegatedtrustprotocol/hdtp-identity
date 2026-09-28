@@ -219,7 +219,8 @@ scenario('certificate', 'a root whose notBefore is years away is not a refusal',
 // The REASON, not just the fact. This returned 'closed' for every exception — and 'closed' is what
 // the rekey scenario below expects, so a `bad_request` for a malformed argument, a suite typo, or a
 // port that had stopped dispatching `hpke_open` all scored as blocked while nothing was measured.
-// The `pub` parameter was dead too: `defender.open` ignores its third argument.
+// The third argument is the recipient's public key, which `hpke_open` takes as `recipient_spki`
+// (it was ignored until 2026-09-28, when the core stopped deriving it from the private key).
 const openTo = (h, e) => {
   try {
     open('PACT-SEAL-X25519', h.sign.priv, h.sign.pub, Buffer.from('PACT-SEAL-v2'), fromB64url(e.protected), fromB64url(e.enc), fromB64url(e.ct));
