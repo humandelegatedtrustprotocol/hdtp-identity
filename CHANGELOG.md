@@ -1,7 +1,7 @@
 # Changelog
 
 One version for everything in this repository: the Rust crates (`pact-identity`,
-`pact-identity-wasm`, the `pact` CLI), the Go module `github.com/pact-cloud/pact-identity/go` and the
+`pact-identity-wasm`, `pact-limits`, the `pact` CLI), the Go module `github.com/pact-cloud/pact-identity/go` and the
 Wasm package. A release is tagged `vX.Y.Z` and `go/vX.Y.Z` on one commit (`make release`), and its
 GitHub release carries the Wasm package, the CLI binaries, `manifest.json` and `SHA256SUMS`.
 Versions follow semver; before 1.0.0 a minor version may change the contract (`CONTRACT.md`).
@@ -9,6 +9,15 @@ Versions follow semver; before 1.0.0 a minor version may change the contract (`C
 Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
+
+- `pact-limits`, a new crate: SPEC §12's per-caller call budgets as one pure decision over a state
+  store the host implements (layer 2 of pact-gateway `docs/release/two-layer-limits-2026-09-28.md`).
+  Token buckets with the cloud's keys, the rule set as data (no default in the library), and the
+  cloud's `RateLimiter.take` arithmetic operation for operation. Two rules the cloud has no code for
+  yet: the guest total charged before the open, and the cap on waiting requests.
+- `js/cases/limits-vectors.json`: 3840 steps of the cloud's TypeScript (`limits.ts`, sha256 in the
+  file), run over SQLite by `js/limits-vectors.mjs` and replayed by the crate, every row compared bit
+  for bit.
 
 ## 0.3.6 — 2026-09-28
 
