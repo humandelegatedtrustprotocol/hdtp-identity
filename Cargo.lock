@@ -886,6 +886,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pact-limits"
+version = "0.3.6"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "password-hash"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
