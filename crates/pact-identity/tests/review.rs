@@ -315,3 +315,31 @@ fn keys_still_generate_for_both_algorithms() {
         assert_eq!(k.alg(), alg);
     }
 }
+
+// ── 0.4.1: an open with no public key is refused by name, never a panic ──
+// The Rust API cannot be handed a missing key (`&PublicKey`); the boundary is where one can be
+// missing, and both functions that take it name the member. The Go port's library API, which can
+// be handed nil, is held in go/unit_test.go.
+#[test]
+fn an_open_with_no_public_key_is_refused_by_name() {
+    let k = key("ed25519");
+    let sealed = call(
+        "hpke_seal",
+        json!({ "suite": "PACT-SEAL-X25519", "recipient_spki": k["spki"], "info": b64u(b"PACT-SEAL-v2"), "aad": b64u(b"h"), "plaintext": b64u(b"hi") }),
+    );
+    let open = |spki: Option<Value>| {
+        let mut a = json!({ "suite": "PACT-SEAL-X25519", "recipient_pkcs8": k["pkcs8"], "info": b64u(b"PACT-SEAL-v2"), "aad": b64u(b"h"), "enc": sealed["enc"], "ct": sealed["ct"] });
+        if let Some(v) = spki {
+            a["recipient_spki"] = v;
+        }
+        call("hpke_open", a)
+    };
+    assert_eq!(open(None), json!({ "error": "bad_request", "why": "recipient_spki is required" }), "absent");
+    assert_eq!(open(Some(Value::Null)), json!({ "error": "bad_request", "why": "recipient_spki is required" }), "null");
+    assert_eq!(open(Some(k["spki"].clone()))["plaintext"], b64u(b"hi"), "the control");
+    let r = call(
+        "open_result",
+        json!({ "envelope": { "protected": "", "enc": "", "ct": "", "sig": "" }, "my_pkcs8": k["pkcs8"], "msg_id": "m", "now": "2026-09-13T12:00:00Z" }),
+    );
+    assert_eq!(r, json!({ "error": "bad_request", "why": "my_spki is required" }));
+}

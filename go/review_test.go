@@ -29,11 +29,11 @@ func reviewIdentity(t *testing.T, alg, endpoint string) reviewPair {
 		t.Fatal(err)
 	}
 	leafKey, _ := GenerateKey(alg)
-	leaf, err := BuildLeaf(LeafOpts{CN: "Alina Rao", RootCN: "Alina Rao", RootKey: rootKey, HostPub: leafKey.Public, Endpoint: endpoint, NotBefore: mustTime(t, "2026-09-01T00:00:00Z"), NotAfter: mustTime(t, "2027-09-01T00:00:00Z")})
+	leaf, err := BuildLeaf(LeafOpts{CN: "Alina Rao", RootCN: "Alina Rao", RootKey: rootKey, HostPub: leafKey.Public(), Endpoint: endpoint, NotBefore: mustTime(t, "2026-09-01T00:00:00Z"), NotAfter: mustTime(t, "2027-09-01T00:00:00Z")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return reviewPair{rootKey: rootKey, leafKey: leafKey, root: root, leaf: leaf, rootFP: Fingerprint(rootKey.Public.SPKI)}
+	return reviewPair{rootKey: rootKey, leafKey: leafKey, root: root, leaf: leaf, rootFP: Fingerprint(rootKey.Public().SPKI)}
 }
 
 // withField rebuilds a certificate's TBS with one of its eight fields replaced, re-signs it, and
@@ -181,7 +181,7 @@ func TestAddressGuardRefusesEverySpellingOfLoopback(t *testing.T) {
 func TestSmallOrderPointsAndSPKIBits(t *testing.T) {
 	k, _ := GenerateKey("ed25519")
 	sig, _ := SignDetached(k, []byte("data"))
-	if !VerifyDetached(k.Public, []byte("data"), sig) {
+	if !VerifyDetached(k.Public(), []byte("data"), sig) {
 		t.Fatal("a real signature verifies")
 	}
 	identity := make([]byte, 32)
@@ -191,14 +191,14 @@ func TestSmallOrderPointsAndSPKIBits(t *testing.T) {
 		t.Error("a small-order public key verified")
 	}
 	bad := append(append([]byte{}, identity...), sig[32:]...)
-	if VerifyDetached(k.Public, []byte("data"), bad) {
+	if VerifyDetached(k.Public(), []byte("data"), bad) {
 		t.Error("a small-order R verified")
 	}
 	if ed25519PointOK(identity) {
 		t.Error("the identity element is a point of small order")
 	}
 	// The SPKI's BIT STRING unused-bits byte must be zero.
-	spki := append([]byte{}, k.Public.SPKI...)
+	spki := append([]byte{}, k.Public().SPKI...)
 	spki[len(spki)-33] = 1 // the unused-bits byte before the 32 key bytes
 	if _, err := ParseSPKI(spki); err == nil {
 		t.Error("an SPKI with unused bits parsed")
@@ -247,7 +247,7 @@ func TestLifetimeAndCallerSideChecks(t *testing.T) {
 	now := mustTime(t, "2026-09-13T12:00:00Z")
 	ts := now.Unix()
 	seal := func(exp int64, msgID string) *Envelope {
-		env, err := SealRequest(SealOpts{RecipientKey: bharat.leafKey.Public, Sender: alina.leafKey, Form: "chain", SenderChain: [][]byte{alina.leaf, alina.root}, Method: "tools/call", Params: json.RawMessage(`{"name":"send_message","arguments":{"msg_id":"m","text":"hello"}}`), MsgID: msgID, TS: ts, Exp: exp})
+		env, err := SealRequest(SealOpts{RecipientKey: bharat.leafKey.Public(), Sender: alina.leafKey, Form: "chain", SenderChain: [][]byte{alina.leaf, alina.root}, Method: "tools/call", Params: json.RawMessage(`{"name":"send_message","arguments":{"msg_id":"m","text":"hello"}}`), MsgID: msgID, TS: ts, Exp: exp})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -256,7 +256,7 @@ func TestLifetimeAndCallerSideChecks(t *testing.T) {
 	node := NodeState{
 		Endpoint: "https://agent.bharat.example/mcp", AcceptNewHosts: "auto",
 		Chain: []string{B64url(bharat.leaf), B64url(bharat.root)},
-		Keys:  []HeldKey{{Kid: Fingerprint(bharat.leafKey.Public.SPKI), Leaf: B64url(bharat.leaf), PKCS8: B64url(pkcs8Of(t, bharat.leafKey)), Current: true}},
+		Keys:  []HeldKey{{Kid: Fingerprint(bharat.leafKey.Public().SPKI), Leaf: B64url(bharat.leaf), PKCS8: B64url(pkcs8Of(t, bharat.leafKey)), Current: true}},
 		Pins:  []Pin{{Root: alina.rootFP, Endpoint: reviewEndpoint, Leaf: B64url(alina.leaf), State: "active"}},
 	}
 	if d := decided(t, now, *seal(ts+600, "m-1"), node); d.Result["code"] != "ok" || d.Result["tier"] != "contact" {
@@ -271,14 +271,14 @@ func TestLifetimeAndCallerSideChecks(t *testing.T) {
 
 	// A result sealed twenty minutes ago is outside the window even before its exp.
 	sealResult := func(tsAt, exp int64, form string) []byte {
-		args := map[string]any{"recipient_spki": B64url(alina.leafKey.Public.SPKI), "sender_pkcs8": B64url(pkcs8Of(t, bharat.leafKey)), "form": form, "sender_chain": []string{B64url(bharat.leaf), B64url(bharat.root)}, "result": map[string]any{"ok": true}, "msg_id": "m-1", "ts": tsAt, "exp": exp}
+		args := map[string]any{"recipient_spki": B64url(alina.leafKey.Public().SPKI), "sender_pkcs8": B64url(pkcs8Of(t, bharat.leafKey)), "form": form, "sender_chain": []string{B64url(bharat.leaf), B64url(bharat.root)}, "result": map[string]any{"ok": true}, "msg_id": "m-1", "ts": tsAt, "exp": exp}
 		raw, _ := json.Marshal(args)
 		return Call("seal_result", raw)
 	}
 	open := func(env []byte, expectedEndpoint string) map[string]any {
 		var e map[string]any
 		_ = json.Unmarshal(env, &e)
-		args := map[string]any{"envelope": e, "my_pkcs8": B64url(pkcs8Of(t, alina.leafKey)), "my_spki": B64url(alina.leafKey.Public.SPKI), "msg_id": "m-1", "now": "2026-09-13T12:00:00Z",
+		args := map[string]any{"envelope": e, "my_pkcs8": B64url(pkcs8Of(t, alina.leafKey)), "my_spki": B64url(alina.leafKey.Public().SPKI), "msg_id": "m-1", "now": "2026-09-13T12:00:00Z",
 			"pins": []map[string]any{{"root": bharat.rootFP, "endpoint": "https://agent.bharat.example/mcp", "leaf": B64url(bharat.leaf), "state": "active"}}}
 		if expectedEndpoint != "" {
 			args["expected_endpoint"] = expectedEndpoint
@@ -299,7 +299,7 @@ func TestLifetimeAndCallerSideChecks(t *testing.T) {
 	}
 
 	// FollowRenewed: equal notBefore, different bytes, is a conflict and is not followed.
-	twin, err := BuildLeaf(LeafOpts{CN: "Alina Rao", RootCN: "Alina Rao", RootKey: bharat.rootKey, HostPub: bharat.leafKey.Public, Endpoint: "https://agent.bharat.example/mcp", NotBefore: mustTime(t, "2026-09-01T00:00:00Z"), NotAfter: mustTime(t, "2027-09-01T00:00:00Z")})
+	twin, err := BuildLeaf(LeafOpts{CN: "Alina Rao", RootCN: "Alina Rao", RootKey: bharat.rootKey, HostPub: bharat.leafKey.Public(), Endpoint: "https://agent.bharat.example/mcp", NotBefore: mustTime(t, "2026-09-01T00:00:00Z"), NotAfter: mustTime(t, "2027-09-01T00:00:00Z")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +366,7 @@ func TestEveryP256SignatureIsTheLowSTwin(t *testing.T) {
 		if low, isSig := EcdsaIsLowS(sig); !isSig || !low {
 			t.Fatalf("signature %d: low=%v isSig=%v", i, low, isSig)
 		}
-		if !VerifyDetached(priv.Public, []byte{byte(i)}, sig) {
+		if !VerifyDetached(priv.Public(), []byte{byte(i)}, sig) {
 			t.Fatalf("signature %d does not verify", i)
 		}
 	}
@@ -478,7 +478,7 @@ func TestAPendingContactsSealedListingAnswersAtThePendingTier(t *testing.T) {
 	der := func(n string) []byte { return hexBytes(t, v.Certificates[n].DerHex) }
 	rootA, _ := Parse(der("root_a"))
 	// Alina's next host: the same root, a newer leaf, another address (§5.3 under `auto`).
-	moved, err := BuildLeaf(LeafOpts{CN: "Alina Rao", RootCN: "Alina Rao", RootKey: c.rootA, HostPub: c.leafANext.Public, Endpoint: movedEndpoint, NotBefore: mustTime(t, "2026-09-10T00:00:00Z"), NotAfter: mustTime(t, "2027-09-10T00:00:00Z"), Serial: SerialOf("p21/moved")})
+	moved, err := BuildLeaf(LeafOpts{CN: "Alina Rao", RootCN: "Alina Rao", RootKey: c.rootA, HostPub: c.leafANext.Public(), Endpoint: movedEndpoint, NotBefore: mustTime(t, "2026-09-10T00:00:00Z"), NotAfter: mustTime(t, "2027-09-10T00:00:00Z"), Serial: SerialOf("p21/moved")})
 	if err != nil {
 		t.Fatal(err)
 	}

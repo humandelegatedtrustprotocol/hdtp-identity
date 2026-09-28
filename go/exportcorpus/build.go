@@ -258,7 +258,7 @@ func root(label, cn string) (identity, error) {
 	if err != nil {
 		return identity{}, err
 	}
-	return identity{key: k, fp: pact.Fingerprint(k.Public.SPKI), cert: b64u(der)}, nil
+	return identity{key: k, fp: pact.Fingerprint(k.Public().SPKI), cert: b64u(der)}, nil
 }
 
 func leaf(of identity, cn, host, endpoint string) (string, error) {
@@ -266,7 +266,7 @@ func leaf(of identity, cn, host, endpoint string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	der, err := pact.BuildLeaf(pact.LeafOpts{CN: cn, RootCN: cn, RootKey: of.key, HostPub: h.Public, Endpoint: endpoint,
+	der, err := pact.BuildLeaf(pact.LeafOpts{CN: cn, RootCN: cn, RootKey: of.key, HostPub: h.Public(), Endpoint: endpoint,
 		NotBefore: born, NotAfter: dies, Serial: serial("leaf/" + host)})
 	return b64u(der), err
 }

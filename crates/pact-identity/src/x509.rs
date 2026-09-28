@@ -125,8 +125,9 @@ pub fn root_tbs(cn: &str, key: &PublicKey, not_before: i64, serial: &[u8]) -> Re
 }
 
 pub fn build_root(cn: &str, key: &PrivateKey, not_before: i64, serial: &[u8]) -> Result<Vec<u8>> {
-    let u = root_tbs(cn, &key.public(), not_before, serial)?;
-    Ok(assemble(&u.tbs, &u.sig_alg, &key.sign(&u.tbs)))
+    let signer = key.signer();
+    let u = root_tbs(cn, &signer.public(), not_before, serial)?;
+    Ok(assemble(&u.tbs, &u.sig_alg, &signer.sign(&u.tbs)))
 }
 
 /// An extension outside the profile, which only the intrusion suite builds.
