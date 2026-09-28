@@ -1,7 +1,7 @@
 # Changelog
 
 One version for everything in this repository: the Rust crates (`pact-identity`,
-`pact-identity-wasm`, the `pact` CLI), the Go module `github.com/pact-cloud/pact-identity/go` and the
+`pact-identity-wasm`, `pact-limits`, the `pact` CLI), the Go module `github.com/pact-cloud/pact-identity/go` and the
 Wasm package. A release is tagged `vX.Y.Z` and `go/vX.Y.Z` on one commit (`make release`), and its
 GitHub release carries the Wasm package, the CLI binaries, `manifest.json` and `SHA256SUMS`.
 Versions follow semver; before 1.0.0 a minor version may change the contract (`CONTRACT.md`).
@@ -9,6 +9,34 @@ Versions follow semver; before 1.0.0 a minor version may change the contract (`C
 Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
+
+## 0.4.0 — 2026-09-28
+
+- `pact-limits`, a new crate: SPEC §12's per-caller call budgets as one pure decision over a state
+  store the host implements (layer 2 of pact-gateway `docs/release/two-layer-limits-2026-09-28.md`).
+  Token buckets with the cloud's keys, the rule set as data (no default in the library), and the
+  cloud's `RateLimiter.take` arithmetic operation for operation. Two rules the cloud has no code for
+  yet: the guest total charged before the open, and the cap on waiting requests. It is compiled into
+  the core, so into the Wasm; the Go port is `go/limits.go`.
+- Two contract functions (§6.3, section `limits`), in both ports: `limits_rules_check` (whether a
+  rules document can be enforced, and the first reason it cannot) and `limits_decide` (one call:
+  allowed, or refused with `retry_after` and the bucket, and the rows to write).
+- `js/cases/limits-vectors.json`: 3840 steps of the cloud's TypeScript (`limits.ts`, sha256 in the
+  file), run over SQLite by `js/limits-vectors.mjs` and replayed by the crate, the Wasm and the Go
+  port, every row compared bit for bit.
+- **Breaking:** `hpke_open` takes `recipient_spki` and `open_result` takes `my_spki`: the
+  recipient's own public key, as its leaf certificate holds it, in both ports (`hpke::open` and
+  `OpenResultArgs::my_public` in Rust; `Open(id, priv, pub, …)` and `OpenOpts.RecipientPublic` in
+  Go). The open no longer derives it from the private key, which for P-256 was a scalar
+  multiplication on every open. A public key that is not the private key's refuses (`kid is not
+  this key`, or `does not open`), never a plaintext. `decide` takes the key from the held leaf it
+  already parses, so its arguments do not change. No path takes the old arguments.
+- An Ed25519 private key is its seed: reading one no longer derives the public key, which the open
+  never used. Signing and `public()` derive what they need; signatures are byte for byte the same
+  (Appendix B, both ports).
+- serde_json reads floating-point numbers correctly rounded (`float_roundtrip`). Its default parser
+  read `15.029461111111111` one ulp high, so a stored bucket handed to `limits_decide` would have
+  read differently from what the host wrote.
 
 ## 0.3.6 — 2026-09-28
 

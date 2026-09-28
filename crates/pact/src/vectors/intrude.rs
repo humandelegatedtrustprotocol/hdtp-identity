@@ -53,6 +53,7 @@ pub fn control_opened(
     let opened = envelope::open_result(envelope::OpenResultArgs {
         envelope: &wire,
         my_key,
+        my_public: &my_key.public(),
         msg_id,
         now,
         pins: &[],

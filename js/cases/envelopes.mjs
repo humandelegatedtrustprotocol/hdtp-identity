@@ -6,7 +6,7 @@ import { sealDeterministic } from '../../../pact-protocol/vectors/lib/hpke.mjs';
 import { ENDPOINTS } from '../cast.mjs';
 
 export default function envelopes({ add, expect }, f) {
-  const { now, at, ENDPOINT, rootKey, hostKey, rootDer, leafDer, rootPkcs8, hostPkcs8, hostSpki, p256Spki, rsaSpki, rootFp, hostFp } = f;
+  const { now, at, ENDPOINT, rootKey, hostKey, rootDer, leafDer, rootPkcs8, hostPkcs8, rootSpki, hostSpki, p256Spki, rsaSpki, rootFp, hostFp } = f;
   const { request, sealed, sealedNoTool, small, node, pinned, open, chainForm, leafForm, answerTo, follow, olderLeaf } = f;
   const eph = (n) => b64url(new Uint8Array(32).fill(n));
 
@@ -19,7 +19,7 @@ export default function envelopes({ add, expect }, f) {
   add('seal_request with a method nobody has', 'seal_request', { recipient_leaf: leafDer, sender_pkcs8: hostPkcs8, form: 'chain', sender_chain: [leafDer, rootDer], method: 'tools/dance', params: {}, msg_id: 'x', ts: 1, ephemeral_seed: eph(7) });
   add('seal_request with an empty msg_id', 'seal_request', { recipient_leaf: leafDer, sender_pkcs8: hostPkcs8, form: 'chain', sender_chain: [leafDer, rootDer], method: 'tools/call', params: {}, msg_id: '', ts: 1, ephemeral_seed: eph(7) });
   add('seal_request whose exp is a month past its ts', 'seal_request', { recipient_leaf: leafDer, sender_pkcs8: hostPkcs8, form: 'chain', sender_chain: [leafDer, rootDer], method: 'tools/call', params: {}, msg_id: 'x', ts: 1, exp: 1 + 31 * 86400, ephemeral_seed: eph(7) });
-  add('hpke_open of a ciphertext that is not one', 'hpke_open', { suite: 'PACT-SEAL-X25519', recipient_pkcs8: hostPkcs8, info: 'PACT-SEAL-v2', aad: '', enc: b64url(new Uint8Array(32)), ct: b64url(new Uint8Array(32)) });
+  add('hpke_open of a ciphertext that is not one', 'hpke_open', { suite: 'PACT-SEAL-X25519', recipient_pkcs8: hostPkcs8, recipient_spki: hostSpki, info: 'PACT-SEAL-v2', aad: '', enc: b64url(new Uint8Array(32)), ct: b64url(new Uint8Array(32)) });
   add('hpke_seal with a suite nobody has', 'hpke_seal', { suite: 'PACT-SEAL-ROT13', recipient_spki: hostSpki, info: 'x', aad: '', plaintext: '' });
   // `decide`'s refusal lives in `result.code`, not in a top-level `error`, so it too was once counted
   // as proven whole on a success it had never given. This is the one that reaches the contact tier,
@@ -39,7 +39,7 @@ export default function envelopes({ add, expect }, f) {
   // band before the arithmetic, and so answered "outside the time window" here where the other port
   // answers "exp too far from ts": a divergence introduced by the fix for one. Exact arithmetic now.
   add('decide on an envelope whose exp is in the year 71,000', 'decide', { now, envelope: request({ params: { name: 'send_message' }, msgId: 'parity-far', exp: 2 ** 41, ephemeralSeed: Buffer.alloc(32, 6) }), node });
-  add('open_result of a request envelope', 'open_result', { envelope: sealed, my_pkcs8: hostPkcs8, msg_id: 'p-1', now, pins: [] });
+  add('open_result of a request envelope', 'open_result', { envelope: sealed, my_pkcs8: hostPkcs8, my_spki: hostSpki, msg_id: 'p-1', now, pins: [] });
   add('follow_renewed on a chain to another root', 'follow_renewed', { answer: { code: 'certificate_renewed', data: { chain: [leafDer, rootDer] } }, pinned_root: 'sha256:' + 'A'.repeat(43), pinned_leaf: leafDer, dialed: ENDPOINT, now });
   add('follow_renewed on a chain that is not one', 'follow_renewed', { answer: { code: 'certificate_renewed', data: { chain: [] } }, pinned_root: rootFp, pinned_leaf: leafDer, dialed: ENDPOINT, now });
   add('follow_renewed on the same leaf', 'follow_renewed', { answer: { code: 'certificate_renewed', data: { chain: [leafDer, rootDer] } }, pinned_root: rootFp, pinned_leaf: leafDer, dialed: ENDPOINT, now });
@@ -65,12 +65,29 @@ export default function envelopes({ add, expect }, f) {
   add('hpke_seal', 'hpke_seal', hpkeArgs);
   // The seal the case above asks for, made by the seed from the same ephemeral seed.
   const sealedHpke = sealDeterministic('PACT-SEAL-X25519', hostKey.pub, Buffer.from('PACT-SEAL-v2'), Buffer.from([9]), Buffer.from([1, 2, 3]), Buffer.alloc(32, 5));
-  add('hpke_open of what hpke_seal made', 'hpke_open', { suite: 'PACT-SEAL-X25519', recipient_pkcs8: hostPkcs8, info: 'PACT-SEAL-v2', aad: b64url(new Uint8Array([9])), enc: b64url(sealedHpke.enc), ct: b64url(sealedHpke.ct) });
+  add('hpke_open of what hpke_seal made', 'hpke_open', { suite: 'PACT-SEAL-X25519', recipient_pkcs8: hostPkcs8, recipient_spki: hostSpki, info: 'PACT-SEAL-v2', aad: b64url(new Uint8Array([9])), enc: b64url(sealedHpke.enc), ct: b64url(sealedHpke.ct) });
   // A result sealed and opened: the one path a caller reads members other than `ok` from. Port-built:
   // the seed seals requests, not results.
   const resultArgs = { recipient_spki: hostSpki, sender_pkcs8: hostPkcs8, form: 'chain', sender_chain: [leafDer, rootDer], result: { ok: true, items: [1, 2] }, msg_id: 'p-1', ts: at(now), ephemeral_seed: eph(5) };
   add('seal_result of a real result', 'seal_result', resultArgs);
-  add('open_result of what seal_result made', 'open_result', { envelope: f.wasm.call('seal_result', resultArgs), my_pkcs8: hostPkcs8, msg_id: 'p-1', now, pins: [] });
+  add('open_result of what seal_result made', 'open_result', { envelope: f.wasm.call('seal_result', resultArgs), my_pkcs8: hostPkcs8, my_spki: hostSpki, msg_id: 'p-1', now, pins: [] });
+
+  // ── 2026-09-28: the recipient's public key is handed in, never derived from its private key ────
+  // A public key that is not the private key's must refuse, never yield a plaintext.
+  const hpkeOpen = { suite: 'PACT-SEAL-X25519', recipient_pkcs8: hostPkcs8, recipient_spki: hostSpki, info: 'PACT-SEAL-v2', aad: b64url(new Uint8Array([9])), enc: b64url(sealedHpke.enc), ct: b64url(sealedHpke.ct) };
+  add('hpke_open with a public key that is another Ed25519 key', 'hpke_open', { ...hpkeOpen, recipient_spki: rootSpki });
+  expect('hpke_open with a public key that is another Ed25519 key', { error: 'envelope_invalid', why: 'does not open' });
+  add('hpke_open with a public key of the other algorithm', 'hpke_open', { ...hpkeOpen, recipient_spki: p256Spki });
+  expect('hpke_open with a public key of the other algorithm', { error: 'envelope_invalid', why: 'does not open' });
+  add('hpke_open with no public key', 'hpke_open', { ...hpkeOpen, recipient_spki: undefined });
+  expect('hpke_open with no public key', { error: 'bad_request', why: 'recipient_spki is required' });
+  const sealedResult = f.wasm.call('seal_result', resultArgs);
+  add('open_result with a public key that is not this key\'s: the kid says so first', 'open_result', { envelope: sealedResult, my_pkcs8: hostPkcs8, my_spki: rootSpki, msg_id: 'p-1', now, pins: [] });
+  expect('open_result with a public key that is not this key\'s: the kid says so first', { error: 'envelope_invalid', why: 'kid is not this key' });
+  add('open_result with the kid\'s public key and another private key: it does not open', 'open_result', { envelope: sealedResult, my_pkcs8: rootPkcs8, my_spki: hostSpki, msg_id: 'p-1', now, pins: [] });
+  expect('open_result with the kid\'s public key and another private key: it does not open', { error: 'envelope_invalid', why: 'does not open' });
+  add('open_result with no public key', 'open_result', { envelope: sealedResult, my_pkcs8: hostPkcs8, msg_id: 'p-1', now, pins: [] });
+  expect('open_result with no public key', { error: 'bad_request', why: 'my_spki is required' });
 
   // ── 2026-09-21: what the Go port answered differently (review-findings plan, B) ────────────────
   //
@@ -79,9 +96,9 @@ export default function envelopes({ add, expect }, f) {
   const reheader = (e, patch) => ({ ...e, protected: b64url(Buffer.from(JSON.stringify(Object.fromEntries(Object.entries({ ...JSON.parse(Buffer.from(e.protected, 'base64url').toString()), ...patch }).sort(([a], [b]) => (a < b ? -1 : 1)))))) });
 
   // B1 — OpenResult: Rust's words, and Rust's order.
-  add('open_result with a key the envelope is not sealed to', 'open_result', open(chainForm, { my_pkcs8: rootPkcs8 }));
+  add('open_result with a key the envelope is not sealed to', 'open_result', open(chainForm, { my_pkcs8: rootPkcs8, my_spki: rootSpki }));
   add('open_result whose header names a suite that is known and is not this key\'s', 'open_result', open(reheader(chainForm, { suite: 'PACT-SEAL-P256' })));
-  add('open_result with the wrong key AND the wrong suite: which is said first', 'open_result', open(reheader(chainForm, { suite: 'PACT-SEAL-P256' }), { my_pkcs8: rootPkcs8 }));
+  add('open_result with the wrong key AND the wrong suite: which is said first', 'open_result', open(reheader(chainForm, { suite: 'PACT-SEAL-P256' }), { my_pkcs8: rootPkcs8, my_spki: rootSpki }));
   add('open_result in the leaf form, naming a leaf no pin holds', 'open_result', open(leafForm));
   add('open_result in the leaf form, from a held leaf that has run out', 'open_result', open(answerTo({ form: 'leaf', ts: at('2027-10-01T00:00:00Z') }), { pins: pinned, now: '2027-10-01T00:00:00Z' }));
   add('open_result in the leaf form, with a signature that is not the held leaf\'s', 'open_result', open({ ...leafForm, sig: b64url(new Uint8Array(64)) }, { pins: pinned }));

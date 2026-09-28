@@ -94,7 +94,7 @@ if (!v2) {
     ok(header.kid === recipientLeaf.fingerprint, `${v.name}: kid is the recipient leaf key`);
     ok(createPublicKey(recipientPriv).export({ format: 'der', type: 'spki' }).equals(fromB64url(recipientLeaf.spki)), `${v.name}: the recipient key is the leaf's`);
     let plaintext = null;
-    try { plaintext = d.open(v.suite, recipientPriv, null, Buffer.from('PACT-SEAL-v2'), aad, enc, ct); } catch (e) { ok(false, `${v.name}: open threw ${e.message}`); }
+    try { plaintext = d.open(v.suite, recipientPriv, createPublicKey({ key: fromB64url(recipientLeaf.spki), format: 'der', type: 'spki' }), Buffer.from('PACT-SEAL-v2'), aad, enc, ct); } catch (e) { ok(false, `${v.name}: open threw ${e.message}`); }
     ok(plaintext && plaintext.toString('hex') === v.plaintext_hex, `${v.name}: plaintext`);
     if (plaintext) {
       const body = JSON.parse(plaintext.toString());

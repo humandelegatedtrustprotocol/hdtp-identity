@@ -17,7 +17,7 @@ export function makeDefender(port) {
     if (!r.ok) return r;
     return { ok: true, leafKey: createPublicKey({ key: fromB64url(r.leaf_spki), format: 'der', type: 'spki' }), leafSpki: fromB64url(r.leaf_spki), rootFingerprint: r.root_fingerprint, endpoint: r.endpoint, notBefore: r.not_before, notAfter: r.not_after };
   }
-  const open = (suite, priv, _pub, info, aad, enc, ct) => fromB64url(must(call('hpke_open', { suite, recipient_pkcs8: b64url(pkcs8Of(priv)), info: Buffer.from(info).toString(), aad: b64url(aad), enc: b64url(enc), ct: b64url(ct) })).plaintext);
+  const open = (suite, priv, pub, info, aad, enc, ct) => fromB64url(must(call('hpke_open', { suite, recipient_pkcs8: b64url(pkcs8Of(priv)), recipient_spki: b64url(spkiOf(pub)), info: Buffer.from(info).toString(), aad: b64url(aad), enc: b64url(enc), ct: b64url(ct) })).plaintext);
   const sealWith = (suite, pub, info, aad, plaintext, seed) => {
     const r = must(call('hpke_seal', { suite, recipient_spki: b64url(spkiOf(pub)), info: Buffer.from(info).toString(), aad: b64url(aad), plaintext: b64url(plaintext), ephemeral_seed: seed ? b64url(seed) : undefined }));
     return { enc: fromB64url(r.enc), ct: fromB64url(r.ct) };

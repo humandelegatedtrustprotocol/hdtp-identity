@@ -8,7 +8,7 @@
 //
 // `build` has no file: its one function, `version`, answers what the port IS, which two ports cannot
 // agree on.
-export const CASE_FILES = ['dispatcher', 'keys', 'certificates', 'csr', 'signing', 'cards', 'envelopes', 'vault', 'ledger', 'export'];
+export const CASE_FILES = ['dispatcher', 'keys', 'certificates', 'csr', 'signing', 'cards', 'envelopes', 'vault', 'ledger', 'export', 'limits'];
 const NO_CASES = ['build'];
 
 const load = (file) => import(`./${file}.mjs`);

@@ -12,19 +12,36 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
 export const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
+// The workspace's crates, read from the workspace itself: every member of Cargo.toml's `members`,
+// by the name its own Cargo.toml gives it. This was a list written here by hand, and when
+// crates/pact-limits joined the workspace (2026-09-28) the list did not: `--check` said "ok" with that
+// crate's lock entry never read, and `make release` then wrote the new version into three of the four
+// crates and stopped at a lock file that no longer resolved.
+export function workspaceCrates(dir = root) {
+  const ws = readFileSync(dir + 'Cargo.toml', 'utf8');
+  const m = /\[workspace\][^[]*?\nmembers = \[([^\]]*)\]/.exec(ws);
+  if (!m) throw new Error('Cargo.toml: no [workspace] members list');
+  const members = [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]);
+  if (!members.length) throw new Error('Cargo.toml: the [workspace] members list is empty');
+  return members.map((p) => {
+    const name = /^\[package\]\nname = "([^"]+)"/m.exec(readFileSync(`${dir}${p}/Cargo.toml`, 'utf8'));
+    if (!name) throw new Error(`${p}/Cargo.toml: no [package] name`);
+    return name[1];
+  });
+}
+
 // Each copy: the file, how to read the version from it, how to write one into it. Every reader must
 // match exactly once; a copy that is not found is a failure, never a silent skip.
-const LOCK_CRATES = ['pact', 'pact-identity', 'pact-identity-wasm'];
 const lockRe = (name) => new RegExp(`(\\[\\[package\\]\\]\\nname = "${name}"\\nversion = ")([^"]+)(")`, 'g');
-export const COPIES = [
+export const copies = (dir = root) => [
   { file: 'Cargo.toml', re: () => /(\[workspace\.package\]\nversion = ")([^"]+)(")/g },
-  ...LOCK_CRATES.map((name) => ({ file: 'Cargo.lock', label: `Cargo.lock (${name})`, re: () => lockRe(name) })),
+  ...workspaceCrates(dir).map((name) => ({ file: 'Cargo.lock', label: `Cargo.lock (${name})`, re: () => lockRe(name) })),
   { file: 'js/package.json', re: () => /(\n {2}"version": ")([^"]+)(")/g },
   { file: 'go/api.go', re: () => /(\n\tModuleVersion = ")([^"]+)(")/g },
 ];
 
 export function read(dir = root) {
-  return COPIES.map((c) => {
+  return copies(dir).map((c) => {
     const text = readFileSync(dir + c.file, 'utf8');
     const hits = [...text.matchAll(c.re())];
     if (hits.length !== 1) throw new Error(`${c.label ?? c.file}: the version is written ${hits.length} times where it must be written once`);
@@ -34,7 +51,7 @@ export function read(dir = root) {
 
 export function set(version, dir = root) {
   if (!SEMVER.test(version)) throw new Error(`${version} is not X.Y.Z`);
-  for (const c of COPIES) {
+  for (const c of copies(dir)) {
     const text = readFileSync(dir + c.file, 'utf8');
     let n = 0;
     const out = text.replace(c.re(), (_, a, _v, b) => { n++; return a + version + b; });

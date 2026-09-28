@@ -180,8 +180,13 @@ fn encap(suite: Suite, key: &PublicKey, seed: &[u8; 32]) -> Result<(Vec<u8>, Zer
     }
 }
 
-fn decap(suite: Suite, key: &PrivateKey, enc: &[u8]) -> Result<Zeroizing<Vec<u8>>> {
-    let pk_r = recipient_public(suite, &key.public())?;
+/// `public` is the recipient's own public key, as the host holds it in its leaf certificate: it goes
+/// into the KEM context (RFC 9180 §4.1), and deriving it from the private key cost a scalar
+/// multiplication on every open (97 us of about 205 us for P-256, measured 2026-09-28). A public key
+/// that is not the private key's gives a different context, so a different AEAD key, and the open
+/// fails: it can refuse, never admit.
+fn decap(suite: Suite, key: &PrivateKey, public: &PublicKey, enc: &[u8]) -> Result<Zeroizing<Vec<u8>>> {
+    let pk_r = recipient_public(suite, public)?;
     let mut ctx = enc.to_vec();
     ctx.extend_from_slice(&pk_r);
     match suite {
@@ -251,11 +256,20 @@ pub fn seal(
     Ok((enc, ct))
 }
 
-pub fn open(suite: Suite, recipient: &PrivateKey, info: &[u8], aad: &[u8], enc: &[u8], ct: &[u8]) -> Result<Vec<u8>> {
+/// Opens what was sealed to `recipient`, whose public key is `recipient_public` (see `decap`).
+pub fn open(
+    suite: Suite,
+    recipient: &PrivateKey,
+    recipient_public: &PublicKey,
+    info: &[u8],
+    aad: &[u8],
+    enc: &[u8],
+    ct: &[u8],
+) -> Result<Vec<u8>> {
     if ct.len() < 16 {
         return err("envelope_invalid", "does not open");
     }
-    let ss = decap(suite, recipient, enc).map_err(|_| Error::new("envelope_invalid", "does not open"))?;
+    let ss = decap(suite, recipient, recipient_public, enc).map_err(|_| Error::new("envelope_invalid", "does not open"))?;
     let (key, nonce) = key_schedule(suite, &ss, info);
     aead_open(suite, &key, &nonce, aad, ct)
 }
@@ -271,10 +285,28 @@ mod tests {
             let r = PrivateKey::from_seed(alg, &label_seed("t/r")).unwrap();
             assert_eq!(suite_for(&r.public()), suite);
             let (enc, ct) = seal(suite, &r.public(), b"PACT-SEAL-v2", b"aad", b"hello", None).unwrap();
-            assert_eq!(open(suite, &r, b"PACT-SEAL-v2", b"aad", &enc, &ct).unwrap(), b"hello");
-            assert!(open(suite, &r, b"PACT-SEAL-v1", b"aad", &enc, &ct).is_err());
+            assert_eq!(open(suite, &r, &r.public(), b"PACT-SEAL-v2", b"aad", &enc, &ct).unwrap(), b"hello");
+            assert!(open(suite, &r, &r.public(), b"PACT-SEAL-v1", b"aad", &enc, &ct).is_err());
             let (enc2, _) = seal(suite, &r.public(), b"PACT-SEAL-v2", b"aad", b"hello", None).unwrap();
             assert_ne!(enc, enc2);
+        }
+    }
+
+    #[test]
+    fn a_public_key_that_is_not_the_recipients_opens_nothing() {
+        // The public key an open is handed is the host's word for its own; a wrong one must refuse,
+        // never yield a plaintext. The same algorithm (another key), and the other algorithm.
+        for (alg, suite, other_alg) in [(Alg::Ed25519, Suite::X25519, Alg::P256), (Alg::P256, Suite::P256, Alg::Ed25519)] {
+            let r = PrivateKey::from_seed(alg, &label_seed("t/r")).unwrap();
+            let (enc, ct) = seal(suite, &r.public(), b"PACT-SEAL-v2", b"aad", b"hello", None).unwrap();
+            for wrong in
+                [PrivateKey::from_seed(alg, &label_seed("t/other")).unwrap(), PrivateKey::from_seed(other_alg, &label_seed("t/r")).unwrap()]
+            {
+                let e = open(suite, &r, &wrong.public(), b"PACT-SEAL-v2", b"aad", &enc, &ct).unwrap_err();
+                assert_eq!((e.code.as_str(), e.why.as_str()), ("envelope_invalid", "does not open"), "{alg:?} with {:?}", wrong.alg());
+            }
+            // The control: the right key opens.
+            assert_eq!(open(suite, &r, &r.public(), b"PACT-SEAL-v2", b"aad", &enc, &ct).unwrap(), b"hello");
         }
     }
 

@@ -274,6 +274,9 @@ fn active() -> String {
 pub struct OpenResultArgs<'a> {
     pub envelope: &'a Wire,
     pub my_key: &'a PrivateKey,
+    /// The caller's own public key, as its leaf certificate holds it: the kid is checked against it
+    /// and the open puts it in the KEM context (hpke.rs `decap`), so it is never derived from `my_key`.
+    pub my_public: &'a PublicKey,
     pub msg_id: &'a str,
     pub now: i64,
     pub pins: &'a [CallerPin],
@@ -287,11 +290,11 @@ pub fn open_result(a: OpenResultArgs<'_>) -> Result<Value> {
     let invalid = |why: &str| err::<Value>("envelope_invalid", why);
     let (aad, h) = decode_header(&a.envelope.protected)?;
     let suite = header_checks(&h)?;
-    let me = a.my_key.public();
+    let me = a.my_public;
     if h.get("kid").and_then(|k| k.as_str()) != Some(&me.fingerprint()) {
         return invalid("kid is not this key");
     }
-    if suite_for(&me) != suite {
+    if suite_for(me) != suite {
         return invalid("suite does not fit the key");
     }
     if h.get("cty").and_then(|c| c.as_str()) != Some(CTY_RESULT) {
@@ -315,7 +318,8 @@ pub fn open_result(a: OpenResultArgs<'_>) -> Result<Value> {
         return err("envelope_invalid", "encapsulated key is not the suite's length");
     }
     let sig = wire_b64u(&a.envelope.sig).map_err(|_| Error::new("envelope_invalid", "signature"))?;
-    let plaintext = hpke::open(suite, a.my_key, INFO_V2, &aad, &enc, &ct).map_err(|_| Error::new("envelope_invalid", "does not open"))?;
+    let plaintext =
+        hpke::open(suite, a.my_key, a.my_public, INFO_V2, &aad, &enc, &ct).map_err(|_| Error::new("envelope_invalid", "does not open"))?;
     let body: Value = serde_json::from_slice(&plaintext).map_err(|_| Error::new("envelope_invalid", "does not open"))?;
     let m = members(&body);
     let (payload_key, proof_key) = match m.as_str() {

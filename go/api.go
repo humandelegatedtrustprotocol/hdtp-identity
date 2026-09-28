@@ -16,7 +16,7 @@ import (
 // track the Rust core. The module version is the repository's one version (scripts/version.mjs
 // writes it here and holds it equal to the crates' and the Wasm package's).
 const (
-	ModuleVersion = "0.3.6"
+	ModuleVersion = "0.4.0"
 	SpecVersion   = "2.2.4"
 )
 
@@ -324,4 +324,8 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 
 	// Ledger: api_ledger.go
 	"ledger_check": callLedgerCheck,
+
+	// Limits: api_limits.go
+	"limits_rules_check": callLimitsRulesCheck,
+	"limits_decide":      callLimitsDecide,
 }
