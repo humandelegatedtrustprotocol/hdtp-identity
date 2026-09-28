@@ -68,6 +68,7 @@ before `make publish`; there is no CI (see "The gate is local").
 |---|---|
 | `crates/pact-identity` | the core (`der`, `keys`, `canonical`, `hpke`, `x509`, `address`, `csr`, `card`, `envelope`, `vault`, `api`) |
 | `crates/pact-identity-wasm` | the `wasm-bindgen` boundary: `call(name, args) -> json` |
+| `crates/pact-limits` | SPEC §12's per-caller call budgets: token buckets, the rules as data, one pure decision (`decide`) over a state store the host implements; compiled into the core as contract §6.3 |
 | `js/` | loaders (`index.mjs` for Node and the browser, `worker.mjs` for Workers), `build.sh`, `reproduce.sh` (the canonical, containerised build), `manifest.json` + `verify.mjs`, and the Node proofs `check.mjs` and `intrude.mjs` |
 | `go/` | the Go port and its `pact-identity-go` adapter binary (built by the Go side; one JSON request per line on stdin, one answer per line out) |
 | `contract/` | `contract.json` — the boundary as data, and the source `CONTRACT.md` is rendered from (`render.mjs`); `schema.mjs` + `schema.test.mjs`, the JSON Schema subset it is written in; `contract.mjs`, which judges one answer by it |
