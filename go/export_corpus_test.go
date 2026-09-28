@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"io/fs"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -18,7 +20,42 @@ import (
 // names, and both controls accepted with what they hold. The corpus is the same one the Rust host's
 // test and js/parity.mjs read.
 func TestReadExportZipAnswersTheWholeCorpus(t *testing.T) {
-	raw, err := exportcorpus.FS.ReadFile("cases.json")
+	answersCorpus(t, exportcorpus.FS)
+}
+
+// The corpus the pact CLI writes for another owner (`pact vectors corpus --owner <root> --out <dir>`),
+// read by this port: every hostile file refused with the refusal ITS cases.json names — not at the
+// owner check — and every control accepted whole. The CLI is the one writer, and this is the port it
+// did not write in. PACT_REISSUED_CORPUS names the directory. gate.sh writes one for a fresh owner,
+// sets it, and fails unless this test PASSED; a plain `go test` has no corpus to read and skips it.
+func TestReadExportZipAnswersTheCorpusWrittenForAnotherOwner(t *testing.T) {
+	dir := os.Getenv("PACT_REISSUED_CORPUS")
+	if dir == "" {
+		t.Skip("PACT_REISSUED_CORPUS names no corpus written by `pact vectors corpus`; gate.sh writes one and sets it")
+	}
+	written, fixed := readCorpusIndex(t, os.DirFS(dir)), readCorpusIndex(t, exportcorpus.FS)
+	if written.Owner == fixed.Owner {
+		t.Fatalf("the corpus in %s names the committed owner %s: it is not one written for another", dir, fixed.Owner)
+	}
+	if len(written.Cases) != len(fixed.Cases) {
+		t.Fatalf("the corpus in %s has %d cases, the committed one %d", dir, len(written.Cases), len(fixed.Cases))
+	}
+	answersCorpus(t, os.DirFS(dir))
+	// The control: the committed valid export, read as the new owner, is another identity's.
+	data, _ := exportcorpus.FS.ReadFile("valid-export.zip")
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now, _ := time.Parse(time.RFC3339, written.Now)
+	if _, err := pact.ReadExportZip(zr, written.Owner, now, 1<<30); err == nil || !strings.HasPrefix(err.Error(), "manifest.json: owner: the file is ") {
+		t.Errorf("the committed valid export read as %s: %v", written.Owner, err)
+	}
+}
+
+func readCorpusIndex(t *testing.T, fsys fs.FS) exportcorpus.Index {
+	t.Helper()
+	raw, err := fs.ReadFile(fsys, "cases.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,10 +63,17 @@ func TestReadExportZipAnswersTheWholeCorpus(t *testing.T) {
 	if err := json.Unmarshal(raw, &index); err != nil {
 		t.Fatal(err)
 	}
+	return index
+}
+
+// answersCorpus reads every file of a corpus through ReadExportZip and holds each to its case.
+func answersCorpus(t *testing.T, fsys fs.FS) {
+	t.Helper()
+	index := readCorpusIndex(t, fsys)
 	now, _ := time.Parse(time.RFC3339, index.Now)
 	accepted := 0
 	for _, c := range index.Cases {
-		data, err := exportcorpus.FS.ReadFile(c.File)
+		data, err := fs.ReadFile(fsys, c.File)
 		if err != nil {
 			t.Fatal(err)
 		}
