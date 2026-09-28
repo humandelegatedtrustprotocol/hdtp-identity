@@ -10,6 +10,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+## 0.4.1 — 2026-09-28
+
 - **Correction to 0.4.0.** Its entry, and commit 3746e32, said the open no longer derives the
   recipient's public key; that was true of the Rust core and false of the Go port, whose
   `ParsePKCS8` still derived it on every read (14.2 us for P-256, 16.0 us for Ed25519), and the Go
