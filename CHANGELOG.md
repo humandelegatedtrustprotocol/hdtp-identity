@@ -10,6 +10,12 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+- `gate.sh` writes the export corpus for a random owner with `pact vectors corpus`, and the Go port
+  reads it: `TestReadExportZipAnswersTheCorpusWrittenForAnotherOwner` holds every case to the
+  refusals its `cases.json` names. The committed valid export read as that owner is its control.
+  The test skips without `PACT_REISSUED_CORPUS`, and the gate fails unless it passed. Until now
+  the Go port had read a corpus written for another owner only once, by hand.
+
 ## 0.3.5 — 2026-09-28
 
 - **`pact vectors corpus --owner <root> --out <dir>`** writes the export corpus for another owner
