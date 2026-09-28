@@ -364,6 +364,46 @@ mod tests {
     /// accepted with what they hold.
     #[test]
     fn read_export_answers_the_whole_corpus() {
+        answers_the_corpus_in(&corpus());
+    }
+
+    /// The corpus re-issued for other owners (`pact vectors corpus`) reads as the committed one does:
+    /// each hostile file refused with ITS refusal, and not at the owner check, and each valid file
+    /// taken whole — under each new owner, where the committed files are all refused as another
+    /// identity's.
+    #[test]
+    fn the_corpus_reissued_for_another_owner_reaches_every_check() {
+        let fixed: Value = serde_json::from_slice(&std::fs::read(corpus().join("cases.json")).unwrap()).unwrap();
+        let fixed_owner = fixed["owner"].as_str().unwrap().to_string();
+        for label in ["another owner", "a third"] {
+            let owner = format!("sha256:{}", pact_identity::util::b64u(&Sha256::digest(label.as_bytes())));
+            let dir = tempfile::tempdir().unwrap();
+            for (name, bytes) in crate::vectors::corpus::corpus_for(&owner).unwrap() {
+                std::fs::write(dir.path().join(name), bytes).unwrap();
+            }
+            let index: Value = serde_json::from_slice(&std::fs::read(dir.path().join("cases.json")).unwrap()).unwrap();
+            assert_eq!(index["owner"], owner);
+            assert!(!serde_json::to_string(&index).unwrap().contains(&fixed_owner), "cases.json still names the fixed owner");
+            answers_the_corpus_in(dir.path());
+            // The control: the committed valid export, read as this owner, is another identity's.
+            let refused = read_export(&corpus().join("valid-export.zip"), &owner, index["now"].as_str().unwrap(), 1 << 30).err().unwrap();
+            assert!(refused.starts_with("manifest.json: owner: the file is "), "{refused}");
+        }
+        // A root the corpus gives someone else is not an owner it can be re-issued for.
+        let peer = fixed["cases"][0]["accept"]["leafless"][0].as_str().unwrap();
+        assert_eq!(
+            crate::vectors::corpus::corpus_for(peer).map(|_| ()),
+            Err(format!("{peer}: the corpus already names this root as someone other than the owner"))
+        );
+        let wrong_owner = format!("sha256:{}", "A".repeat(43));
+        assert_eq!(
+            crate::vectors::corpus::corpus_for(&wrong_owner).map(|_| ()),
+            Err(format!("{wrong_owner}: the corpus already names this root as someone other than the owner"))
+        );
+    }
+
+    fn answers_the_corpus_in(dir: &Path) {
+        let corpus = || dir.to_path_buf();
         let index: Value = serde_json::from_slice(&std::fs::read(corpus().join("cases.json")).unwrap()).unwrap();
         let (owner, now) = (index["owner"].as_str().unwrap(), index["now"].as_str().unwrap());
         let mut wrong = Vec::new();

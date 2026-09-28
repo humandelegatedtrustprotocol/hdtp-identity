@@ -121,7 +121,11 @@ fn tls(insecure: bool) -> ureq::tls::TlsConfig {
     ureq::tls::TlsConfig::builder().disable_verification(insecure).build()
 }
 
-fn post(endpoint: &str, body: &str, session: Option<&str>, insecure: bool) -> Res<(String, Option<String>, u16)> {
+/// An answer as posted: its body, the session id it gave, its HTTP status, and its `Retry-After`
+/// header in seconds when it has one.
+type Posted = (String, Option<String>, u16, Option<u64>);
+
+fn post(endpoint: &str, body: &str, session: Option<&str>, insecure: bool) -> Res<Posted> {
     let mut req = ureq::post(endpoint).header("content-type", "application/json").header("accept", "application/json, text/event-stream");
     if let Some(id) = session {
         req = req.header("mcp-session-id", id);
@@ -136,8 +140,9 @@ fn post(endpoint: &str, body: &str, session: Option<&str>, insecure: bool) -> Re
         .map_err(|e| Fail(format!("{endpoint}: {e}")))?;
     let status = resp.status().as_u16();
     let given = resp.headers().get("mcp-session-id").and_then(|v| v.to_str().ok()).map(|s| s.to_string());
+    let wait = resp.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|s| s.trim().parse::<u64>().ok());
     let text = resp.body_mut().read_to_string().map_err(|e| Fail(format!("{endpoint}: {e}")))?;
-    Ok((text, given, status))
+    Ok((text, given, status, wait))
 }
 
 /// The MCP handshake, before any scenario.
@@ -157,7 +162,7 @@ fn initialize(endpoint: &str, insecure: bool) -> Res<Option<String>> {
         "capabilities": {},
         "clientInfo": { "name": "pact vectors intrude", "version": env!("CARGO_PKG_VERSION") },
     }});
-    let (text, session, _) = post(endpoint, &body.to_string(), None, insecure)?;
+    let (text, session, _, _) = post(endpoint, &body.to_string(), None, insecure)?;
     if session.is_none() && !text.contains("\"result\"") {
         return fail(format!(
             "{endpoint}: initialize was refused, so no scenario could be posted: {}",
@@ -173,18 +178,96 @@ fn initialize(endpoint: &str, insecure: bool) -> Res<Option<String>> {
     Ok(session)
 }
 
-fn sealed_call(endpoint: &str, wire: &Value, id: u32, session: Option<&str>, insecure: bool) -> Res<(String, String)> {
+/// One answer to a scenario: the code it is judged by, the body, and how long the target asked to
+/// be left alone when it refused the attempt.
+pub struct Answer {
+    pub code: String,
+    pub text: String,
+    pub retry_after: Option<u64>,
+}
+
+fn sealed_call(endpoint: &str, wire: &Value, id: u32, session: Option<&str>, insecure: bool) -> Res<Answer> {
     let body = json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call", "params": { "name": "sealed_call", "arguments": wire } });
-    let (text, _, status) = post(endpoint, &body.to_string(), session, insecure)?;
+    let (text, _, status, header) = post(endpoint, &body.to_string(), session, insecure)?;
     let code = answer_code(&text);
+    let retry_after = retry_after_of(&text).or(header);
     // A door that refuses before PACT sees anything is `http_<n>`, as the JS driver has always
     // reported it. This dropped the status, so an HTTP 403 at the edge arrived as
     // `unknown:not-json(...)` -- classified UNREACHED correctly, but unable to say why, and the
     // `http_` arm of the verdict test below was dead code in this port.
     if code.starts_with("unknown:not-json") && status >= 400 {
-        return Ok((format!("http_{status}"), text));
+        return Ok(Answer { code: format!("http_{status}"), text, retry_after });
     }
-    Ok((code, text))
+    Ok(Answer { code, text, retry_after })
+}
+
+// ── rate limits ──────────────────────────────────────────────────────────────────────────────────
+// A target over a budget answers `rate_limited` (SPEC §5, with `retry_after` in seconds) or, at an
+// edge, HTTP 429. Both refuse the ATTEMPT, before the target has judged the attack: scored as the
+// target's verdict, a rate limit read as REPRODUCES for an attack and CONTROL REFUSED for the
+// control, and neither is what happened. So a rate-limited post is paused and posted again, as the
+// target asked, up to a bound; one still rate-limited is UNREACHED and fails the run, saying why. A
+// rate-limited envelope was refused before it was opened (§5), so posting it again is not a replay.
+
+/// How many times a rate-limited post is posted again.
+pub const RATE_RETRIES: u32 = 3;
+/// The longest one pause may be: a target asking for more is left UNREACHED at once.
+pub const RATE_PAUSE_MAX: u64 = 60;
+/// The pause when the target names none.
+pub const RATE_PAUSE_DEFAULT: u64 = 10;
+
+/// Whether a code is a refusal of the attempt for a budget: `rate_limited`, or HTTP 429 at an edge.
+pub fn is_rate_limited(code: &str) -> bool {
+    code == "rate_limited" || code == "http_429"
+}
+
+/// `retry_after`, in whole seconds, wherever an answer carries it beside its code.
+pub fn retry_after_of(text: &str) -> Option<u64> {
+    let v = rpc_body(text).ok()?;
+    let mut places = vec![v["error"]["data"]["retry_after"].clone(), v["error"]["retry_after"].clone(), v["result"]["retry_after"].clone()];
+    for inner in tool_texts(&v) {
+        places.push(inner["retry_after"].clone());
+        places.push(inner["error"]["retry_after"].clone());
+    }
+    places.iter().find_map(|p| p.as_u64())
+}
+
+/// Posts until the answer is not a rate limit, pausing as the target asks. `pause` sleeps (a test
+/// passes one that only records). The last answer is returned whatever it is.
+pub fn through_rate_limits(mut post: impl FnMut() -> Res<Answer>, mut pause: impl FnMut(u64)) -> Res<Answer> {
+    let mut answer = post()?;
+    for attempt in 1..=RATE_RETRIES {
+        if !is_rate_limited(&answer.code) {
+            break;
+        }
+        let wait = answer.retry_after.unwrap_or(RATE_PAUSE_DEFAULT);
+        if wait > RATE_PAUSE_MAX {
+            println!("  {:<10} rate-limited for {wait} s, over the {RATE_PAUSE_MAX} s this run waits", "");
+            break;
+        }
+        println!("  {:<10} rate-limited: pausing {wait} s as asked, then posting again ({attempt} of {RATE_RETRIES})", "");
+        pause(wait);
+        answer = post()?;
+    }
+    Ok(answer)
+}
+
+/// The verdict on one scenario's answer. A rate limit, in either answer of a replayed pair, is
+/// UNREACHED: the target refused the attempt, and said nothing about the attack.
+pub fn verdict(got: &str, expect: &str, control: bool) -> &'static str {
+    if got == expect {
+        "blocked"
+    } else if got.split(" then ").any(|c| c.starts_with("unknown") || c.starts_with("http_") || is_rate_limited(c)) {
+        "UNREACHED"
+    } else if control {
+        // The control is the one scenario that must get THROUGH, so its failure is the opposite
+        // of an intrusion: a receiver refusing everything -- exactly what the control exists to
+        // catch -- was reported as `REPRODUCES`, i.e. "something got in", while what happened
+        // was that the legitimate call was blocked.
+        "CONTROL REFUSED"
+    } else {
+        "REPRODUCES"
+    }
 }
 
 struct Scenario {
@@ -522,13 +605,18 @@ pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now
             return fail(format!("js/live-scenarios.json names {}, and this driver has no builder for it", s.id));
         };
         let mut post_once = || {
-            posted += 1;
-            sealed_call(&endpoint, &wire, posted, session.as_deref(), allow_insecure)
+            through_rate_limits(
+                || {
+                    posted += 1;
+                    sealed_call(&endpoint, &wire, posted, session.as_deref(), allow_insecure)
+                },
+                |s| std::thread::sleep(std::time::Duration::from_secs(s)),
+            )
         };
-        let (first, raw) = post_once()?;
+        let Answer { code: first, text: raw, .. } = post_once()?;
         // Replayed: the same envelope posted again must be answered the same way.
         let got = if s.twice {
-            let (second, _) = post_once()?;
+            let second = post_once()?.code;
             if second == first {
                 first
             } else {
@@ -537,19 +625,7 @@ pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now
         } else {
             first
         };
-        let mut verdict = if got == s.expect {
-            "blocked"
-        } else if got.starts_with("unknown") || got.starts_with("http_") {
-            "UNREACHED"
-        } else if s.control {
-            // The control is the one scenario that must get THROUGH, so its failure is the opposite
-            // of an intrusion: a receiver refusing everything -- exactly what the control exists to
-            // catch -- was reported as `REPRODUCES`, i.e. "something got in", while what happened
-            // was that the legitimate call was blocked.
-            "CONTROL REFUSED"
-        } else {
-            "REPRODUCES"
-        };
+        let mut verdict = verdict(&got, &s.expect, s.control);
         println!("  {verdict:<10} {}: {got}", s.name);
         // …and an answer that LOOKS sealed is opened, with the key this driver has been holding all
         // along. Only a verdict of `blocked` (the expected `sealed`) is worth opening: a refusal and
@@ -573,12 +649,20 @@ pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now
     let unreached = results.iter().filter(|(_, _, v)| *v == "UNREACHED").count();
     let control = results.iter().filter(|(_, _, v)| *v == "CONTROL REFUSED").count();
     let unopened = results.iter().filter(|(_, _, v)| *v == "CONTROL UNOPENED").count();
+    let limited = results.iter().filter(|(_, got, v)| *v == "UNREACHED" && got.split(" then ").any(is_rate_limited)).count();
     println!(
-        "{} scenarios: {} blocked, {} reproduce, {} never reached a PACT answer{}{}",
+        "{} scenarios: {} blocked, {} reproduce, {} never reached a PACT answer{}{}{}",
         results.len(),
         results.len() - reproduce - unreached - control - unopened,
         reproduce,
         unreached,
+        if limited > 0 {
+            format!(
+                " ({limited} of them rate-limited: the target refused the attempt before judging the attack, so nothing is known of it; wait out its budget and run again)"
+            )
+        } else {
+            String::new()
+        },
         if control > 0 { ", and the CONTROL was refused: this receiver refuses a legitimate call too" } else { "" },
         if unopened > 0 {
             ", and the CONTROL's answer looked sealed and did not open: nothing here shows a call can get through"
@@ -618,6 +702,65 @@ mod tests {
             }
         }
         assert!(aim.wire("a-scenario-nobody-wrote").unwrap().is_none());
+    }
+
+    /// A rate limit refuses the attempt, not the attack: never REPRODUCES, never CONTROL REFUSED.
+    #[test]
+    fn a_rate_limit_is_unreached_for_an_attack_and_for_the_control() {
+        for got in ["rate_limited", "http_429", "envelope_invalid then rate_limited", "rate_limited then envelope_invalid"] {
+            assert_eq!(verdict(got, "envelope_invalid", false), "UNREACHED", "{got}, an attack");
+            assert_eq!(verdict(got, "sealed", true), "UNREACHED", "{got}, the control");
+        }
+        // The controls of the table: the target's own verdicts are judged as before.
+        assert_eq!(verdict("envelope_invalid", "envelope_invalid", false), "blocked");
+        assert_eq!(verdict("chain_required", "envelope_invalid", false), "REPRODUCES");
+        assert_eq!(verdict("envelope_invalid", "sealed", true), "CONTROL REFUSED");
+        assert_eq!(verdict("http_400", "sealed", true), "UNREACHED");
+        // Where an answer says how long to wait.
+        let tool =
+            |inner: &str| json!({ "jsonrpc": "2.0", "id": 1, "result": { "content": [{ "type": "text", "text": inner }] } }).to_string();
+        assert_eq!(retry_after_of(&tool(r#"{"code":"rate_limited","retry_after":7}"#)), Some(7));
+        assert_eq!(
+            retry_after_of(
+                r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"x","data":{"code":"rate_limited","retry_after":9}}}"#
+            ),
+            Some(9)
+        );
+        assert_eq!(retry_after_of(&tool(r#"{"code":"rate_limited"}"#)), None);
+    }
+
+    /// A rate-limited post is posted again after the pause the target asked for, up to the bound; a
+    /// target asking for longer than the bound is not waited for; one that stays rate-limited is
+    /// answered as it last answered, which the verdict makes UNREACHED.
+    #[test]
+    fn a_rate_limited_post_is_paused_and_posted_again_up_to_a_bound() {
+        let answer = |code: &str, wait: Option<u64>| Answer { code: code.into(), text: String::new(), retry_after: wait };
+        let run = |script: Vec<Answer>| {
+            let mut script = script.into_iter();
+            let (mut posts, mut pauses) = (0, Vec::new());
+            let got = through_rate_limits(
+                || {
+                    posts += 1;
+                    Ok(script.next().expect("posted more often than the script answers"))
+                },
+                |s| pauses.push(s),
+            )
+            .unwrap()
+            .code;
+            (got, posts, pauses)
+        };
+        // Through after two pauses, each as long as asked, or the default when nothing was named.
+        assert_eq!(
+            run(vec![answer("rate_limited", Some(3)), answer("http_429", None), answer("envelope_invalid", None)]),
+            ("envelope_invalid".into(), 3, vec![3, RATE_PAUSE_DEFAULT])
+        );
+        // Never through: the bound, and the last answer.
+        let always = (0..=RATE_RETRIES).map(|_| answer("rate_limited", Some(1))).collect();
+        assert_eq!(run(always), ("rate_limited".into(), RATE_RETRIES as usize + 1, vec![1; RATE_RETRIES as usize]));
+        // Asked to wait longer than a run waits: not waited for.
+        assert_eq!(run(vec![answer("rate_limited", Some(RATE_PAUSE_MAX + 1))]), ("rate_limited".into(), 1, vec![]));
+        // The control of the loop: an answer that is no rate limit is posted once.
+        assert_eq!(run(vec![answer("sealed", None)]), ("sealed".into(), 1, vec![]));
     }
 
     #[test]
