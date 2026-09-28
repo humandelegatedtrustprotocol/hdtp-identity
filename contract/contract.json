@@ -14,7 +14,8 @@
     "envelopes": "Envelopes",
     "vault": "Vault",
     "ledger": "The ledger",
-    "export": "The export"
+    "export": "The export",
+    "limits": "The call budgets"
   },
   "failure": {
     "type": "object",
@@ -605,6 +606,228 @@
         "backup_verified_at": { "type": "integer", "minimum": 0 }
       },
       "required": ["v"],
+      "additionalProperties": false
+    },
+    "LimitsRules": {
+      "type": "object",
+      "description": "The numbers of SPEC §12's call budgets, as a host keeps them in its configuration. Every member is required; the library holds no default.",
+      "properties": {
+        "contact_calls_per_second": {
+          "type": "number",
+          "description": "One contact, inbound, and one contact, outbound: the sustained rate. Above 0."
+        },
+        "contact_burst": {
+          "type": "number",
+          "description": "How many calls a contact may make at once. At least 1, and at most 3600 seconds of `contact_calls_per_second`, so the bucket refills within the hour an idle row is kept."
+        },
+        "identity_capacity_per_second": {
+          "type": "number",
+          "description": "The most calls a second one identity takes from all its contacts together, and sends to all of them together. At least 1."
+        },
+        "guest_calls_per_hour": {
+          "type": "number",
+          "description": "A guest, per proven root and source (burst the same). At least 1."
+        },
+        "guest_source_calls_per_hour": {
+          "type": "number",
+          "description": "A source alone: a small form answered `chain_required` (burst the same). At least 1."
+        },
+        "stranger_calls_out_per_hour": {
+          "type": "number",
+          "description": "Calls out to anybody who is not an active contact, per identity (burst the same). At least 1."
+        },
+        "integration_calls_per_hour": {
+          "type": "number",
+          "description": "One integration, per contact (SPEC §5.7; burst the same). At least 1."
+        },
+        "guest_total_calls_per_hour": {
+          "type": "number",
+          "description": "Every guest together, per identity, charged before the envelope is opened (burst the same). At least 1."
+        },
+        "pending_in_cap": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The most contact requests an identity holds waiting on its owner."
+        }
+      },
+      "required": [
+        "contact_calls_per_second",
+        "contact_burst",
+        "identity_capacity_per_second",
+        "guest_calls_per_hour",
+        "guest_source_calls_per_hour",
+        "stranger_calls_out_per_hour",
+        "integration_calls_per_hour",
+        "guest_total_calls_per_hour",
+        "pending_in_cap"
+      ],
+      "additionalProperties": false
+    },
+    "LimitsCharge": {
+      "description": "What one call is charged to. The bucket keys are the cloud's `rate_buckets` keys.",
+      "oneOf": [
+        {
+          "type": "object",
+          "description": "An active contact calling in: `contact:<root>`, then `identity` at `contact_cap` × `contact_calls_per_second`, at most `identity_capacity_per_second` and at least 1, with one second of that as its burst.",
+          "properties": {
+            "kind": {
+              "const": "contact_in"
+            },
+            "root": {
+              "type": "string",
+              "minLength": 1
+            },
+            "contact_cap": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "kind",
+            "root",
+            "contact_cap"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "description": "Anybody else calling in, by the root its envelope proved and the host's name for its source: `guest:<root>:<source>` when `addressed`, `guest:<root>` when not, `source:<source>` when no root was proven (absent, null or empty).",
+          "properties": {
+            "kind": {
+              "const": "guest_in"
+            },
+            "root": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source": {
+              "type": "string"
+            },
+            "addressed": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "source",
+            "addressed"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "description": "Every guest together, before the envelope is opened: `guest-total`.",
+          "properties": {
+            "kind": {
+              "const": "guest_total"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "description": "A call out to an active contact: `out:contact:<root>`, then `out:identity`.",
+          "properties": {
+            "kind": {
+              "const": "contact_out"
+            },
+            "root": {
+              "type": "string",
+              "minLength": 1
+            },
+            "contact_cap": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "kind",
+            "root",
+            "contact_cap"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "description": "A call out to anybody who is not an active contact, or one that starts or answers a relationship: `out:stranger`.",
+          "properties": {
+            "kind": {
+              "const": "stranger_out"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "description": "A call to one integration by one contact: `integration:<integration>:<contact>`.",
+          "properties": {
+            "kind": {
+              "const": "integration"
+            },
+            "integration": {
+              "type": "string",
+              "minLength": 1
+            },
+            "contact": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "kind",
+            "integration",
+            "contact"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "description": "A contact request, while the identity holds `held` already: a count, no bucket.",
+          "properties": {
+            "kind": {
+              "const": "pending_in"
+            },
+            "held": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "kind",
+            "held"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "LimitsRow": {
+      "type": "object",
+      "description": "A bucket's row: the tokens left when it was last charged, and when, in milliseconds.",
+      "properties": {
+        "tokens": {
+          "type": "number"
+        },
+        "updated_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "tokens",
+        "updated_at"
+      ],
       "additionalProperties": false
     }
   },
@@ -1245,12 +1468,13 @@
         "properties": {
           "suite": { "$ref": "#/$defs/Suite" },
           "recipient_pkcs8": { "$ref": "#/$defs/Pkcs8" },
+          "recipient_spki": { "$ref": "#/$defs/Spki", "description": "The recipient's own public key, as its leaf certificate holds it. It goes into the KEM context (RFC 9180 §4.1) and is never derived from `recipient_pkcs8`; one that is not that key's public key gives another context, and the open fails (`does not open`): it can refuse, never admit." },
           "info": { "type": "string" },
           "aad": { "$ref": "#/$defs/B64url" },
           "enc": { "$ref": "#/$defs/B64url" },
           "ct": { "$ref": "#/$defs/B64url" }
         },
-        "required": ["suite", "recipient_pkcs8", "info", "enc", "ct"],
+        "required": ["suite", "recipient_pkcs8", "recipient_spki", "info", "enc", "ct"],
         "additionalProperties": false
       },
       "result": {
@@ -1315,13 +1539,14 @@
         "properties": {
           "envelope": { "$ref": "#/$defs/ArrivedEnvelope" },
           "my_pkcs8": { "$ref": "#/$defs/Pkcs8" },
+          "my_spki": { "$ref": "#/$defs/Spki", "description": "The caller's own public key, as its leaf certificate holds it: the header's `kid` is checked against it (`kid is not this key`), and the open puts it in the KEM context. Never derived from `my_pkcs8`; one that names the kid but is not that key's public key does not open." },
           "msg_id": { "type": "string" },
           "now": { "$ref": "#/$defs/InstantIn" },
           "pins": { "type": "array", "items": { "$ref": "#/$defs/Pin" } },
           "expected_root": { "type": "string" },
           "expected_endpoint": { "type": "string" }
         },
-        "required": ["envelope", "my_pkcs8", "msg_id", "now"],
+        "required": ["envelope", "my_pkcs8", "my_spki", "msg_id", "now"],
         "additionalProperties": false
       },
       "result": {
@@ -1748,6 +1973,153 @@
       },
       "errors": ["bad_request", "parse"],
       "notes": "The wallet's book as rows of contacts.csv, the one mapping every wallet uses (SPEC §9.2: a book is an export of contacts only). Each contact, in order: an object (`contacts[<i>] is an object`), no member but `root`, `endpoint`, `name`, `leaf`, `root_cert` and `added` (the first other, in sorted order: `contacts[<i>]: \"<m>\" is not a member of a wallet contact`), `root` and `endpoint` strings (`contacts[<i>]: <m> is required`), the rest strings when present (`contacts[<i>]: <m> is a string`). A row carries the root, the endpoint, the name (empty when absent), the leaf and the root certificate (null when absent), and `added` (the export's time when absent); its other columns are what a contact the wallet keeps is: an empty `display_name`, `status` `active`, `was_active` true, and nothing granted either way. The rows are not checked here: export_write holds each to the reader's rules."
+    },
+    "limits_rules_check": {
+      "section": "limits",
+      "params": {
+        "type": "object",
+        "properties": {
+          "rules": {
+            "description": "A rules document, as a host's configuration holds it; anything at all, since this is what checks it."
+          }
+        },
+        "required": [
+          "rules"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "ok": {
+                "const": true
+              }
+            },
+            "required": [
+              "ok"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ok": {
+                "const": false
+              },
+              "why": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "ok",
+              "why"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "errors": [
+        "bad_request"
+      ],
+      "notes": "Whether a rules document can be enforced as written, and the first reason it cannot, in this order: not an object (`the limits rules are an object`); a member it does not hold, the first in sorted order (`the limits rules hold <members>, and nothing else: <member>`); each member in the order of `LimitsRules`, absent or not a number (`<member> is a number`); then every number finite, `contact_calls_per_second` above 0 (`… is above 0`) and every other at least 1 (`… is at least 1`); `pending_in_cap` whole (`pending_in_cap is a whole number`); and a contact's bucket refilling from empty within the hour (`contact_burst / contact_calls_per_second is at most 3600: …`). `rules` absent or null is `bad_request`, `rules is required`. A host publishes no document this refuses."
+    },
+    "limits_decide": {
+      "section": "limits",
+      "params": {
+        "type": "object",
+        "properties": {
+          "rules": {
+            "$ref": "#/$defs/LimitsRules"
+          },
+          "charge": {
+            "$ref": "#/$defs/LimitsCharge"
+          },
+          "now": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "The host's clock, in milliseconds."
+          },
+          "state": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "$ref": "#/$defs/LimitsRow"
+            },
+            "description": "The rows the host holds, by bucket key: at least the charge's. Absent or null is none, and a bucket with no row is full."
+          }
+        },
+        "required": [
+          "rules",
+          "charge",
+          "now"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "allowed": {
+            "type": "boolean"
+          },
+          "retry_after": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "0 when allowed; when refused by a bucket, the whole seconds, at least 1, until every refusing bucket holds a call again (to within a second's rounding, as the cloud's arithmetic has it); null when refused by `pending_in_cap`, which no wait refills."
+          },
+          "refused_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The key of the bucket that needs longest, the first of equals in charge order, or `pending_in`; null when allowed."
+          },
+          "writes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "bucket": {
+                  "type": "string"
+                },
+                "tokens": {
+                  "type": "number"
+                },
+                "updated_at": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "bucket",
+                "tokens",
+                "updated_at"
+              ],
+              "additionalProperties": false
+            },
+            "description": "The rows to store, in charge order: every bucket of an allowed call, none of a refusal."
+          }
+        },
+        "required": [
+          "allowed",
+          "retry_after",
+          "refused_by",
+          "writes"
+        ],
+        "additionalProperties": false
+      },
+      "errors": [
+        "bad_request"
+      ],
+      "notes": "SPEC §12's call budgets as one decision (crates/pact-limits; go/limits.go). A call is charged one token in EVERY bucket of its charge, or in none: a refusal spends nothing. A bucket's level is `min(burst, tokens + elapsed × rate)`, `elapsed` the seconds since `updated_at` and never negative (a clock that went back refills nothing, and the row is written with the earlier time); a level under 1 refuses, with `retry_after = max(1, ceil((1 − level) / rate))`. The arithmetic is the cloud's `RateLimiter.take` operation for operation in IEEE double precision, and `js/cases/limits-vectors.json` holds the two to the same decisions and the same bits. A host may delete a row idle for over an hour: under rules `limits_rules_check` passes it is full, and no decision changes. In order: `rules` (absent: `rules is required`; not enforceable: `the limits rules cannot be enforced: <limits_rules_check's why>`), `charge` (not an object: `charge is required`; `charge.kind is required`; `charge.kind is one of …`; a member its kind does not hold, the first in sorted order: `a <kind> charge holds <members>, and nothing else: <member>`; `charge.<member> is required` for a string that is absent or empty, `charge.<member> is a whole number` for a count, `charge.root is a string or null`, `charge.source is required`, `charge.addressed is required`), `now` (`now is a time in milliseconds`: a whole number from 0 to 2^53 − 1, written without a fraction or an exponent), `state` (not an object: `state is an object of rows by bucket`; a row, in sorted order of key, that does not read: `the state's row <key> does not read: <member>`)."
     }
   }
 }

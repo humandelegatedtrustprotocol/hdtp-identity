@@ -278,7 +278,7 @@ func TestLifetimeAndCallerSideChecks(t *testing.T) {
 	open := func(env []byte, expectedEndpoint string) map[string]any {
 		var e map[string]any
 		_ = json.Unmarshal(env, &e)
-		args := map[string]any{"envelope": e, "my_pkcs8": B64url(pkcs8Of(t, alina.leafKey)), "msg_id": "m-1", "now": "2026-09-13T12:00:00Z",
+		args := map[string]any{"envelope": e, "my_pkcs8": B64url(pkcs8Of(t, alina.leafKey)), "my_spki": B64url(alina.leafKey.Public.SPKI), "msg_id": "m-1", "now": "2026-09-13T12:00:00Z",
 			"pins": []map[string]any{{"root": bharat.rootFP, "endpoint": "https://agent.bharat.example/mcp", "leaf": B64url(bharat.leaf), "state": "active"}}}
 		if expectedEndpoint != "" {
 			args["expected_endpoint"] = expectedEndpoint
