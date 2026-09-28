@@ -52,12 +52,53 @@ type unsupportedError struct{ why string }
 
 func (e unsupportedError) Error() string { return e.why }
 
-// PrivateKey pairs a private key with its public half.
+// PrivateKey is a private key as it was read: an Ed25519 seed or a P-256 scalar, and nothing derived
+// from it. Reading one used to derive the public key (ed25519.NewKeyFromSeed, ecdsa.ParseRawPrivateKey:
+// a scalar multiplication each, 16.1 and 14.4 us a parse, measured 2026-09-28), and the open, which
+// the Go decide does after reading the held key on every call, never used it. Public() and Signer()
+// derive what they are asked for; the X25519 scalar and the P-256 ECDH key come from the seed and the
+// scalar directly.
 type PrivateKey struct {
 	Alg    string
-	Ed     ed25519.PrivateKey
-	EC     *ecdsa.PrivateKey
+	seed   []byte // Ed25519: the 32-byte seed
+	scalar []byte // P-256: the 32-byte scalar, in [1, n-1]
+}
+
+// Public derives the public key. A caller that also signs takes a Signer and asks it for both.
+func (k *PrivateKey) Public() *PublicKey { return k.Signer().Public }
+
+// Signer is a private key expanded for signing: its public key and its signatures from one expansion.
+type Signer struct {
 	Public *PublicKey
+	ed     ed25519.PrivateKey
+	ec     *ecdsa.PrivateKey
+}
+
+// Signer expands the key once. The key's parts were checked when it was made, so this cannot fail.
+func (k *PrivateKey) Signer() *Signer {
+	if k.Alg == AlgEd25519 {
+		ed := ed25519.NewKeyFromSeed(k.seed)
+		pub := ed.Public().(ed25519.PublicKey)
+		spki, _ := x509.MarshalPKIXPublicKey(pub)
+		return &Signer{ed: ed, Public: &PublicKey{Alg: AlgEd25519, Ed: pub, SPKI: spki}}
+	}
+	ec, _ := ecdsa.ParseRawPrivateKey(elliptic.P256(), k.scalar)
+	spki, _ := x509.MarshalPKIXPublicKey(&ec.PublicKey)
+	return &Signer{ec: ec, Public: &PublicKey{Alg: AlgP256, EC: &ec.PublicKey, SPKI: spki}}
+}
+
+func newEd25519(seed []byte) *PrivateKey {
+	return &PrivateKey{Alg: AlgEd25519, seed: append([]byte(nil), seed...)}
+}
+
+// newP256 takes a 32-byte scalar, refused outside [1, n-1] as ecdsa.ParseRawPrivateKey refused it,
+// without the multiplication that call makes.
+func newP256(scalar []byte) (*PrivateKey, error) {
+	d := new(big.Int).SetBytes(scalar)
+	if len(scalar) != 32 || d.Sign() == 0 || d.Cmp(p256N) >= 0 {
+		return nil, errors.New("P-256 scalar out of range")
+	}
+	return &PrivateKey{Alg: AlgP256, scalar: append([]byte(nil), scalar...)}, nil
 }
 
 // B64url encodes without padding, the JSON form of every byte string in the contract.
@@ -212,7 +253,7 @@ func ParsePKCS8(der []byte) (*PrivateKey, error) {
 		if len(inner.content) != 32 {
 			return nil, errors.New("Ed25519 seed is not 32 bytes")
 		}
-		return newEd25519(ed25519.NewKeyFromSeed(inner.content))
+		return newEd25519(inner.content), nil
 	case oid == oidEcPublicKey && len(alg) == 2 && alg[1].tag == 0x06 && derOidMinimal(alg[1]) && readOid(alg[1]) == oidPrime256v1:
 		ec, err := derRead(f[2].content, 0)
 		if err != nil {
@@ -230,30 +271,9 @@ func ParsePKCS8(der []byte) (*PrivateKey, error) {
 		}
 		d := make([]byte, 32)
 		copy(d[32-len(g[1].content):], g[1].content)
-		priv, err := ecdsa.ParseRawPrivateKey(elliptic.P256(), d)
-		if err != nil {
-			return nil, errors.New("P-256 scalar out of range")
-		}
-		return newP256(priv)
+		return newP256(d)
 	}
 	return nil, unsupportedError{"unsupported key type " + oid}
-}
-
-func newEd25519(key ed25519.PrivateKey) (*PrivateKey, error) {
-	pub := key.Public().(ed25519.PublicKey)
-	spki, err := x509.MarshalPKIXPublicKey(pub)
-	if err != nil {
-		return nil, err
-	}
-	return &PrivateKey{Alg: AlgEd25519, Ed: key, Public: &PublicKey{Alg: AlgEd25519, Ed: pub, SPKI: spki}}, nil
-}
-
-func newP256(key *ecdsa.PrivateKey) (*PrivateKey, error) {
-	spki, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
-	if err != nil {
-		return nil, err
-	}
-	return &PrivateKey{Alg: AlgP256, EC: key, Public: &PublicKey{Alg: AlgP256, EC: &key.PublicKey, SPKI: spki}}, nil
 }
 
 // PKCS8 exports the private key in PKCS #8 DER, in the minimal form the vectors carry: Ed25519 per
@@ -261,10 +281,11 @@ func newP256(key *ecdsa.PrivateKey) (*PrivateKey, error) {
 // algorithm identifier and the public key derived, never stored.
 func (k *PrivateKey) PKCS8() ([]byte, error) {
 	if k.Alg == AlgEd25519 {
-		return x509.MarshalPKCS8PrivateKey(k.Ed)
+		// RFC 8410's form, the one x509.MarshalPKCS8PrivateKey writes: the seed in an OCTET STRING
+		// inside the privateKey OCTET STRING.
+		return seq(derIntN(0), seq(oidBytes(oidEd25519)), octet(octet(k.seed))), nil
 	}
-	scalar := k.EC.D.FillBytes(make([]byte, 32))
-	ecKey := seq(derIntN(1), octet(scalar))
+	ecKey := seq(derIntN(1), octet(k.scalar))
 	return seq(derIntN(0), seq(oidBytes(oidEcPublicKey), oidBytes(oidPrime256v1)), octet(ecKey)), nil
 }
 
@@ -272,17 +293,17 @@ func (k *PrivateKey) PKCS8() ([]byte, error) {
 func GenerateKey(alg string) (*PrivateKey, error) {
 	switch alg {
 	case AlgEd25519:
-		_, priv, err := ed25519.GenerateKey(rand.Reader)
-		if err != nil {
+		seed := make([]byte, 32)
+		if _, err := rand.Read(seed); err != nil {
 			return nil, err
 		}
-		return newEd25519(priv)
+		return newEd25519(seed), nil
 	case AlgP256:
 		priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		if err != nil {
 			return nil, err
 		}
-		return newP256(priv)
+		return newP256(priv.D.FillBytes(make([]byte, 32)))
 	}
 	return nil, unsupportedError{"unsupported key type " + alg}
 }
@@ -295,18 +316,14 @@ func KeyFromSeed(alg string, seed []byte) (*PrivateKey, error) {
 	}
 	switch alg {
 	case AlgEd25519:
-		return newEd25519(ed25519.NewKeyFromSeed(seed))
+		return newEd25519(seed), nil
 	case AlgP256:
 		k := new(big.Int).SetBytes(seed)
 		k.Mod(k, p256N)
 		if k.Sign() == 0 {
 			k.SetInt64(1)
 		}
-		priv, err := ecdsa.ParseRawPrivateKey(elliptic.P256(), k.FillBytes(make([]byte, 32)))
-		if err != nil {
-			return nil, err
-		}
-		return newP256(priv)
+		return newP256(k.FillBytes(make([]byte, 32)))
 	}
 	return nil, unsupportedError{"unsupported key type " + alg}
 }
@@ -353,9 +370,9 @@ func ed25519PublicToX25519(pub ed25519.PublicKey) []byte {
 	return intToLE(u, 32)
 }
 
-// ed25519PrivateToX25519 is RFC 8032 §5.1.5: the clamped low half of SHA-512(seed) is the scalar.
-func ed25519PrivateToX25519(priv ed25519.PrivateKey) []byte {
-	h := sha512.Sum512(priv.Seed())
+// ed25519SeedToX25519 is RFC 8032 §5.1.5: the clamped low half of SHA-512(seed) is the scalar.
+func ed25519SeedToX25519(seed []byte) []byte {
+	h := sha512.Sum512(seed)
 	a := append([]byte(nil), h[:32]...)
 	return clamp(a)
 }

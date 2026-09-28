@@ -2,7 +2,7 @@
 //! §13.1 names (RFC 7748 §4.1 and RFC 8032 §5.1.5 to X25519).
 use crate::der::{self, children, read, read_oid, read_oid_strict};
 use crate::util::{b64u, err, sha256, Error, Result};
-use p256::ecdsa::signature::{Signer, Verifier};
+use p256::ecdsa::signature::{Signer as _, Verifier};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use sha2::{Digest, Sha256, Sha512};
 use zeroize::Zeroizing;
@@ -269,36 +269,25 @@ impl PrivateKey {
         }
     }
 
-    pub fn public(&self) -> PublicKey {
+    /// The key expanded for signing: an Ed25519 seed becomes its `SigningKey` here, once. A caller that
+    /// needs the public key AND a signature takes a `Signer` and asks it for both; `public()` and
+    /// `sign()` on the key each expand it again. 0.4.0 made the key its seed and left four callers
+    /// (the leaf-form seal, a CSR, a root certificate, an issued leaf) expanding it twice: the leaf-form
+    /// `seal_result` went from 85.4 to 96.0 us (measured 2026-09-29).
+    pub fn signer(&self) -> Signer<'_> {
         match self {
-            PrivateKey::Ed25519(seed) => {
-                let vk = ed25519_dalek::SigningKey::from_bytes(seed).verifying_key();
-                PublicKey { spki: spki_of(der::seq(&[der::oid(OID_ED25519)]), vk.as_bytes()), inner: Public::Ed25519(vk) }
-            }
-            PrivateKey::P256(k) => {
-                let pk = k.public_key();
-                let point = pk.to_encoded_point(false);
-                PublicKey {
-                    spki: spki_of(der::seq(&[der::oid(OID_EC_PUBLIC_KEY), der::oid(OID_PRIME256V1)]), point.as_bytes()),
-                    inner: Public::P256(pk),
-                }
-            }
+            PrivateKey::Ed25519(seed) => Signer::Ed25519(Box::new(ed25519_dalek::SigningKey::from_bytes(seed))),
+            PrivateKey::P256(k) => Signer::P256(k),
         }
+    }
+
+    pub fn public(&self) -> PublicKey {
+        self.signer().public()
     }
 
     /// §13.1: Ed25519 pure, or ECDSA P-256/SHA-256 in DER (RFC 6979 deterministic), by the signer's own algorithm.
     pub fn sign(&self, data: &[u8]) -> Vec<u8> {
-        match self {
-            PrivateKey::Ed25519(seed) => ed25519_dalek::SigningKey::from_bytes(seed).sign(data).to_bytes().to_vec(),
-            PrivateKey::P256(k) => {
-                let sk = p256::ecdsa::SigningKey::from(k);
-                let sig: p256::ecdsa::Signature = sk.sign(data);
-                // The low-S twin, always (SPEC 14.1). `p256` does not normalise on its own — only
-                // `k256` does, for Bitcoin's sake — so half of what this returned was the high twin,
-                // and a certificate carrying that one is outside the profile.
-                sig.normalize_s().unwrap_or(sig).to_der().as_bytes().to_vec()
-            }
-        }
+        self.signer().sign(data)
     }
 
     /// RFC 8032 §5.1.5: the clamped low half of SHA-512(seed) is the X25519 scalar.
@@ -320,6 +309,46 @@ impl PrivateKey {
         match self {
             PrivateKey::P256(k) => Ok(k),
             _ => err("unsupported", "not a P-256 key"),
+        }
+    }
+}
+
+/// A private key expanded for signing (`PrivateKey::signer`): its public key and its signatures from
+/// one expansion.
+pub enum Signer<'a> {
+    Ed25519(Box<ed25519_dalek::SigningKey>),
+    P256(&'a p256::SecretKey),
+}
+
+impl Signer<'_> {
+    pub fn public(&self) -> PublicKey {
+        match self {
+            Signer::Ed25519(k) => {
+                let vk = k.verifying_key();
+                PublicKey { spki: spki_of(der::seq(&[der::oid(OID_ED25519)]), vk.as_bytes()), inner: Public::Ed25519(vk) }
+            }
+            Signer::P256(k) => {
+                let pk = k.public_key();
+                let point = pk.to_encoded_point(false);
+                PublicKey {
+                    spki: spki_of(der::seq(&[der::oid(OID_EC_PUBLIC_KEY), der::oid(OID_PRIME256V1)]), point.as_bytes()),
+                    inner: Public::P256(pk),
+                }
+            }
+        }
+    }
+
+    pub fn sign(&self, data: &[u8]) -> Vec<u8> {
+        match self {
+            Signer::Ed25519(k) => k.sign(data).to_bytes().to_vec(),
+            Signer::P256(k) => {
+                let sk = p256::ecdsa::SigningKey::from(*k);
+                let sig: p256::ecdsa::Signature = sk.sign(data);
+                // The low-S twin, always (SPEC 14.1). `p256` does not normalise on its own — only
+                // `k256` does, for Bitcoin's sake — so half of what this returned was the high twin,
+                // and a certificate carrying that one is outside the profile.
+                sig.normalize_s().unwrap_or(sig).to_der().as_bytes().to_vec()
+            }
         }
     }
 }

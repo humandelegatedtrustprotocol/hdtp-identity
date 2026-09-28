@@ -425,7 +425,7 @@ func WalletIssue(plain VaultPlaintext, record RecordPlaintext, rootFingerprint s
 			rootSPKIs = append(rootSPKIs, cert.SPKI)
 		}
 		if priv, err := ParsePKCS8(FromB64url(r.PKCS8)); err == nil {
-			rootSPKIs = append(rootSPKIs, priv.Public.SPKI)
+			rootSPKIs = append(rootSPKIs, priv.Public().SPKI)
 		}
 	}
 	if root == nil {
