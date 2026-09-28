@@ -9,7 +9,7 @@ import { buildRoot, buildLeaf } from '../../pact-protocol/vectors/lib/x509.mjs';
 import { encodeCard } from '../../pact-protocol/vectors/lib/card.mjs';
 import { makeNode, receive } from '../../pact-protocol/vectors/lib/envelope.mjs';
 import { readFileSync } from 'node:fs';
-import { runLive, answerCode, scenarios, BATTERY, checkBattery } from './live.mjs';
+import { runLive, answerCode, scenarios, BATTERY, checkBattery, verdictOf, throughRateLimits, retryAfterOf, RATE_RETRIES, RATE_PAUSE_MAX, RATE_PAUSE_DEFAULT } from './live.mjs';
 import { load } from './index.mjs';
 import { alina, H, D } from './cast.mjs';
 
@@ -58,7 +58,7 @@ async function sealedResult(fake, envelope) {
 }
 
 /** The fake behind an HTTP door. `answerOk` is what it sends for a call the seed let through. */
-async function serve(answerOk) {
+async function serve(answerOk, { door = () => null, pause } = {}) {
   const server = createServer();
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const fake = fakeNode(server.address().port);
@@ -75,6 +75,9 @@ async function serve(answerOk) {
       // is proven against that one by aiming it there.)
       if (rpc.method === 'initialize') { res.end(JSON.stringify({ jsonrpc: '2.0', id: rpc.id, result: { protocolVersion: '2025-06-18', capabilities: {}, serverInfo: { name: 'seed', version: '1' } } })); return; }
       if (rpc.method !== 'tools/call') { res.statusCode = 202; res.end(); return; }
+      // A door in front of the receiver, which may refuse the attempt before the node sees it.
+      const refused = door(rpc);
+      if (refused) { res.end(JSON.stringify(refused)); return; }
       const answer = receive(fake.node, rpc.params.arguments);
       if (answer.code === 'ok') res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { content: [{ type: 'text', text: JSON.stringify(await answerOk(fake, rpc.params.arguments)) }] } }));
       else res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: -32000, message: answer.code, data: { code: answer.code, why: answer.why } } }));
@@ -82,7 +85,7 @@ async function serve(answerOk) {
   });
   const lines = [];
   // The seed's card intake refuses an http endpoint only at the address guard, which the fake does not run; the adapter dials what it was given.
-  const out = await runLive({ endpoint: fake.endpoint, fetchImpl: (u, init) => fetch(u.replace('https://alina.example/mcp', fake.endpoint), init), log: (l) => lines.push(l) });
+  const out = await runLive({ endpoint: fake.endpoint, fetchImpl: (u, init) => fetch(u.replace('https://alina.example/mcp', fake.endpoint), init), log: (l) => lines.push(l), ...(pause ? { pause } : {}) });
   server.close();
   return { out, lines };
 }
@@ -109,6 +112,54 @@ test('a control answered with something that only looks sealed is not a control 
   assert.equal(control.verdict, 'CONTROL UNOPENED', lines.join('\n'));
   assert.equal(out.controlUnopened, 1);
   assert.ok(out.results.slice(0, -1).every((r) => r.verdict === 'blocked'), 'nothing else changes');
+});
+
+// A rate limit refuses the ATTEMPT, before the target judged the attack. It was scored as a verdict:
+// REPRODUCES for an attack, CONTROL REFUSED for the control.
+const rateLimited = (retryAfter) => ({ jsonrpc: '2.0', id: 1, result: { content: [{ type: 'text', text: JSON.stringify({ code: 'rate_limited', ...(retryAfter === undefined ? {} : { retry_after: retryAfter }) }) }], isError: true } });
+
+test('a target that rate-limits every post leaves every scenario UNREACHED, the control too, and the run fails', async () => {
+  const pauses = [];
+  const { out, lines } = await serve(sealedResult, { door: () => rateLimited(2), pause: async (s) => { pauses.push(s); } });
+  assert.ok(out.results.every((r) => r.verdict === 'UNREACHED'), lines.join('\n'));
+  assert.equal(out.reproduces + out.controlRefused, 0, 'a rate limit is never a verdict on the attack');
+  assert.equal(out.rateLimited, out.results.length);
+  assert.ok(lines.at(-1).includes('rate-limited: the target refused the attempt before judging the attack'), lines.at(-1));
+  // Each post was paused as asked, up to the bound, and no longer.
+  const posts = BATTERY.scenarios.reduce((n, s) => n + (s.twice ? 2 : 1), 0);
+  assert.deepEqual(pauses, Array(posts * RATE_RETRIES).fill(2));
+});
+
+test('a rate-limited post is posted again after the pause asked for, and then judged as the target answers', async () => {
+  const seen = new Set();
+  const pauses = [];
+  // Every envelope is refused for a budget the first time it arrives, and let through after.
+  const door = (rpc) => { const key = rpc.params.arguments.protected + rpc.params.arguments.sig; if (seen.has(key)) return null; seen.add(key); return rateLimited(); };
+  const { out, lines } = await serve(sealedResult, { door, pause: async (s) => { pauses.push(s); } });
+  assert.ok(out.results.every((r) => r.verdict === 'blocked'), lines.join('\n'));
+  assert.equal(out.unreached, 0);
+  assert.ok(pauses.length >= BATTERY.scenarios.length && pauses.every((p) => p === RATE_PAUSE_DEFAULT), `${pauses}`);
+});
+
+test('the verdict and the retry loop: a bound, the pause asked for, and no pause asked for past the bound', async () => {
+  for (const got of ['rate_limited', 'http_429', 'envelope_invalid then rate_limited']) {
+    assert.equal(verdictOf(got, 'envelope_invalid', false), 'UNREACHED', got);
+    assert.equal(verdictOf(got, 'sealed', true), 'UNREACHED', got);
+  }
+  assert.equal(verdictOf('chain_required', 'envelope_invalid', false), 'REPRODUCES');
+  assert.equal(verdictOf('envelope_invalid', 'sealed', true), 'CONTROL REFUSED');
+  const run = async (script) => { const pauses = []; let posts = 0; const got = await throughRateLimits(async () => script[posts++], async (s) => { pauses.push(s); }); return { got: got.code, posts, pauses }; };
+  assert.deepEqual(await run([{ code: 'rate_limited', retryAfter: RATE_PAUSE_MAX + 1 }]), { got: 'rate_limited', posts: 1, pauses: [] });
+  assert.deepEqual(await run([{ code: 'http_429', retryAfter: 4 }, { code: 'sealed' }]), { got: 'sealed', posts: 2, pauses: [4] });
+  assert.equal(retryAfterOf(JSON.stringify(rateLimited(7))), 7);
+  assert.equal(retryAfterOf(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: -32000, data: { code: 'rate_limited', retry_after: 9 } } })), 9);
+});
+
+test('the two drivers wait alike: the Rust driver has the same bound and pauses', () => {
+  const rust = readFileSync(new URL('../crates/pact/src/vectors/intrude.rs', import.meta.url), 'utf8');
+  for (const [name, value] of [['RATE_RETRIES', RATE_RETRIES], ['RATE_PAUSE_MAX', RATE_PAUSE_MAX], ['RATE_PAUSE_DEFAULT', RATE_PAUSE_DEFAULT]]) {
+    assert.match(rust, new RegExp(`pub const ${name}: u\\d+ = ${value};`), `${name} in intrude.rs is not ${value}`);
+  }
 });
 
 test('answerCode reads every shape an endpoint answers in', () => {

@@ -10,6 +10,32 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+- **`pact vectors corpus --owner <root> --out <dir>`** writes the export corpus for another owner
+  root. The committed corpus names one fixed owner, so on a host whose identities cannot hold that
+  root, 27 hostile files were refused at the owner check, before the check each one targets: those
+  results were UNREACHED, not proven.
+  - The CLI embeds `go/exportcorpus`. A build script reads the file list from `cases.json`.
+  - It replaces the owner's fingerprint in the stored members, the same length, so every offset
+    and stated size stays.
+  - It writes each changed member's CRC-32 again.
+  - It replaces a changed member's sha256 in the manifest only where the old one was true of the
+    old bytes, so a file whose defect is a wrong hash keeps it.
+  - `cases.json`'s refusals follow the new owner.
+  - It refuses a root the corpus gives someone else, a deflated member holding the owner, and
+    writing over an existing file.
+  - The committed corpus is unchanged, and the ports' own tests still read it.
+  - Test: `the_corpus_reissued_for_another_owner_reaches_every_check` reads the corpus under two new
+    owners with the CLI's reader. Each hostile file gets its named refusal and each valid file is
+    read whole. The committed valid export is refused as another identity's under each owner.
+- **A rate limit is no longer a verdict.** `pact vectors intrude` and `js/live.mjs` scored a
+  `rate_limited` answer as REPRODUCES for an attack and CONTROL REFUSED for the control. It refuses
+  the attempt before the target judges the attack.
+  - A `rate_limited` answer, or HTTP 429, is now paused for its `retry_after` (the answer's, or the
+    `Retry-After` header; 10 s when neither names one) and posted again, up to three times.
+  - A pause longer than 60 s is not waited for.
+  - A post still rate-limited is UNREACHED, and the run fails saying it was rate-limited.
+  - The two drivers' constants are held equal by a test.
+
 ## 0.3.4 — 2026-09-27
 
 - SPEC 2.2.3: `version` answers spec 2.2.3. The only change is 9.2#3's wording: the notice names

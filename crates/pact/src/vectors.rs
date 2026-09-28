@@ -13,9 +13,11 @@ use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
 mod check;
+pub(crate) mod corpus;
 mod intrude;
 
 pub use check::check;
+pub use corpus::corpus;
 pub use intrude::intrude;
 
 const NOW: &str = "2026-09-13T12:00:00Z";
