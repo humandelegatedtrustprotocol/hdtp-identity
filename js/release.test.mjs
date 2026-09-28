@@ -191,7 +191,11 @@ test('a release: two commits, two tags on the second, the version everywhere, ex
     // The steps ran in order: gate, then pin, then the CLI from the tag.
     assert.deepEqual(f.calls().trim().split('\n'), ['gate', 'pin', 'cli v0.2.0 darwin-arm64 linux-amd64 linux-arm64']);
     // One version, everywhere; the pin records it; the changelog is dated.
-    assert.equal(execFileSync('node', ['scripts/version.mjs', '--check'], { cwd: f.work, encoding: 'utf8' }).trim(), 'version: ok (0.2.0 in all 6 places)');
+    // Where it is written: the workspace, the lock entry of every workspace member, js/package.json
+    // and go/api.go. Counted from the fixture's own Cargo.toml, not written down: "6 places" here
+    // stayed true while a fourth crate joined and its lock entry was never read.
+    const members = /members = \[([^\]]*)\]/.exec(readFileSync(join(f.work, 'Cargo.toml'), 'utf8'))[1].match(/"[^"]+"/g).length;
+    assert.equal(execFileSync('node', ['scripts/version.mjs', '--check'], { cwd: f.work, encoding: 'utf8' }).trim(), `version: ok (0.2.0 in all ${members + 3} places)`);
     const pin = JSON.parse(readFileSync(join(f.work, 'js/manifest.json'), 'utf8'));
     assert.equal(pin.crate_version, '0.2.0');
     assert.match(readFileSync(join(f.work, 'CHANGELOG.md'), 'utf8'), /## Unreleased\n\n## 0\.2\.0 — 2026-09-27\n\n- a change the fixture releases\n/);
