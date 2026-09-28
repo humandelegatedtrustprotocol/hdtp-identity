@@ -394,7 +394,7 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 	if len(enc) != SuiteNpk(suite) {
 		return invalid("encapsulated key is not the suite's length")
 	}
-	plaintext, err := Open(suite, priv, []byte(InfoV2), aad, enc, ct)
+	plaintext, err := Open(suite, priv, heldLeaf.PublicKey, []byte(InfoV2), aad, enc, ct)
 	if err != nil {
 		return invalid("does not open")
 	}
@@ -675,7 +675,10 @@ func itoa(n int) string { return strconv.Itoa(n) }
 
 // OpenOpts is the caller side of a sealed result.
 type OpenOpts struct {
-	Recipient        *PrivateKey
+	Recipient *PrivateKey
+	// RecipientPublic is the recipient's own public key, from its leaf: the kid is checked against it
+	// and the open puts it in the KEM context. Never Recipient.Public.
+	RecipientPublic  *PublicKey
 	MsgID            string
 	Now              time.Time
 	Pins             []Pin
@@ -721,10 +724,10 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 	if v != 2 || !SuiteKnown(suite) {
 		return nil, errors.New("version or suite")
 	}
-	if kid, _ := header["kid"].(string); kid != Fingerprint(o.Recipient.Public.SPKI) {
+	if kid, _ := header["kid"].(string); kid != Fingerprint(o.RecipientPublic.SPKI) {
 		return nil, errors.New("kid is not this key")
 	}
-	if mine, _ := SuiteForKey(o.Recipient.Public); suite != mine {
+	if mine, _ := SuiteForKey(o.RecipientPublic); suite != mine {
 		return nil, errors.New("suite does not fit the key")
 	}
 	if cty, _ := header["cty"].(string); cty != CtyResult {
@@ -753,7 +756,7 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 	if err != nil {
 		return nil, errors.New("signature")
 	}
-	plaintext, err := Open(suite, o.Recipient, []byte(InfoV2), aad, enc, ct)
+	plaintext, err := Open(suite, o.Recipient, o.RecipientPublic, []byte(InfoV2), aad, enc, ct)
 	if err != nil {
 		return nil, errors.New("does not open")
 	}

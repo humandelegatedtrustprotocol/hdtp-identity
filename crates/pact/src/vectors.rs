@@ -209,6 +209,7 @@ pub fn gen(out: Option<&str>) -> Res<i32> {
         let pt = hpke::open(
             suite,
             recipient,
+            &recipient_leaf.public_key,
             envelope::INFO_V2,
             &from_b64u(&wire.protected).map_err(|e| Fail(e.why))?,
             &from_b64u(&wire.enc).map_err(|e| Fail(e.why))?,

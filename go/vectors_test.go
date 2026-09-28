@@ -391,7 +391,7 @@ func TestV2Envelopes(t *testing.T) {
 		if !bytes.Equal(recipient.Public.SPKI, recipientLeaf.SPKI) {
 			t.Errorf("%s: the recipient key is not the leaf's", e.Name)
 		}
-		pt, err := Open(e.Suite, recipient, []byte(InfoV2), aad, enc, ct)
+		pt, err := Open(e.Suite, recipient, recipientLeaf.PublicKey, []byte(InfoV2), aad, enc, ct)
 		if err != nil {
 			t.Errorf("%s: open: %v", e.Name, err)
 			continue

@@ -14,6 +14,7 @@ mod envelopes;
 mod export;
 mod keys;
 mod ledger;
+mod limits;
 mod signing;
 mod vault;
 
@@ -264,6 +265,9 @@ fn dispatch(name: &str, a: &Value) -> Result<Answer> {
         "book_rows" => export::book_rows(a)?,
         // §6.1 ledger
         "ledger_check" => ledger::ledger_check(a)?,
+        // §6.3 limits
+        "limits_rules_check" => limits::limits_rules_check(a)?,
+        "limits_decide" => limits::limits_decide(a)?,
         "version" => json!({ "crate": env!("CARGO_PKG_VERSION"), "spec": SPEC_VERSION }),
         other => return err("unsupported", format!("no function named {other}")),
     }))

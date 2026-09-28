@@ -200,7 +200,7 @@ pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
             );
             t.ok(header["kid"] == recipient_leaf.public_key.fingerprint(), format!("{name}: kid is the recipient leaf key"));
             t.ok(recipient.public().spki() == &recipient_leaf.spki[..], format!("{name}: the recipient key is the leaf's"));
-            let pt = hpke::open(suite, &recipient, envelope::INFO_V2, &aad, &enc, &ct).map_err(|e| e.why)?;
+            let pt = hpke::open(suite, &recipient, &recipient_leaf.public_key, envelope::INFO_V2, &aad, &enc, &ct).map_err(|e| e.why)?;
             t.ok(hex(&pt) == e["plaintext_hex"].as_str().unwrap_or(""), format!("{name}: plaintext"));
             let body: Value = serde_json::from_slice(&pt).map_err(|e| e.to_string())?;
             let mut signed = aad.clone();

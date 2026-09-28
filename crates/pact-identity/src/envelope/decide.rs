@@ -105,10 +105,11 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
     if enc.len() != suite.npk() {
         return Ok(invalid("encapsulated key is not the suite's length"));
     }
-    let body: Value = match hpke::open(suite, &key, INFO_V2, &aad, &enc, &ct).ok().and_then(|p| serde_json::from_slice(&p).ok()) {
-        Some(b) => b,
-        None => return Ok(invalid("does not open")),
-    };
+    let body: Value =
+        match hpke::open(suite, &key, &held_leaf.public_key, INFO_V2, &aad, &enc, &ct).ok().and_then(|p| serde_json::from_slice(&p).ok()) {
+            Some(b) => b,
+            None => return Ok(invalid("does not open")),
+        };
     let m = members(&body);
     if m != "chain,method,params" && m != "leaf,method,params" {
         return Ok(invalid("plaintext members"));

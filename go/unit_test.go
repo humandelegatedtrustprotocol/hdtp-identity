@@ -317,21 +317,21 @@ func TestSealAndOpenResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	rootB, _ := Parse(der("root_b"))
-	opened, err := OpenResult(*env, OpenOpts{Recipient: c.leafA, MsgID: "m-1", Now: now, ExpectedRoot: FingerprintOf(rootB), ExpectedEndpoint: endpointB})
+	opened, err := OpenResult(*env, OpenOpts{Recipient: c.leafA, RecipientPublic: c.leafA.Public, MsgID: "m-1", Now: now, ExpectedRoot: FingerprintOf(rootB), ExpectedEndpoint: endpointB})
 	if err != nil || opened.Form != "chain" || opened.Root != FingerprintOf(rootB) || !bytes.Contains(opened.Result, []byte("ok")) {
 		t.Fatalf("open result: %v %+v", err, opened)
 	}
-	if _, err := OpenResult(*env, OpenOpts{Recipient: c.leafA, MsgID: "m-2", Now: now}); err == nil {
+	if _, err := OpenResult(*env, OpenOpts{Recipient: c.leafA, RecipientPublic: c.leafA.Public, MsgID: "m-2", Now: now}); err == nil {
 		t.Error("a wrong msg_id should not correlate")
 	}
 	// The small form back, against a pin of leaf_b.
 	env, _ = SealResult(SealOpts{RecipientKey: leafA.PublicKey, Sender: c.leafB, Form: "leaf", Error: json.RawMessage(`{"code":"permission_denied","message":"no"}`), MsgID: "m-3", TS: now.Unix()})
 	pins := []Pin{{Root: FingerprintOf(rootB), Endpoint: endpointB, Leaf: B64url(der("leaf_b")), State: "active"}}
-	opened, err = OpenResult(*env, OpenOpts{Recipient: c.leafA, MsgID: "m-3", Now: now, Pins: pins})
+	opened, err = OpenResult(*env, OpenOpts{Recipient: c.leafA, RecipientPublic: c.leafA.Public, MsgID: "m-3", Now: now, Pins: pins})
 	if err != nil || opened.Form != "leaf" || opened.Error == nil {
 		t.Fatalf("open small-form error result: %v %+v", err, opened)
 	}
-	if _, err := OpenResult(*env, OpenOpts{Recipient: c.leafA, MsgID: "m-3", Now: now}); err == nil {
+	if _, err := OpenResult(*env, OpenOpts{Recipient: c.leafA, RecipientPublic: c.leafA.Public, MsgID: "m-3", Now: now}); err == nil {
 		t.Error("an unheld leaf should not verify")
 	}
 	// A request sealed through Call, decided by Bharat.
@@ -423,5 +423,31 @@ func TestAPlaintextThatIsNotJSONIsDamageNotAnEarlierWallet(t *testing.T) {
 	_ = json.Unmarshal(raw, &doc)
 	if _, err := VaultOpenDoc("a passphrase", doc); err != errEarlierGeneration {
 		t.Fatalf("a plaintext with no generation opened as %v, want %v", err, errEarlierGeneration)
+	}
+}
+
+// The public key an open is handed is the host's word for its own (hpke.go decap): a wrong one, of
+// the same algorithm or the other, refuses, and never yields a plaintext. The right one is the control.
+func TestOpenWithAPublicKeyThatIsNotTheRecipientsOpensNothing(t *testing.T) {
+	for _, tc := range []struct{ alg, suite, other string }{{AlgEd25519, SuiteX25519, AlgP256}, {AlgP256, SuiteP256, AlgEd25519}} {
+		r, err := KeyFromSeed(tc.alg, Seed("t/r"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		enc, ct, err := Seal(tc.suite, r.Public, []byte(InfoV2), []byte("aad"), []byte("hello"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		sameAlg, _ := KeyFromSeed(tc.alg, Seed("t/other"))
+		otherAlg, _ := KeyFromSeed(tc.other, Seed("t/r"))
+		for _, wrong := range []*PrivateKey{sameAlg, otherAlg} {
+			pt, err := Open(tc.suite, r, wrong.Public, []byte(InfoV2), []byte("aad"), enc, ct)
+			if err == nil || err.Error() != "does not open" || pt != nil {
+				t.Fatalf("%s with a %s public key: %q, %v", tc.alg, wrong.Alg, pt, err)
+			}
+		}
+		if pt, err := Open(tc.suite, r, r.Public, []byte(InfoV2), []byte("aad"), enc, ct); err != nil || string(pt) != "hello" {
+			t.Fatalf("%s: the right public key: %q, %v", tc.alg, pt, err)
+		}
 	}
 }

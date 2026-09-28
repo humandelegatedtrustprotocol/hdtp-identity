@@ -71,12 +71,12 @@ export function answeredEnvelope(body) {
  * refusal. Returns null when it does, and why not otherwise. The Rust driver does the same
  * (`control_opened`, held by its own unit test); js/live.test.mjs holds this one.
  */
-export async function controlOpened(answer, { pkcs8, msgId, now, root, endpoint }) {
+export async function controlOpened(answer, { pkcs8, spki, msgId, now, root, endpoint }) {
   const envelope = answeredEnvelope(answer);
   if (!envelope) return 'the answer carries no envelope';
   const core = await load();
   const at = new Date(Math.floor(now / 1000) * 1000).toISOString().replace('.000Z', 'Z');
-  const opened = core.call('open_result', { envelope, my_pkcs8: pkcs8, msg_id: msgId, now: at, pins: [], expected_root: root, expected_endpoint: endpoint });
+  const opened = core.call('open_result', { envelope, my_pkcs8: pkcs8, my_spki: spki, msg_id: msgId, now: at, pins: [], expected_root: root, expected_endpoint: endpoint });
   // A failure of the boundary is `{ error: <code>, why }`; an envelope that OPENS is `{ ok: true, … }`
   // carrying `result` — or `error`, when what was sealed inside is a refusal.
   if (opened.ok !== true) return `${opened.error}: ${opened.why}`;
@@ -232,7 +232,7 @@ export function scenarios({ targetLeaf, now = Date.now(), battery = BATTERY }) {
     if (!build[s.id]) throw new Error(`js/live-scenarios.json names ${s.id}, and js/live.mjs has no builder for it`);
     const envelope = build[s.id]();
     const control = s.control
-      ? { pkcs8: b64url(hostM.priv.export({ format: 'der', type: 'pkcs8' })), msgId: JSON.parse(fromB64url(envelope.protected).toString()).msg_id }
+      ? { pkcs8: b64url(hostM.priv.export({ format: 'der', type: 'pkcs8' })), spki: b64url(hostM.pub.export({ format: 'der', type: 'spki' })), msgId: JSON.parse(fromB64url(envelope.protected).toString()).msg_id }
       : undefined;
     // Every entry carries the ATTACKER's root, because "she is new every run" is otherwise
     // untestable from outside: her chain rides inside the ciphertext, and the signature over it

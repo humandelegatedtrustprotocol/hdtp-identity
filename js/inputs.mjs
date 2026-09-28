@@ -19,6 +19,8 @@ import { fileURLToPath } from 'node:url';
 export const INPUTS = [
   'crates/pact-identity',
   'crates/pact-identity-wasm',
+  // The call budgets are compiled into the core through its dependency on them (api/limits.rs).
+  'crates/pact-limits',
   'Cargo.toml',
   'Cargo.lock',
   'rust-toolchain.toml',
