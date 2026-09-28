@@ -10,6 +10,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+## 0.4.0 — 2026-09-28
+
 - `pact-limits`, a new crate: SPEC §12's per-caller call budgets as one pure decision over a state
   store the host implements (layer 2 of pact-gateway `docs/release/two-layer-limits-2026-09-28.md`).
   Token buckets with the cloud's keys, the rule set as data (no default in the library), and the
