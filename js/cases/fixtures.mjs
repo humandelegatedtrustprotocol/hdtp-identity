@@ -91,7 +91,7 @@ export function fixtures({ wasm, go }) {
   const callerSpki = b64url(spkiOf(callerKey.pub));
   // Port-built: the seed seals requests, not results.
   const answerTo = (o = {}) => wasm.call('seal_result', { recipient_spki: callerSpki, sender_pkcs8: hostPkcs8, form: 'chain', sender_chain: [leafDer, rootDer], result: { ok: 1 }, msg_id: 'r-1', ts: at(now), ...o });
-  const open = (envelope, o = {}) => ({ envelope, my_pkcs8: callerPkcs8, msg_id: 'r-1', now, pins: [], expected_root: rootFp, expected_endpoint: ENDPOINT, ...o });
+  const open = (envelope, o = {}) => ({ envelope, my_pkcs8: callerPkcs8, my_spki: callerSpki, msg_id: 'r-1', now, pins: [], expected_root: rootFp, expected_endpoint: ENDPOINT, ...o });
   const chainForm = answerTo();
   const leafForm = answerTo({ form: 'leaf' });
   const follow = (answer) => ({ answer, pinned_root: rootFp, pinned_leaf: leafDer, dialed: ENDPOINT, now });

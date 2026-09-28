@@ -7,9 +7,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed here that did not pass.
 
-Specification: **2.2.4**. **88** normative sentences, **801** cross-port parity cases over **50** guarded functions.
+Specification: **2.2.4**. **88** normative sentences, **807** cross-port parity cases over **50** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **1602** answers held to the shape it declares, **0** did not. Of **94** declared error codes, **79** were produced by a case here; the rest are declared for a caller's benefit and no argument in this suite reaches them.
+Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **1614** answers held to the shape it declares, **0** did not. Of **94** declared error codes, **79** were produced by a case here; the rest are declared for a caller's benefit and no argument in this suite reaches them.
 
 ## The 88 normative sentences of the specification
 
@@ -202,7 +202,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 801 cross-port parity cases
+## The 807 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -210,7 +210,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **801** cases, **0** disagreements, **50** of **50** functions compared whole on success.
+At the run that generated this file: **807** cases, **0** disagreements, **50** of **50** functions compared whole on success.
 
 ### `address_guard` — 32 cases · whole on success
 
@@ -617,11 +617,14 @@ At the run that generated this file: **801** cases, **0** disagreements, **50** 
 - generate_key with an algorithm nobody has
 - generate_key with nothing to work from
 
-### `hpke_open` — 3 cases · whole on success
+### `hpke_open` — 6 cases · whole on success
 
 - hpke_open of a ciphertext that is not one
 - hpke_open with nothing to work from
 - hpke_open of what hpke_seal made
+- hpke_open with a public key that is another Ed25519 key
+- hpke_open with a public key of the other algorithm
+- hpke_open with no public key
 
 ### `hpke_seal` — 3 cases · whole on success
 
@@ -855,11 +858,14 @@ At the run that generated this file: **801** cases, **0** disagreements, **50** 
 
 - a function nobody defines
 
-### `open_result` — 17 cases · whole on success
+### `open_result` — 20 cases · whole on success
 
 - open_result of a request envelope
 - open_result with nothing to work from
 - open_result of what seal_result made
+- open_result with a public key that is not this key's: the kid says so first
+- open_result with the kid's public key and another private key: it does not open
+- open_result with no public key
 - open_result with a key the envelope is not sealed to
 - open_result whose header names a suite that is known and is not this key's
 - open_result with the wrong key AND the wrong suite: which is said first

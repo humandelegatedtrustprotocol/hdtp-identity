@@ -22,6 +22,16 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 - `js/cases/limits-vectors.json`: 3840 steps of the cloud's TypeScript (`limits.ts`, sha256 in the
   file), run over SQLite by `js/limits-vectors.mjs` and replayed by the crate, the Wasm and the Go
   port, every row compared bit for bit.
+- **Breaking:** `hpke_open` takes `recipient_spki` and `open_result` takes `my_spki`: the
+  recipient's own public key, as its leaf certificate holds it, in both ports (`hpke::open` and
+  `OpenResultArgs::my_public` in Rust; `Open(id, priv, pub, …)` and `OpenOpts.RecipientPublic` in
+  Go). The open no longer derives it from the private key, which for P-256 was a scalar
+  multiplication on every open. A public key that is not the private key's refuses (`kid is not
+  this key`, or `does not open`), never a plaintext. `decide` takes the key from the held leaf it
+  already parses, so its arguments do not change. No path takes the old arguments.
+- An Ed25519 private key is its seed: reading one no longer derives the public key, which the open
+  never used. Signing and `public()` derive what they need; signatures are byte for byte the same
+  (Appendix B, both ports).
 - serde_json reads floating-point numbers correctly rounded (`float_roundtrip`). Its default parser
   read `15.029461111111111` one ulp high, so a stored bucket handed to `limits_decide` would have
   read differently from what the host wrote.

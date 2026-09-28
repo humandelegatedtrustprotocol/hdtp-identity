@@ -233,12 +233,12 @@ fn compressed_p256_points_are_refused() {
     enc_c.extend_from_slice(&enc[1..33]);
     let opened = call(
         "hpke_open",
-        json!({ "suite": "PACT-SEAL-P256", "recipient_pkcs8": k["pkcs8"], "info": b64u(b"PACT-SEAL-v2"), "aad": b64u(b"h"), "enc": b64u(&enc_c), "ct": sealed["ct"] }),
+        json!({ "suite": "PACT-SEAL-P256", "recipient_pkcs8": k["pkcs8"], "recipient_spki": k["spki"], "info": b64u(b"PACT-SEAL-v2"), "aad": b64u(b"h"), "enc": b64u(&enc_c), "ct": sealed["ct"] }),
     );
     assert!(opened["error"].is_string(), "{opened}");
     let ok = call(
         "hpke_open",
-        json!({ "suite": "PACT-SEAL-P256", "recipient_pkcs8": k["pkcs8"], "info": b64u(b"PACT-SEAL-v2"), "aad": b64u(b"h"), "enc": sealed["enc"], "ct": sealed["ct"] }),
+        json!({ "suite": "PACT-SEAL-P256", "recipient_pkcs8": k["pkcs8"], "recipient_spki": k["spki"], "info": b64u(b"PACT-SEAL-v2"), "aad": b64u(b"h"), "enc": sealed["enc"], "ct": sealed["ct"] }),
     );
     assert_eq!(ok["plaintext"], b64u(b"hi"), "{ok}");
 }

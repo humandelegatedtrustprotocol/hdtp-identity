@@ -1468,12 +1468,13 @@
         "properties": {
           "suite": { "$ref": "#/$defs/Suite" },
           "recipient_pkcs8": { "$ref": "#/$defs/Pkcs8" },
+          "recipient_spki": { "$ref": "#/$defs/Spki", "description": "The recipient's own public key, as its leaf certificate holds it. It goes into the KEM context (RFC 9180 §4.1) and is never derived from `recipient_pkcs8`; one that is not that key's public key gives another context, and the open fails (`does not open`): it can refuse, never admit." },
           "info": { "type": "string" },
           "aad": { "$ref": "#/$defs/B64url" },
           "enc": { "$ref": "#/$defs/B64url" },
           "ct": { "$ref": "#/$defs/B64url" }
         },
-        "required": ["suite", "recipient_pkcs8", "info", "enc", "ct"],
+        "required": ["suite", "recipient_pkcs8", "recipient_spki", "info", "enc", "ct"],
         "additionalProperties": false
       },
       "result": {
@@ -1538,13 +1539,14 @@
         "properties": {
           "envelope": { "$ref": "#/$defs/ArrivedEnvelope" },
           "my_pkcs8": { "$ref": "#/$defs/Pkcs8" },
+          "my_spki": { "$ref": "#/$defs/Spki", "description": "The caller's own public key, as its leaf certificate holds it: the header's `kid` is checked against it (`kid is not this key`), and the open puts it in the KEM context. Never derived from `my_pkcs8`; one that names the kid but is not that key's public key does not open." },
           "msg_id": { "type": "string" },
           "now": { "$ref": "#/$defs/InstantIn" },
           "pins": { "type": "array", "items": { "$ref": "#/$defs/Pin" } },
           "expected_root": { "type": "string" },
           "expected_endpoint": { "type": "string" }
         },
-        "required": ["envelope", "my_pkcs8", "msg_id", "now"],
+        "required": ["envelope", "my_pkcs8", "my_spki", "msg_id", "now"],
         "additionalProperties": false
       },
       "result": {

@@ -303,7 +303,8 @@ fn v2_envelopes_open_and_reproduce() {
         assert_eq!(suite_for(&recipient_leaf.public_key), suite, "{name}: suite follows the recipient key");
         assert_eq!(header["kid"], recipient_leaf.public_key.fingerprint(), "{name}: kid is the recipient leaf key");
         assert_eq!(recipient.public().spki(), &recipient_leaf.spki[..], "{name}: the recipient key is the leaf's");
-        let pt = hpke::open(suite, &recipient, b"PACT-SEAL-v2", &aad, &enc, &ct).unwrap_or_else(|err| panic!("{name}: {err}"));
+        let pt = hpke::open(suite, &recipient, &recipient_leaf.public_key, b"PACT-SEAL-v2", &aad, &enc, &ct)
+            .unwrap_or_else(|err| panic!("{name}: {err}"));
         assert_eq!(hex(&pt), e["plaintext_hex"].as_str().unwrap(), "{name}: plaintext");
         let body: Value = serde_json::from_slice(&pt).unwrap();
         let mut signed = aad.clone();
@@ -454,6 +455,7 @@ fn a_result_seals_back_and_opens_on_the_caller_side() {
     let out = envelope::open_result(envelope::OpenResultArgs {
         envelope: &wire,
         my_key: alina,
+        my_public: &alina.public(),
         msg_id: "m-1",
         now: ts + 5,
         pins: &[],
@@ -469,6 +471,7 @@ fn a_result_seals_back_and_opens_on_the_caller_side() {
     let bad = envelope::open_result(envelope::OpenResultArgs {
         envelope: &wire,
         my_key: alina,
+        my_public: &alina.public(),
         msg_id: "m-2",
         now: ts,
         pins: &[],
@@ -499,6 +502,7 @@ fn a_result_seals_back_and_opens_on_the_caller_side() {
     let out = envelope::open_result(envelope::OpenResultArgs {
         envelope: &small,
         my_key: alina,
+        my_public: &alina.public(),
         msg_id: "m-3",
         now: ts,
         pins: &pins,
