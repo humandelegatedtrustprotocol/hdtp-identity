@@ -10,6 +10,11 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+- SPEC 2.2.4: `version` answers spec 2.2.4. The change is §12's call budgets, which are token
+  buckets sized by the contacts an identity may hold, and `get_card`'s `limits` members. Both are
+  the hosts' to enforce and advertise; this library holds neither. §12 carries no MUST before or
+  after, and `js/musts.json` is unchanged: there are still 88 MUSTs. No behaviour changes.
+
 - `gate.sh` writes the export corpus for a random owner with `pact vectors corpus`, and the Go port
   reads it: `TestReadExportZipAnswersTheCorpusWrittenForAnotherOwner` holds every case to the
   refusals its `cases.json` names. The committed valid export read as that owner is its control.
