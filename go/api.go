@@ -324,4 +324,8 @@ var functions = map[string]func(json.RawMessage) json.RawMessage{
 
 	// Ledger: api_ledger.go
 	"ledger_check": callLedgerCheck,
+
+	// Limits: api_limits.go
+	"limits_rules_check": callLimitsRulesCheck,
+	"limits_decide":      callLimitsDecide,
 }

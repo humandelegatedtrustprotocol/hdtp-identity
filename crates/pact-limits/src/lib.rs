@@ -11,8 +11,8 @@
 //! The arithmetic is the cloud's `RateLimiter.take` (`gateway/src/identity/limits.ts`, pact-cloud
 //! 988f410) operation for operation, in IEEE double precision, so the two decide alike on every input
 //! and the rows one wrote read the same to the other. `js/cases/limits-vectors.json` holds that
-//! equivalence: sequences generated against the TypeScript over SQLite, replayed by
-//! `tests/vectors.rs`.
+//! equivalence: sequences generated against the TypeScript over SQLite, replayed here, through the
+//! Wasm and through the Go port.
 
 /// One token bucket: the row it is kept in, its sustained rate in calls a second, and the most calls
 /// it holds. A bucket with no row is full.

@@ -14,10 +14,17 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   store the host implements (layer 2 of pact-gateway `docs/release/two-layer-limits-2026-09-28.md`).
   Token buckets with the cloud's keys, the rule set as data (no default in the library), and the
   cloud's `RateLimiter.take` arithmetic operation for operation. Two rules the cloud has no code for
-  yet: the guest total charged before the open, and the cap on waiting requests.
+  yet: the guest total charged before the open, and the cap on waiting requests. It is compiled into
+  the core, so into the Wasm; the Go port is `go/limits.go`.
+- Two contract functions (§6.3, section `limits`), in both ports: `limits_rules_check` (whether a
+  rules document can be enforced, and the first reason it cannot) and `limits_decide` (one call:
+  allowed, or refused with `retry_after` and the bucket, and the rows to write).
 - `js/cases/limits-vectors.json`: 3840 steps of the cloud's TypeScript (`limits.ts`, sha256 in the
-  file), run over SQLite by `js/limits-vectors.mjs` and replayed by the crate, every row compared bit
-  for bit.
+  file), run over SQLite by `js/limits-vectors.mjs` and replayed by the crate, the Wasm and the Go
+  port, every row compared bit for bit.
+- serde_json reads floating-point numbers correctly rounded (`float_roundtrip`). Its default parser
+  read `15.029461111111111` one ulp high, so a stored bucket handed to `limits_decide` would have
+  read differently from what the host wrote.
 
 ## 0.3.6 — 2026-09-28
 

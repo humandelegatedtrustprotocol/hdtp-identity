@@ -7,9 +7,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed here that did not pass.
 
-Specification: **2.2.4**. **88** normative sentences, **727** cross-port parity cases over **48** guarded functions.
+Specification: **2.2.4**. **88** normative sentences, **801** cross-port parity cases over **50** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**49** functions, spec 2.2.4): **1454** answers held to the shape it declares, **0** did not. Of **92** declared error codes, **77** were produced by a case here; the rest are declared for a caller's benefit and no argument in this suite reaches them.
+Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **1602** answers held to the shape it declares, **0** did not. Of **94** declared error codes, **79** were produced by a case here; the rest are declared for a caller's benefit and no argument in this suite reaches them.
 
 ## The 88 normative sentences of the specification
 
@@ -202,7 +202,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 727 cross-port parity cases
+## The 801 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -210,7 +210,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **727** cases, **0** disagreements, **48** of **48** functions compared whole on success.
+At the run that generated this file: **801** cases, **0** disagreements, **50** of **50** functions compared whole on success.
 
 ### `address_guard` — 32 cases · whole on success
 
@@ -770,6 +770,86 @@ At the run that generated this file: **727** cases, **0** disagreements, **48** 
 - ledger_check with a move that is not a boolean
 - ledger_check with nothing to work from
 - ledger_check over a ledger that reads
+
+### `limits_decide` — 56 cases · whole on success
+
+- limits_decide: a contact in, fresh
+- limits_decide: a contact in, empty
+- limits_decide: a contact out, fresh
+- limits_decide: a contact out, empty
+- limits_decide: a guest with an address, fresh
+- limits_decide: a guest with an address, empty
+- limits_decide: a guest with no address, fresh
+- limits_decide: a guest with no address, empty
+- limits_decide: a small form, no root, fresh
+- limits_decide: a small form, no root, empty
+- limits_decide: a small form, an empty root, fresh
+- limits_decide: a small form, an empty root, empty
+- limits_decide: the guest total, fresh
+- limits_decide: the guest total, empty
+- limits_decide: a stranger out, fresh
+- limits_decide: a stranger out, empty
+- limits_decide: an integration, fresh
+- limits_decide: an integration, empty
+- limits_decide: the identity aggregate, empty
+- limits_decide: the outbound aggregate, empty
+- limits_decide: both buckets empty, the first of equals
+- limits_decide: a contact cap of 0 is still one call a second
+- limits_decide: a contact cap past the capacity
+- limits_decide: a row over its burst
+- limits_decide: a clock that went back
+- limits_decide: a partly refilled bucket
+- limits_decide: rows for other buckets are left alone
+- limits_decide: requests under the cap
+- limits_decide: requests at the cap
+- limits_decide with no rules
+- limits_decide with rules that cannot be enforced
+- limits_decide with no charge
+- limits_decide with a charge that is a string
+- limits_decide with a charge with no kind
+- limits_decide with a charge of an unknown kind
+- limits_decide with a charge with a member its kind does not hold
+- limits_decide with a contact charge with no root
+- limits_decide with a contact charge with an empty root
+- limits_decide with a contact cap with a fraction
+- limits_decide with a negative contact cap
+- limits_decide with a guest charge whose root is a number
+- limits_decide with a guest charge with no source
+- limits_decide with a guest charge with no addressed
+- limits_decide with an integration charge with no contact
+- limits_decide with a pending count that is a string
+- limits_decide with no now
+- limits_decide with a negative now
+- limits_decide with a now with a fraction
+- limits_decide with a now past 2^53
+- limits_decide with a state that is a list
+- limits_decide with a row that is a number
+- limits_decide with a row with a member it does not hold
+- limits_decide with a row whose tokens are a string
+- limits_decide with a row with no updated_at
+- limits_decide with a row whose updated_at has a fraction
+- limits_decide with nothing to work from
+
+### `limits_rules_check` — 18 cases · whole on success
+
+- limits_rules_check: a document that can be enforced
+- limits_rules_check: not an object
+- limits_rules_check: a member it does not hold
+- limits_rules_check: a member missing
+- limits_rules_check: a member that is a string
+- limits_rules_check: a contact rate of 0
+- limits_rules_check: a burst under one call
+- limits_rules_check: a capacity under one call
+- limits_rules_check: a guest budget of 0
+- limits_rules_check: a negative source budget
+- limits_rules_check: a stranger budget of 0
+- limits_rules_check: an integration budget of 0
+- limits_rules_check: a guest total of 0
+- limits_rules_check: a pending cap of 0
+- limits_rules_check: a pending cap with a fraction
+- limits_rules_check: a contact bucket slower than the hour
+- limits_rules_check with no rules
+- limits_rules_check with null rules
 
 ### `no_such_function` — 1 case · not a dispatched function
 
