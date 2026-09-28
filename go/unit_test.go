@@ -6,6 +6,7 @@ package pactidentity
 import (
 	"bytes"
 	"encoding/json"
+	"math/big"
 	"strings"
 	"testing"
 	"time"
@@ -62,15 +63,15 @@ func TestCSRRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	info := CSRCheck(csr, [][]byte{root.Public.SPKI})
+	info := CSRCheck(csr, [][]byte{root.Public().SPKI})
 	if !info.OK || info.Endpoint != endpointA || info.DNSName != "agent.alina.example" || info.Alg != AlgP256 {
 		t.Fatalf("csr_check: %+v", info)
 	}
-	issued, err := IssueFromCSR(csr, IssueOpts{RootCN: "Alina Rao", RootKey: root, RootSPKIs: [][]byte{root.Public.SPKI}, Now: now, ValidDays: 365})
+	issued, err := IssueFromCSR(csr, IssueOpts{RootCN: "Alina Rao", RootKey: root, RootSPKIs: [][]byte{root.Public().SPKI}, Now: now, ValidDays: 365})
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := ValidateChain([][]byte{issued.DER, rootDer}, ChainOpts{Now: now, ExpectedRoot: Fingerprint(root.Public.SPKI), ExpectedEndpoint: endpointA})
+	r := ValidateChain([][]byte{issued.DER, rootDer}, ChainOpts{Now: now, ExpectedRoot: Fingerprint(root.Public().SPKI), ExpectedEndpoint: endpointA})
 	if !r.OK {
 		t.Fatalf("issued leaf does not validate: rule %d %s", r.Rule, r.Reason)
 	}
@@ -86,7 +87,7 @@ func TestCSRRoundTrip(t *testing.T) {
 		t.Error("399 days should be refused")
 	}
 	// Proof of possession: a request signed by another key.
-	infoBytes := csrInfo("Alina Rao", host.Public, endpointA, "")
+	infoBytes := csrInfo("Alina Rao", host.Public(), endpointA, "")
 	sig, _ := SignDetached(other, infoBytes)
 	forged := seq(infoBytes, sigAlgFor(host.Alg), bitstr(sig, 0))
 	if r := CSRCheck(forged, nil); r.OK || !strings.Contains(r.Why, "proof of possession") {
@@ -94,7 +95,7 @@ func TestCSRRoundTrip(t *testing.T) {
 	}
 	// The root-key refusal.
 	rootCSR, _ := CSRNew("Alina Rao", root, endpointA, "")
-	if r := CSRCheck(rootCSR, [][]byte{root.Public.SPKI}); r.OK || !strings.Contains(r.Why, "root") {
+	if r := CSRCheck(rootCSR, [][]byte{root.Public().SPKI}); r.OK || !strings.Contains(r.Why, "root") {
 		t.Errorf("root-key CSR: %+v", r)
 	}
 	// A private address and a non-normal endpoint.
@@ -105,7 +106,7 @@ func TestCSRRoundTrip(t *testing.T) {
 		}
 	}
 	// The seam: issue the TBS, sign it outside, assemble.
-	plan, err := IssueTBSFromCSR(csr, IssueOpts{RootCN: "Alina Rao", RootPub: root.Public, Now: now})
+	plan, err := IssueTBSFromCSR(csr, IssueOpts{RootCN: "Alina Rao", RootPub: root.Public(), Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +180,7 @@ func TestWalletIssue(t *testing.T) {
 	root, _ := GenerateKey(AlgEd25519)
 	rootDer, _ := BuildRoot(RootOpts{CN: "Alina Rao", Key: root, NotBefore: now})
 	pkcs8, _ := root.PKCS8()
-	fp := Fingerprint(root.Public.SPKI)
+	fp := Fingerprint(root.Public().SPKI)
 	plain := VaultPlaintext{V: 2, Roots: []VaultRoot{{Fingerprint: fp, CN: "Alina Rao", PKCS8: B64url(pkcs8), Cert: B64url(rootDer), Created: now.Format(time.RFC3339)}}}
 	record := RecordPlaintext{V: 2}
 	host, _ := GenerateKey(AlgEd25519)
@@ -317,21 +318,21 @@ func TestSealAndOpenResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	rootB, _ := Parse(der("root_b"))
-	opened, err := OpenResult(*env, OpenOpts{Recipient: c.leafA, RecipientPublic: c.leafA.Public, MsgID: "m-1", Now: now, ExpectedRoot: FingerprintOf(rootB), ExpectedEndpoint: endpointB})
+	opened, err := OpenResult(*env, OpenOpts{Recipient: c.leafA, RecipientPublic: c.leafA.Public(), MsgID: "m-1", Now: now, ExpectedRoot: FingerprintOf(rootB), ExpectedEndpoint: endpointB})
 	if err != nil || opened.Form != "chain" || opened.Root != FingerprintOf(rootB) || !bytes.Contains(opened.Result, []byte("ok")) {
 		t.Fatalf("open result: %v %+v", err, opened)
 	}
-	if _, err := OpenResult(*env, OpenOpts{Recipient: c.leafA, RecipientPublic: c.leafA.Public, MsgID: "m-2", Now: now}); err == nil {
+	if _, err := OpenResult(*env, OpenOpts{Recipient: c.leafA, RecipientPublic: c.leafA.Public(), MsgID: "m-2", Now: now}); err == nil {
 		t.Error("a wrong msg_id should not correlate")
 	}
 	// The small form back, against a pin of leaf_b.
 	env, _ = SealResult(SealOpts{RecipientKey: leafA.PublicKey, Sender: c.leafB, Form: "leaf", Error: json.RawMessage(`{"code":"permission_denied","message":"no"}`), MsgID: "m-3", TS: now.Unix()})
 	pins := []Pin{{Root: FingerprintOf(rootB), Endpoint: endpointB, Leaf: B64url(der("leaf_b")), State: "active"}}
-	opened, err = OpenResult(*env, OpenOpts{Recipient: c.leafA, RecipientPublic: c.leafA.Public, MsgID: "m-3", Now: now, Pins: pins})
+	opened, err = OpenResult(*env, OpenOpts{Recipient: c.leafA, RecipientPublic: c.leafA.Public(), MsgID: "m-3", Now: now, Pins: pins})
 	if err != nil || opened.Form != "leaf" || opened.Error == nil {
 		t.Fatalf("open small-form error result: %v %+v", err, opened)
 	}
-	if _, err := OpenResult(*env, OpenOpts{Recipient: c.leafA, RecipientPublic: c.leafA.Public, MsgID: "m-3", Now: now}); err == nil {
+	if _, err := OpenResult(*env, OpenOpts{Recipient: c.leafA, RecipientPublic: c.leafA.Public(), MsgID: "m-3", Now: now}); err == nil {
 		t.Error("an unheld leaf should not verify")
 	}
 	// A request sealed through Call, decided by Bharat.
@@ -434,20 +435,69 @@ func TestOpenWithAPublicKeyThatIsNotTheRecipientsOpensNothing(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		enc, ct, err := Seal(tc.suite, r.Public, []byte(InfoV2), []byte("aad"), []byte("hello"))
+		enc, ct, err := Seal(tc.suite, r.Public(), []byte(InfoV2), []byte("aad"), []byte("hello"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		sameAlg, _ := KeyFromSeed(tc.alg, Seed("t/other"))
 		otherAlg, _ := KeyFromSeed(tc.other, Seed("t/r"))
 		for _, wrong := range []*PrivateKey{sameAlg, otherAlg} {
-			pt, err := Open(tc.suite, r, wrong.Public, []byte(InfoV2), []byte("aad"), enc, ct)
+			pt, err := Open(tc.suite, r, wrong.Public(), []byte(InfoV2), []byte("aad"), enc, ct)
 			if err == nil || err.Error() != "does not open" || pt != nil {
 				t.Fatalf("%s with a %s public key: %q, %v", tc.alg, wrong.Alg, pt, err)
 			}
 		}
-		if pt, err := Open(tc.suite, r, r.Public, []byte(InfoV2), []byte("aad"), enc, ct); err != nil || string(pt) != "hello" {
+		if pt, err := Open(tc.suite, r, r.Public(), []byte(InfoV2), []byte("aad"), enc, ct); err != nil || string(pt) != "hello" {
 			t.Fatalf("%s: the right public key: %q, %v", tc.alg, pt, err)
 		}
+	}
+}
+
+// A missing key is a named refusal, never a panic (0.4.0 dereferenced nil): Open and OpenResult,
+// each argument alone, with the right keys as the control.
+func TestAnOpenWithAMissingKeyIsRefusedByName(t *testing.T) {
+	r, _ := KeyFromSeed(AlgEd25519, Seed("t/r"))
+	pub := r.Public()
+	enc, ct, err := Seal(SuiteX25519, pub, []byte(InfoV2), nil, []byte("hi"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		priv *PrivateKey
+		pub  *PublicKey
+		why  string
+	}{{nil, pub, "the recipient's key is required"}, {r, nil, "the recipient's public key is required"}} {
+		pt, err := Open(SuiteX25519, tc.priv, tc.pub, []byte(InfoV2), nil, enc, ct)
+		if err == nil || err.Error() != tc.why || codeFor(err, "") != codeArgs || pt != nil {
+			t.Fatalf("Open: %q, %v; want %q", pt, err, tc.why)
+		}
+		_, err = OpenResult(Envelope{}, OpenOpts{Recipient: tc.priv, RecipientPublic: tc.pub, MsgID: "m"})
+		if err == nil || err.Error() != tc.why || codeFor(err, "") != codeArgs {
+			t.Fatalf("OpenResult: %v; want %q", err, tc.why)
+		}
+	}
+	if pt, err := Open(SuiteX25519, r, pub, []byte(InfoV2), nil, enc, ct); err != nil || string(pt) != "hi" {
+		t.Fatalf("the control: %q, %v", pt, err)
+	}
+}
+
+// A P-256 scalar outside [1, n-1] is refused at parse as it was when ecdsa.ParseRawPrivateKey did it,
+// now without the multiplication; n-1 is the control that reads.
+func TestAP256ScalarOutsideTheGroupIsRefused(t *testing.T) {
+	pkcs8 := func(d []byte) []byte {
+		return seq(derIntN(0), seq(oidBytes(oidEcPublicKey), oidBytes(oidPrime256v1)), octet(seq(derIntN(1), octet(d))))
+	}
+	nMinus1 := new(big.Int).Sub(p256N, big.NewInt(1)).FillBytes(make([]byte, 32))
+	for name, d := range map[string][]byte{"zero": make([]byte, 32), "n": p256N.FillBytes(make([]byte, 32)), "n+1": new(big.Int).Add(p256N, big.NewInt(1)).FillBytes(make([]byte, 32))} {
+		if _, err := ParsePKCS8(pkcs8(d)); err == nil || err.Error() != "P-256 scalar out of range" {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	k, err := ParsePKCS8(pkcs8(nMinus1))
+	if err != nil {
+		t.Fatalf("n-1: %v", err)
+	}
+	if k.Public() == nil || k.Public().EC == nil {
+		t.Fatal("n-1 has no public key")
 	}
 }

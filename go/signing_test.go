@@ -21,10 +21,10 @@ func signingRequest(t *testing.T) (map[string]any, []byte, *PrivateKey) {
 		t.Fatal(err)
 	}
 	return map[string]any{
-		"csr": B64url(csr), "purpose": "move", "expect_root": Fingerprint(root.Public.SPKI), "root_cert": B64url(cert),
+		"csr": B64url(csr), "purpose": "move", "expect_root": Fingerprint(root.Public().SPKI), "root_cert": B64url(cert),
 		"redirect": "http://localhost:8080/wallet/return", "state": B64url(bytes.Repeat([]byte{7}, 32)), "recipient": "a node",
 		"valid_days": "90", "expires": timeOut(signingNow.Add(5 * time.Minute)),
-	}, root.Public.SPKI, root
+	}, root.Public().SPKI, root
 }
 
 func TestSigningRequestCheckPassesOneRequestAndRefusesOnePerRule(t *testing.T) {

@@ -3,7 +3,7 @@
 //! function over state the host supplies. `envelope.mjs receive()` is its specification, line for line.
 use crate::canonical::canonical;
 use crate::hpke::{self, suite_for, Suite};
-use crate::keys::{PrivateKey, PublicKey};
+use crate::keys::{PrivateKey, PublicKey, Signer};
 use crate::util::{b64u, err, from_b64u, wire_b64u, Error, Result};
 use crate::x509::{self, compare_leaves, parse, validate_chain, ChainResult};
 use serde::{Deserialize, Serialize};
@@ -83,7 +83,7 @@ fn header(suite: Suite, kid: &str, msg_id: &str, ts: i64, exp: i64, cty: &str) -
     canonical(&h).into_bytes()
 }
 
-fn proof(form: Form, sender: &PrivateKey, sender_chain: Option<&[Vec<u8>]>) -> Result<(&'static str, Value)> {
+fn proof(form: Form, sender: &Signer<'_>, sender_chain: Option<&[Vec<u8>]>) -> Result<(&'static str, Value)> {
     match form {
         Form::Chain => {
             let chain = sender_chain.ok_or_else(|| Error::new("bad_request", "the chain form needs sender_chain"))?;
@@ -101,7 +101,7 @@ fn proof(form: Form, sender: &PrivateKey, sender_chain: Option<&[Vec<u8>]>) -> R
 #[allow(clippy::too_many_arguments)]
 fn seal_body(
     recipient: &PublicKey,
-    sender: &PrivateKey,
+    sender: &Signer<'_>,
     body: &Value,
     msg_id: &str,
     ts: i64,
@@ -136,14 +136,16 @@ pub struct SealRequest<'a> {
 
 /// `{method, params, chain | leaf}`, in that member order, sealed to the recipient leaf's key.
 pub fn seal_request(r: SealRequest<'_>) -> Result<Wire> {
-    let (k, v) = proof(r.form, r.sender, r.sender_chain)?;
+    // One expansion of the sender's key for the leaf form's fingerprint and the signature.
+    let signer = r.sender.signer();
+    let (k, v) = proof(r.form, &signer, r.sender_chain)?;
     let mut body = Map::new();
     body.insert("method".into(), Value::String(r.method.clone()));
     body.insert("params".into(), r.params.clone());
     body.insert(k.into(), v);
     seal_body(
         r.recipient,
-        r.sender,
+        &signer,
         &Value::Object(body),
         &r.msg_id,
         r.ts,
@@ -168,7 +170,9 @@ pub struct SealResult<'a> {
 
 /// `{result | error, chain | leaf}` sealed back to the caller's key with the request's `msg_id`.
 pub fn seal_result(r: SealResult<'_>) -> Result<Wire> {
-    let (k, v) = proof(r.form, r.sender, r.sender_chain)?;
+    // One expansion of the sender's key for the leaf form's fingerprint and the signature.
+    let signer = r.sender.signer();
+    let (k, v) = proof(r.form, &signer, r.sender_chain)?;
     let mut body = Map::new();
     match (&r.result, &r.error) {
         (Some(res), None) => body.insert("result".into(), res.clone()),
@@ -176,7 +180,7 @@ pub fn seal_result(r: SealResult<'_>) -> Result<Wire> {
         _ => return err("bad_request", "a result carries exactly one of result and error"),
     };
     body.insert(k.into(), v);
-    seal_body(r.recipient, r.sender, &Value::Object(body), &r.msg_id, r.ts, r.exp.unwrap_or(r.ts + 600), CTY_RESULT, r.ephemeral_seed)
+    seal_body(r.recipient, &signer, &Value::Object(body), &r.msg_id, r.ts, r.exp.unwrap_or(r.ts + 600), CTY_RESULT, r.ephemeral_seed)
 }
 
 fn members(v: &Value) -> String {
