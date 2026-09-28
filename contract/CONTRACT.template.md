@@ -344,7 +344,9 @@ which its own tests run against the whole corpus: `ReadExportZip` (the reading a
 writes the first byte. The fixture corpus is `go/exportcorpus/`: two valid exports (one whose local
 headers disagree with its central directory), a valid book, and hostile files, each naming the
 refusal it must produce (`go/exportcorpus/cases.json`); both ports' tests and `js/parity.mjs` read
-all of it. Read-side parity cases on the core's functions (`js/cases/export-reader.mjs`) reach
+all of it. Its files name one fixed owner; `pact vectors corpus --owner <root> --out <dir>` writes
+the same corpus for another root, each file with its defect and `cases.json` with the same
+refusals, so a host can import every file into an identity it holds. Read-side parity cases on the core's functions (`js/cases/export-reader.mjs`) reach
 rules that no file does.
 
 {{table:export}}
