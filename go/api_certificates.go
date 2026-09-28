@@ -35,7 +35,7 @@ func callBuildRoot(args json.RawMessage) json.RawMessage {
 	if err != nil {
 		return failErr(codeFor(err, "parse"), err)
 	}
-	return ok(map[string]any{"der": B64url(der), "fingerprint": Fingerprint(priv.Public.SPKI)})
+	return ok(map[string]any{"der": B64url(der), "fingerprint": Fingerprint(priv.Public().SPKI)})
 }
 
 func callRootTBS(args json.RawMessage) json.RawMessage {
