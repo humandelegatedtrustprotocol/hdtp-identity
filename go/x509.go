@@ -127,11 +127,12 @@ func Assemble(tbs, alg, sig []byte) []byte {
 
 // BuildRoot signs a root with its own key.
 func BuildRoot(o RootOpts) ([]byte, error) {
-	tbs, alg, err := rootTBS(o.CN, o.Key.Public, o.NotBefore, o.Serial)
+	signer := o.Key.Signer()
+	tbs, alg, err := rootTBS(o.CN, signer.Public, o.NotBefore, o.Serial)
 	if err != nil {
 		return nil, err
 	}
-	sig, err := SignDetached(o.Key, tbs)
+	sig, err := signer.Sign(tbs)
 	if err != nil {
 		return nil, err
 	}
@@ -230,11 +231,12 @@ func LeafTBS(o LeafOpts) (tbs, alg []byte, err error) { return leafTBS(o, o.Root
 
 // BuildLeaf issues a leaf under the root key.
 func BuildLeaf(o LeafOpts) ([]byte, error) {
-	tbs, alg, err := leafTBS(o, o.RootKey.Public)
+	signer := o.RootKey.Signer()
+	tbs, alg, err := leafTBS(o, signer.Public)
 	if err != nil {
 		return nil, err
 	}
-	sig, err := SignDetached(o.RootKey, tbs)
+	sig, err := signer.Sign(tbs)
 	if err != nil {
 		return nil, err
 	}

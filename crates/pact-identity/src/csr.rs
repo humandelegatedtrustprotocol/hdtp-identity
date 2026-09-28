@@ -20,9 +20,10 @@ fn cri(cn: &str, key: &PublicKey, endpoint: &str, dns_name: Option<&str>) -> Vec
 }
 
 pub fn csr_new(cn: &str, host_key: &PrivateKey, endpoint: &str, dns_name: Option<&str>) -> Result<Vec<u8>> {
-    let info = cri(cn, &host_key.public(), endpoint, dns_name);
+    let signer = host_key.signer();
+    let info = cri(cn, &signer.public(), endpoint, dns_name);
     let alg = host_key.alg().sig_oid()?;
-    Ok(der::seq(&[info.clone(), der::seq(&[der::oid(alg)]), der::bitstr(&host_key.sign(&info), 0)]))
+    Ok(der::seq(&[info.clone(), der::seq(&[der::oid(alg)]), der::bitstr(&signer.sign(&info), 0)]))
 }
 
 pub struct Csr {
@@ -196,8 +197,9 @@ pub fn issue_tbs(
 }
 
 pub fn issue(csr: &Csr, root_cn: &str, root: &PrivateKey, now: i64, previous_not_before: Option<i64>, valid_days: i64) -> Result<Issued> {
-    let (u, not_before, not_after) = issue_tbs(csr, root_cn, &root.public(), now, previous_not_before, valid_days)?;
-    Ok(Issued { der: x509::assemble(&u.tbs, &u.sig_alg, &root.sign(&u.tbs)), not_before, not_after })
+    let signer = root.signer();
+    let (u, not_before, not_after) = issue_tbs(csr, root_cn, &signer.public(), now, previous_not_before, valid_days)?;
+    Ok(Issued { der: x509::assemble(&u.tbs, &u.sig_alg, &signer.sign(&u.tbs)), not_before, not_after })
 }
 
 #[cfg(test)]

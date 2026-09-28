@@ -128,7 +128,7 @@ func encap(id string, pub *PublicKey, seed []byte) (enc, ss []byte, err error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		e, err := ek.EC.ECDH()
+		e, err := ecdh.P256().NewPrivateKey(ek.scalar)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -171,7 +171,7 @@ func decap(id string, priv *PrivateKey, pub *PublicKey, enc []byte) ([]byte, err
 		return nil, err
 	}
 	if id == SuiteP256 {
-		sk, err := priv.EC.ECDH()
+		sk, err := ecdh.P256().NewPrivateKey(priv.scalar)
 		if err != nil {
 			return nil, err
 		}
@@ -185,7 +185,7 @@ func decap(id string, priv *PrivateKey, pub *PublicKey, enc []byte) ([]byte, err
 		}
 		return sharedSecret(s, dh, concat(enc, pkR))
 	}
-	sk, err := ecdh.X25519().NewPrivateKey(ed25519PrivateToX25519(priv.Ed))
+	sk, err := ecdh.X25519().NewPrivateKey(ed25519SeedToX25519(priv.seed))
 	if err != nil {
 		return nil, err
 	}
@@ -240,6 +240,14 @@ func Seal(id string, pub *PublicKey, info, aad, plaintext []byte) (enc, ct []byt
 
 // Open is the recipient side: priv is the recipient's key and pub its public key, from its leaf.
 func Open(id string, priv *PrivateKey, pub *PublicKey, info, aad, enc, ct []byte) ([]byte, error) {
+	// A caller's mistake, named, before anything: a nil key was a panic in 0.4.0 (dereferenced in
+	// decap). The Rust API's types cannot be nil; the JSON boundary of both ports names the member.
+	if priv == nil {
+		return nil, errArg("the recipient's key is required")
+	}
+	if pub == nil {
+		return nil, errArg("the recipient's public key is required")
+	}
 	s, ok := suites[id]
 	if !ok {
 		return nil, errors.New("unknown suite")
@@ -266,11 +274,16 @@ func Open(id string, priv *PrivateKey, pub *PublicKey, info, aad, enc, ct []byte
 
 // SignDetached is §13.1: Ed25519 pure, or ECDSA P-256/SHA-256 in DER, by the signer's own algorithm.
 func SignDetached(priv *PrivateKey, data []byte) ([]byte, error) {
-	if priv.Alg == AlgEd25519 {
-		return ed25519.Sign(priv.Ed, data), nil
+	return priv.Signer().Sign(data)
+}
+
+// Sign is SignDetached with the key already expanded.
+func (s *Signer) Sign(data []byte) ([]byte, error) {
+	if s.ed != nil {
+		return ed25519.Sign(s.ed, data), nil
 	}
 	h := sha256.Sum256(data)
-	sig, err := ecdsa.SignASN1(rand.Reader, priv.EC, h[:])
+	sig, err := ecdsa.SignASN1(rand.Reader, s.ec, h[:])
 	if err != nil {
 		return nil, err
 	}

@@ -10,6 +10,24 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+- **Correction to 0.4.0.** Its entry, and commit 3746e32, said the open no longer derives the
+  recipient's public key; that was true of the Rust core and false of the Go port, whose
+  `ParsePKCS8` still derived it on every read (14.2 us for P-256, 16.0 us for Ed25519), and the Go
+  `decide` reads the held key on every open. It is true of both from this release.
+- **Breaking (Go):** `PrivateKey` holds its Ed25519 seed or P-256 scalar and nothing derived from
+  it. `Public` is a method, `Public()`, and the `Ed` and `EC` fields are gone; `Signer()` expands a
+  key once for a caller that needs its public key and a signature. `ParsePKCS8` is 1.7 us (P-256)
+  and 0.48 us (Ed25519). A P-256 scalar outside [1, n-1] is still refused, `P-256 scalar out of
+  range`.
+- Go: `Open` and `OpenResult` refuse a missing private or public key by name (`the recipient's key
+  is required`, `the recipient's public key is required`, `bad_request`), where 0.4.0 panicked on a
+  nil `RecipientPublic`. The Rust API's types cannot be nil; the JSON boundary of both ports names
+  the member (`recipient_spki is required`, `my_spki is required`).
+- **Fix of a regression in 0.4.0:** a leaf-form seal, a CSR, a root certificate and an issued leaf
+  expanded an Ed25519 key twice, once for its public key and once to sign, once 0.4.0 made the key
+  its seed. They expand it once (`PrivateKey::signer`, Go `Signer()`). `seal_result`, Ed25519
+  sender, leaf form: 95.9 us in 0.4.0, 85.3 us now (85.4 us in 0.3.6).
+
 ## 0.4.0 — 2026-09-28
 
 - `pact-limits`, a new crate: SPEC §12's per-caller call budgets as one pure decision over a state

@@ -93,7 +93,8 @@ func callPublicKey(args json.RawMessage) json.RawMessage {
 	if err != nil {
 		return failErr(codeFor(err, "parse"), err)
 	}
-	return ok(map[string]any{"alg": priv.Alg, "spki": B64url(priv.Public.SPKI), "fingerprint": Fingerprint(priv.Public.SPKI)})
+	pub := priv.Public()
+	return ok(map[string]any{"alg": priv.Alg, "spki": B64url(pub.SPKI), "fingerprint": Fingerprint(pub.SPKI)})
 }
 
 func callKeyInfo(args json.RawMessage) json.RawMessage {
@@ -159,5 +160,6 @@ func keyOut(priv *PrivateKey) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"alg": priv.Alg, "pkcs8": B64url(pkcs8), "spki": B64url(priv.Public.SPKI), "fingerprint": Fingerprint(priv.Public.SPKI)}, nil
+	pub := priv.Public()
+	return map[string]any{"alg": priv.Alg, "pkcs8": B64url(pkcs8), "spki": B64url(pub.SPKI), "fingerprint": Fingerprint(pub.SPKI)}, nil
 }

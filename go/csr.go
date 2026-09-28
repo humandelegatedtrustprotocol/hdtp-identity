@@ -24,8 +24,9 @@ func csrInfo(cn string, pub *PublicKey, endpoint, dnsName string) []byte {
 
 // CSRNew makes a request for the endpoint, signed by the host key.
 func CSRNew(cn string, host *PrivateKey, endpoint, dnsName string) ([]byte, error) {
-	info := csrInfo(cn, host.Public, endpoint, dnsName)
-	sig, err := SignDetached(host, info)
+	signer := host.Signer()
+	info := csrInfo(cn, signer.Public, endpoint, dnsName)
+	sig, err := signer.Sign(info)
 	if err != nil {
 		return nil, err
 	}
