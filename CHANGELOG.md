@@ -10,6 +10,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+## 0.3.6 — 2026-09-28
+
 - SPEC 2.2.4: `version` answers spec 2.2.4. The change is §12's call budgets, which are token
   buckets sized by the contacts an identity may hold, and `get_card`'s `limits` members. Both are
   the hosts' to enforce and advertise; this library holds neither. §12 carries no MUST before or
