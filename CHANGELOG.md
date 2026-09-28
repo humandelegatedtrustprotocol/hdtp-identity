@@ -10,6 +10,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+## 0.3.5 — 2026-09-28
+
 - **`pact vectors corpus --owner <root> --out <dir>`** writes the export corpus for another owner
   root. The committed corpus names one fixed owner, so on a host whose identities cannot hold that
   root, 27 hostile files were refused at the owner check, before the check each one targets: those
