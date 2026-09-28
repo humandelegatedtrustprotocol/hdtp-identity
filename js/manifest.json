@@ -1,5 +1,5 @@
 {
-  "crate_version": "0.3.6",
+  "crate_version": "0.4.0",
   "rustc": "rustc 1.92.0 (ded5c06cf 2025-12-08)",
   "wasm_pack": "wasm-pack 0.15.0",
   "builder": {
@@ -10,7 +10,7 @@
     "how": "sh js/reproduce.sh"
   },
   "source": {
-    "inputs_sha256": "9f4352bf31ab575c194d6be747577de7a1fac893ae9ba11b6208636011313a4a",
+    "inputs_sha256": "36b1d70755bf0ffb6ac624f9cc7d7c22f581cfafbced4597919b92b1c54d08c3",
     "files": 51,
     "paths": [
       "crates/pact-identity",
@@ -43,7 +43,7 @@
       "bytes": 13413
     },
     "pkg-web/pact_identity_wasm_bg.wasm": {
-      "sha256": "148fb07695b3add906815aed9fd307d46378043c80660d38f09f621dac15016b",
+      "sha256": "3b9300499df8c305e3e82ad4038b92e436b09ef059d1e72482c471fdf9a8ebcc",
       "bytes": 832382
     },
     "pkg-web/pact_identity_wasm_bg.wasm.d.ts": {
@@ -67,7 +67,7 @@
       "bytes": 10102
     },
     "pkg-node/pact_identity_wasm_bg.wasm": {
-      "sha256": "148fb07695b3add906815aed9fd307d46378043c80660d38f09f621dac15016b",
+      "sha256": "3b9300499df8c305e3e82ad4038b92e436b09ef059d1e72482c471fdf9a8ebcc",
       "bytes": 832382
     },
     "pkg-node/pact_identity_wasm_bg.wasm.d.ts": {
