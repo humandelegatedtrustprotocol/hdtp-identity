@@ -6,8 +6,8 @@
 // REAL TypeScript — the module itself, loaded by Node, over a `SqlStorage` made of `node:sqlite`, so
 // REAL and INTEGER columns behave as SQLite has them — through seeded sequences of calls, and writes
 // every decision and every row it wrote into js/cases/limits-vectors.json. The crate
-// (crates/pact-limits/tests/vectors.rs) replays that file on every gate; the TypeScript is only
-// needed to make or re-check it.
+// (crates/pact-limits/tests/vectors.rs), the Wasm and the Go port (js/limits.test.mjs) replay that
+// file on every gate; the TypeScript is only needed to make or re-check it.
 //
 //   node --experimental-transform-types js/limits-vectors.mjs --cloud <pact-cloud checkout>          compare
 //   node --experimental-transform-types js/limits-vectors.mjs --cloud <pact-cloud checkout> --write  write
