@@ -60,7 +60,7 @@ func headerJSON(suite, kid, msgID string, ts, exp int64, cty string) []byte {
 	return Canonical(map[string]any{"v": int64(2), "suite": suite, "kid": kid, "msg_id": msgID, "ts": ts, "exp": exp, "cty": cty})
 }
 
-func proofMember(o SealOpts) ([]byte, error) {
+func proofMember(o SealOpts, signer *Signer) ([]byte, error) {
 	switch o.Form {
 	case "chain":
 		if len(o.SenderChain) != 2 {
@@ -68,12 +68,12 @@ func proofMember(o SealOpts) ([]byte, error) {
 		}
 		return []byte(`,"chain":[` + jsonString(B64url(o.SenderChain[0])) + `,` + jsonString(B64url(o.SenderChain[1])) + `]`), nil
 	case "leaf":
-		return []byte(`,"leaf":` + jsonString(Fingerprint(o.Sender.Public.SPKI))), nil
+		return []byte(`,"leaf":` + jsonString(Fingerprint(signer.Public.SPKI))), nil
 	}
 	return nil, errArg("form is chain or leaf")
 }
 
-func sealBody(o SealOpts, body []byte) (*Envelope, error) {
+func sealBody(o SealOpts, signer *Signer, body []byte) (*Envelope, error) {
 	suite, err := SuiteForKey(o.RecipientKey)
 	if err != nil {
 		return nil, err
@@ -92,7 +92,7 @@ func sealBody(o SealOpts, body []byte) (*Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	sig, err := SignDetached(o.Sender, concat(aad, enc, ct))
+	sig, err := signer.Sign(concat(aad, enc, ct))
 	if err != nil {
 		return nil, err
 	}
@@ -111,12 +111,17 @@ func SealRequest(o SealOpts) (*Envelope, error) {
 	if err != nil {
 		return nil, errors.New("params is not JSON")
 	}
-	proof, err := proofMember(o)
+	if o.Sender == nil {
+		return nil, errArg("the sender's key is required")
+	}
+	// One expansion of the sender's key for the leaf form's fingerprint and the signature.
+	signer := o.Sender.Signer()
+	proof, err := proofMember(o, signer)
 	if err != nil {
 		return nil, err
 	}
 	body := concat([]byte(`{"method":`+jsonString(o.Method)+`,"params":`), params, proof, []byte("}"))
-	return sealBody(o, body)
+	return sealBody(o, signer, body)
 }
 
 // SealResult seals a result back: plaintext {result|error, chain|leaf}, cty application/pact-result+json.
@@ -139,11 +144,16 @@ func SealResult(o SealOpts) (*Envelope, error) {
 	default:
 		return nil, errArg("a result carries exactly one of result and error")
 	}
-	proof, err := proofMember(o)
+	if o.Sender == nil {
+		return nil, errArg("the sender's key is required")
+	}
+	// One expansion of the sender's key for the leaf form's fingerprint and the signature.
+	signer := o.Sender.Signer()
+	proof, err := proofMember(o, signer)
 	if err != nil {
 		return nil, err
 	}
-	return sealBody(o, concat(lead, proof, []byte("}")))
+	return sealBody(o, signer, concat(lead, proof, []byte("}")))
 }
 
 // Pin is what a receiver keeps per pinned root.
@@ -677,7 +687,7 @@ func itoa(n int) string { return strconv.Itoa(n) }
 type OpenOpts struct {
 	Recipient *PrivateKey
 	// RecipientPublic is the recipient's own public key, from its leaf: the kid is checked against it
-	// and the open puts it in the KEM context. Never Recipient.Public.
+	// and the open puts it in the KEM context. Never derived from Recipient.
 	RecipientPublic  *PublicKey
 	MsgID            string
 	Now              time.Time
@@ -699,6 +709,14 @@ type Opened struct {
 // OpenResult is §13.2 for the receiving caller: decode, open, validate the chain or find the named leaf
 // among its pins, verify the signature and correlate. Every failure is envelope_invalid.
 func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
+	// Named, never a panic: in 0.4.0 a caller that left RecipientPublic out compiled, and the kid
+	// check dereferenced nil.
+	if o.Recipient == nil {
+		return nil, errArg("the recipient's key is required")
+	}
+	if o.RecipientPublic == nil {
+		return nil, errArg("the recipient's public key is required")
+	}
 	o.Now = o.Now.Truncate(time.Second)
 	aad, err := wireB64url(env.Protected)
 	if err != nil {

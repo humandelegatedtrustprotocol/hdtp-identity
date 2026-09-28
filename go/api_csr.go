@@ -74,7 +74,7 @@ func callIssueFromCSR(args json.RawMessage) json.RawMessage {
 	// §9's refusal covers the root that is signing, whether or not the caller listed it: a wallet
 	// that omits `root_spkis` still cannot be talked into issuing a leaf for its own root key.
 	o.RootKey = root
-	o.RootSPKIs = append(o.RootSPKIs, root.Public.SPKI)
+	o.RootSPKIs = append(o.RootSPKIs, root.Public().SPKI)
 	issued, err := IssueFromCSR(a.CSR, o)
 	if err != nil {
 		return failErr("bad_request", err)

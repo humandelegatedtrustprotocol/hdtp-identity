@@ -212,7 +212,7 @@ func rebuild(t *testing.T, c cast) map[string][]byte {
 	t.Helper()
 	at := func(s string) time.Time { return mustTime(t, s) }
 	leafA := func(label string, host *PrivateKey, dns, nb, na string) []byte {
-		der, err := BuildLeaf(LeafOpts{CN: "Alina Rao", RootCN: "Alina Rao", RootKey: c.rootA, HostPub: host.Public, Endpoint: endpointA, DNSName: dns, NotBefore: at(nb), NotAfter: at(na), Serial: SerialOf(label)})
+		der, err := BuildLeaf(LeafOpts{CN: "Alina Rao", RootCN: "Alina Rao", RootKey: c.rootA, HostPub: host.Public(), Endpoint: endpointA, DNSName: dns, NotBefore: at(nb), NotAfter: at(na), Serial: SerialOf(label)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -226,7 +226,7 @@ func rebuild(t *testing.T, c cast) map[string][]byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	leafB, err := BuildLeaf(LeafOpts{CN: "Bharat Mehta", RootCN: "Bharat Mehta", RootKey: c.rootB, HostPub: c.leafB.Public, Endpoint: endpointB, NotBefore: at("2026-09-01T00:00:00Z"), NotAfter: at("2027-09-01T00:00:00Z"), Serial: SerialOf("leaf_b")})
+	leafB, err := BuildLeaf(LeafOpts{CN: "Bharat Mehta", RootCN: "Bharat Mehta", RootKey: c.rootB, HostPub: c.leafB.Public(), Endpoint: endpointB, NotBefore: at("2026-09-01T00:00:00Z"), NotAfter: at("2027-09-01T00:00:00Z"), Serial: SerialOf("leaf_b")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,9 +273,9 @@ func TestCertificatesReproduce(t *testing.T) {
 		if !bytes.Equal(wc.TBS, gc.TBS) {
 			t.Errorf("%s: TBS differs", name)
 		}
-		issuer := c.rootA.Public
+		issuer := c.rootA.Public()
 		if name == "root_b" || name == "leaf_b" {
-			issuer = c.rootB.Public
+			issuer = c.rootB.Public()
 		}
 		if !verifyCert(wc, issuer) {
 			t.Errorf("%s: the vector's signature does not verify under its issuer", name)
@@ -307,7 +307,7 @@ func TestCertificatesReproduce(t *testing.T) {
 			t.Errorf("%s: PKCS #8 does not round-trip", name)
 		}
 		leaf, _ := Parse(hexBytes(t, v.Certificates[name].DerHex))
-		if !bytes.Equal(leaf.SPKI, priv.Public.SPKI) {
+		if !bytes.Equal(leaf.SPKI, priv.Public().SPKI) {
 			t.Errorf("%s: the key is not the leaf's", name)
 		}
 	}
@@ -388,7 +388,7 @@ func TestV2Envelopes(t *testing.T) {
 		if header["kid"] != Fingerprint(recipientLeaf.SPKI) {
 			t.Errorf("%s: kid is not the recipient leaf key", e.Name)
 		}
-		if !bytes.Equal(recipient.Public.SPKI, recipientLeaf.SPKI) {
+		if !bytes.Equal(recipient.Public().SPKI, recipientLeaf.SPKI) {
 			t.Errorf("%s: the recipient key is not the leaf's", e.Name)
 		}
 		pt, err := Open(e.Suite, recipient, recipientLeaf.PublicKey, []byte(InfoV2), aad, enc, ct)
@@ -533,10 +533,10 @@ func TestDerivationVectors(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := B64url(k.Public.SPKI); got != d.Spki {
+			if got := B64url(k.Public().SPKI); got != d.Spki {
 				t.Errorf("%s: the key the seed makes: got %s want %s", d.Info, got, d.Spki)
 			}
-			if got := Fingerprint(k.Public.SPKI); got != d.Fingerprint {
+			if got := Fingerprint(k.Public().SPKI); got != d.Fingerprint {
 				t.Errorf("%s: the identity that key is: got %s want %s", d.Info, got, d.Fingerprint)
 			}
 		}
