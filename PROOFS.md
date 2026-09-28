@@ -7,9 +7,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed here that did not pass.
 
-Specification: **2.2.3**. **88** normative sentences, **727** cross-port parity cases over **48** guarded functions.
+Specification: **2.2.4**. **88** normative sentences, **727** cross-port parity cases over **48** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**49** functions, spec 2.2.3): **1454** answers held to the shape it declares, **0** did not. Of **92** declared error codes, **77** were produced by a case here; the rest are declared for a caller's benefit and no argument in this suite reaches them.
+Every answer of both ports is validated against `contract/contract.json` (**49** functions, spec 2.2.4): **1454** answers held to the shape it declares, **0** did not. Of **92** declared error codes, **77** were produced by a case here; the rest are declared for a caller's benefit and no argument in this suite reaches them.
 
 ## The 88 normative sentences of the specification
 
