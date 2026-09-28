@@ -59,6 +59,25 @@ node scripts/version.mjs --check
 step "Go port: vet, tests, adapter"
 ( cd go && go vet ./... && go test ./... && make build )
 
+step "The corpus the CLI writes for a fresh owner reads in the Go port as its cases.json says"
+# `pact vectors corpus` re-issues go/exportcorpus for another owner root. This is the one port that
+# did not write it. A random root each run, so the check is of the verb and not of one output.
+REISSUED="$(mktemp -d)"
+trap 'rm -rf "$REISSUED"' EXIT
+OWNER="sha256:$(node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))")"
+cargo run -q --locked -p pact -- vectors corpus --owner "$OWNER" --out "$REISSUED/corpus"
+( cd go && PACT_REISSUED_CORPUS="$REISSUED/corpus" go test -count=1 -v -run '^TestReadExportZipAnswersTheCorpusWrittenForAnotherOwner$' . ) >"$REISSUED/go.txt" 2>&1 || {
+  cat "$REISSUED/go.txt"
+  exit 1
+}
+# Skipped is not passed: the test runs here or nowhere.
+grep -q -- '--- PASS: TestReadExportZipAnswersTheCorpusWrittenForAnotherOwner' "$REISSUED/go.txt" || {
+  cat "$REISSUED/go.txt"
+  echo "gate: the Go port did not read the corpus written for $OWNER" >&2
+  exit 1
+}
+echo "the corpus written for $OWNER: every case in the Go port as cases.json says"
+
 step "The pin is of THIS commit, and the Wasm build in this tree is the pinned one"
 node js/verify.mjs
 
