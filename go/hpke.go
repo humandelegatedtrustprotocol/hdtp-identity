@@ -161,9 +161,12 @@ func encap(id string, pub *PublicKey, seed []byte) (enc, ss []byte, err error) {
 	return enc, ss, err
 }
 
-func decap(id string, priv *PrivateKey, enc []byte) ([]byte, error) {
+// decap takes the recipient's public key as the host holds it in its leaf, as the Rust core does
+// (hpke.rs): it goes into the KEM context, and a key that is not the private key's gives another
+// context, another AEAD key, and an open that fails.
+func decap(id string, priv *PrivateKey, pub *PublicKey, enc []byte) ([]byte, error) {
 	s := suites[id]
-	pkR, err := recipientPublic(id, priv.Public)
+	pkR, err := recipientPublic(id, pub)
 	if err != nil {
 		return nil, err
 	}
@@ -235,8 +238,8 @@ func Seal(id string, pub *PublicKey, info, aad, plaintext []byte) (enc, ct []byt
 	return sealWith(id, pub, info, aad, plaintext, seed)
 }
 
-// Open is the recipient side.
-func Open(id string, priv *PrivateKey, info, aad, enc, ct []byte) ([]byte, error) {
+// Open is the recipient side: priv is the recipient's key and pub its public key, from its leaf.
+func Open(id string, priv *PrivateKey, pub *PublicKey, info, aad, enc, ct []byte) ([]byte, error) {
 	s, ok := suites[id]
 	if !ok {
 		return nil, errors.New("unknown suite")
@@ -245,7 +248,7 @@ func Open(id string, priv *PrivateKey, info, aad, enc, ct []byte) ([]byte, error
 	// point off the curve, a low-order point, the tag — is a fact about the recipient's key that an
 	// attacker gets to probe for free, and it is what the Rust core refuses to say. This port said
 	// all four, differently.
-	ss, err := decap(id, priv, enc)
+	ss, err := decap(id, priv, pub, enc)
 	if err != nil {
 		return nil, errors.New("does not open")
 	}

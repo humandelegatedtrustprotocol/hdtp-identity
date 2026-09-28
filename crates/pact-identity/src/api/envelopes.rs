@@ -29,6 +29,7 @@ pub(super) fn hpke_open(a: &Value) -> Result<Value> {
         let pt = hpke::open(
             suite,
             &private(a, "recipient_pkcs8")?,
+            &public(a, "recipient_spki")?,
             s(a, "info")?.as_bytes(),
             &opt_bytes(a, "aad")?.unwrap_or_default(),
             &bytes(a, "enc")?,
@@ -86,11 +87,13 @@ pub(super) fn open_result(a: &Value) -> Result<Value> {
         let wire: Wire = serde_json::from_value(a.get("envelope").cloned().unwrap_or(Value::Null))
             .map_err(|_| Error::new("envelope_invalid", "envelope members"))?;
         let key = private(a, "my_pkcs8")?;
+        let me = public(a, "my_spki")?;
         let pins: Vec<CallerPin> = serde_json::from_value(a.get("pins").cloned().unwrap_or(json!([])))
             .map_err(|e| Error::new("bad_request", format!("pins: {e}")))?;
         envelope::open_result(OpenResultArgs {
             envelope: &wire,
             my_key: &key,
+            my_public: &me,
             msg_id: s(a, "msg_id")?,
             now: instant(a, "now")?,
             pins: &pins,
