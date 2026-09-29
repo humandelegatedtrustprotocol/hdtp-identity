@@ -14,7 +14,7 @@
 //! never a fault of the call. The pin is the host's own state: a pinned leaf that does not read is an
 //! error of the call, in its reader's class, as `decide` answers the host's damaged state.
 use crate::card;
-use crate::util::{b64u, from_b64u, Result};
+use crate::util::{b64u, err, from_b64u, Result};
 use crate::x509::{compare_leaves, parse, validate_chain, ChainResult};
 use serde_json::Value;
 
@@ -36,6 +36,17 @@ pub enum Verdict {
     Refused(String),
 }
 
+/// The pin's root is a fingerprint (the contract's `Fingerprint`), or the call is refused: a root the
+/// host holds that is not one is the host's fault, and compared with the card's it read as
+/// `the card names another root`, a refusal of what the peer answered. The adapter asks this as it
+/// reads the pin, before the answer; `check` asks it first, for a typed caller.
+pub fn pin_root(root: &str) -> Result<()> {
+    if !crate::ledger::is_fingerprint(root) {
+        return err("bad_request", "pin.root is not a fingerprint");
+    }
+    Ok(())
+}
+
 fn refused(why: impl Into<String>) -> Result<Verdict> {
     Ok(Verdict::Refused(why.into()))
 }
@@ -46,8 +57,9 @@ fn refused(why: impl Into<String>) -> Result<Verdict> {
 /// endpoint; the leaf is not older than the pinned one, nor a different one of the same date; the
 /// card carries the leaf the chain proved; the card's signature decodes and verifies under that leaf.
 pub fn check(pin: &Pin<'_>, answer: &Value, now: i64) -> Result<Verdict> {
-    // The host's own leaf first, whatever the peer sent: a pin that does not read is the host's to
+    // The host's own pin first, whatever the peer sent: a pin that does not read is the host's to
     // hear about, and a refresh that cannot compare against it has nothing to decide.
+    pin_root(pin.root)?;
     parse(pin.leaf)?;
     let text = |k: &str| answer.get(k).and_then(Value::as_str).filter(|s| !s.is_empty());
     let (Some(card_text), Some(card_sig)) = (text("card"), text("card_sig")) else {

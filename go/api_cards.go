@@ -76,6 +76,9 @@ func callRefreshCheck(a args) json.RawMessage {
 	if !isText {
 		return fail(codeArgs, "pin.root is required")
 	}
+	if err := refreshPinRoot(root); err != nil {
+		return failAs(codeArgs, err)
+	}
 	endpoint, isText := pin["endpoint"].(string)
 	if !isText {
 		return fail(codeArgs, "pin.endpoint is required")

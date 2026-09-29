@@ -42,6 +42,17 @@ type RenewedLeaf struct {
 	Leaf, SPKI []byte
 }
 
+// refreshPinRoot is the core's refresh::pin_root: the pin's root is a fingerprint (the contract's
+// Fingerprint), or the call is refused. A root the host holds that is not one is the host's fault, and
+// compared with the card's it read as "the card names another root", a refusal of what the peer
+// answered. The adapter asks this as it reads the pin, before the answer; RefreshCheck asks it first.
+func refreshPinRoot(root string) error {
+	if !IsFingerprint(root) {
+		return errArg("pin.root is not a fingerprint")
+	}
+	return nil
+}
+
 // RefreshCheck judges the peer's answer, {card, card_sig, chain} as it was sent, against the pin at
 // now. In this order: the signed card is there; the chain is two certificates; its members decode;
 // the card decodes; the card names the pinned root; the chain validates to the pinned root at the
@@ -49,7 +60,10 @@ type RenewedLeaf struct {
 // the card carries the leaf the chain proved; the card's signature decodes and verifies under it.
 func RefreshCheck(pin RefreshPin, answer json.RawMessage, now time.Time) (RefreshVerdict, error) {
 	now = now.Truncate(time.Second)
-	// The host's own leaf first, whatever the peer sent.
+	// The host's own pin first, whatever the peer sent.
+	if err := refreshPinRoot(pin.Root); err != nil {
+		return RefreshVerdict{}, err
+	}
 	if _, err := Parse(pin.Leaf); err != nil {
 		return RefreshVerdict{}, classed(err)
 	}
