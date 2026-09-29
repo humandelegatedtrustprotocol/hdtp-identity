@@ -136,19 +136,26 @@ func certOut(c *Cert) map[string]any {
 	}
 }
 
-// Call dispatches one contract function.
 // loneSurrogateWhy is what Call answers arguments holding an unpaired UTF-16 surrogate escape.
 const loneSurrogateWhy = "args: a string holds half of a UTF-16 surrogate pair"
 
+// Call dispatches one contract function.
 func Call(name string, args json.RawMessage) (out json.RawMessage) {
 	defer func() {
 		if r := recover(); r != nil {
 			out = fail("internal", fmt.Sprint(r))
 		}
 	}()
+	// The name first: one the contract does not have is `unsupported`, whatever the arguments are
+	// (CONTRACT §0). The core read the arguments first, so a list, null or half a surrogate pair beside
+	// an unknown name was a refusal of the arguments there and `unsupported` here (R34).
+	fn, found := functions[name]
+	if !found {
+		return fail("unsupported", "no function named "+name)
+	}
 	// A \u escape of half a surrogate pair: encoding/json reads it as U+FFFD, and the Rust core's
-	// parser refuses it, so the two ports answered it two ways. Both name it first, in these words,
-	// before anything reads the arguments or the name.
+	// parser refuses it, so the two ports answered it two ways. Both name it next, in these words,
+	// before anything reads the arguments.
 	if loneSurrogate(args) {
 		return fail(codeArgs, loneSurrogateWhy)
 	}
@@ -157,10 +164,6 @@ func Call(name string, args json.RawMessage) (out json.RawMessage) {
 	// arguments and went on where the core answered serde's text (R40, S3-2).
 	if why := jsonLimit(args); why != "" {
 		return fail(codeArgs, "args: "+why)
-	}
-	fn, found := functions[name]
-	if !found {
-		return fail("unsupported", "no function named "+name)
 	}
 	// Arguments are an object, or the member is not there at all. A list, a bare scalar or the literal
 	// `null` is a caller's mistake named here, once, rather than as whatever encoding/json says about

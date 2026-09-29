@@ -102,19 +102,6 @@ func csvEach(text string, fn func(n int, fields []string) bool) *csvRefusal {
 	return nil
 }
 
-// csvRead is every record, at once.
-func csvRead(text string) ([][]string, *csvRefusal) {
-	var records [][]string
-	bad := csvEach(text, func(_ int, fields []string) bool {
-		records = append(records, append([]string(nil), fields...))
-		return true
-	})
-	if bad != nil {
-		return nil, bad
-	}
-	return records, nil
-}
-
 // csvWriteRecord appends one record, CRLF-terminated, each field quoted exactly when it must be.
 func csvWriteRecord(out *strings.Builder, fields []string) {
 	for k, f := range fields {

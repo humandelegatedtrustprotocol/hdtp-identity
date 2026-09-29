@@ -58,6 +58,16 @@ export default function certificates({ add, expect }, f) {
   add('build_root with a serial that is too short', 'build_root', { cn: 'Alina Rao', pkcs8: rootPkcs8, not_before: now, serial: b64url(new Uint8Array(4)) });
   add('build_root with an instant that is not one', 'build_root', { cn: 'Alina Rao', pkcs8: rootPkcs8, not_before: 'yesterday', serial: SERIAL });
   add('build_leaf over 398 days', 'build_leaf', { cn: 'A', root_cn: 'A', root_pkcs8: rootPkcs8, host_spki: hostSpki, endpoint: ENDPOINT, not_before: '2026-09-01T00:00:00Z', not_after: '2027-11-01T00:00:00Z', serial: SERIAL });
+  // §14.1's ceiling at its edge, read from contract/contract.json's `Windows`: exactly max_leaf_days is
+  // a leaf, and one second more is not. No case put a leaf there (C15's residual), so either port's
+  // bound could have moved by a day unseen.
+  const days = f.defs.Windows.const.max_leaf_days;
+  const lasting = (s) => new Date(Date.parse('2026-09-01T00:00:00Z') + s * 1000).toISOString().replace('.000Z', 'Z');
+  // The serial is given and the root is Ed25519, so the leaf is compared whole, byte for byte.
+  for (const [what, seconds] of [[`exactly ${days} days`, days * 86400], [`${days} days and a second`, days * 86400 + 1]]) {
+    add(`build_leaf of ${what}`, 'build_leaf', { cn: 'A', root_cn: 'A', root_pkcs8: rootPkcs8, host_spki: hostSpki, endpoint: ENDPOINT, not_before: '2026-09-01T00:00:00Z', not_after: lasting(seconds), serial: SERIAL });
+  }
+  expect(`build_leaf of ${days} days and a second`, { error: 'bad_request', why: 'validity over 398 days' });
   add('build_leaf backwards in time', 'build_leaf', { cn: 'A', root_cn: 'A', root_pkcs8: rootPkcs8, host_spki: hostSpki, endpoint: ENDPOINT, not_before: '2027-09-01T00:00:00Z', not_after: '2026-09-01T00:00:00Z', serial: SERIAL });
   for (const url of ['https://127.0.0.1/mcp', 'http://a.example/x', 'https://a.example/x/'])
     add(`build_leaf naming ${url}`, 'build_leaf', { cn: 'A', root_cn: 'A', root_pkcs8: rootPkcs8, host_spki: hostSpki, endpoint: url, not_before: now, not_after: '2027-09-01T00:00:00Z', serial: SERIAL });

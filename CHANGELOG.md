@@ -18,7 +18,7 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   1108 cases today (1103 when written; the hostile object is now sent only to the 15 functions that
   declare one of its members, and the key outside the profile came with cluster G), varied from one
   named hand-written case per function that succeeds on both ports. 463 cases failed when they were
-  written (459 generated, and 4 written beside them), 1 fails today (written); each is listed in `js/cases/known-divergences.json` with
+  written (459 generated, and 4 written beside them), and none fails today; each was listed in `js/cases/known-divergences.json` with
   the audit finding that closes it, and the run fails on any other failure, on an entry whose case
   passes, and on an entry nobody has.
 - The coverage gate fails when a declared error code is not produced by both ports in one case they
@@ -298,6 +298,31 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 - `parse_certificate` judges a certificate that is neither a root nor a leaf as a root only when it is
   a CA and self-issued, as the contract says and the core did; the Go port judged every CA as a root,
   so a CA-flagged leaf under another name got a root's refusal there and a leaf's in the core (T17).
+- **A name the contract does not have is `unsupported`, whatever the arguments are** (R34): the name is
+  judged first, in both ports, before half a surrogate pair, a number past the largest double or
+  arguments that are not an object. The core read the arguments first, so `nope([])` was
+  `bad_request` `args is a JSON object` there and `unsupported` in the Go port, and both answered a
+  surrogate or `1e400` beside an unknown name as a refusal of the arguments. CONTRACT §0 says so, and
+  `js/boundary-text.json`'s `unknown_name` holds both ports' tests to it for text parity cannot send.
+- CONTRACT §0's list of failure codes is rendered from the contract's `ErrorCode` (R35): it named
+  `chain_required`, `certificate_renewed` and `pending_approval`, which are codes of `decide`'s
+  answer and never a failure, and `profile`, which is no code at all. It no longer says the Go port
+  exposes every function as a typed Go function: the export section is `Call` and the two whole-file
+  conveniences.
+- A header whose `ts` or `exp` is written `-0` is `header member types` in both ports, as the core
+  reads it (S3-1, in the header): the Go port read it as 0 and went on to the time window. Parity
+  cases hold `-0` in `ts` and `exp`, and a `ts` written with a fraction, through `decide` and
+  `open_result`.
+- `pact id ledger` marks as current the entry the ledger rules call live (X8): each root's newest by
+  notBefore, the first of equals, and none when that one has expired. It marked the newest of the
+  unexpired entries and the last of equals. The rule is written once, `ledger::live_entry`, which
+  `ledger_check` uses too.
+- Removed, no caller (standing rule 2): Rust `der::ia5`, and `export::csv::read` outside the tests
+  (X12; Go's `csvRead` moved into its tests the same way); Go `LeafOpts`'s `CA`, `Usage`, `AKI`,
+  `Extra` and `AlgOID`, and the `ExtraExtension` type — they existed "so the intrusion suite can build
+  what a wallet never would", and nothing in this repository, the node or the cloud's battery set
+  them. `LeafOpts.URIs` stays; the node's tests set it.
+- Parity cases put a leaf at exactly `max_leaf_days` and one second past it (C15's residual).
 
 ## 0.4.1 — 2026-09-28
 

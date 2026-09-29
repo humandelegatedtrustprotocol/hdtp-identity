@@ -134,7 +134,12 @@ type boundaryTextDoc struct {
 		Args string          `json:"args"`
 		Want json.RawMessage `json:"want"`
 	} `json:"calls"`
-	Integers map[string][]string `json:"integers"`
+	Integers    map[string][]string `json:"integers"`
+	UnknownName struct {
+		Fn   string          `json:"fn"`
+		Want json.RawMessage `json:"want"`
+		Args []string        `json:"args"`
+	} `json:"unknown_name"`
 }
 
 func boundaryText(t *testing.T) boundaryTextDoc {
@@ -202,6 +207,16 @@ func TestJSONTheCoreDoesNotReadIsNotReadHere(t *testing.T) {
 	for _, c := range doc.Calls {
 		if out := Call("key_info", json.RawMessage(c.Args)); !sameJSON(out, c.Want) {
 			t.Errorf("key_info(%.60s) = %s, want %s", c.Args, out, c.Want)
+		}
+	}
+	// A name no function has is judged before the arguments are read, whatever they are (R34).
+	u := doc.UnknownName
+	if len(u.Args) < 5 {
+		t.Fatalf("js/boundary-text.json's unknown_name holds %d texts", len(u.Args))
+	}
+	for _, text := range u.Args {
+		if out := Call(u.Fn, json.RawMessage(text)); !sameJSON(out, u.Want) {
+			t.Errorf("%s(%.40s) = %s, want %s", u.Fn, text, out, u.Want)
 		}
 	}
 	nested := func(n int) string { return strings.Repeat("[", n) + "1" + strings.Repeat("]", n) }

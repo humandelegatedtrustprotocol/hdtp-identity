@@ -96,7 +96,10 @@ export async function render() {
   text = text.replace(/^\{\{types\}\}$/m, () => types(contract));
   const filled = text
     .replaceAll('{{spec}}', contract.spec)
-    .replaceAll('{{count}}', String(Object.keys(contract.methods).length));
+    .replaceAll('{{count}}', String(Object.keys(contract.methods).length))
+    // §0's list of failure codes, from the enum itself: written by hand, it named four codes no port
+    // emits and the enum does not have (R35).
+    .replaceAll('{{error_codes}}', contract.$defs.ErrorCode.enum.map((c) => `\`${c}\``).join(', '));
   if (/\{\{/.test(filled)) throw new Error(`a placeholder was left unrendered: ${filled.match(/\{\{[^}]*\}\}/)[0]}`);
   return filled;
 }

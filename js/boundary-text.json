@@ -1,5 +1,5 @@
 {
-  "about": "The arguments text both ports read alike, as one list of cases: text a JSON parser reads as it pleases, which the core's serde_json and the Go port's encoding/json read differently, and so neither port hands to its parser. The core's tests (crates/pact-identity/src/api.rs, unknown_names_and_non_object_args_answer_rather_than_throw and a_member_of_the_wrong_type_is_refused_and_never_read_as_absent) and the Go port's (go/api_args_test.go, TestJSONTheCoreDoesNotReadIsNotReadHere and TestAnIntegerIsWhatTheCoreReadsAsOne) read it; each port's constant for the depth is held to `max_depth`. `calls` are key_info's answers to arguments given as text, which the parity harness cannot send when they do not parse (the Go adapter reads its request as one JSON line). `nested` builds arguments `{\"spki\": <arrays>}` nested `max_depth` deep with the arguments, and one deeper. `integers` are JSON number texts a member reads as an integer (serde_json's `as_i64`), and texts it does not.",
+  "about": "The arguments text both ports read alike, as one list of cases: text a JSON parser reads as it pleases, which the core's serde_json and the Go port's encoding/json read differently, and so neither port hands to its parser. The core's test the_arguments_text_is_read_as_the_go_port_reads_it (crates/pact-identity/src/api.rs) and the Go port's TestJSONTheCoreDoesNotReadIsNotReadHere and TestAnIntegerIsWhatTheCoreReadsAsOne (go/api_args_test.go) read it; each port's constant for the depth is held to `max_depth`. `calls` are key_info's answers to arguments given as text, which the parity harness cannot send when they do not parse (the Go adapter reads its request as one JSON line). `nested` builds arguments `{\"spki\": <arrays>}` nested `max_depth` deep with the arguments, and one deeper. `integers` are JSON number texts a member reads as an integer (serde_json's `as_i64`), and texts it does not. `unknown_name` are texts of arguments beside a name no function has, each answered `unsupported` `no function named no_such_function` whatever the text is: the name is judged before anything reads the arguments (R34).",
   "max_depth": 127,
   "nested": {
     "within": {
@@ -99,6 +99,23 @@
       "\"7\"",
       "9223372036854775808",
       "-9223372036854775809"
+    ]
+  },
+  "unknown_name": {
+    "fn": "no_such_function",
+    "want": {
+      "error": "unsupported",
+      "why": "no function named no_such_function"
+    },
+    "args": [
+      "{",
+      "",
+      "[]",
+      "null",
+      "3",
+      "{\"x\":\"\\ud800\"}",
+      "{\"x\":1e400}",
+      "{\"x\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[1]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}"
     ]
   }
 }
