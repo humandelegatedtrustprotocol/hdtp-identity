@@ -25,7 +25,7 @@ fn at<T>(why: impl AsRef<str>) -> Result<T> {
 /// The manifest's members held to §9.2, and its owner to the importing identity's when `owner` is
 /// given.
 pub fn check(doc: &Map<String, Value>, owner: Option<&str>) -> Result<Manifest> {
-    if let Some(k) = crate::ledger::stranger(doc, &MEMBERS) {
+    if let Some(k) = crate::util::stranger(doc, &MEMBERS) {
         return at(format!("{} is not a member of a manifest", crate::canonical::string(&k)));
     }
     if let Some(k) = MEMBERS.iter().find(|m| !doc.contains_key(**m)) {
@@ -49,7 +49,7 @@ pub fn check(doc: &Map<String, Value>, owner: Option<&str>) -> Result<Manifest> 
         return at("exported_at is not an RFC 3339 instant");
     }
     let Some(counts) = doc["counts"].as_object() else { return at("counts is an object") };
-    if let Some(k) = crate::ledger::stranger(counts, &COUNTS) {
+    if let Some(k) = crate::util::stranger(counts, &COUNTS) {
         return at(format!("counts: {} is not a count of a manifest", crate::canonical::string(&k)));
     }
     let mut n = [0u64; 4];

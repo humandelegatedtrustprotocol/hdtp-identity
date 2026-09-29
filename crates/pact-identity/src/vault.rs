@@ -4,8 +4,9 @@
 use crate::canonical::canonical;
 use crate::csr;
 use crate::keys::PrivateKey;
-use crate::ledger::{self, is_fingerprint, stranger};
+use crate::ledger::{self, is_fingerprint};
 use crate::time::{format_rfc3339, parse_rfc3339};
+use crate::util::stranger;
 use crate::util::{b64u, err, from_b64u, Error, Result};
 use aes_gcm::aead::{Aead, KeyInit, Payload};
 use serde_json::{json, Map, Value};

@@ -367,7 +367,7 @@ pub(super) fn export_manifest(a: &Value) -> Result<Value> {
     let sha = match a.get("hashes") {
         None | Some(Value::Null) => None,
         Some(Value::Object(h)) => {
-            if let Some(k) = crate::ledger::stranger(h, &["messages.jsonl"]) {
+            if let Some(k) = crate::util::stranger(h, &["messages.jsonl"]) {
                 return err(
                     "bad_request",
                     format!("hashes: {} is not hashed by the host: only messages.jsonl is", crate::canonical::string(&k)),

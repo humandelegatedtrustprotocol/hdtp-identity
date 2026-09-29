@@ -1,7 +1,7 @@
 package pactidentity
 
 // PACT SPEC §12's per-caller call budgets: the Go port of crates/pact-limits, which this port's
-// `limits_rules_check` and `limits_decide` answer with. The node decides its budgets in its sidecar,
+// `limits_rules_check`, `limits_decide` and `limits_buckets` answer with. The node decides its budgets in its sidecar,
 // pact-limitd, with the Rust crate itself; nothing outside this module calls these. The same token
 // buckets, the same keys, the same arithmetic in the same order, held to the Rust crate by parity
 // and to the cloud's TypeScript by js/cases/limits-vectors.json (limits_test.go).

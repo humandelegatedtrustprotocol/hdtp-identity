@@ -119,6 +119,7 @@ export const BASES = {
   book_rows: 'book_rows: a contact with everything, one with the least',
   limits_rules_check: 'limits_rules_check: a document that can be enforced',
   limits_decide: 'limits_decide: a contact in, fresh',
+  limits_buckets: 'limits_buckets: a contact in',
 };
 
 /** The members of the hostile object a function declares: what reaches its body. */
