@@ -372,7 +372,7 @@ func TestChainCases(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		follow, why, _ := FollowRenewed(chainIn(c.Answer.Data.Chain), "sha256:"+B64url(pinned.AKI), der(c.PinnedLeaf), c.Dialed, mustTime(t, c.Now))
+		follow, why, _ := FollowRenewed(chainIn(t, c.Answer.Data.Chain), "sha256:"+B64url(pinned.AKI), der(c.PinnedLeaf), c.Dialed, mustTime(t, c.Now))
 		if follow != (c.Expect == "follow") {
 			t.Errorf("%s: expected %s (%s)", c.Name, c.Expect, why)
 		}
@@ -403,7 +403,7 @@ func TestV2Envelopes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		aad, enc, ct := FromB64url(e.Protected), FromB64url(e.Enc), FromB64url(e.Ct)
+		aad, enc, ct := wireIn(t, e.Protected), wireIn(t, e.Enc), wireIn(t, e.Ct)
 		hv, err := decodeJSON(aad)
 		if err != nil {
 			t.Fatal(err)
@@ -442,7 +442,7 @@ func TestV2Envelopes(t *testing.T) {
 			if body["leaf"] != Fingerprint(senderLeaf.SPKI) {
 				t.Errorf("%s: leaf names the sender's held leaf", e.Name)
 			}
-			if !VerifyDetached(senderLeaf.PublicKey, signed, FromB64url(e.Sig)) {
+			if !VerifyDetached(senderLeaf.PublicKey, signed, wireIn(t, e.Sig)) {
 				t.Errorf("%s: signature under the held leaf's key", e.Name)
 			}
 			if len(ct) >= 400 {
@@ -454,7 +454,7 @@ func TestV2Envelopes(t *testing.T) {
 			}
 			var chain [][]byte
 			for _, c := range body["chain"].([]any) {
-				chain = append(chain, FromB64url(c.(string)))
+				chain = append(chain, chainIn(t, []string{c.(string)})[0])
 			}
 			r := ValidateChain(chain, ChainOpts{Now: now})
 			if !r.OK {
@@ -464,7 +464,7 @@ func TestV2Envelopes(t *testing.T) {
 			if !bytes.Equal(chain[0], der(e.SenderChain[0])) {
 				t.Errorf("%s: chain inside is not the sender's", e.Name)
 			}
-			if !VerifyDetached(r.LeafKey, signed, FromB64url(e.Sig)) {
+			if !VerifyDetached(r.LeafKey, signed, wireIn(t, e.Sig)) {
 				t.Errorf("%s: signature under the chain's leaf key", e.Name)
 			}
 		}
@@ -546,7 +546,7 @@ func TestDerivationVectors(t *testing.T) {
 		if got := B64url(PrfSalt()); got != d.Salt {
 			t.Errorf("%s: salt is SHA-256(\"pact/vault/1\"): got %s want %s", d.Info, got, d.Salt)
 		}
-		prf, err := decodeB64url(d.Prf)
+		prf, err := DecodeB64url(d.Prf)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -124,10 +124,12 @@ pub fn decode(text: &str, now: i64) -> Result<Card> {
     }
     let get = |n: &str| props.iter().find(|(k, _)| k == n).map(|(_, v)| v.as_slice());
     let bad = |why: String| err("bad_request", why);
+    // An empty value names no version, as the seed's card.mjs reads it: this answered `version not
+    // implemented` to `X-PACT-VERSION:` and the Go port and the seed `no X-PACT-VERSION` (C9).
     match get("X-PACT-VERSION").and_then(|v| v.first()) {
         Some(v) if v == "2" => {}
-        Some(_) => return bad("version not implemented".into()),
-        None => return bad("no X-PACT-VERSION".into()),
+        Some(v) if !v.is_empty() => return bad("version not implemented".into()),
+        _ => return bad("no X-PACT-VERSION".into()),
     }
     let certs = get("X-PACT-CERT").unwrap_or(&[]);
     if certs.len() != 1 {

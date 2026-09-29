@@ -8,9 +8,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 case can be listed as proven that did not pass. The cases that fail today are listed apart, at the
 end, each with the finding it waits on.
 
-Specification: **2.2.4**. **88** normative sentences, **2166** cross-port parity cases over **50** guarded functions, and **3** known divergences that fail today and are listed apart, at the end.
+Specification: **2.2.4**. **88** normative sentences, **2214** cross-port parity cases over **50** guarded functions, and **3** known divergences that fail today and are listed apart, at the end.
 
-Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **4338** answers, of which **2** do not hold to the shape it declares — **2** of them in a known divergence. Of **118** declared error codes, **118** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **4434** answers, of which **2** do not hold to the shape it declares — **2** of them in a known divergence. Of **118** declared error codes, **118** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 88 normative sentences of the specification
 
@@ -203,7 +203,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 2166 cross-port parity cases
+## The 2214 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -211,7 +211,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **2166** cases (**1108** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
+At the run that generated this file: **2214** cases (**1108** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
 
 ### `address_guard` — 50 cases · whole on success
 
@@ -448,7 +448,7 @@ At the run that generated this file: **2166** cases (**1108** of the run's cases
 - generated · build_root · not_before absent, pkcs8 7
 - generated · build_root · not_before absent, serial 7
 
-### `card_decode` — 24 cases · whole on success
+### `card_decode` — 37 cases · whole on success
 
 - card_decode of a real card
 - card_decode of an empty card
@@ -465,6 +465,19 @@ At the run that generated this file: **2166** cases (**1108** of the run's cases
 - card_decode of a card whose leaf holds a key outside the profile: P-384
 - card_decode of a card whose leaf holds a key outside the profile: X25519
 - card_decode of a card whose leaf holds a key outside the profile: Ed25519 with a NULL
+- card_decode of a card whose certificate has a stray character
+- card_decode of a card whose certificate has a full stop
+- card_decode of a card whose certificate has padding inside
+- card_decode of a card whose certificate has a no-break space
+- card_decode of a card whose certificate has a vertical tab
+- card_decode of a card whose certificate has a tab
+- card_decode of a card whose certificate has nothing but !!!
+- card_decode of a card whose certificate has a spare bit set
+- card_decode of a card whose certificate has nothing wrong with it
+- card_decode of a card whose certificate has padding at the end
+- card_decode of a card whose certificate has the standard alphabet
+- card_decode of a card whose certificate has a space
+- card_decode of a card with an empty X-PACT-VERSION
 - generated · card_decode · {}
 - generated · card_decode · the hostile object
 - generated · card_decode · vcard absent
@@ -599,7 +612,7 @@ At the run that generated this file: **2166** cases (**1108** of the run's cases
 - generated · csr_new · endpoint absent, host_pkcs8 7
 - generated · csr_new · endpoint absent, dns_name 7
 
-### `decide` — 98 cases · whole on success
+### `decide` — 104 cases · whole on success
 
 - decide on an envelope from a pinned contact
 - decide on a pinned contact's call that names no tool
@@ -684,6 +697,12 @@ At the run that generated this file: **2166** cases (**1108** of the run's cases
 - decide with a pinned leaf holding a key outside the profile: X25519
 - decide with a held leaf holding a key outside the profile: Ed25519 with a NULL
 - decide with a pinned leaf holding a key outside the profile: Ed25519 with a NULL
+- decide on a call whose plaintext chain's leaf has a stray character
+- decide on a call whose plaintext chain's leaf has a vertical tab
+- decide on a call whose plaintext chain's leaf has padding (the control)
+- decide with a held key whose PKCS #8 is not base64url
+- decide with a held key whose PKCS #8 is not a key
+- decide with a held key whose PKCS #8 holds a key outside the profile
 - generated · decide · {}
 - generated · decide · the hostile object
 - generated · decide · now absent
@@ -1783,7 +1802,7 @@ At the run that generated this file: **2166** cases (**1108** of the run's cases
 
 - a function nobody defines
 
-### `open_result` — 92 cases · whole on success
+### `open_result` — 107 cases · whole on success
 
 - open_result of a request envelope
 - open_result with nothing to work from
@@ -1822,6 +1841,21 @@ At the run that generated this file: **2166** cases (**1108** of the run's cases
 - open_result in the leaf form, with a pin holding a key outside the profile: P-384
 - open_result in the leaf form, with a pin holding a key outside the profile: X25519
 - open_result in the leaf form, with a pin holding a key outside the profile: Ed25519 with a NULL
+- open_result on an answer whose plaintext chain's leaf has a stray character
+- open_result on an answer whose plaintext chain's leaf has a vertical tab
+- open_result on an answer whose plaintext chain's leaf has padding (the control)
+- open_result in the chain form, with a pin whose leaf is not base64url
+- open_result in the chain form, with a pin whose leaf is not a certificate
+- open_result in the chain form, with a pin whose leaf has a stray character
+- open_result in the chain form, with a pin holding a key outside the profile: rsa
+- open_result in the chain form, with a pin holding a key outside the profile: P-384
+- open_result in the chain form, with a pin holding a key outside the profile: X25519
+- open_result in the chain form, with a pin holding a key outside the profile: Ed25519 with a NULL
+- open_result in the chain form, with the pin as held
+- open_result in the chain form, with two pins for its root: the first as held, the second a newer leaf
+- open_result in the chain form, with two pins for its root: the first as held, the second an older leaf
+- open_result in the chain form, with two pins for its root: the first as held, the second a leaf that is not a certificate
+- open_result in the chain form, with two pins for its root: the first newer, the second as held
 - generated · open_result · {}
 - generated · open_result · the hostile object
 - generated · open_result · envelope absent
@@ -1940,7 +1974,7 @@ At the run that generated this file: **2166** cases (**1108** of the run's cases
 - generated · profile_error · der absent, kind 7
 - generated · profile_error · kind absent, der 7
 
-### `public_key` — 12 cases · whole on success
+### `public_key` — 21 cases · whole on success
 
 - public_key of a key that is not one
 - public_key with no argument
@@ -1949,6 +1983,15 @@ At the run that generated this file: **2166** cases (**1108** of the run's cases
 - public_key
 - public_key of a P-256 key
 - public_key from an Ed25519 PKCS #8 whose algorithm carries a NULL
+- public_key of a key with a space inside
+- public_key of a key with a tab inside
+- public_key of a key with CR LF inside
+- public_key of a key with a vertical tab inside
+- public_key of a key with a form feed inside
+- public_key of a key with a next line inside
+- public_key of a key with a no-break space inside
+- public_key of a key with a line separator inside
+- public_key of the key as written (the control)
 - generated · public_key · {}
 - generated · public_key · pkcs8 absent
 - generated · public_key · pkcs8 null
@@ -2336,7 +2379,7 @@ At the run that generated this file: **2166** cases (**1108** of the run's cases
 - generated · validate_chain · now absent, expected_root 7
 - generated · validate_chain · now absent, expected_endpoint 7
 
-### `vault_open` — 24 cases · whole on success
+### `vault_open` — 29 cases · whole on success
 
 - vault_open of what vault_seal made
 - vault_open of what vault_seal made, with t spelled 1.0
@@ -2355,6 +2398,11 @@ At the run that generated this file: **2166** cases (**1108** of the run's cases
 - vault_open of a document with a KDF with too many lanes
 - vault_open of a document with a KDF nobody implements
 - vault_open with nothing to work from
+- vault_open of what vault_seal made, with a ct with a stray character
+- vault_open of what vault_seal made, with a ct with a no-break space
+- vault_open of what vault_seal made, with a nonce with a stray character
+- vault_open of what vault_seal made, with a salt with a stray character
+- vault_open of what vault_seal made, with a ct padded (the control)
 - generated · vault_open · {}
 - generated · vault_open · passphrase absent
 - generated · vault_open · passphrase null

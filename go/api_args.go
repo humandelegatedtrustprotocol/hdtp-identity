@@ -143,7 +143,7 @@ func (a args) optBytes(k string) ([]byte, error) {
 	if !isText {
 		return nil, parseError{"not base64url"}
 	}
-	b, err := decodeB64url(s)
+	b, err := DecodeB64url(s)
 	if b == nil && err == nil {
 		b = []byte{}
 	}
@@ -220,7 +220,7 @@ func (a args) chain(k string) ([][]byte, error) {
 		if len(item) == 0 || item[0] != '"' || json.Unmarshal(item, &s) != nil {
 			return nil, parseError{"not base64url"}
 		}
-		b, err := decodeB64url(s)
+		b, err := DecodeB64url(s)
 		if err != nil {
 			return nil, err
 		}

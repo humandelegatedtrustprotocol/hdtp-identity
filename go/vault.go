@@ -130,7 +130,10 @@ func vaultKey(passphrase string, v Vault) ([]byte, error) {
 	if v.KDF.MKiB < minMKiB || v.KDF.MKiB > maxMKiB || v.KDF.T < 1 || v.KDF.T > maxT || v.KDF.P < 1 || v.KDF.P > maxP {
 		return nil, vaultError{"kdf parameters out of range"}
 	}
-	salt := FromB64url(v.Salt)
+	salt, err := DecodeB64url(v.Salt)
+	if err != nil {
+		return nil, errVault
+	}
 	if len(salt) < 8 {
 		return nil, errors.New("not a pact-vault/1 document")
 	}
@@ -346,8 +349,14 @@ func VaultOpenDoc(passphrase string, doc map[string]any) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	nonce := FromB64url(v.Nonce)
-	if len(nonce) != 12 {
+	// Read strictly, as the core reads them: this port skipped a stray character in `ct`, so a
+	// document the core refuses as damaged opened here (C8).
+	nonce, err := DecodeB64url(v.Nonce)
+	if err != nil || len(nonce) != 12 {
+		return nil, errVault
+	}
+	ct, err := DecodeB64url(v.Ct)
+	if err != nil {
 		return nil, errVault
 	}
 	header := make(map[string]any, len(doc))
@@ -356,7 +365,7 @@ func VaultOpenDoc(passphrase string, doc map[string]any) ([]byte, error) {
 			header[k] = val
 		}
 	}
-	pt, err := gcm.Open(nil, nonce, FromB64url(v.Ct), Canonical(header))
+	pt, err := gcm.Open(nil, nonce, ct, Canonical(header))
 	if err != nil {
 		return nil, errVault
 	}
@@ -458,11 +467,15 @@ func WalletIssue(plain VaultPlaintext, record RecordPlaintext, rootFingerprint s
 		// EVERY root this vault holds, and a root is held as its certificate: a software root has a
 		// `pkcs8` beside it and a card-held one has not. Reading `pkcs8` alone left a card-held
 		// sibling out of "a request whose key is a root" (§9), and such a request was given a leaf.
-		if cert, err := Parse(FromB64url(r.Cert)); err == nil {
-			rootSPKIs = append(rootSPKIs, cert.SPKI)
+		if der, err := DecodeB64url(r.Cert); err == nil {
+			if cert, err := Parse(der); err == nil {
+				rootSPKIs = append(rootSPKIs, cert.SPKI)
+			}
 		}
-		if priv, err := ParsePKCS8(FromB64url(r.PKCS8)); err == nil {
-			rootSPKIs = append(rootSPKIs, priv.Public().SPKI)
+		if der, err := DecodeB64url(r.PKCS8); err == nil {
+			if priv, err := ParsePKCS8(der); err == nil {
+				rootSPKIs = append(rootSPKIs, priv.Public().SPKI)
+			}
 		}
 	}
 	if root == nil {
@@ -471,7 +484,11 @@ func WalletIssue(plain VaultPlaintext, record RecordPlaintext, rootFingerprint s
 	if root.PKCS8 == "" {
 		return nil, errors.New("this root is held on a card: wallet_issue signs only with a key the vault holds")
 	}
-	rootKey, err := ParsePKCS8(FromB64url(root.PKCS8))
+	rootDER, err := DecodeB64url(root.PKCS8)
+	if err != nil {
+		return nil, err
+	}
+	rootKey, err := ParsePKCS8(rootDER)
 	if err != nil {
 		return nil, errors.New("the root key does not parse")
 	}

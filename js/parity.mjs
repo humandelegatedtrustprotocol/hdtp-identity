@@ -119,9 +119,14 @@ const excused = []; // [{ id, fn, findings, fails }]
 // alike: what the failure side of the coverage gate is judged on (below).
 const comparedCodes = new Map();
 
-// A member of an expected answer is the value the answer's member must be, or a pattern its text must
-// match where the contract fixes part of the words (the member a refusal names) and not all of them.
-const holds = (v, got) => (v instanceof RegExp ? typeof got === 'string' && v.test(got) : got === v);
+// A member of an expected answer is the value the answer's member must be — an object or a list
+// compared whole, members in any order — or a pattern its text must match where the contract fixes
+// part of the words (the member a refusal names) and not all of them.
+const holds = (v, got) => {
+  if (v instanceof RegExp) return typeof got === 'string' && v.test(got);
+  if (v !== null && typeof v === 'object') return JSON.stringify(canonical(v)) === JSON.stringify(canonical(got));
+  return got === v;
+};
 const shown = (want) => JSON.stringify(want, (_, v) => (v instanceof RegExp ? String(v) : v));
 
 for (const c of cases) {

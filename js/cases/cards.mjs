@@ -55,4 +55,45 @@ export default function cards({ add, expect }, f) {
     add(`card_decode of a card whose leaf holds a key outside the profile: ${kind}`, 'card_decode', { vcard, now });
     expect(`card_decode of a card whose leaf holds a key outside the profile: ${kind}`, { error: 'bad_request', why: `certificate does not parse: unsupported key type ${oid}` });
   }
+
+  // ── H: a card's certificate is bytes this port did not write, and an empty version is none ────────
+  //
+  // The core read X-PACT-CERT strictly, and the Go port and the seed's card.mjs as Buffer.from does,
+  // skipping what they did not know: a stray character in the certificate was a card to two of them and
+  // a refusal to the core, which the cloud runs (R24, T11, C7). An empty X-PACT-VERSION was `version not
+  // implemented` to the core and `no X-PACT-VERSION` to the other two (C9). One reading now, in the
+  // ports and the seed: the certificate as every argument's bytes are read (CONTRACT §0,
+  // js/b64url-arguments.json), and an empty version as none. Hand-written, one line, so every value
+  // reaches the reader as it is written here.
+  const withCert = (value) => `BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Alina Rao\r\nX-PACT-VERSION:2\r\nX-PACT-CERT:${value}\r\nX-PACT-SEAL:required\r\nEND:VCARD\r\n`;
+  const at8 = (c) => leafDer.slice(0, 8) + c + leafDer.slice(8);
+  // A spare bit needs a certificate whose length is not a multiple of three: the first of these that
+  // has one, with the lowest bit of its last character set.
+  const A64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+  const spared = [leafDer, f.rootDer, twinLeaf, f.p256RootDer].find((d) => d.length % 4 !== 0);
+  if (!spared) throw new Error('cards.mjs: no certificate fixture has spare bits to set');
+  const withSpareBit = spared.slice(0, -1) + A64[A64.indexOf(spared.at(-1)) | 1];
+  const notB64 = { error: 'bad_request', why: 'certificate does not parse: not base64url' };
+  const read = { cert: leafDer, endpoint: f.ENDPOINT, root: f.rootFp };
+  for (const [what, value, want] of [
+    ['a stray character', at8('!'), notB64],
+    ['a full stop', at8('.'), notB64],
+    ['padding inside', at8('='), notB64],
+    ['a no-break space', at8('\u00a0'), notB64],
+    ['a vertical tab', at8('\u000b'), notB64],
+    ['a tab', at8('\t'), notB64],
+    ['nothing but !!!', '!!!', notB64],
+    ['a spare bit set', withSpareBit, notB64],
+    // The controls, which must read: the certificate as written, padded, and in the standard alphabet.
+    ['nothing wrong with it', leafDer, read],
+    ['padding at the end', leafDer + '='.repeat((4 - (leafDer.length % 4)) % 4), read],
+    ['the standard alphabet', leafDer.replace(/-/g, '+').replace(/_/g, '/'), read],
+    ['a space', at8(' '), notB64],
+  ]) {
+    add(`card_decode of a card whose certificate has ${what}`, 'card_decode', { vcard: withCert(value), now });
+    expect(`card_decode of a card whose certificate has ${what}`, want);
+  }
+  add('card_decode of a card with an empty X-PACT-VERSION', 'card_decode', { vcard: card.replace('X-PACT-VERSION:2', 'X-PACT-VERSION:'), now });
+  expect('card_decode of a card with an empty X-PACT-VERSION', { error: 'bad_request', why: 'no X-PACT-VERSION' });
+  expect('card_decode of a 1.x card', { error: 'bad_request', why: 'version not implemented' });
 }

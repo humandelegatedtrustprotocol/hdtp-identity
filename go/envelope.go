@@ -211,7 +211,7 @@ func pinHolding(pins []Pin, named string) (*Pin, *Cert, error) {
 		if p.State == "blocked" || (p.LeafFingerprint != "" && p.LeafFingerprint != named) {
 			continue
 		}
-		leafDER, err := decodeB64url(p.Leaf)
+		leafDER, err := DecodeB64url(p.Leaf)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -360,8 +360,8 @@ func classed(err error) error {
 
 func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Decision {
 	effects := []map[string]any{}
-	// Every member is base64url and nothing else. The lenient reader skips what it does not know, so
-	// `protected` with a stray character decoded to the same bytes, the signature — which covers the
+	// Every member is base64url and nothing else. The lenient reader this port had skipped what it did
+	// not know, so `protected` with a stray character decoded to the same bytes, the signature — which covers the
 	// DECODED bytes — still verified, and this port accepted a second spelling of an envelope the core
 	// refuses.
 	aad, err := wireB64url(env.Protected)
@@ -393,7 +393,7 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 		if k.Kid != kid {
 			continue
 		}
-		leafDER, err := decodeB64url(k.Leaf)
+		leafDER, err := DecodeB64url(k.Leaf)
 		if err != nil {
 			return unreadableState(unreadable, err)
 		}
@@ -426,9 +426,16 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 	if s, _ := SuiteForKey(heldLeaf.PublicKey); s != suite {
 		return invalid("suite does not fit the leaf")
 	}
-	priv, err := ParsePKCS8(FromB64url(held.PKCS8))
+	// The held key is the node's own state: one that does not read is an error of the call, in its
+	// reader's class, as the core's `?` has it — never `does not open`, which told the peer about the
+	// host's damaged state and skipped the host's own audit of it (R23).
+	heldDER, err := DecodeB64url(held.PKCS8)
 	if err != nil {
-		return invalid("does not open")
+		return unreadableState(unreadable, err)
+	}
+	priv, err := ParsePKCS8(heldDER)
+	if err != nil {
+		return unreadableState(unreadable, err)
 	}
 	enc, errEnc := wireB64url(env.Enc)
 	ct, errCt := wireB64url(env.Ct)
@@ -570,11 +577,14 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 	}
 	chain := make([][]byte, 0, len(chainAny))
 	for _, c := range chainAny {
+		// A member that does not read is the plaintext's shape, as the core answers it: read leniently,
+		// a stray character was skipped and the chain validated here (T10).
 		s, ok := c.(string)
-		if !ok {
+		der, err := DecodeB64url(s)
+		if !ok || err != nil {
 			return invalid("plaintext shape")
 		}
-		chain = append(chain, FromB64url(s))
+		chain = append(chain, der)
 	}
 	vr := ValidateChain(chain, ChainOpts{Now: now})
 	if !vr.OK {
@@ -654,7 +664,7 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 				return unreadableState(unreadable, parseError{"not an RFC 3339 instant: " + t.At})
 			}
 			if now.Sub(at) < Tombstone {
-				was, err := decodeB64url(t.Leaf)
+				was, err := DecodeB64url(t.Leaf)
 				if err != nil {
 					return unreadableState(unreadable, err)
 				}
@@ -674,7 +684,7 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 	if pin.State == "blocked" {
 		return asGuest("blocked")
 	}
-	pinnedDER, err := decodeB64url(pin.Leaf)
+	pinnedDER, err := DecodeB64url(pin.Leaf)
 	if err != nil {
 		return unreadableState(unreadable, err)
 	}
@@ -869,10 +879,11 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 	chain := make([][]byte, 0, len(chainAny))
 	for _, c := range chainAny {
 		s, ok := c.(string)
-		if !ok {
+		der, err := DecodeB64url(s)
+		if !ok || err != nil {
 			return nil, errors.New("plaintext shape")
 		}
-		chain = append(chain, FromB64url(s))
+		chain = append(chain, der)
 	}
 	vr := ValidateChain(chain, ChainOpts{Now: o.Now, ExpectedRoot: o.ExpectedRoot, ExpectedEndpoint: o.ExpectedEndpoint, rootGiven: o.rootGiven, endpointGiven: o.endpointGiven})
 	if !vr.OK {
@@ -882,14 +893,26 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 		return nil, errors.New("signature is not the chain's leaf key")
 	}
 	out.Form, out.Root, out.Endpoint = "chain", vr.RootFingerprint, vr.Endpoint
+	// The first pin for the chain's root is the one read, as the core reads it and as decide reads the
+	// node's pins in both ports: this read every pin for the root, so a second one newer than the
+	// chain refused a result the first accepted, and a second that did not read refused it too (S5-2).
 	pinned := false
 	for _, p := range o.Pins {
 		if p.Root != vr.RootFingerprint {
 			continue
 		}
 		pinned = true
-		cmp, err := CompareLeaves(FromB64url(p.Leaf), chain[0])
-		if err != nil || cmp == "superseded" {
+		// The caller's pin is the caller's state: one that does not read is an error of the call in its
+		// reader's class, as the core's `?` has it, never `superseded leaf` (T10).
+		pinDER, err := DecodeB64url(p.Leaf)
+		if err != nil {
+			return nil, err
+		}
+		cmp, err := CompareLeaves(pinDER, chain[0])
+		if err != nil {
+			return nil, classed(err)
+		}
+		if cmp == "superseded" {
 			return nil, errors.New("superseded leaf")
 		}
 		if cmp == "conflict" {
@@ -898,6 +921,7 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 		if cmp == "newer" {
 			out.LeafUpdate = chain[0]
 		}
+		break
 	}
 	// No pin for this root is first contact, and the leaf that rode along is what a caller pins.
 	// Handing it back only from inside the loop meant a caller holding no pins was never told what to

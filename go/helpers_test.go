@@ -1,16 +1,34 @@
 package pactidentity
 
+import "testing"
+
 // Helpers only the tests call. They were exported (or package) API that nothing outside the
 // tests reached — review N-15 — so they live beside the tests that use them.
 
-// chainIn decodes a list of base64url members the way the wire does, for a test or a caller holding
-// strings rather than the boundary's arguments. The boundary itself decodes strictly (b64.go).
-func chainIn(chain []string) [][]byte {
+// chainIn decodes a list of base64url members for a test holding strings rather than the
+// boundary's arguments, and fails the test on one that does not read.
+func chainIn(t *testing.T, chain []string) [][]byte {
+	t.Helper()
 	out := make([][]byte, 0, len(chain))
 	for _, c := range chain {
-		out = append(out, FromB64url(c))
+		b, err := DecodeB64url(c)
+		if err != nil {
+			t.Fatalf("chain member %q: %v", c, err)
+		}
+		out = append(out, b)
 	}
 	return out
+}
+
+// wireIn decodes an envelope member of the vectors as it travels, and fails the test on one that is
+// not in its one canonical spelling.
+func wireIn(t *testing.T, s string) []byte {
+	t.Helper()
+	b, err := wireB64url(s)
+	if err != nil {
+		t.Fatalf("envelope member %q: %v", s, err)
+	}
+	return b
 }
 
 // Functions lists the contract's names, for a caller that wants to check coverage.

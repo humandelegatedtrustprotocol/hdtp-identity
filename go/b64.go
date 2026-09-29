@@ -1,21 +1,30 @@
 package pactidentity
 
-// A base64url member of a request, decoded strictly.
+// Bytes as base64url, read by one of two rules and never by a third.
 //
-// `FromB64url` is lenient, as the seed library's `Buffer.from(s, 'base64url')` is: it skips every
-// character outside the alphabet and cannot fail. That is the right reading for bytes already on the
-// wire, where the seed is the authority. It is the wrong reading for an argument a caller hands the
-// boundary, and the difference was a hole: `csr_check`'s `root_spkis` decoded "!!!" to no bytes at
-// all, so §9's root-key refusal — which matches the request's key against every root it was given —
-// had nothing to match and accepted a CSR carrying the root's own key. The Rust core's `from_b64u`
-// refuses the same input, so the two ports answered differently on the same call, which CONTRACT §0
-// forbids.
+// DecodeB64url is for bytes a caller hands the boundary, and for every string this port reads that
+// it did not write itself: a card's certificate, a peer's plaintext chain, a pin, a held key, a
+// vault's salt, nonce and ciphertext (CONTRACT §0). It forgives the padding and the standard
+// alphabet's `+` and `/`, and refuses everything else as `parse`, `not base64url`: a character
+// outside the alphabet, whitespace of any kind included, and a last character with a spare bit set.
+// js/b64url-arguments.json is the list of cases it and the Rust core's `from_b64u` are held to. This
+// port forgave space, tab, CR and LF and the core every Unicode whitespace character, so a key with a
+// vertical tab in it was a key to one and `parse` to the other (C10); the contract forgives padding
+// and alphabet, and no whitespace.
 //
-// So every base64url member a caller hands the boundary is read by decodeB64url (api_args.go's
-// `bytes`, `optBytes` and `chain`): a member that is not base64url is a caller's mistake reported as
-// `parse`, never an empty byte string. Absent and present-but-empty stay apart there — absent is
-// `<name> is required`, `""` is no bytes, which the parser then says is wrong — as the core draws
-// the line.
+// wireB64url is for the four members of an envelope that travelled (CONTRACT §5), and forgives
+// nothing.
+//
+// There was a third: `FromB64url`, lenient as Node's `Buffer.from(s, 'base64url')` is, which skipped
+// every character outside the alphabet and could not fail. This port read a card's certificate, a
+// peer's plaintext chain, a pin's leaf, a held key and a vault's ciphertext with it, so a stray `!`
+// in any of them was a card, a chain, a key or a vault this port took and the Rust core refused (X9,
+// C7, C8, T10, R23), and `csr_check`'s `root_spkis` once decoded "!!!" to no bytes at all, so §9's
+// root-key refusal had nothing to match. It is gone; nothing reads bytes that way now.
+//
+// Absent and present-but-empty stay apart at the boundary (api_args.go's `bytes`, `optBytes` and
+// `chain`): absent is `<name> is required`, `""` is no bytes, which the parser then says is wrong —
+// as the core draws the line.
 
 import (
 	"encoding/base64"
@@ -27,11 +36,15 @@ type parseError struct{ why string }
 
 func (e parseError) Error() string { return e.why }
 
-func decodeB64url(s string) ([]byte, error) {
+// DecodeB64url reads bytes this port did not write: base64url, forgiving the padding and the standard
+// alphabet, and nothing else. What does not read is a parse error, `not base64url`.
+func DecodeB64url(s string) ([]byte, error) {
+	// encoding/base64 skips CR and LF even in strict mode, so they are refused by hand.
+	if strings.ContainsAny(s, "\r\n") {
+		return nil, parseError{"not base64url"}
+	}
 	cleaned := strings.Map(func(r rune) rune {
 		switch r {
-		case ' ', '\t', '\n', '\r':
-			return -1
 		case '+':
 			return '-'
 		case '/':
@@ -50,8 +63,8 @@ func decodeB64url(s string) ([]byte, error) {
 }
 
 // wireB64url reads a member of an envelope as it travels: unpadded base64url in its ONE canonical
-// spelling (§13.1), as the core's `wire_b64u` does. decodeB64url is for what a caller hands the
-// boundary and forgives padding, the standard alphabet and whitespace; none of that may be forgiven
+// spelling (§13.1), as the core's `wire_b64u` does. DecodeB64url is for what a caller hands the
+// boundary and forgives padding and the standard alphabet; none of that may be forgiven
 // on the wire, because `sig` covers the DECODED bytes and every spelling a reader accepts is another
 // envelope that verifies. encoding/base64 silently skips CR and LF even in strict mode, so they are
 // refused by hand.
