@@ -47,4 +47,12 @@ export default function cards({ add, expect }, f) {
     ['an extra line with CR LF', { fn: 'x', cert: leafDer, extra: ['X-A:1\r\nX-PACT-SEAL:none'] }],
     ['a name with a comma and a semicolon', { fn: 'Rao, Alina; of Pune', cert: leafDer, seal: 'required' }],
   ]) add(`card_encode: ${what}`, 'card_encode', args);
+
+  // A card whose certificate carries a key outside the profile is refused at intake, the key named
+  // (R12, T2): the Go port read such a certificate and took the card.
+  for (const [kind, { oid }] of Object.entries(f.foreign)) {
+    const vcard = encodeCard({ fn: 'Alina Rao', cert: Buffer.from(f.foreignLeaf(kind), 'base64url'), seal: 'required' });
+    add(`card_decode of a card whose leaf holds a key outside the profile: ${kind}`, 'card_decode', { vcard, now });
+    expect(`card_decode of a card whose leaf holds a key outside the profile: ${kind}`, { error: 'bad_request', why: `certificate does not parse: unsupported key type ${oid}` });
+  }
 }

@@ -48,7 +48,8 @@ if (!go) {
   process.exit(2);
 }
 const contract = await loadContract();
-const { cases: written, expected, problems } = await collect(fixtures({ wasm, go }), contract);
+const f = fixtures({ wasm, go });
+const { cases: written, expected, problems } = await collect(f, contract);
 
 // ── comparison ─────────────────────────────────────────────────────────────────────────────────
 // Members are compared by name, not by the order a language's encoder happens to emit them in (Go
@@ -99,7 +100,7 @@ const verbose = process.argv.includes('--verbose');
 // from one hand-written case that succeeds on both ports (its base). They join the hand-written ones.
 const picked = pickBases(contract, written, ask, succeeded);
 problems.push(...picked.problems);
-const made = generate(contract, picked.bases);
+const made = generate(contract, picked.bases, f.outside);
 const handIds = new Set(written.map(({ id }) => id));
 for (const { id } of made.cases) if (handIds.has(id)) problems.push(`the case id ${JSON.stringify(id)} is both written and generated`);
 for (const [id, want] of made.expected) expected.set(id, { want, file: 'generated' });

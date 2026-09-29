@@ -6,6 +6,7 @@ import { sealDeterministic, signDetached, suiteForKey } from '../../../pact-prot
 import { canonical } from '../../../pact-protocol/vectors/lib/canonical.mjs';
 import { ENDPOINTS, bharat, BORN, DIES } from '../cast.mjs';
 import { RawArgs } from '../port.mjs';
+import { createPublicKey } from 'node:crypto';
 import { ZONED } from './certificates.mjs';
 
 export default function envelopes({ add, expect }, f) {
@@ -416,4 +417,45 @@ export default function envelopes({ add, expect }, f) {
   add('open_result on an answer whose result holds the largest double', 'open_result', open(resultText('{"n":1.7976931348623157e308}')));
   // An answer is held by its `result`, which is what the peer sent.
   expect('open_result on an answer whose result holds the largest double', { n: 1.7976931348623157e308 });
+
+  // ── G: the keys an envelope is sealed to (T4, F6, R14) ───────────────────────────────────────────
+  //
+  // The X25519 suite is for an Ed25519 recipient, converted (CONTRACT §5; SPEC §13.1's suite table),
+  // and a leaf cannot hold any other: a bare X25519 key is outside the profile, and refused where it is
+  // read, as every key outside it is. The core sealed to one and the Go port refused it as a suite
+  // that does not fit; both named an X25519 suite for it.
+  const info = 'PACT-SEAL-v2', plaintext = b64url(new Uint8Array([1, 2, 3]));
+  for (const [kind, { spki, oid }] of Object.entries(f.foreign)) {
+    const refused = { error: 'unsupported', why: `unsupported key type ${oid}` };
+    add(`suite_for a key outside the profile: ${kind}`, 'suite_for', { spki: b64url(spki) });
+    expect(`suite_for a key outside the profile: ${kind}`, refused);
+    for (const suite of ['PACT-SEAL-X25519', 'PACT-SEAL-P256']) {
+      add(`hpke_seal under ${suite} to a key outside the profile: ${kind}`, 'hpke_seal', { suite, recipient_spki: b64url(spki), info, plaintext });
+      expect(`hpke_seal under ${suite} to a key outside the profile: ${kind}`, refused);
+    }
+    add(`hpke_open as a key outside the profile: ${kind}`, 'hpke_open', { ...hpkeOpen, recipient_spki: b64url(spki) });
+    expect(`hpke_open as a key outside the profile: ${kind}`, refused);
+  }
+  // A suite that is not the recipient key's is the envelope's refusal, in the envelope layer's words.
+  // The core said `unsupported`, which hpke_seal does not declare (F6, R14).
+  for (const [suite, spki, what] of [['PACT-SEAL-X25519', p256Spki, 'a P-256 key'], ['PACT-SEAL-P256', hostSpki, 'an Ed25519 key']]) {
+    add(`hpke_seal under ${suite} to ${what}`, 'hpke_seal', { suite, recipient_spki: spki, info, plaintext });
+    expect(`hpke_seal under ${suite} to ${what}`, { error: 'envelope_invalid', why: 'suite does not fit the key' });
+  }
+  // An Ed25519 key of small order converts to a low-order X25519 point, and every seal to it meets an
+  // all-zero DH output, which SPEC §13.1 refuses. A leaf holding one validates, in both ports, so a
+  // seal_request reaches it. The core said `internal`, a code no input is to reach (CONTRACT §0), and
+  // the Go port `envelope_invalid` (T4). The identity (y = 1) and y = -1 both map to u = 0.
+  const smallOrder = { 'the identity': '0100000000000000000000000000000000000000000000000000000000000000', 'y = -1': 'ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f' };
+  const lowOrder = { error: 'envelope_invalid', why: 'all-zero DH output: low-order point' };
+  for (const [what, point] of Object.entries(smallOrder)) {
+    const spki = Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), Buffer.from(point, 'hex')]);
+    const leaf = f.alinaLeaf({ hostKey: { pub: createPublicKey({ key: spki, format: 'der', type: 'spki' }) }, label: `parity/small-order/${what}` });
+    add(`hpke_seal to an Ed25519 key of small order: ${what}`, 'hpke_seal', { suite: 'PACT-SEAL-X25519', recipient_spki: b64url(spki), info, plaintext, ephemeral_seed: eph(5) });
+    expect(`hpke_seal to an Ed25519 key of small order: ${what}`, lowOrder);
+    add(`seal_request to a leaf holding an Ed25519 key of small order: ${what}`, 'seal_request', { recipient_leaf: leaf, sender_pkcs8: hostPkcs8, sender_chain: [leafDer, rootDer], params: {}, msg_id: 'p-low', ts: at(now), ephemeral_seed: eph(7) });
+    expect(`seal_request to a leaf holding an Ed25519 key of small order: ${what}`, lowOrder);
+    add(`seal_result to an Ed25519 key of small order: ${what}`, 'seal_result', { recipient_spki: b64url(spki), sender_pkcs8: hostPkcs8, sender_chain: [leafDer, rootDer], result: { ok: true }, msg_id: 'p-low', ts: at(now), ephemeral_seed: eph(7) });
+    expect(`seal_result to an Ed25519 key of small order: ${what}`, lowOrder);
+  }
 }

@@ -544,3 +544,34 @@ func TestAP256ScalarOutsideTheGroupIsRefused(t *testing.T) {
 		t.Fatal("n-1 has no public key")
 	}
 }
+
+// SPEC §13.1: an all-zero DH output is refused. The only X25519 recipient the profile has is an Ed25519
+// key, converted, and one of small order converts to a low-order point: the identity (y = 1) and
+// y = -1 both map to u = 0. The boundary names it as the envelope's refusal, as the core does (T4);
+// the control is a real key under the same call. A bare X25519 key is no key of the profile.
+func TestALowOrderRecipientIsRefused(t *testing.T) {
+	prefix := mustHex("302a300506032b6570032100")
+	minusOne := mustHex("ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f")
+	identity := make([]byte, 32)
+	identity[0] = 1
+	for _, point := range [][]byte{identity, minusOne} {
+		pub, err := ParseSPKI(concat(prefix, point))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := Seal(SuiteX25519, pub, []byte("i"), nil, []byte("x")); err == nil || err.Error() != "all-zero DH output: low-order point" {
+			t.Errorf("a seal to a small-order key: %v", err)
+		}
+		out := Call("hpke_seal", mustJSON(map[string]any{"suite": SuiteX25519, "recipient_spki": B64url(concat(prefix, point)), "info": "i", "plaintext": "eA"}))
+		if !strings.Contains(string(out), `"error":"envelope_invalid"`) || !strings.Contains(string(out), "all-zero DH output: low-order point") {
+			t.Errorf("hpke_seal to a small-order key: %s", out)
+		}
+	}
+	real, _ := KeyFromSeed(AlgEd25519, make([]byte, 32))
+	if _, _, err := Seal(SuiteX25519, real.Public(), []byte("i"), nil, []byte("x")); err != nil {
+		t.Errorf("the control: %v", err)
+	}
+	if _, err := ParseSPKI(concat(mustHex("302a300506032b656e032100"), make([]byte, 32))); err == nil || err.Error() != "unsupported key type 1.3.101.110" {
+		t.Errorf("a bare X25519 key: %v", err)
+	}
+}

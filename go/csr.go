@@ -220,11 +220,7 @@ func CSRCheck(der []byte, rootSPKIs [][]byte) CSRInfo {
 		return csrFail(err)
 	}
 	// …and only now, with the whole request read, the questions `csr.rs`'s `check` asks, in its order.
-	// The key's algorithm used to be judged straight after the key was parsed, so a request wrong in
-	// two ways was refused for a different one by each port.
-	if _, err := AlgorithmOf(pub); err != nil {
-		return csrRefuse("request key algorithm not in the profile")
-	}
+	// A key outside the profile was refused where it was read (ParseSPKI), as the core refuses it.
 	expected := OIDEcdsaSHA256
 	if pub.Alg == AlgEd25519 {
 		expected = OIDEd25519

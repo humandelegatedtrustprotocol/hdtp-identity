@@ -582,7 +582,10 @@
     "hash": "7ff47a8bc4dd",
     "text": "The HPKE ephemeral MUST be fresh for every envelope — a reused one repeats the key and the nonce, and two ciph",
     "held_by": [
-      "scenario:HPKE ephemeral reuse leaks the XOR of two plaintexts; production sealing cannot take a seed"
+      "scenario:HPKE ephemeral reuse leaks the XOR of two plaintexts; production sealing cannot take a seed",
+      "scenario:a low-order X25519 recipient point",
+      "rust:refuses_a_low_order_point",
+      "go:TestALowOrderRecipientIsRefused"
     ]
   },
   "13.1#6": {

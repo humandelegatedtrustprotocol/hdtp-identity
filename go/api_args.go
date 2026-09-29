@@ -318,14 +318,7 @@ func (a args) pub(k string) (*PublicKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	p, err := ParseSPKI(der)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := AlgorithmOf(p); err != nil {
-		return nil, err
-	}
-	return p, nil
+	return ParseSPKI(der)
 }
 
 func (a args) list(k string) ([]any, error) {

@@ -22,14 +22,12 @@ import (
 const (
 	AlgEd25519 = "ed25519"
 	AlgP256    = "p256"
-	AlgX25519  = "x25519"
 )
 
 var (
 	p256N, _       = new(big.Int).SetString("FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551", 16)
 	p25519         = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 255), big.NewInt(19))
 	oidEd25519     = "1.3.101.112"
-	oidX25519      = "1.3.101.110"
 	oidEcPublicKey = "1.2.840.10045.2.1"
 	oidPrime256v1  = "1.2.840.10045.3.1.7"
 )
@@ -39,11 +37,7 @@ type PublicKey struct {
 	Alg  string
 	Ed   ed25519.PublicKey
 	EC   *ecdsa.PublicKey
-	X    []byte // an X25519 public key, which signs nothing and only seals (§13.1)
 	SPKI []byte
-	// AlgOID is the algorithm OID as written, kept even when the profile does not admit it, so a
-	// refusal can name the algorithm the way the Rust core names it.
-	AlgOID string
 }
 
 // unsupportedError is an algorithm the profile does not admit, answered as `unsupported` at the
@@ -148,9 +142,16 @@ func Fingerprint(spki []byte) string { return "sha256:" + B64url(sha256Sum(spki)
 // KeyID is the 32 raw bytes of the fingerprint's hash: subjectKeyIdentifier and authorityKeyIdentifier.
 func KeyID(spki []byte) []byte { return sha256Sum(spki) }
 
-// ParseSPKI reads a SubjectPublicKeyInfo. The structure must be sound; an algorithm the profile does not
-// admit parses with an empty Alg, so the profile check can name it (the seed's createPublicKey accepts
-// any algorithm OpenSSL knows and profileError refuses it afterwards).
+// ParseSPKI reads a SubjectPublicKeyInfo of the profile: Ed25519 (RFC 8410, no parameters) or P-256,
+// uncompressed. Every other algorithm is refused here, where it is read, as the Rust core refuses it:
+// `unsupported key type <OID>`.
+//
+// It parsed with an empty Alg — and X25519 as a third algorithm — so that `profile_error` could name
+// the key, as the seed's createPublicKey accepts any key OpenSSL knows. So a certificate carrying an
+// RSA, P-384, X25519 or parameterised Ed25519 key was a certificate here: parse_certificate answered
+// an `alg` the contract does not have, card_decode took the card, compare_leaves compared it, a
+// request carrying one was refused for another reason, and a seal went to a bare X25519 key — each
+// where the core refused the key (R12, T2, T3, T4). The seed refuses them where it reads them too.
 func ParseSPKI(spki []byte) (*PublicKey, error) {
 	n, err := derRead(spki, 0)
 	if err != nil {
@@ -175,7 +176,7 @@ func ParseSPKI(spki []byte) (*PublicKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := &PublicKey{SPKI: append([]byte(nil), spki...), AlgOID: oid}
+	out := &PublicKey{SPKI: append([]byte(nil), spki...)}
 	switch {
 	case oid == oidEd25519 && len(alg) == 1:
 		if len(key) != ed25519.PublicKeySize {
@@ -183,12 +184,6 @@ func ParseSPKI(spki []byte) (*PublicKey, error) {
 		}
 		out.Alg = AlgEd25519
 		out.Ed = ed25519.PublicKey(append([]byte(nil), key...))
-	case oid == oidX25519 && len(alg) == 1:
-		if len(key) != 32 {
-			return nil, errors.New("X25519 key is not 32 bytes")
-		}
-		out.Alg = AlgX25519
-		out.X = append([]byte(nil), key...)
 	case oid == oidEcPublicKey && len(alg) == 2 && alg[1].tag == 0x06 && derOidMinimal(alg[1]) && readOid(alg[1]) == oidPrime256v1:
 		// RFC 5480 §2.2 allows a compressed point; the profile takes the uncompressed form only,
 		// so one key has one SubjectPublicKeyInfo and one fingerprint.
@@ -201,10 +196,9 @@ func ParseSPKI(spki []byte) (*PublicKey, error) {
 		}
 		out.Alg = AlgP256
 		out.EC = pub
+	default:
+		return nil, unsupportedError{"unsupported key type " + oid}
 	}
-	// An algorithm outside the profile still parses, with Alg empty and the OID kept: a certificate
-	// carrying such a key must reach `profile_error`, which is what names it (§14.1). The boundary
-	// refuses it, in the Rust core's words, before a caller can use it as a key (see AlgorithmOf).
 	return out, nil
 }
 
@@ -342,13 +336,11 @@ func algKnown(alg string) error {
 	return nil
 }
 
-// AlgorithmOf names the key's algorithm, or errors for one the profile does not admit.
+// AlgorithmOf names the key's algorithm: one of the profile's two, which every key ParseSPKI returns
+// has.
 func AlgorithmOf(pub *PublicKey) (string, error) {
-	if pub == nil {
+	if pub == nil || (pub.Alg != AlgEd25519 && pub.Alg != AlgP256) {
 		return "", errors.New("unsupported key type")
-	}
-	if pub.Alg == "" {
-		return "", unsupportedError{"unsupported key type " + pub.AlgOID}
 	}
 	return pub.Alg, nil
 }

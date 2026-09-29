@@ -269,19 +269,20 @@ scenario('secrets', 'HPKE ephemeral reuse leaks the XOR of two plaintexts; produ
   const d1 = seal('PACT-SEAL-X25519', hostA.sign.pub, info, aad, p1, seed('same')), d2 = seal('PACT-SEAL-X25519', hostA.sign.pub, info, aad, p1, seed('same'));
   return leaks && !d1.enc.equals(d2.enc) && !d1.enc.equals(c1.enc) ? 'leaks with a fixed seed, differs without' : 'unexpected';
 });
-// The all-zero X25519 SPKI is built HERE, outside the scenario, so a Node release that refuses this
-// hand-assembled DER — or one wrong byte in the hex prefix — fails loudly instead of scoring the
-// scenario `blocked` for an exception that never reached the low-order-point check. The old
-// assertion was `/threw/`, which matched any exception from either of the two throw sites.
-const zeroX25519 = createPublicKey({ key: Buffer.concat([Buffer.from('302a300506032b656e032100', 'hex'), Buffer.alloc(32)]), format: 'der', type: 'spki' });
-// The two ports refuse this at DIFFERENT LAYERS, which tightening the assertion is what revealed:
-// the Rust core accepts a raw X25519 recipient SPKI and then refuses the all-zero shared secret,
-// while the Go port refuses the recipient key itself ("suite does not fit the key", because
-// `recipientPublic` wants an Ed25519 key to convert). Both refuse, and neither refuses for an
-// unrelated reason — so both wordings are named here rather than matching any exception, and the
-// divergence in `why` is recorded for the cross-port pass rather than hidden by a loose regex.
-scenario('secrets', 'a low-order X25519 recipient point', blockedIf((got) => /^threw: .*(low order|all-zero|shared secret|identity|suite does not fit)/i.test(got)), () => {
-  seal('PACT-SEAL-X25519', zeroX25519, Buffer.from('PACT-SEAL-v2'), Buffer.alloc(0), Buffer.from('x'));
+// A low-order recipient point, reached the one way the profile has: an Ed25519 key of small order,
+// which the X25519 suite converts (RFC 7748 §4.1) to a low-order point, so the DH output is all zero
+// and SPEC §13.1 refuses it. The identity (y = 1) maps to u = 0. The key is built HERE, outside the
+// scenario, so a Node release that refuses this hand-assembled DER fails loudly instead of scoring
+// the scenario `blocked` for an exception that never reached the check.
+//
+// This sealed to a bare X25519 SubjectPublicKeyInfo of zeros, and the two ports refused it at
+// different layers: the core sealed to a bare X25519 key and refused the shared secret, as
+// `internal`; the Go port refused the key as a suite that does not fit. A bare X25519 key is outside
+// the profile now, and refused where it is read (T4), so it could no longer reach the check at all;
+// the assertion names the refusal the scenario is for, and nothing else.
+const smallOrder = createPublicKey({ key: Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), Buffer.from([1]), Buffer.alloc(31)]), format: 'der', type: 'spki' });
+scenario('secrets', 'a low-order X25519 recipient point', blockedIf((got) => got === 'threw: envelope_invalid: all-zero DH output: low-order point'), () => {
+  seal('PACT-SEAL-X25519', smallOrder, Buffer.from('PACT-SEAL-v2'), Buffer.alloc(0), Buffer.from('x'));
   return 'sealed';
 });
 scenario('secrets', 'the root private keys are not in the spec', 'absent', () => {

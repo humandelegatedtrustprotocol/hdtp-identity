@@ -85,4 +85,18 @@ export default function keys({ add, expect }, f) {
   // in one answer (CONTRACT §0).
   add('verify with args holding a lone high surrogate', 'verify', { spki: 'a\ud800' });
   expect('verify with args holding a lone high surrogate', { error: 'bad_request', why: 'args: a string holds half of a UTF-16 surrogate pair' });
+
+  // ── G: a key outside the profile is refused where it is read (R12, T2, T4) ───────────────────────
+  //
+  // The profile has two algorithms. A key of any other — RSA, P-384, a bare X25519 key, an Ed25519
+  // key with a NULL after its OID — is `unsupported`, named by its OID, in both ports. A bare X25519
+  // key was a third algorithm to both: `key_info` named `x25519`, which the contract's Alg does not
+  // have, and `verify` answered `valid: false` where it refuses every other key it cannot read.
+  for (const [kind, { spki, oid }] of Object.entries(f.foreign)) {
+    const refused = { error: 'unsupported', why: `unsupported key type ${oid}` };
+    add(`key_info of a key outside the profile: ${kind}`, 'key_info', { spki: b64url(spki) });
+    expect(`key_info of a key outside the profile: ${kind}`, refused);
+    add(`verify with a key outside the profile: ${kind}`, 'verify', { spki: b64url(spki), data: b64url(new Uint8Array(4)), sig: b64url(new Uint8Array(64)) });
+    expect(`verify with a key outside the profile: ${kind}`, refused);
+  }
 }
