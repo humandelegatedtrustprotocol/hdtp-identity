@@ -46,8 +46,9 @@ func callDeriveSeed(a args) json.RawMessage {
 }
 
 // key_from_seed reads `alg` first, as CONTRACT §1 lists it: the algorithm, then the seed that is
-// read for it (T21's direction; the core read the seed's length first). A seed that is not a string
-// is `seed is required`, as the core reads it.
+// read for it (T21's direction; the core read the seed's length first). The seed is bytes like any
+// other (CONTRACT §0): absent is `seed is required`, and a seed that is not a string does not decode
+// — both ports read one as no seed at all.
 func callKeyFromSeed(a args) json.RawMessage {
 	alg, err := a.str("alg")
 	if err != nil {
@@ -56,12 +57,12 @@ func callKeyFromSeed(a args) json.RawMessage {
 	if err := algKnown(alg); err != nil {
 		return failAs(codeArgs, err)
 	}
-	if _, isText := a.text("seed"); !isText {
-		return fail(codeArgs, "seed is required")
-	}
 	seed, err := a.seed32("seed")
 	if err != nil {
 		return failAs("parse", err)
+	}
+	if seed == nil {
+		return fail(codeArgs, "seed is required")
 	}
 	priv, err := KeyFromSeed(alg, seed)
 	if err != nil {

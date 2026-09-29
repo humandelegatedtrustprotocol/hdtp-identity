@@ -2,7 +2,7 @@
 import { b64url } from '../../../pact-protocol/vectors/lib/keys.mjs';
 import { encodeCard } from '../../../pact-protocol/vectors/lib/card.mjs';
 
-export default function cards({ add }, f) {
+export default function cards({ add, expect }, f) {
   const { now, leafDer, card, twinLeaf, shortAki } = f;
   const cardOf = (fn, der) => encodeCard({ fn, cert: Buffer.from(der, 'base64url') });
   add('card_encode', 'card_encode', { fn: 'Alina Rao', cert: leafDer, seal: 'required' });
@@ -11,6 +11,16 @@ export default function cards({ add }, f) {
   add('card_encode with an emoji name', 'card_encode', { fn: '👋'.repeat(40), cert: leafDer });
   add('card_encode with a seal nobody has', 'card_encode', { fn: 'A', cert: leafDer, seal: 'maybe' });
   add('card_encode of a certificate that is not one', 'card_encode', { fn: 'A', cert: b64url(new Uint8Array(4)) });
+  // A certificate is bytes (CONTRACT §0): one that is not a string does not decode, which the contract
+  // did not declare for this function until both ports were asked.
+  add('card_encode with a certificate that is not a string', 'card_encode', { fn: 'A', cert: 7 });
+  expect('card_encode with a certificate that is not a string', { error: 'parse', why: 'not base64url' });
+  // `extra` is a list of strings or it is refused (T21): the core dropped an item that was not a
+  // string — a number, or null — and wrote the card without it, where the Go port refused the call.
+  for (const [what, extra] of [['a number', ['X-A:1', 7]], ['null', [null]]]) {
+    add(`card_encode with an extra line that is ${what}`, 'card_encode', { fn: 'A', cert: leafDer, extra });
+    expect(`card_encode with an extra line that is ${what}`, { error: 'bad_request', why: 'extra is required' });
+  }
   add('card_decode of a real card', 'card_decode', { vcard: card, now });
   add('card_decode of an empty card', 'card_decode', { vcard: 'BEGIN:VCARD\r\nEND:VCARD\r\n', now });
   add('card_decode of nothing at all', 'card_decode', { vcard: '', now });

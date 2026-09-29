@@ -36,56 +36,76 @@ fn id<'a>(a: &'a Value, k: &str) -> Result<&'a str> {
     Ok(v)
 }
 
-fn s<'a>(a: &'a Value, k: &str) -> Result<&'a str> {
-    a.get(k).and_then(|v| v.as_str()).ok_or_else(|| Error::new("bad_request", format!("{k} is required")))
+/// `<k> is required`: CONTRACT §0's answer to a member that is absent, and to one of the wrong type.
+fn required(k: &str) -> Error {
+    Error::new("bad_request", format!("{k} is required"))
 }
-fn opt_s<'a>(a: &'a Value, k: &str) -> Option<&'a str> {
-    a.get(k).and_then(|v| v.as_str())
+
+fn s<'a>(a: &'a Value, k: &str) -> Result<&'a str> {
+    a.get(k).and_then(|v| v.as_str()).ok_or_else(|| required(k))
+}
+
+// The optional members (CONTRACT §0). Absent or null is not given; present and of the wrong type is
+// refused in the words its absence gets where it is required — never read as absent. These read a
+// member of the wrong type as absent, and so a `serial` of 7 built a root with a random serial, a
+// `guest` of "yes" let a guest name this host, an `expected_root` of 7 accepted any root and an `exp`
+// of 1.5 sealed ts + 600, where the Go port refused each (F5, R02, C3).
+
+/// An optional string.
+fn opt_s<'a>(a: &'a Value, k: &str) -> Result<Option<&'a str>> {
+    match a.get(k) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(v)) => Ok(Some(v)),
+        Some(_) => Err(required(k)),
+    }
+}
+/// Optional bytes: present and not a string is bytes that will not decode, as for `bytes`.
+fn opt_bytes(a: &Value, k: &str) -> Result<Option<Vec<u8>>> {
+    match a.get(k) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(v)) => Ok(Some(from_b64u(v)?)),
+        Some(_) => err("parse", "not base64url"),
+    }
 }
 /// A required base64url member. Absent is a caller's mistake that names the member; present but not
 /// a base64url string is a decode failure, and both ports say so in the same words.
 fn bytes(a: &Value, k: &str) -> Result<Vec<u8>> {
-    match a.get(k) {
-        None | Some(Value::Null) => err("bad_request", format!("{k} is required")),
-        Some(Value::String(v)) => from_b64u(v),
-        Some(_) => err("parse", "not base64url"),
-    }
-}
-fn opt_bytes(a: &Value, k: &str) -> Result<Option<Vec<u8>>> {
-    match opt_s(a, k) {
-        Some(v) => Ok(Some(from_b64u(v)?)),
-        None => Ok(None),
-    }
+    opt_bytes(a, k)?.ok_or_else(|| required(k))
 }
 fn instant(a: &Value, k: &str) -> Result<i64> {
     parse_rfc3339(s(a, k)?)
 }
 fn opt_instant(a: &Value, k: &str) -> Result<Option<i64>> {
-    match opt_s(a, k) {
-        Some(v) => Ok(Some(parse_rfc3339(v)?)),
-        None => Ok(None),
+    opt_s(a, k)?.map(parse_rfc3339).transpose()
+}
+/// An optional integer: one serde_json reads as an `i64`, which is a number written without a
+/// fraction or an exponent that fits 64 bits — and not `-0`, which it reads as a float. The Go port
+/// reads the same set (go/api_args.go's `integerText`).
+fn opt_int(a: &Value, k: &str) -> Result<Option<i64>> {
+    match a.get(k) {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v.as_i64().map(Some).ok_or_else(|| required(k)),
     }
 }
 fn int(a: &Value, k: &str) -> Result<i64> {
-    a.get(k).and_then(|v| v.as_i64()).ok_or_else(|| Error::new("bad_request", format!("{k} is required")))
-}
-fn opt_int(a: &Value, k: &str) -> Option<i64> {
-    a.get(k).and_then(|v| v.as_i64())
+    opt_int(a, k)?.ok_or_else(|| required(k))
 }
 /// `valid_days`, read with the arguments (CONTRACT §0): absent is a year; present and not an integer
 /// is a member of the wrong type, `valid_days is required`, and never a year it was not asked for.
 fn valid_days(a: &Value) -> Result<i64> {
-    let days = match a.get("valid_days") {
-        None | Some(Value::Null) => 365,
-        Some(v) => v.as_i64().ok_or_else(|| Error::new("bad_request", "valid_days is required"))?,
-    };
+    let days = opt_int(a, "valid_days")?.unwrap_or(365);
     if !(1..=x509::MAX_LEAF_DAYS).contains(&days) {
         return err("bad_request", "validity must be between one and 398 days");
     }
     Ok(days)
 }
-fn boolean(a: &Value, k: &str) -> bool {
-    a.get(k).and_then(|v| v.as_bool()).unwrap_or(false)
+/// An optional boolean: absent or null is false.
+fn boolean(a: &Value, k: &str) -> Result<bool> {
+    match a.get(k) {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Bool(b)) => Ok(*b),
+        Some(_) => Err(required(k)),
+    }
 }
 /// An optional list of DER members: absent is an empty list, present is parsed or refused. A list
 /// that cannot be read must never read as "no roots to refuse against" — that is §9's root-key
@@ -106,7 +126,7 @@ fn present_chain(a: &Value, k: &str) -> Result<Option<Vec<Vec<u8>>>> {
     }
 }
 fn chain(a: &Value, k: &str) -> Result<Vec<Vec<u8>>> {
-    let Some(items) = a.get(k).and_then(|v| v.as_array()) else { return err("bad_request", format!("{k} is required")) };
+    let Some(items) = a.get(k).and_then(|v| v.as_array()) else { return Err(required(k)) };
     items.iter().map(|c| c.as_str().ok_or_else(|| Error::new("parse", "not base64url")).and_then(from_b64u)).collect()
 }
 fn private(a: &Value, k: &str) -> Result<PrivateKey> {
@@ -152,7 +172,7 @@ fn cert_json(c: &x509::Cert) -> Value {
 /// Written, it was an empty dNSName that csr_check and chain rule 5 then refused, and the Go port wrote
 /// none (R26, F4).
 fn dns_name(a: &Value) -> Result<Option<String>> {
-    match opt_s(a, "dns_name") {
+    match opt_s(a, "dns_name")? {
         Some("") => err("bad_request", "dns_name is empty"),
         d => Ok(d.map(str::to_string)),
     }
@@ -429,6 +449,46 @@ mod tests {
         assert_eq!(k["alg"], "ed25519");
         let v: Value = serde_json::from_str(&call("version", "{}")).unwrap();
         assert_eq!(v["spec"], SPEC_VERSION);
+    }
+
+    /// A member of the wrong type is refused, never read as absent (CONTRACT §0): bytes answer as bytes
+    /// that will not decode, anything else as its absence would were it required; absent and null are
+    /// not given. js/cases/generated.mjs holds both ports to the same answer for every optional member
+    /// of every function; this is the core's own record of the readers.
+    #[test]
+    fn a_member_of_the_wrong_type_is_refused_and_never_read_as_absent() {
+        let a = |t: &str| serde_json::from_str::<Value>(t).unwrap();
+        let required = |k: &str| Some(Error::new("bad_request", format!("{k} is required")));
+        let undecodable = Some(Error::new("parse", "not base64url"));
+        for absent in ["{}", r#"{"k":null}"#] {
+            assert_eq!(opt_s(&a(absent), "k"), Ok(None));
+            assert_eq!(opt_bytes(&a(absent), "k"), Ok(None));
+            assert_eq!(opt_int(&a(absent), "k"), Ok(None));
+            assert_eq!(boolean(&a(absent), "k"), Ok(false));
+            assert_eq!(opt_instant(&a(absent), "k"), Ok(None));
+        }
+        assert_eq!(opt_s(&a(r#"{"k":7}"#), "k").err(), required("k"));
+        assert_eq!(opt_instant(&a(r#"{"k":7}"#), "k").err(), required("k"));
+        assert_eq!(opt_bytes(&a(r#"{"k":7}"#), "k").err(), undecodable);
+        assert_eq!(seed32(&a(r#"{"k":[1]}"#), "k").err(), undecodable);
+        assert_eq!(serial(&a(r#"{"serial":7}"#)).err(), undecodable);
+        assert_eq!(boolean(&a(r#"{"k":"yes"}"#), "k").err(), required("k"));
+        assert_eq!(boolean(&a(r#"{"k":1}"#), "k").err(), required("k"));
+        // An integer is what serde_json reads as an i64: no fraction, no exponent, and not -0, which
+        // it reads as a float. go/api_args.go's integerText reads the same set.
+        for not_an_integer in
+            [r#"{"k":"7"}"#, r#"{"k":1.5}"#, r#"{"k":7.0}"#, r#"{"k":1e2}"#, r#"{"k":-0}"#, r#"{"k":9223372036854775808}"#]
+        {
+            assert_eq!(opt_int(&a(not_an_integer), "k").err(), required("k"), "{not_an_integer}");
+        }
+        assert_eq!(opt_int(&a(r#"{"k":-9223372036854775808}"#), "k"), Ok(Some(i64::MIN)));
+        assert_eq!(opt_int(&a(r#"{"k":0}"#), "k"), Ok(Some(0)));
+        assert_eq!(valid_days(&a(r#"{"valid_days":-0}"#)).err(), required("valid_days"));
+        // `extra` is a list of strings, every item: one that is not — null included — was dropped.
+        for extra in [r#"["X-A:1",7]"#, "[null]", r#""X-A:1""#] {
+            let out: Value = serde_json::from_str(&call("card_encode", &format!(r#"{{"fn":"A","cert":"AAAA","extra":{extra}}}"#))).unwrap();
+            assert_eq!(out, json!({ "error": "bad_request", "why": "extra is required" }), "extra {extra}");
+        }
     }
 
     /// `declared` is contract/contract.json's `params.properties`, function by function, in order;

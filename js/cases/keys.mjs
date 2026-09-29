@@ -21,6 +21,10 @@ export default function keys({ add, expect }, f) {
   add('derive_seed with prf as null', 'derive_seed', { prf: null, info: 'pact/root/1' });
   add('derive_seed with prf that is not base64url', 'derive_seed', { prf: '!!!', info: 'pact/root/1' });
   add('key_from_seed with an unknown algorithm', 'key_from_seed', { alg: 'rsa', seed: b64url(new Uint8Array(32)) });
+  // Bytes of the wrong type answer as bytes that will not decode (CONTRACT §0), as `spki: 123` does
+  // above: both ports read a seed of 7 as no seed at all, `seed is required`.
+  add('key_from_seed with a seed that is not a string', 'key_from_seed', { alg: 'ed25519', seed: 7 });
+  expect('key_from_seed with a seed that is not a string', { error: 'parse', why: 'not base64url' });
   add('public_key of a key that is not one', 'public_key', { pkcs8: b64url(new Uint8Array(16)) });
   add('public_key with no argument', 'public_key', {});
   add('key_info of an spki that is not one', 'key_info', { spki: b64url(new Uint8Array(4)) });

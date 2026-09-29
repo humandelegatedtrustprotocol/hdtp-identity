@@ -17,11 +17,11 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   the wrong type (read order) — 1068 cases today (1103 when written; the hostile object is now sent
   only to the 15 functions that declare one of its members), varied from one named hand-written case per function
   that succeeds on both ports. 463 cases failed when they were written (459 generated, and 4 written
-  beside them), 60 fail today (58 and 2); each is listed in `js/cases/known-divergences.json` with
+  beside them), 4 fail today (2 and 2); each is listed in `js/cases/known-divergences.json` with
   the audit finding that closes it, and the run fails on any other failure, on an entry whose case
   passes, and on an entry nobody has.
 - The coverage gate fails when a declared error code is not produced by both ports in one case they
-  answered alike (S2, TC-1); all 94 are. It used to print the count and pass.
+  answered alike (S2, TC-1); all 99 are. It used to print the count and pass.
 - `js/cases/hostile.json` is the one hostile object: the generated cases send it to both ports, Go's
   `TestCallNeverPanics` reads it and now fails on an answer of `internal` (its `recover()` turned a
   panic into a JSON object, which the sweep accepted), and the core has the same sweep
@@ -119,6 +119,25 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   missing plaintext, as its note says (T21).
 - `version` and `prf_salt` declare `bad_request`: they refuse a member they do not declare, like every
   function.
+- **A member of the wrong type is refused, never read as absent** (cluster C; F5, R02, C3, T21), in
+  both ports, as CONTRACT §0 now says: a base64url member that is not a string answers `parse`
+  `not base64url`, and any other `bad_request` in words that name it (`<name> is required`, or the
+  function's own). The core read an optional one of the wrong type as absent: a `serial` of 7 built a
+  root with a random serial, `guest: "yes"` let a guest name this host, `expected_root: 7` accepted
+  any root, `exp: "7"` sealed ts + 600, an `aad` of 7 sealed with none. `card_encode` refuses an
+  `extra` item that is not a string, `null` included (the core dropped it and wrote the card
+  without it); `key_from_seed` answers a `seed` that is not a string as bytes that do not decode, and
+  `export_read` refuses a `manifest`, `contacts_csv` or `threads_csv` that is not a string, in both
+  ports, where both read them as absent. `key_from_seed`, `card_encode` and `vault_seal` declare
+  `parse`, which the bytes rule gives them and both ports answered. Generated cases hold every
+  optional member of the wrong type to that answer.
+- **An integer is one the core reads as an integer** (S3-1): the Go port read `-0` as 0 — it sealed
+  an `exp` of -0, decided a limits `now` of -0 and judged `valid_days: -0` out of range — where the
+  core refuses it, as serde_json reads -0 as a float. A vault document whose KDF numbers are spelled
+  `1.0`, `8192.0` or `1e0` has the canonical header the whole numbers have, and opened in the Go port;
+  it is `kdf parameters out of range` there too, as is an `m_kib` of 8192.5, which the Go port cut to
+  8192 and refused as a wrong passphrase (C5). Parity sends these as raw text (`RawArgs`, js/port.mjs),
+  which `JSON.stringify` cannot write.
 - **JS loader:** `call(name, null)` hands `null` to the core, which answers `args is a JSON object`
   as the Go port does; it used to be made `{}` (`js/index.mjs`, `js/worker.mjs`). Only `args` left
   out is `{}`. The parity case `args that are null` sends `null` for the first time (TC-2).

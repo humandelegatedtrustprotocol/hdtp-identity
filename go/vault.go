@@ -286,6 +286,20 @@ func vaultSealAny(passphrase string, plaintext []byte, kdf *KDF, salt, nonce []b
 	return &v, nil
 }
 
+// kdfNumber is a KDF parameter of a document as the core reads one (`as_u64`): a json.Number, as the
+// boundary decodes the document, written as a whole number — `1.0` is not one. A float64 is a Go
+// caller's own decoding, which kept no spelling: it counts when it is whole. Past 2^32 it is out of
+// every parameter's range, which is what the caller is told.
+func kdfNumber(v any) (uint64, bool) {
+	if f, isFloat := v.(float64); isFloat {
+		if f < 0 || f != math.Trunc(f) || f > math.MaxUint32 {
+			return 0, false
+		}
+		return uint64(f), true
+	}
+	return asU64(v)
+}
+
 // VaultOpenDoc decrypts the document as received: the AAD is every member but ct, canonicalised,
 // so a member added after sealing — or one changed — fails to open, exactly as in the Rust core.
 func VaultOpenDoc(passphrase string, doc map[string]any) ([]byte, error) {
@@ -296,14 +310,28 @@ func VaultOpenDoc(passphrase string, doc map[string]any) ([]byte, error) {
 	v.Ct, _ = doc["ct"].(string)
 	if kdf, ok := doc["kdf"].(map[string]any); ok {
 		v.KDF.Name, _ = kdf["name"].(string)
-		if m, ok := numberOf(kdf["m_kib"]); ok {
-			v.KDF.MKiB = uint32(m)
-		}
-		if t, ok := numberOf(kdf["t"]); ok {
-			v.KDF.T = uint32(t)
-		}
-		if p, ok := numberOf(kdf["p"]); ok {
-			v.KDF.P = uint8(p)
+		// Each parameter a whole number written as one, as the core reads it (`as_u64`): `t` spelled
+		// 1.0 has the canonical header `t` 1 has, so this port opened such a document the core refuses,
+		// and an `m_kib` of 8192.5 was cut to 8192 and failed as a wrong passphrase (C5). A number
+		// wider than its field is out of range, not cut to fit.
+		for _, p := range []struct {
+			k     string
+			limit uint64
+			set   func(uint64)
+		}{
+			{"m_kib", math.MaxUint32, func(n uint64) { v.KDF.MKiB = uint32(n) }},
+			{"t", math.MaxUint32, func(n uint64) { v.KDF.T = uint32(n) }},
+			{"p", math.MaxUint8, func(n uint64) { v.KDF.P = uint8(n) }},
+		} {
+			x, present := kdf[p.k]
+			if !present || x == nil {
+				continue
+			}
+			n, whole := kdfNumber(x)
+			if !whole || n > p.limit {
+				return nil, vaultError{"kdf parameters out of range"}
+			}
+			p.set(n)
 		}
 	}
 	key, err := vaultKey(passphrase, v)

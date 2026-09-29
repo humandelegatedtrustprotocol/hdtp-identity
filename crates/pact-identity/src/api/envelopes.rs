@@ -47,14 +47,14 @@ pub(super) fn seal_request(a: &Value) -> Result<Value> {
         let wire = envelope::seal_request(SealRequest {
             recipient: &leaf.public_key,
             sender: &sender,
-            form: Form::parse(opt_s(a, "form").unwrap_or("chain"))?,
+            form: Form::parse(opt_s(a, "form")?.unwrap_or("chain"))?,
             sender_chain: sender_chain.as_deref(),
-            method: opt_s(a, "method").unwrap_or("tools/call").to_string(),
+            method: opt_s(a, "method")?.unwrap_or("tools/call").to_string(),
             params: a.get("params").cloned().unwrap_or(json!({})),
             msg_id: id(a, "msg_id")?.to_string(),
             ts: int(a, "ts")?,
-            exp: opt_int(a, "exp"),
-            cty: opt_s(a, "cty").map(|c| c.to_string()),
+            exp: opt_int(a, "exp")?,
+            cty: opt_s(a, "cty")?.map(|c| c.to_string()),
             ephemeral_seed: seed32(a, "ephemeral_seed")?,
         })?;
         serde_json::to_value(wire).map_err(|e| Error::new("internal", e.to_string()))?
@@ -69,13 +69,13 @@ pub(super) fn seal_result(a: &Value) -> Result<Value> {
         let wire = envelope::seal_result(SealResult {
             recipient: &recipient,
             sender: &sender,
-            form: Form::parse(opt_s(a, "form").unwrap_or("chain"))?,
+            form: Form::parse(opt_s(a, "form")?.unwrap_or("chain"))?,
             sender_chain: sender_chain.as_deref(),
             result: a.get("result").cloned(),
             error: a.get("error").cloned(),
             msg_id: id(a, "msg_id")?.to_string(),
             ts: int(a, "ts")?,
-            exp: opt_int(a, "exp"),
+            exp: opt_int(a, "exp")?,
             ephemeral_seed: seed32(a, "ephemeral_seed")?,
         })?;
         serde_json::to_value(wire).map_err(|e| Error::new("internal", e.to_string()))?
@@ -106,8 +106,8 @@ pub(super) fn open_result(a: &Value) -> Result<Value> {
             msg_id: s(a, "msg_id")?,
             now: instant(a, "now")?,
             pins: &pins,
-            expected_root: opt_s(a, "expected_root"),
-            expected_endpoint: opt_s(a, "expected_endpoint"),
+            expected_root: opt_s(a, "expected_root")?,
+            expected_endpoint: opt_s(a, "expected_endpoint")?,
         })?
     })
 }

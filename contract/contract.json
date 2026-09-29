@@ -886,7 +886,7 @@
         "additionalProperties": false
       },
       "result": { "$ref": "#/$defs/Key" },
-      "errors": ["bad_request", "unsupported"],
+      "errors": ["bad_request", "parse", "unsupported"],
       "notes": "An Ed25519 seed is used directly; a P-256 scalar is the seed mod n, with 0 → 1 (the seed library's `keys.mjs`). Written for the vectors, and production API since SPEC §2.1: it is how a wallet turns a derived seed into its root."
     },
     "prf_salt": {
@@ -1408,7 +1408,7 @@
         "required": ["vcard"],
         "additionalProperties": false
       },
-      "errors": ["bad_request"],
+      "errors": ["bad_request", "parse"],
       "notes": "Folded per RFC 6350 at 75 octets, CRLF, exactly as the seed's `card.mjs`. Refuses `<fn|seal|extra> carries a control character`: a card is lines, and a line break in anything a caller supplies writes a property of the caller's choosing (SPEC §3)."
     },
     "card_decode": {
@@ -1665,7 +1665,7 @@
         "required": ["vault"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "vault"],
+      "errors": ["bad_request", "parse", "vault"],
       "notes": "`plaintext` is a VaultPlaintext or a RecordPlaintext, and its `v` is 2: anything else is `bad_request` (`a vault plaintext is v 2: the root, or the record`). That generation is all `vault_seal` checks of the plaintext (and `vault_open` of what it opens): the two shapes are held by `wallet_issue`, where the rules read them, so a stricter seal or open cannot lock a person out of a document a wallet already keeps. Read in this order: `passphrase` (absent: `passphrase is required`; empty: `empty passphrase`), `plaintext` and its generation, then `kdf`. `salt` and `nonce` are for tests only."
     },
     "vault_open": {
