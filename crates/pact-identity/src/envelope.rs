@@ -261,21 +261,15 @@ where
     Ok(None)
 }
 
-/// A caller's pin, as `open_result` needs it.
-#[derive(Deserialize, Clone, Debug)]
+/// A caller's pin, as `open_result` needs it (read from JSON by `CallerPin::read_all`, state.rs).
+#[derive(Clone, Debug)]
 pub struct CallerPin {
     pub root: String,
     pub endpoint: String,
     pub leaf: String,
-    #[serde(default = "active")]
     pub state: String,
     /// The fingerprint of `leaf`'s key, when the host keeps it — see `pin_holding`.
-    #[serde(default)]
     pub leaf_fingerprint: Option<String>,
-}
-
-fn active() -> String {
-    "active".into()
 }
 
 pub struct OpenResultArgs<'a> {
