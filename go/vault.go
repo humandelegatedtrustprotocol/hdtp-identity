@@ -191,6 +191,10 @@ func stranger[V any](doc map[string]V, allowed []string) string {
 // same order and the same words. Held where the rules read it, not at seal and open, which carry the
 // documents a live wallet already keeps.
 func CheckFile(raw json.RawMessage) error {
+	// Absent or null is `<name> is required`, as CONTRACT §0 has every absent member (S1-2).
+	if len(raw) == 0 || string(raw) == "null" {
+		return errArg("vault_plaintext is required")
+	}
 	v, err := decodeJSON(raw)
 	doc, isDoc := v.(map[string]any)
 	if len(raw) == 0 || err != nil || !isDoc {
@@ -214,6 +218,9 @@ func CheckFile(raw json.RawMessage) error {
 // that does not read is refused, never skipped: skipped, it could be the live leaf, and one live leaf
 // per identity would fail open. Every entry is read, not only one root's.
 func CheckRecord(raw json.RawMessage) error {
+	if len(raw) == 0 || string(raw) == "null" {
+		return errArg("record_plaintext is required")
+	}
 	v, err := decodeJSON(raw)
 	doc, isDoc := v.(map[string]any)
 	if len(raw) == 0 || err != nil || !isDoc {

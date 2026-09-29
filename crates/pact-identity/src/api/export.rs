@@ -315,7 +315,8 @@ fn read_end<'b>(a: &'b EndArgs<'_>) -> Result<Value> {
         Some(_) => return err("bad_request", "messages_sha256 is a lowercase hex sha256 or null"),
     };
     let lines = match &a.lines {
-        None | Some(Value::Null) => 0,
+        // Absent, it was 0 lines, and the file was refused for its count instead (S1-3).
+        None | Some(Value::Null) => return err("bad_request", "lines is required"),
         Some(v) => v.as_u64().ok_or_else(|| Error::new("bad_request", "lines is a whole number"))?,
     };
     let list = |l: &'b Option<StrList<'_>>, k: &str| match l {
