@@ -49,9 +49,9 @@
     "hash": "bb19da6a5ea2",
     "text": "Before issuing any certificate, a wallet MUST establish that the root it is about to sign with is the root the",
     "held_by": [
-      "rust:a_vault_entry_that_disagrees_with_its_own_certificate_signs_nothing",
-      "go:TestVaultRulesMirrorTheCore"
-    ]
+      "rust:a_vault_entry_that_disagrees_with_its_own_certificate_signs_nothing"
+    ],
+    "gap": "held on the card path only (the test cited); the software path (`wallet_issue`, both ports) establishes nothing about the root it signs with: see 2.2#2's gap"
   },
   "2.2#2": {
     "hash": "dc3dbec818f9",
@@ -60,21 +60,22 @@
       "rust:a_card_whose_certificate_and_key_disagree_gets_no_leaf",
       "rust:another_card_signs_nothing_for_this_identity",
       "rust:a_card_that_swaps_its_key_after_the_check_signs_nothing_that_is_kept"
-    ]
+    ],
+    "gap": "held on the card path only (the tests cited); the software path: `wallet_issue` in both ports signs with the pkcs8 the vault holds beside the root fingerprint and checks none of §2.2 against it — neither that the key is the fingerprint, nor that the root certificate is the key, nor a challenge — and returns the leaf without validating the chain; the CLI checks the vault entry's fingerprint against its own certificate first (wallet/card.rs `root_key`), not the key. Measured 2026-09-29: a vault entry holding another key's pkcs8 gets a leaf from both ports, and that leaf fails chain rule 3. The fix — the checks in `wallet_issue`, in both ports — is TC-8 of the port-parity audit of 2026-09-29"
   },
   "2.2#3": {
     "hash": "48f03f123375",
     "text": "The challenge MUST be domain-separated from certificate bytes — the ASCII `PACT root proof v1` followed by a n",
     "elsewhere": "wallet",
-    "why": "the challenge is the browser wallet's, and a hosting platform's half is held in that platform's own MUST table, beside its code. This library issues from a vault whose entry carries the certificate and checks that instead"
+    "why": "the challenge is the wallet's: a browser wallet signs it with the derived root, and a hosting platform's half is held in that platform's own MUST table, beside its code. This library's `wallet_issue` makes no challenge and checks nothing in its place (see 2.2#2's gap)"
   },
   "2.2#4": {
     "hash": "11306b742c60",
     "text": "A wallet MUST validate a chain it has assembled (§14.2) against the expected root and endpoint before returnin",
     "held_by": [
-      "rust:a_leaf_the_card_signed_validates_to_that_root_at_its_endpoint",
-      "go:TestWalletIssue"
-    ]
+      "rust:a_leaf_the_card_signed_validates_to_that_root_at_its_endpoint"
+    ],
+    "gap": "held on the card path only (the test cited); the software path (`wallet_issue`, both ports) returns a leaf without validating the chain, and one that fails chain rule 3: see 2.2#2's gap"
   },
   "2.2#5": {
     "hash": "448b0a994299",
@@ -549,7 +550,8 @@
     "text": "base64url HPKE encapsulated key, of exactly the suite's `Npk` (RFC 9180 §7.1): 65 bytes for `PACT-SEAL-P256`, ",
     "held_by": [
       "scenario:a byte moved from the encapsulated key into the ciphertext",
-      "go:TestSmallOrderPointsAndSPKIBits"
+      "rust:an_encapsulated_key_of_the_wrong_length_is_refused_under_each_suite",
+      "go:TestAnEncapsulatedKeyOfTheWrongLengthIsRefused"
     ]
   },
   "13.1#2": {
@@ -658,8 +660,10 @@
     "text": "Idempotency records for seen `msg_id`s MUST be retained until `min(exp, ts + 300 s)` — the end of the window i",
     "held_by": [
       "scenario:an envelope that asks to be remembered for a year",
-      "rust:an_envelope_asking_to_be_remembered_for_a_year_is_refused"
-    ]
+      "rust:an_envelope_asking_to_be_remembered_for_a_year_is_refused",
+      "go:TestLifetimeAndCallerSideChecks"
+    ],
+    "why": "what this library holds is the bound that makes a record kept past ts + 300 s protect nothing: the skew window and the thirty-day cap on exp − ts, which both port tests hold (a year refused, exactly thirty days accepted). Keeping the records is the host's, and both hosts keep them until exp alone today (CW-06 of the port-parity audit of 2026-09-29), so no host is named as holding the retention itself"
   },
   "13.3#3": {
     "hash": "71e0e50ade5b",
