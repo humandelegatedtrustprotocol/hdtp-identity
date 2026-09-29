@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { collect, CASE_FILES } from './cases/index.mjs';
-import { generate, pickBases, wrongTypeFor, wrongTypeAnswer, BASES, HOSTILE } from './cases/generated.mjs';
+import { generate, pickBases, wrongTypeFor, wrongTypeAnswer, keyedOf, BASES, HOSTILE } from './cases/generated.mjs';
 import { readKnown, verdict } from './cases/known.mjs';
 
 const contract = {
@@ -143,6 +143,32 @@ test('an optional string is also tried as "", and a wrong type is one the member
   assert.equal(wrongTypeFor({ type: 'array' }, root), 'x');
   assert.deepEqual(wrongTypeFor({ type: ['string', 'integer'] }, root), {});
   assert.equal(wrongTypeFor(true, root), undefined);
+});
+
+test('every member that holds a key gets one outside the profile, in the first place of a list', () => {
+  const $defs = {
+    B64url: { type: 'string' }, Spki: { $ref: '#/$defs/B64url' }, Pkcs8: { $ref: '#/$defs/B64url' }, CertDer: { $ref: '#/$defs/B64url' },
+    Csr: { $ref: '#/$defs/B64url' }, Chain: { type: 'array', items: { $ref: '#/$defs/CertDer' } }, Node: { type: 'object', properties: { pkcs8: { $ref: '#/$defs/Pkcs8' } } },
+  };
+  const root = { $defs };
+  assert.deepEqual(keyedOf({ $ref: '#/$defs/Spki' }, root), { type: 'Spki', list: false });
+  assert.deepEqual(keyedOf({ $ref: '#/$defs/Chain' }, root), { type: 'CertDer', list: true });
+  assert.deepEqual(keyedOf({ type: 'array', items: { $ref: '#/$defs/Spki' } }, root), { type: 'Spki', list: true });
+  assert.equal(keyedOf({ $ref: '#/$defs/B64url' }, root), null, 'bytes are not a key');
+  assert.equal(keyedOf({ $ref: '#/$defs/Node' }, root), null, 'a key inside an object is its reader\'s, not a member');
+  const contract = {
+    $defs, sections: { keys: 'Keys' },
+    methods: { seal: { section: 'keys', params: { type: 'object', properties: { spki: { $ref: '#/$defs/Spki' }, chain: { $ref: '#/$defs/Chain' }, roots: { type: 'array', items: { $ref: '#/$defs/Spki' } }, data: { $ref: '#/$defs/B64url' } }, required: ['spki', 'data'] }, errors: ['bad_request'] } },
+  };
+  const base = { id: 'seal', fn: 'seal', args: { spki: 'S', chain: ['L', 'R'], data: 'D' }, how: '*' };
+  const outside = { Spki: 'out-spki', Pkcs8: 'out-pkcs8', CertDer: 'out-cert', Csr: 'out-csr' };
+  const made = generate(contract, new Map([['seal', base]]), outside).cases.filter((c) => c.kind === 'a key outside the profile');
+  assert.deepEqual(made.map((c) => [c.id, c.args]), [
+    ['generated · seal · spki holding a key outside the profile', { spki: 'out-spki', chain: ['L', 'R'], data: 'D' }],
+    ['generated · seal · chain holding a key outside the profile', { spki: 'S', chain: ['out-cert', 'R'], data: 'D' }],
+    ['generated · seal · roots holding a key outside the profile', { spki: 'S', chain: ['L', 'R'], data: 'D', roots: ['out-spki'] }],
+  ]);
+  assert.equal(generate(contract, new Map([['seal', base]])).cases.filter((c) => c.kind === 'a key outside the profile').length, 0, 'no values, no shape');
 });
 
 test('a base is named, found, of its function, and succeeds on both ports, or the run is told why', () => {

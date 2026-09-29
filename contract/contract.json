@@ -39,7 +39,7 @@
       "pattern": "^[A-Za-z0-9_-]*$",
       "description": "Bytes, as base64url without padding. An ANSWER always spells them this way. An ARGUMENT is read forgivingly about padding and alphabet (§0); the members of an envelope that travelled are not (§5)."
     },
-    "Alg": { "enum": ["ed25519", "p256"], "description": "A key algorithm." },
+    "Alg": { "enum": ["ed25519", "p256"], "description": "A key algorithm. A key of any other is refused where it is read (CONTRACT §0)." },
     "Fingerprint": {
       "type": "string",
       "pattern": "^sha256:[A-Za-z0-9_-]{43}$",
@@ -1018,7 +1018,7 @@
         "required": ["der", "fingerprint"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "parse"]
+      "errors": ["bad_request", "parse", "unsupported"]
     },
     "root_tbs": {
       "section": "certificates",
@@ -1039,7 +1039,7 @@
         "required": ["tbs", "sig_alg"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "parse"],
+      "errors": ["bad_request", "parse", "unsupported"],
       "notes": "The external-signing seam: a root in a passkey or a security key signs `tbs` in the host, and `assemble_root` builds the certificate from the signature handed back."
     },
     "assemble_root": {
@@ -1087,7 +1087,7 @@
         "required": ["der"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "parse"],
+      "errors": ["bad_request", "parse", "unsupported"],
       "notes": "Refuses a validity over 398 days and an endpoint that is not an https URL in normal form."
     },
     "leaf_tbs": {
@@ -1114,7 +1114,7 @@
         "required": ["tbs", "sig_alg"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "parse"],
+      "errors": ["bad_request", "parse", "unsupported"],
       "notes": "The same seam for leaves: `build_leaf` with the root's public key in place of its private one."
     },
     "assemble_leaf": {
@@ -1147,7 +1147,7 @@
         "additionalProperties": false
       },
       "result": { "$ref": "#/$defs/Certificate" },
-      "errors": ["bad_request", "parse"],
+      "errors": ["bad_request", "parse", "unsupported"],
       "notes": "Parsing itself refuses, with a `parse` error, what DER has one encoding for and the certificate spells another way: the AlgorithmIdentifier inside the TBS differing from the one outside (`signature algorithm inside and outside differ`), a BOOLEAN that is not `0xFF` or is an explicit FALSE, a non-minimal INTEGER, an OBJECT IDENTIFIER with a padded subidentifier, a `keyUsage` BIT STRING whose unused bits are set or whose trailing zero bits are not removed, a validity of other than two times, an extension of other than two or three parts or whose OCTET STRING holds more than one TLV, a P-256 key that is not the uncompressed point. Every one of these is a scenario in `vectors/intrude.mjs`, which the seed and both ports answer alike — the seed's strictness and the ports' are one rule, proven rather than asserted."
     },
     "profile_error": {
@@ -1170,7 +1170,7 @@
         "required": ["error"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "parse"],
+      "errors": ["bad_request", "parse", "unsupported"],
       "notes": "The exact strings of the seed's `x509.mjs profileError`; `null` when the certificate is inside the profile. This is an ANSWER whose one member happens to be called `error`: a failure of the call carries `why` beside it (§0), and this never does."
     },
     "validate_chain": {
@@ -1204,7 +1204,7 @@
         "required": ["order"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "parse"]
+      "errors": ["bad_request", "parse", "unsupported"]
     },
     "is_normal_https": {
       "section": "certificates",
@@ -1286,7 +1286,7 @@
         "required": ["der"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "parse"]
+      "errors": ["bad_request", "parse", "unsupported"]
     },
     "csr_check": {
       "section": "csr",
@@ -1350,7 +1350,7 @@
         "required": ["der", "endpoint", "not_before", "not_after"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "parse"],
+      "errors": ["bad_request", "parse", "unsupported"],
       "notes": "`csr_check` first — with the issuing root added to `root_spkis` — then `build_leaf` under the monotonic rule. `valid_days` absent is 365; an explicit 0 is refused."
     },
     "issue_tbs_from_csr": {
@@ -1381,7 +1381,7 @@
         "required": ["tbs", "sig_alg", "endpoint", "not_before", "not_after"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "parse"],
+      "errors": ["bad_request", "parse", "unsupported"],
       "notes": "As `issue_from_csr`, for the seam: assembled with `assemble_leaf`."
     },
     "card_encode": {
@@ -1482,7 +1482,7 @@
         "required": ["enc", "ct"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "envelope_invalid", "parse"],
+      "errors": ["bad_request", "envelope_invalid", "parse", "unsupported"],
       "notes": "`ephemeral_seed` exists for vectors and the intrusion suite; production callers omit it and the core draws 32 fresh bytes. `aad` absent is empty."
     },
     "hpke_open": {
@@ -1507,7 +1507,7 @@
         "required": ["plaintext"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "envelope_invalid", "parse"]
+      "errors": ["bad_request", "envelope_invalid", "parse", "unsupported"]
     },
     "seal_request": {
       "section": "envelopes",
@@ -1530,7 +1530,7 @@
         "additionalProperties": false
       },
       "result": { "$ref": "#/$defs/Envelope" },
-      "errors": ["bad_request", "parse"],
+      "errors": ["bad_request", "envelope_invalid", "parse", "unsupported"],
       "notes": "`form` absent is `chain`, which needs `sender_chain`; `method` absent is `tools/call`; `params` absent is `{}`; `exp` absent is `ts + 600`; `cty` absent is a call."
     },
     "seal_result": {
@@ -1553,7 +1553,7 @@
         "additionalProperties": false
       },
       "result": { "$ref": "#/$defs/Envelope" },
-      "errors": ["bad_request", "parse"],
+      "errors": ["bad_request", "envelope_invalid", "parse", "unsupported"],
       "notes": "Exactly one of `result` and `error`. `cty` is `application/pact-result+json`."
     },
     "open_result": {
@@ -1587,7 +1587,7 @@
         "required": ["ok", "root", "endpoint", "form"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "envelope_invalid", "parse"],
+      "errors": ["bad_request", "envelope_invalid", "parse", "unsupported"],
       "notes": "The caller side of §13.2: opens, requires `result` xor `error` plus one of `chain`/`leaf`, validates the chain to `expected_root` and `expected_endpoint` or finds the named leaf among `pins`, refuses a superseded leaf, verifies `sig`, checks `cty` and `msg_id`. Every refusal of the ENVELOPE is `{\"error\": \"envelope_invalid\", \"why\"}`. `leaf_update` is a leaf newer than the pin, for the host to store. An absent or null `envelope` is the caller's omission, `bad_request` `envelope is required` (CONTRACT §0); a present one is read for its four members in order (`protected`, `enc`, `ct`, `sig`), and one that is not an object, or lacks a member or holds one that is not a string, is `envelope_invalid` naming it (`envelope is required`, `envelope.sig is required`). `pins` absent or null is none; a pin is read for `root`, `endpoint`, `leaf`, `state` and `leaf_fingerprint` in that order, and one that is not an object or lacks a required member, or holds one of the wrong type, is `bad_request` naming it by its path (`pins[0] is required`, `pins[0].root is required`)."
     },
     "follow_renewed": {
@@ -1717,7 +1717,7 @@
         "required": ["der", "endpoint", "not_before", "not_after", "ledger_entry", "new_host", "warnings"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "parse"],
+      "errors": ["bad_request", "parse", "unsupported"],
       "notes": "Two documents, as \u00a79 keeps them: the vault is the root and nothing else, the record holds the ledger this reads and the entry answered is appended to. A vault carrying `ledger` or `contacts` is refused (`bad_request`, `a vault holds the root and nothing else: its ledger and contacts belong in the record`); an absent or null document is `vault_plaintext is required` or `record_plaintext is required` (CONTRACT §0), and a record that is not an object `record_plaintext is required: the ledger lives there`. After `root_fingerprint`, `csr`, `now` and `valid_days` (present and not an integer: `valid_days is required`), each document is held to its schema before anything in it is read: the vault (not an object: `vault_plaintext is required: the root lives there`; then its `v`; then the first member, in sorted order, it does not hold: `vault_plaintext holds v, roots, prf and passkey, and nothing else: <member>`), then the record (likewise, `record_plaintext holds v, roots, ledger, contacts, passkey and backup_verified_at, and nothing else: <member>`; a `ledger` that is not a list: `the record's ledger is a list`), and every ledger entry, every root's: an entry that is not an object, lacks a required member, has one of the wrong type, a `root` that is not a fingerprint, an empty `endpoint` or an instant that does not parse, or carries one it does not hold is refused (`the record's ledger entry <i> does not read: <member>`), never skipped — skipped, it could be the live leaf. A root with no `pkcs8` is refused (`this root is held on a card: wallet_issue signs only with a key the vault holds`). The entry answered is the endpoint and the dates, never the leaf. The wallet's rules: `csr_check` with the vault's roots as `root_spkis`; then `ledger_check`'s rules over the record's ledger (a record with no `ledger` has no entry to read): `new_host` true when no ledger entry names that endpoint's host, with the warning `new host: this endpoint's host has never been issued to`; the **live leaf is the newest one issued** (§14.3) and a second endpoint while it is unexpired is refused unless `move: true`, which instead warns `move: the live leaf at the previous endpoint is superseded once contacts see this one` (a `move` or a `move_back`); `not_before` monotonic over the ledger; `valid_days` absent means 365 and an explicit 0 is refused."
     },
     "ledger_check": {

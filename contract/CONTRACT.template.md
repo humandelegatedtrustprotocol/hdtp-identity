@@ -28,7 +28,12 @@ the tables is `contract/CONTRACT.template.md` and is written by hand.
   `ts` and `exp` inside an envelope header stay integer Unix seconds, as the spec says.
 - **Keys**: a private key is PKCS #8 DER; a public key is SubjectPublicKeyInfo DER. Algorithms are
   `"ed25519"` and `"p256"`. A **fingerprint** is `"sha256:" + b64url(SHA-256(SPKI))`; a **key id** is
-  the 32 raw bytes of that hash.
+  the 32 raw bytes of that hash. A key of any other algorithm — RSA, P-384, a bare X25519 key, an
+  Ed25519 key whose AlgorithmIdentifier carries parameters — is refused where it is read, as a key or
+  inside a certificate or a request: `{"error": "unsupported", "why": "unsupported key type <OID>"}`,
+  the OID the key's AlgorithmIdentifier names first (a function that answers a refusal as its result
+  carries the same words: chain rule 1, `csr_check`, `card_decode`). The seed's `parse` refuses it in
+  the same words.
 - **Every function returns one JSON object.** Success shapes are listed per function. Failure is
   `{"error": "<code>", "why": "<one line>"}`, where `code` is a spec error where one applies
   (`envelope_invalid`, `chain_required`, `certificate_renewed`, `bad_request`, `pending_approval`) and
@@ -141,8 +146,11 @@ the host makes with its own endpoint in hand.
 
 Suites: `PACT-SEAL-P256` (DHKEM(P-256, HKDF-SHA256), HKDF-SHA256, AES-128-GCM) for a P-256 recipient,
 `PACT-SEAL-X25519` (DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, ChaCha20-Poly1305) for an Ed25519
-recipient converted by the RFC 7748 §4.1 and RFC 8032 §5.1.5 maps. HPKE Base mode, single shot,
-`info` = `PACT-SEAL-v2`. All-zero DH output refused. The
+recipient converted by the RFC 7748 §4.1 and RFC 8032 §5.1.5 maps; a bare X25519 key is no key of
+the profile (§0). A suite that is not the recipient key's is `envelope_invalid`, `suite does not fit
+the key`. HPKE Base mode, single shot, `info` = `PACT-SEAL-v2`. All-zero DH output refused: a seal to
+an Ed25519 key of small order meets one, and is `envelope_invalid`, `all-zero DH output: low-order
+point`; an open that meets one does not open. The
 header is the AAD, canonicalised per RFC 8785; the signature is over `protected ‖ enc ‖ ct`.
 
 **A member of an envelope has ONE spelling** (SPEC §13.1): unpadded base64url, canonical. `decide`

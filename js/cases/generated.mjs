@@ -29,7 +29,13 @@
 //   read order   for each ordered pair (a, b) of members where a is required: a left out AND b of the
 //                wrong type. The member named is the one the function reads first (CONTRACT §0: "both
 //                ports read them in the same order"); a port that judges b's type at decode, before it
-//                reads anything, names b where the other names a.
+//                reads anything, names b where the other names a;
+//   outside      each member that holds a key — a SubjectPublicKeyInfo, a PKCS #8 key, a certificate,
+//                a request, or a list of one of them — holding one whose key is outside the profile
+//                (`outside`, from js/cases/fixtures.mjs), in the first place of a list. CONTRACT §0: it
+//                is refused where it is read, `unsupported`, `unsupported key type <OID>`. One port
+//                read such a key as a key with no algorithm, so a certificate carrying one was parsed,
+//                compared and taken on a card where the other refused it (R12, T2).
 //
 // "A call that succeeds" is one hand-written case per function, named in BASES below: its arguments
 // are what each shape is made from, and its way of comparing (`how`) is kept, which is what already
@@ -40,6 +46,23 @@ import { readFileSync } from 'node:fs';
 
 /** The hostile object, one copy: read here and by go/unit_test.go's TestCallNeverPanics. */
 export const HOSTILE = JSON.parse(readFileSync(new URL('./hostile.json', import.meta.url), 'utf8'));
+
+/** The contract's types that hold a key, which the `outside` shape fills. */
+export const KEYED = ['Spki', 'Pkcs8', 'CertDer', 'Csr'];
+
+/** Which of KEYED a member holds, and whether as a list: `{ type, list }`, or null. */
+export function keyedOf(schema, root) {
+  if (!schema || schema === true) return null;
+  if (schema.$ref) {
+    const name = /^#\/\$defs\/(.+)$/.exec(schema.$ref)[1];
+    return KEYED.includes(name) ? { type: name, list: false } : keyedOf(root.$defs[name], root);
+  }
+  if (schema.type === 'array') {
+    const item = keyedOf(schema.items, root);
+    return item && !item.list ? { type: item.type, list: true } : null;
+  }
+  return null;
+}
 
 /** The member no function declares, for the undeclared-member case. */
 export const UNDECLARED = 'not_a_member';
@@ -174,9 +197,10 @@ export function pickBases(contract, cases, ask, succeeded) {
 
 /**
  * The generated cases, `[{ id, fn, args, how, kind, file }]`, and `expected`: a Map from id to the
- * answer the contract fixes for it. `bases` is `pickBases`'s.
+ * answer the contract fixes for it. `bases` is `pickBases`'s; `outside` maps each of KEYED to a value
+ * whose key is outside the profile, and without it that shape is not made.
  */
-export function generate(contract, bases) {
+export function generate(contract, bases, outside) {
   const cases = [];
   const expected = new Map();
   const root = contract.root ?? { $defs: contract.$defs };
@@ -208,6 +232,13 @@ export function generate(contract, bases) {
       if (wrong !== undefined) add(`${name} ${show(wrong)}`, fn, { ...base.args, [name]: wrong }, how, 'an optional member of the wrong type', wrongTypeAnswer(name, schema, root));
     }
     add('an undeclared member', fn, { ...base.args, [UNDECLARED]: 1 }, how, 'an undeclared member');
+    for (const [name, schema] of outside ? members : []) {
+      const keyed = keyedOf(schema, root);
+      if (!keyed) continue;
+      const was = base.args[name];
+      const value = keyed.list ? [outside[keyed.type], ...(Array.isArray(was) ? was.slice(1) : [])] : outside[keyed.type];
+      add(`${name} holding a key outside the profile`, fn, { ...base.args, [name]: value }, how, 'a key outside the profile');
+    }
     for (const a of required) {
       for (const [b, schema] of members) {
         if (b === a) continue;

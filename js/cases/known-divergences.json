@@ -10,7 +10,6 @@
   "cases": {
     "a function nobody defines, with args that are a list": { "findings": ["R34"], "fails": ["wasm off the contract","differ"] },
     "generated · vault_seal · kdf \"x\"": { "findings": ["R28","C4"], "fails": ["wasm off the contract","wasm not as expected","go not as expected"] },
-    "generated · vault_seal · salt \"\"": { "findings": ["R29","C6"], "fails": ["differ"] },
-    "wallet_issue of a request that is a truncated SEQUENCE": { "findings": ["F18","R31"], "fails": ["differ"] }
+    "generated · vault_seal · salt \"\"": { "findings": ["R29","C6"], "fails": ["differ"] }
   }
 }

@@ -14,14 +14,15 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   function the contract declares, `{}`, the hostile object, each required member absent and `null`
   (held to CONTRACT §0's `<name> is required`), each optional string `""`, each optional member of
   the wrong type, an undeclared member, and each required member absent beside each other member of
-  the wrong type (read order) — 1068 cases today (1103 when written; the hostile object is now sent
-  only to the 15 functions that declare one of its members), varied from one named hand-written case per function
-  that succeeds on both ports. 463 cases failed when they were written (459 generated, and 4 written
-  beside them), 4 fail today (2 and 2); each is listed in `js/cases/known-divergences.json` with
+  the wrong type (read order), and each member that holds a key holding one outside the profile —
+  1108 cases today (1103 when written; the hostile object is now sent only to the 15 functions that
+  declare one of its members, and the key outside the profile came with cluster G), varied from one
+  named hand-written case per function that succeeds on both ports. 463 cases failed when they were
+  written (459 generated, and 4 written beside them), 3 fail today (2 generated, 1 written); each is listed in `js/cases/known-divergences.json` with
   the audit finding that closes it, and the run fails on any other failure, on an entry whose case
   passes, and on an entry nobody has.
 - The coverage gate fails when a declared error code is not produced by both ports in one case they
-  answered alike (S2, TC-1); all 99 are. It used to print the count and pass.
+  answered alike (S2, TC-1); all 117 are. It used to print the count and pass.
 - `js/cases/hostile.json` is the one hostile object: the generated cases send it to both ports, Go's
   `TestCallNeverPanics` reads it and now fails on an answer of `internal` (its `recover()` turned a
   panic into a JSON object, which the sweep accepted), and the core has the same sweep
@@ -164,6 +165,33 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   one and answered `false`, and the Go port judged the address and ignored the zone, so
   `2001:db8::1%eth0` was public to both and `fe80::1%eth0` to the core. It drops one `[` and one `]`
   and no more (R11): the core dropped every bracket, so `[[::1]]` was loopback there.
+- **A key outside the profile is refused where it is read** (cluster G; R12, T2, R13, T3, T4, F6,
+  R14): Ed25519 with no parameters and uncompressed P-256 are the profile's two algorithms, and any
+  other key — RSA, P-384, a bare X25519 key, an Ed25519 key with a NULL after its OID — is
+  `unsupported`, `unsupported key type <OID>`, in both ports and the seed, whether it arrives as a key,
+  in a certificate or in a request. The Go port read one as a key with no algorithm, so
+  `parse_certificate` answered an `alg` the contract does not have, `compare_leaves` compared,
+  `card_decode` took the card, chain rule 1 said `key algorithm not in the profile`, `csr_check` said
+  `request key algorithm not in the profile`, `issue_from_csr` answered that as `bad_request`, and
+  `root_tbs` declared ECDSA over an X25519 key. Both ports read a bare X25519 key as a third
+  algorithm: `key_info` named `x25519`, which the contract's Alg does not have, `build_leaf` built a
+  leaf around one, `verify` answered `valid: false`, and the core sealed to one where the Go port
+  refused it and refused a request carrying one for its signature. Sixteen functions that answered
+  `unsupported` without declaring it, in one port or both, declare it: the certificate builders and
+  readers, the request functions, `hpke_seal` and `hpke_open`, `seal_request` and `seal_result`,
+  `open_result` and `wallet_issue`. The parity gate puts such a key into every member that holds one.
+- A suite that is not the recipient key's is `envelope_invalid` `suite does not fit the key` at
+  `hpke_seal`, as the Go port and the core's own `open_result` say it; the core said `unsupported`
+  (F6, R14). A seal to an Ed25519 key of small order meets an all-zero DH output and is
+  `envelope_invalid` `all-zero DH output: low-order point` in both ports, through `hpke_seal`,
+  `seal_request` and `seal_result`; the core said `internal`, a code no input is to reach, and a leaf
+  holding such a key validates (T4). `seal_request` and `seal_result` declare `envelope_invalid`.
+- `wallet_issue` answers a request refused by its reader with the reader's class, as the core does:
+  `unsupported` for a key outside the profile, `parse` for bytes that do not read, where the Go port
+  said `bad_request` for both.
+- **Removed public API** (cluster G): Go `AlgX25519`, `PublicKey.X`, `PublicKey.AlgOID`; Rust
+  `Alg::X25519`, `keys::OID_X25519` and `keys::x25519_spki`. `Alg::sig_oid` returns the OID, not a
+  `Result`: no algorithm left has none.
 - **JS loader:** `call(name, null)` hands `null` to the core, which answers `args is a JSON object`
   as the Go port does; it used to be made `{}` (`js/index.mjs`, `js/worker.mjs`). Only `args` left
   out is `{}`. The parity case `args that are null` sends `null` for the first time (TC-2).

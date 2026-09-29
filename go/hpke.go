@@ -103,18 +103,16 @@ func SuiteForKey(pub *PublicKey) (string, error) {
 }
 
 // recipientPublic is the KEM public key bytes for a leaf key: the uncompressed P-256 point, or the
-// Ed25519 key mapped to X25519.
+// Ed25519 key mapped to X25519. A suite that is not the key's is the envelope's refusal, in the
+// envelope layer's words, as the core's `recipient_public` answers it (F6, R14).
 func recipientPublic(id string, pub *PublicKey) ([]byte, error) {
-	if id == SuiteP256 {
-		if pub.EC == nil {
-			return nil, errors.New("suite does not fit the key")
-		}
+	switch {
+	case id == SuiteP256 && pub.Alg == AlgP256 && pub.EC != nil:
 		return p256Uncompressed(pub.EC), nil
+	case id == SuiteX25519 && pub.Alg == AlgEd25519 && len(pub.Ed) == ed25519.PublicKeySize:
+		return ed25519PublicToX25519(pub.Ed), nil
 	}
-	if pub.Ed == nil {
-		return nil, errors.New("suite does not fit the key")
-	}
-	return ed25519PublicToX25519(pub.Ed), nil
+	return nil, errors.New("suite does not fit the key")
 }
 
 func encap(id string, pub *PublicKey, seed []byte) (enc, ss []byte, err error) {
