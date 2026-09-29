@@ -412,6 +412,10 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   `abc` was skipped, whatever else in it did not read. The contract's `Pin`, `Tombstone` and
   `FormerEndpoint` type `root` as a `Fingerprint`. A host whose rows carry a made-up root gets an
   error from every decision until the row is repaired.
+- **Go: arguments with no text at all are not an object** (a lead of the port-parity verification,
+  2026-09-30): `Call(name, nil)` and `Call(name, "")` answer `bad_request` `args is a JSON object`,
+  as the core's `call(name, "")` does; they read as `{}`. The line adapter sends `{}` for a request
+  with no `args`, as the JS loader does. `js/boundary-text.json` holds both ports to it.
 
 ## 0.4.1 — 2026-09-28
 

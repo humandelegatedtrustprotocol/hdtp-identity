@@ -88,7 +88,8 @@ the tables is `contract/CONTRACT.template.md` and is written by hand.
   envelope's header and body, a manifest, a line of `messages.jsonl`, a vault's plaintext — holding
   either is text that is not JSON, answered as each function answers that. RFC 8785, in which a
   header is written, has no infinite number. Arguments that do not parse at all answer `args is a
-  JSON object`.
+  JSON object`, and so do arguments with no text at all (Go's `Call(name, nil)` included): no
+  arguments is `{}`, which the JS loader and the Go line adapter send for a call that gives none.
 - **`version` is the one exception.** It describes the port, not a rule, so its answer differs and
   nothing compares it.
 

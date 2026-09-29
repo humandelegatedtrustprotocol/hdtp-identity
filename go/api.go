@@ -165,13 +165,14 @@ func Call(name string, args json.RawMessage) (out json.RawMessage) {
 	if why := jsonLimit(args); why != "" {
 		return fail(codeArgs, "args: "+why)
 	}
-	// Arguments are an object, or the member is not there at all. A list, a bare scalar or the literal
-	// `null` is a caller's mistake named here, once, rather than as whatever encoding/json says about
-	// the map readArgs could not fill — which leaks a Go type into an answer the Rust core gives in
-	// four words. `null` belongs with the rest: the Rust core's `call` matches an object or refuses, and an
-	// absent `args` is a zero-length message, still distinguishable, so nothing else moves.
-	// js/parity.mjs holds the Rust core to the same answers (js/cases/dispatcher.mjs).
-	if t := bytes.TrimSpace(args); len(t) > 0 && t[0] != '{' {
+	// Arguments are an object. A list, a bare scalar, the literal `null` or no text at all is a
+	// caller's mistake named here, once, rather than as whatever encoding/json says about the map
+	// readArgs could not fill — which leaks a Go type into an answer the Rust core gives in four words.
+	// No text at all was `{}` here and `args is a JSON object` to the core's `call`; a caller that
+	// means no arguments passes `{}`, as the JS loader and this port's line adapter do.
+	// js/boundary-text.json holds both ports to these answers, and js/parity.mjs the rest
+	// (js/cases/dispatcher.mjs).
+	if t := bytes.TrimSpace(args); len(t) == 0 || t[0] != '{' {
 		return fail(codeArgs, "args is a JSON object")
 	}
 	a, bad := readArgs(args)

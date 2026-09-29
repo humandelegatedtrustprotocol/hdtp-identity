@@ -13,6 +13,20 @@
   },
   "calls": [
     {
+      "args": "",
+      "want": {
+        "error": "bad_request",
+        "why": "args is a JSON object"
+      }
+    },
+    {
+      "args": " \n",
+      "want": {
+        "error": "bad_request",
+        "why": "args is a JSON object"
+      }
+    },
+    {
       "args": "{",
       "want": {
         "error": "bad_request",
