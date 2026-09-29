@@ -117,6 +117,7 @@ export const BASES = {
   export_manifest: 'export_manifest: finished with the messages',
   export_merge: 'export_merge: a held pin is never replaced',
   book_rows: 'book_rows: a contact with everything, one with the least',
+  media_holds_private_key: 'media_holds_private_key: PKCS #8 of an Ed25519 key, in DER',
   limits_rules_check: 'limits_rules_check: a document that can be enforced',
   limits_decide: 'limits_decide: a contact in, fresh',
   limits_buckets: 'limits_buckets: a contact in',

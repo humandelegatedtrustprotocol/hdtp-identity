@@ -255,14 +255,15 @@ var functions = map[string]function{
 	"wallet_issue": {[]string{"vault_plaintext", "record_plaintext", "root_fingerprint", "csr", "now", "valid_days", "move"}, callWalletIssue},
 
 	// Export: api_export.go
-	"export_read":           {[]string{"directory", "manifest", "contacts_csv", "threads_csv", "owner", "now"}, callExportRead},
-	"export_read_messages":  {[]string{"lines", "threads", "contacts", "media", "first_line"}, callExportReadMessages},
-	"export_read_end":       {[]string{"manifest", "messages_sha256", "lines", "ids", "msg_ids", "reply_tos", "media_seen", "media"}, callExportReadEnd},
-	"export_write":          {[]string{"owner", "owner_name", "exported_at", "tool", "contacts", "threads", "media"}, callExportWrite},
-	"export_write_messages": {[]string{"messages", "msg_ids"}, callExportWriteMessages},
-	"export_manifest":       {[]string{"partial", "hashes", "messages"}, callExportManifest},
-	"book_rows":             {[]string{"contacts", "exported_at"}, callBookRows},
-	"export_merge":          {[]string{"held", "rows"}, callExportMerge},
+	"export_read":             {[]string{"directory", "manifest", "contacts_csv", "threads_csv", "owner", "now"}, callExportRead},
+	"export_read_messages":    {[]string{"lines", "threads", "contacts", "media", "first_line"}, callExportReadMessages},
+	"export_read_end":         {[]string{"manifest", "messages_sha256", "lines", "ids", "msg_ids", "reply_tos", "media_seen", "media"}, callExportReadEnd},
+	"export_write":            {[]string{"owner", "owner_name", "exported_at", "tool", "contacts", "threads", "media"}, callExportWrite},
+	"export_write_messages":   {[]string{"messages", "msg_ids"}, callExportWriteMessages},
+	"export_manifest":         {[]string{"partial", "hashes", "messages"}, callExportManifest},
+	"book_rows":               {[]string{"contacts", "exported_at"}, callBookRows},
+	"export_merge":            {[]string{"held", "rows"}, callExportMerge},
+	"media_holds_private_key": {[]string{"bytes"}, callMediaHoldsPrivateKey},
 
 	// Ledger: api_ledger.go
 	"ledger_check": {[]string{"ledger", "root", "endpoint", "now", "move"}, callLedgerCheck},

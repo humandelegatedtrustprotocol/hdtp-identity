@@ -389,6 +389,14 @@ pub(super) fn export_merge(a: &Value) -> Result<Value> {
     Ok(json!({ "write": m.write, "keep": m.keep, "conflicts": m.conflicts }))
 }
 
+/// Whether a media file's bytes are key material (SPEC §9.2), as every port's export reader judges a
+/// media file: the check a host makes on the files it streams, which the core never sees. The cloud
+/// kept a third copy of it in TypeScript that read spellings the ports did not (CW-07, R38).
+pub(super) fn media_holds_private_key(a: &Value) -> Result<Value> {
+    let b = bytes(a, "bytes")?;
+    Ok(json!({ "holds_private_key": export::media_holds_private_key(&b) }))
+}
+
 pub(super) fn book_rows(a: &Value) -> Result<Value> {
     let contacts = list(a, "contacts")?;
     let at = instant(a, "exported_at")?;

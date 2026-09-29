@@ -15,7 +15,6 @@ pub mod jsonl;
 pub mod manifest;
 pub mod merge;
 
-use crate::der;
 use crate::util::{err, from_b64u, hex, sha256, Error, Result};
 use crate::{address, x509};
 use serde_json::{json, Value};
@@ -63,20 +62,89 @@ fn is_base64_text(s: &str) -> bool {
     s.len() >= 16 && s.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_' | b'+' | b'/' | b'='))
 }
 
-/// Whether DER is a private key: PKCS #8 (`SEQUENCE { INTEGER 0|1, SEQUENCE { OID … }, OCTET STRING … }`)
-/// or SEC1 (`SEQUENCE { INTEGER 1, OCTET STRING, [0]?, [1]? }`), whatever its algorithm. By shape, so
-/// a key of an algorithm this library does not implement is still one.
+// ── key material (SPEC §9.2: an importer MUST refuse anything "that decodes as a private key") ─────
+//
+// Detection reads LENIENTLY, and on purpose, where every other reader here is strict: what a lenient
+// decoder reads as a key is key material, and a check that decodes more strictly than the tools a
+// person has is a check a key can be spelled past. The ports read a base64 word with a spare bit set
+// in its last character, and a PKCS #8 whose length is written in a longer form than it needs
+// (`81 2e`), as no key; the cloud's copy of this check (atob, and a length reader that takes any
+// definite form) and OpenSSL read both as the key, byte for byte (CW-07, R38). So here a word forgives
+// its padding, either alphabet and its spare bits, and a length may take any definite form of up to
+// four octets. The refusals this makes are more, never fewer. js/key-material.json is the list of
+// cases both ports' tests and the parity cases read. TO REVERSE (a reading the owner may change):
+// `loose_read` back to `der::read`, and `loose_b64` back to `from_b64u`, here and in go/export.go.
+
+/// A DER-shaped element read for detection: a tag, and a definite length in the short form or in a
+/// long form of one to four octets, minimal or not.
+struct Loose<'a> {
+    tag: u8,
+    content: &'a [u8],
+    end: usize,
+}
+
+fn loose_read(b: &[u8], at: usize) -> Option<Loose<'_>> {
+    let tag = *b.get(at)?;
+    let first = *b.get(at + 1)? as usize;
+    let (len, start) = if first & 0x80 == 0 {
+        (first, at + 2)
+    } else {
+        let n = first & 0x7f;
+        if n == 0 || n > 4 {
+            return None;
+        }
+        let octets = b.get(at + 2..at + 2 + n)?;
+        (octets.iter().fold(0usize, |l, o| (l << 8) | *o as usize), at + 2 + n)
+    };
+    let end = start.checked_add(len)?;
+    Some(Loose { tag, content: b.get(start..end)?, end })
+}
+
+fn loose_children(content: &[u8]) -> Option<Vec<Loose<'_>>> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    while at < content.len() {
+        let c = loose_read(content, at)?;
+        at = c.end;
+        out.push(c);
+    }
+    Some(out)
+}
+
+/// A word decoded as base64 or base64url for detection: its padding, either alphabet and a last
+/// character with a spare bit set are forgiven, as a lenient decoder forgives them.
+fn loose_b64(w: &str) -> Option<Vec<u8>> {
+    use base64::engine::{general_purpose::GeneralPurpose, DecodePaddingMode, GeneralPurposeConfig};
+    use base64::{alphabet, Engine};
+    const LOOSE: GeneralPurpose = GeneralPurpose::new(
+        &alphabet::URL_SAFE,
+        GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::RequireNone).with_decode_allow_trailing_bits(true),
+    );
+    let cleaned: String = w
+        .chars()
+        .map(|c| match c {
+            '+' => '-',
+            '/' => '_',
+            c => c,
+        })
+        .collect();
+    LOOSE.decode(cleaned.trim_end_matches('=')).ok()
+}
+
+/// Whether bytes are a private key: PKCS #8 (`SEQUENCE { INTEGER 0|1, SEQUENCE { OID … }, OCTET STRING … }`)
+/// or SEC1 (`SEQUENCE { INTEGER 1, OCTET STRING, [0]?, [1]? }`), whatever its algorithm, read by the
+/// lenient reader above. By shape, so a key of an algorithm this library does not implement is still one.
 fn is_private_key_der(bytes: &[u8]) -> bool {
-    let Ok(node) = der::read(bytes, 0) else { return false };
+    let Some(node) = loose_read(bytes, 0) else { return false };
     if node.tag != 0x30 || node.end != bytes.len() {
         return false;
     }
-    let Ok(f) = der::children(&node) else { return false };
-    let version = |n: &der::Node<'_>, allowed: &[u8]| n.tag == 0x02 && n.content.len() == 1 && allowed.contains(&n.content[0]);
+    let Some(f) = loose_children(node.content) else { return false };
+    let version = |n: &Loose<'_>, allowed: &[u8]| n.tag == 0x02 && n.content.len() == 1 && allowed.contains(&n.content[0]);
     let pkcs8 = f.len() >= 3
         && version(&f[0], &[0, 1])
         && f[1].tag == 0x30
-        && der::children(&f[1]).is_ok_and(|a| a.first().is_some_and(|o| o.tag == 0x06))
+        && loose_children(f[1].content).is_some_and(|a| a.first().is_some_and(|o| o.tag == 0x06))
         && f[2].tag == 0x04;
     let sec1 = (2..=4).contains(&f.len())
         && version(&f[0], &[1])
@@ -99,7 +167,8 @@ pub fn holds_private_key(text: &str) -> bool {
     }
     // A private key's DER begins with 0x30, which base64 of either alphabet writes as `M`: only a word
     // that begins so is decoded, so no other cell of a file costs a decoded copy of itself.
-    text.split_ascii_whitespace().any(|w| w.starts_with('M') && is_base64_text(w) && from_b64u(w).is_ok_and(|der| is_private_key_der(&der)))
+    text.split_ascii_whitespace()
+        .any(|w| w.starts_with('M') && is_base64_text(w) && loose_b64(w).is_some_and(|der| is_private_key_der(&der)))
 }
 
 /// A cell's own rules, as `contacts.csv` holds it and as `export_write` is handed it.
@@ -1025,27 +1094,21 @@ mod tests {
     }
 
     /// A media file is key material when its bytes are a PKCS #8 or SEC1 key in DER, or text holding
-    /// one in PEM or base64 (SPEC 2.2.2, 9.2#15). A document, and DER that is not a key, are not.
+    /// one in PEM or base64 (SPEC 2.2.2, 9.2#15), read leniently: js/key-material.json, the one list of
+    /// cases, which the Go port's test and the parity cases read too.
     #[test]
     fn a_media_file_is_key_material_in_der_or_pem() {
-        let key = PrivateKey::from_seed(Alg::Ed25519, &seed("export/media-key")).unwrap();
-        let pkcs8 = key.to_pkcs8();
-        let mut sec1 = vec![0x30, 0x25, 0x02, 0x01, 0x01, 0x04, 0x20];
-        sec1.extend_from_slice(&seed("export/media-sec1"));
-        let pem = format!("-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----\n", base64_std(&pkcs8));
-        let sec1_pem = format!("-----BEGIN EC PRIVATE KEY-----\n{}\n-----END EC PRIVATE KEY-----\n", base64_std(&sec1));
-        for (what, bytes) in [
-            ("PKCS #8 DER", pkcs8.to_vec()),
-            ("SEC1 DER", sec1.clone()),
-            ("PKCS #8 PEM", pem.into_bytes()),
-            ("SEC1 PEM", sec1_pem.into_bytes()),
-        ] {
-            assert!(media_holds_private_key(&bytes), "{what} is key material");
-        }
-        for (what, bytes) in
-            [("a document", b"%PDF-1.7\nthe bytes of a.pdf\n".to_vec()), ("DER that is no key", vec![0x30, 0x03, 0x02, 0x01, 0x05])]
-        {
-            assert!(!media_holds_private_key(&bytes), "{what} is not key material");
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../js/key-material.json");
+        let doc: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let cases = doc["cases"].as_array().unwrap();
+        assert!(cases.len() >= 20, "js/key-material.json holds {} cases", cases.len());
+        for c in cases {
+            let bytes = match (c["hex"].as_str(), c["text"].as_str()) {
+                (Some(h), None) => crate::util::from_hex(h).unwrap(),
+                (None, Some(t)) => t.as_bytes().to_vec(),
+                _ => panic!("a case is hex or text: {c}"),
+            };
+            assert_eq!(media_holds_private_key(&bytes), c["holds"].as_bool().unwrap(), "{}", c["what"]);
         }
     }
 

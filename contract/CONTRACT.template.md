@@ -374,7 +374,8 @@ the host can do, and the words both hosts of this repository use for it (the Go 
   sha256 is not its name`): the manifest lists the text members only, and a media member is bound
   by its name and counted by `counts.media` (SPEC 2.2.2);
 - refuse a media file whose bytes are a private key — PKCS #8 or SEC1 in DER, or text holding one
-  (`media/<h>: holds a private key`);
+  (`media/<h>: holds a private key`) — which it asks `media_holds_private_key`, the rule both ports'
+  readers apply, rather than keep a copy of it;
 - hand `export_read_end` the media `export_read` answered, so a media file no message names is
   refused.
 
@@ -385,9 +386,9 @@ a Rust host that write the same rows write the same file. A media file is stored
 What a contact controls never stops the export (SPEC 9.2#22–25): `export_write_messages` leaves out
 a message whose body is a private key and answers it in `left_out`, and a host that writes in
 batches names the file's msg_ids in `msg_ids`, so a reply to a message not carried is written null.
-The core never sees a media file's bytes, so the host checks each before it writes: a message whose
-file is a private key is left out with the file and listed with the rest, for the host to report to
-the person.
+The core never sees a media file's bytes unless it is handed them, so the host checks each before it
+writes, with `media_holds_private_key`: a message whose file is a private key is left out with the file
+and listed with the rest, for the host to report to the person.
 `book_rows` is the one mapping from the wallet's own book (`VaultContact`, §6) to those rows, which
 every wallet uses before `export_write` writes a book.
 
