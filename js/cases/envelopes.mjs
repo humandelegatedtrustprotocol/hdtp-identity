@@ -291,4 +291,57 @@ export default function envelopes({ add, expect }, f) {
     }
   }
 
+
+  // ── the objects inside a member (T9, F11, F12, F13, R20, R22, T8, S1-1) ─────────────────────────
+  // Each was read through a zero value in one port and refused in the other's words (serde's, or
+  // "decide input does not read" / "envelope members" for every fault). Both ports now read them by
+  // hand, in the contract's order, and name the member by its path. To `decide` they are the host's
+  // arguments (`bad_request`); to `open_result` the envelope is the peer's answer (`envelope_invalid`,
+  // its note), and only an absent one is the caller's omission (§0).
+  const { sig: _sig, ...noSig } = sealed;
+  const { endpoint: _endpoint, ...noEndpoint } = node;
+  for (const [what, args, want] of [
+    ['an envelope with no sig', { now, envelope: noSig, node }, 'envelope.sig is required'],
+    ['an envelope that is not an object', { now, envelope: 'x', node }, 'envelope is required'],
+    ['a node with no endpoint', { now, envelope: sealed, node: noEndpoint }, 'node.endpoint is required'],
+    ['a node that is not an object', { now, envelope: sealed, node: 5 }, 'node is required'],
+    ['a held key with no kid', { now, envelope: sealed, node: { ...node, keys: [{ leaf: leafDer, pkcs8: hostPkcs8 }] } }, 'node.keys[0].kid is required'],
+    ['a pin with no leaf', { now, envelope: sealed, node: { ...node, pins: [{ root: rootFp, endpoint: ENDPOINT }] } }, 'node.pins[0].leaf is required'],
+    ['pins that are not a list', { now, envelope: sealed, node: { ...node, pins: 'x' } }, 'node.pins is required'],
+    ['a seen entry that is not a string', { now, envelope: sealed, node: { ...node, seen: ['m', 5] } }, 'node.seen[1] is required'],
+    ['an accept_new_hosts that is neither auto nor ask', { now, envelope: sealed, node: { ...node, accept_new_hosts: '' } }, 'node.accept_new_hosts is auto or ask'],
+    ['a node and an envelope both short a member', { now, envelope: noSig, node: noEndpoint }, 'node.endpoint is required'],
+  ]) {
+    add(`decide with ${what}`, 'decide', args);
+    expect(`decide with ${what}`, { error: 'bad_request', why: want });
+  }
+  // `accept_new_hosts` absent is `auto` (SPEC §5.3, the contract's NodeState): a pinned contact's chain
+  // at another endpoint re-pins it, where the Go port read the zero value as `ask` and held it (T8).
+  const { accept_new_hosts: _policy, ...unsaid } = node;
+  const movedCall = request({ senderChain: [movedLeaf, f.rootDerBytes], params: { name: 'send_message' }, msgId: 'p-t8' });
+  add('decide on a contact at a new endpoint, the node saying no accept_new_hosts', 'decide', { now, envelope: movedCall, node: { ...unsaid, pins: pinned } });
+  expect('decide on a contact at a new endpoint, the node saying no accept_new_hosts', { code: 'ok', tier: 'contact', endpoint: MOVED });
+  const { ct: _ct, ...noCt } = chainForm;
+  for (const [what, args, want] of [
+    ['an envelope with no ct', open(noCt), { error: 'envelope_invalid', why: 'envelope.ct is required' }],
+    ['an envelope that is not an object', open('x'), { error: 'envelope_invalid', why: 'envelope is required' }],
+    ['a pin with no root', open(leafForm, { pins: [{ endpoint: ENDPOINT, leaf: leafDer }] }), { error: 'bad_request', why: 'pins[0].root is required' }],
+    ['a pin whose root is not a string', open(leafForm, { pins: [{ root: 5, endpoint: ENDPOINT, leaf: leafDer }] }), { error: 'bad_request', why: 'pins[0].root is required' }],
+    ['a pin that is not an object', open(leafForm, { pins: ['x'] }), { error: 'bad_request', why: 'pins[0] is required' }],
+  ]) {
+    add(`open_result with ${what}`, 'open_result', args);
+    expect(`open_result with ${what}`, want);
+  }
+  // `pins: null` is no pins (§0): the core refused it in serde's words. The expectation is read from
+  // the answer's `result` (js/parity.mjs), the peer's `{ok: 1}`: the answer opened.
+  add('open_result with pins that are null', 'open_result', open(chainForm, { pins: null }));
+  expect('open_result with pins that are null', { ok: 1 });
+  // The peer's answer as it was sent: a code or data of the wrong type is an answer, not a caller's
+  // mistake (the contract's `answer: true`), as the core gives it (F14, R22).
+  add('follow_renewed on an answer whose code is not a string', 'follow_renewed', follow({ code: 5 }));
+  expect('follow_renewed on an answer whose code is not a string', { follow: false, why: 'not certificate_renewed' });
+  add('follow_renewed on an answer whose data is not an object', 'follow_renewed', follow({ code: 'certificate_renewed', data: 5 }));
+  expect('follow_renewed on an answer whose data is not an object', { follow: false, why: 'no chain' });
+  add('follow_renewed on an answer that is not an object', 'follow_renewed', follow('x'));
+  expect('follow_renewed on an answer that is not an object', { follow: false, why: 'not certificate_renewed' });
 }

@@ -16,7 +16,7 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   the wrong type, an undeclared member, and each required member absent beside each other member of
   the wrong type (read order) — 1103 cases, varied from one named hand-written case per function
   that succeeds on both ports. 463 cases failed when they were written (459 generated, and 4 written
-  beside them), 122 fail today (120 and 2); each is listed in `js/cases/known-divergences.json` with
+  beside them), 75 fail today (73 and 2); each is listed in `js/cases/known-divergences.json` with
   the audit finding that closes it, and the run fails on any other failure, on an entry whose case
   passes, and on an entry nobody has.
 - The coverage gate fails when a declared error code is not produced by both ports in one case they
@@ -81,6 +81,19 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   core's order, the chain judged when the proof member is made, before the result (F10, R19). The
   typed `SealRequest` and `SealResult` keep their zero-value defaults (the node sets `Exp` and never
   `Cty`); an absent `Params` there is `{}` too.
+- **The objects inside a member are read by hand, in both ports, and named by their path** (T9, F11,
+  F12, F13, R20, R22): `decide`'s node state and envelope, `open_result`'s envelope and pins. A member
+  one lacks, or holds of the wrong type, is `<path> is required` (`node.pins[0].leaf`,
+  `envelope.sig`), `bad_request` to `decide` and, for the envelope, `envelope_invalid` to
+  `open_result`. The core said `decide input does not read`, `envelope members` or serde's own words
+  (`pins: missing field root`) for every fault, and the Go port decided or opened on the zero value
+  (a node with no endpoint was `ok`; a pin with no root opened an answer). `pins: null` is no pins,
+  as §0 says of null (the core refused it); an absent `envelope` to `open_result` is `bad_request`
+  `envelope is required`, where both ports said `envelope_invalid` (S1-1). A node state that says no
+  `accept_new_hosts` is `auto`, as the contract says (the Go port held a moved contact, T8), and one
+  that says anything but `auto` or `ask` is refused. `follow_renewed` reads the peer's answer as it
+  was sent: a code or data of the wrong type is `{follow: false}`, as the core answers, not a
+  refusal of the call (F14).
 - The core reads three functions in the contract's order where the Go port already did: `card_decode`
   reads `vcard` before `now` (R25); `key_from_seed` reads `alg` before the seed (T21, R01; the Go port's
   `KeyFromSeed` also judges the algorithm first now); `vault_seal` answers `empty passphrase` before a

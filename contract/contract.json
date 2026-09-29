@@ -267,7 +267,7 @@
       },
       "required": ["endpoint"],
       "additionalProperties": false,
-      "description": "What the host knows, handed to `decide` whole. Every list absent is empty; `accept_new_hosts` absent is `auto`."
+      "description": "What the host knows, handed to `decide` whole. Every list absent is empty; `accept_new_hosts` absent is `auto`, and anything but `auto` or `ask` is refused (`node.accept_new_hosts is auto or ask`). Read member by member in this order, a held key as `kid`, `leaf`, `pkcs8`, `current`, a pin as `root`, `endpoint`, `leaf`, `state`, `leaf_fingerprint`, a tombstone as `root`, `leaf`, `at`, a former endpoint as `root`, `endpoint`, `at`: a member absent, null or of the wrong type where one is required is `bad_request` naming it by its path (`node.endpoint is required`, `node.keys[0].kid is required`, `node.seen[1] is required`). A pin's `state` is read as a string and not held to its enum."
     },
     "Decision": {
       "description": "What `decide` decided. `code` says which shape this is.",
@@ -1586,7 +1586,7 @@
         "additionalProperties": false
       },
       "errors": ["bad_request", "envelope_invalid", "parse"],
-      "notes": "The caller side of §13.2: opens, requires `result` xor `error` plus one of `chain`/`leaf`, validates the chain to `expected_root` and `expected_endpoint` or finds the named leaf among `pins`, refuses a superseded leaf, verifies `sig`, checks `cty` and `msg_id`. Every refusal of the ENVELOPE is `{\"error\": \"envelope_invalid\", \"why\"}`. `leaf_update` is a leaf newer than the pin, for the host to store."
+      "notes": "The caller side of §13.2: opens, requires `result` xor `error` plus one of `chain`/`leaf`, validates the chain to `expected_root` and `expected_endpoint` or finds the named leaf among `pins`, refuses a superseded leaf, verifies `sig`, checks `cty` and `msg_id`. Every refusal of the ENVELOPE is `{\"error\": \"envelope_invalid\", \"why\"}`. `leaf_update` is a leaf newer than the pin, for the host to store. An absent or null `envelope` is the caller's omission, `bad_request` `envelope is required` (CONTRACT §0); a present one is read for its four members in order (`protected`, `enc`, `ct`, `sig`), and one that is not an object, or lacks a member or holds one that is not a string, is `envelope_invalid` naming it (`envelope is required`, `envelope.sig is required`). `pins` absent or null is none; a pin is read for `root`, `endpoint`, `leaf`, `state` and `leaf_fingerprint` in that order, and one that is not an object or lacks a required member, or holds one of the wrong type, is `bad_request` naming it by its path (`pins[0] is required`, `pins[0].root is required`)."
     },
     "follow_renewed": {
       "section": "envelopes",

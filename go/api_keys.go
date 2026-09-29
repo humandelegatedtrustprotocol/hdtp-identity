@@ -26,7 +26,7 @@ func callGenerateKey(a args) json.RawMessage {
 // the vectors prove it, and a caller that gets it wrong fails loudly instead of quietly becoming
 // somebody else.
 func callPrfSalt(args) json.RawMessage {
-	return ok(map[string]any{"salt": B64(PrfSalt()), "infos": DerivationInfos})
+	return ok(map[string]any{"salt": B64url(PrfSalt()), "infos": DerivationInfos})
 }
 
 func callDeriveSeed(a args) json.RawMessage {
@@ -42,7 +42,7 @@ func callDeriveSeed(a args) json.RawMessage {
 	if err != nil {
 		return failErr(codeArgs, err)
 	}
-	return ok(map[string]any{"seed": B64(seed)})
+	return ok(map[string]any{"seed": B64url(seed)})
 }
 
 // key_from_seed reads `alg` first, as CONTRACT §1 lists it: the algorithm, then the seed that is
