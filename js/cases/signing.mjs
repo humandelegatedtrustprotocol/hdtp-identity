@@ -115,4 +115,13 @@ export default function signing({ add, expect }, f) {
   add('signing_request_check with no now', 'signing_request_check', { request: good, origin: ORIGIN });
   add('signing_request_check with root_spkis that do not read', 'signing_request_check', { ...ask(), root_spkis: ['!!!'] });
   add('signing_request_check with nothing to work from', 'signing_request_check', {});
+
+  // A request whose CSR carries a key outside the profile, or whose root certificate does (T3, R12): the
+  // key is refused where it is read, and named. The Go port said "no proof of possession" for a bare
+  // X25519 key, and named the profile for the rest.
+  for (const [kind, { spki, oid }] of Object.entries(f.foreign)) {
+    add(`signing_request_check of a request carrying a key outside the profile: ${kind}`, 'signing_request_check', ask({ csr: f.requestFor(spki) }));
+    expect(`signing_request_check of a request carrying a key outside the profile: ${kind}`, refused(`unsupported key type ${oid}`));
+  }
+  add('signing_request_check of a request whose root certificate holds a key outside the profile', 'signing_request_check', ask({ root_cert: f.outside.CertDer }));
 }
