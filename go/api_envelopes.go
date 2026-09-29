@@ -23,38 +23,42 @@ func callSuiteFor(args json.RawMessage) json.RawMessage {
 	return ok(map[string]any{"suite": s})
 }
 
-func callHPKESeal(args json.RawMessage) json.RawMessage {
-	var a struct {
-		Suite         *string `json:"suite"`
-		RecipientSPKI B64     `json:"recipient_spki"`
-		Info          string  `json:"info"`
-		AAD           B64     `json:"aad"`
-		Plaintext     B64     `json:"plaintext"`
-		EphemeralSeed B64     `json:"ephemeral_seed"`
-	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	suite, err := needStr(a.Suite, "suite")
+func callHPKESeal(a args) json.RawMessage {
+	suite, err := a.str("suite")
 	if err != nil {
-		return failErr(codeArgs, err)
+		return failAs(codeArgs, err)
 	}
 	if !SuiteKnown(suite) {
 		return fail("envelope_invalid", "version or suite")
 	}
-	pub, err2 := pubIn(a.RecipientSPKI, "recipient_spki")
-	if err2 != nil {
-		return failErr(codeFor(err2, "parse"), err2)
+	pub, err := a.pub("recipient_spki")
+	if err != nil {
+		return failAs("parse", err)
+	}
+	// In the core's order after the key: info, aad, plaintext, then the test-only seed. info and
+	// plaintext were read as empty when they were absent, and a seed of the wrong length was `parse`
+	// here and "" a fresh seal (R15, F7, R16, T13).
+	info, err := a.str("info")
+	if err != nil {
+		return failAs(codeArgs, err)
+	}
+	aad, err := a.optBytes("aad")
+	if err != nil {
+		return failAs(codeArgs, err)
+	}
+	plaintext, err := a.bytes("plaintext")
+	if err != nil {
+		return failAs(codeArgs, err)
+	}
+	seed, err := a.seed32("ephemeral_seed")
+	if err != nil {
+		return failAs(codeArgs, err)
 	}
 	var enc, ct []byte
-	if len(a.EphemeralSeed) > 0 {
-		seed := a.EphemeralSeed
-		if len(seed) != 32 {
-			return fail("parse", "ephemeral_seed must be 32 bytes")
-		}
-		enc, ct, err = sealWith(suite, pub, []byte(a.Info), a.AAD, a.Plaintext, seed)
+	if seed != nil {
+		enc, ct, err = sealWith(suite, pub, []byte(info), aad, plaintext, seed)
 	} else {
-		enc, ct, err = Seal(suite, pub, []byte(a.Info), a.AAD, a.Plaintext)
+		enc, ct, err = Seal(suite, pub, []byte(info), aad, plaintext)
 	}
 	if err != nil {
 		return failErr("envelope_invalid", err)
@@ -62,82 +66,107 @@ func callHPKESeal(args json.RawMessage) json.RawMessage {
 	return ok(map[string]any{"enc": B64url(enc), "ct": B64url(ct)})
 }
 
-func callHPKEOpen(args json.RawMessage) json.RawMessage {
-	var a struct {
-		Suite          *string `json:"suite"`
-		RecipientPKCS8 B64     `json:"recipient_pkcs8"`
-		RecipientSPKI  B64     `json:"recipient_spki"`
-		Info           string  `json:"info"`
-		AAD            B64     `json:"aad"`
-		Enc            B64     `json:"enc"`
-		Ct             B64     `json:"ct"`
-	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	suite, err := needStr(a.Suite, "suite")
+func callHPKEOpen(a args) json.RawMessage {
+	suite, err := a.str("suite")
 	if err != nil {
-		return failErr(codeArgs, err)
+		return failAs(codeArgs, err)
 	}
 	if !SuiteKnown(suite) {
 		return fail("envelope_invalid", "version or suite")
 	}
-	priv, err2 := privIn(a.RecipientPKCS8, "recipient_pkcs8")
-	if err2 != nil {
-		return failErr(codeFor(err2, "parse"), err2)
+	priv, err := a.priv("recipient_pkcs8")
+	if err != nil {
+		return failAs("parse", err)
 	}
-	pub, err2 := pubIn(a.RecipientSPKI, "recipient_spki")
-	if err2 != nil {
-		return failErr(codeFor(err2, "parse"), err2)
+	pub, err := a.pub("recipient_spki")
+	if err != nil {
+		return failAs("parse", err)
 	}
-	pt, err := Open(suite, priv, pub, []byte(a.Info), a.AAD, a.Enc, a.Ct)
+	// info, enc and ct absent were read as empty and answered "does not open" (R15, F7).
+	info, err := a.str("info")
+	if err != nil {
+		return failAs(codeArgs, err)
+	}
+	aad, err := a.optBytes("aad")
+	if err != nil {
+		return failAs(codeArgs, err)
+	}
+	enc, err := a.bytes("enc")
+	if err != nil {
+		return failAs(codeArgs, err)
+	}
+	ct, err := a.bytes("ct")
+	if err != nil {
+		return failAs(codeArgs, err)
+	}
+	pt, err := Open(suite, priv, pub, []byte(info), aad, enc, ct)
 	if err != nil {
 		return failErr("envelope_invalid", err)
 	}
 	return ok(map[string]any{"plaintext": B64url(pt)})
 }
 
-func callSealRequest(args json.RawMessage) json.RawMessage {
-	var a sealArgs
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
+func callSealRequest(a args) json.RawMessage {
+	leafDER, err := a.bytes("recipient_leaf")
+	if err != nil {
+		return failAs(codeArgs, err)
 	}
-	if err := need(a.RecipientLeaf, "recipient_leaf"); err != nil {
-		return failErr(codeArgs, err)
-	}
-	leaf, err := Parse(a.RecipientLeaf)
+	leaf, err := Parse(leafDER)
 	if err != nil {
 		return failErr("parse", err)
 	}
-	o, err := a.opts(leaf.PublicKey)
+	o, err := sealArgs(a, leaf.PublicKey, func(o *SealOpts) error {
+		method, err := a.optStr("method")
+		if err != nil {
+			return err
+		}
+		o.Method = "tools/call"
+		if method != nil {
+			o.Method = *method
+		}
+		// `params` absent is {} (the contract's note); present, it is sealed as given.
+		o.Params = a["params"]
+		if o.Params == nil {
+			o.Params = json.RawMessage(`{}`)
+		}
+		return nil
+	}, func(o *SealOpts) error {
+		cty, err := a.optStr("cty")
+		if err != nil {
+			return err
+		}
+		o.Cty = CtyCall
+		if cty != nil {
+			o.Cty = *cty
+		}
+		return nil
+	})
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs("parse", err)
 	}
-	o.Method, o.Params, o.Cty = a.Method, a.Params, a.Cty
-	env, err := SealRequest(o)
+	env, err := sealRequest(o)
 	if err != nil {
-		return failErr(codeFor(err, "envelope_invalid"), err)
+		return failAs("envelope_invalid", err)
 	}
 	return ok(env)
 }
 
-func callSealResult(args json.RawMessage) json.RawMessage {
-	var a sealArgs
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	pub, err := pubIn(a.RecipientSPKI, "recipient_spki")
+func callSealResult(a args) json.RawMessage {
+	pub, err := a.pub("recipient_spki")
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs("parse", err)
 	}
-	o, err := a.opts(pub)
+	o, err := sealArgs(a, pub, func(o *SealOpts) error {
+		// Present is present: `null` too is a result, as the core reads it.
+		o.Result, o.Error = a["result"], a["error"]
+		return nil
+	}, nil)
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs("parse", err)
 	}
-	o.Result, o.Error = a.Result, a.Error
-	env, err := SealResult(o)
+	env, err := sealResult(o)
 	if err != nil {
-		return failErr(codeFor(err, "envelope_invalid"), err)
+		return failAs("envelope_invalid", err)
 	}
 	return ok(env)
 }
@@ -265,46 +294,60 @@ func callDecide(args json.RawMessage) json.RawMessage {
 	return ok(d)
 }
 
-type sealArgs struct {
-	RecipientLeaf B64             `json:"recipient_leaf"`
-	RecipientSPKI B64             `json:"recipient_spki"`
-	SenderPKCS8   B64             `json:"sender_pkcs8"`
-	Form          string          `json:"form"`
-	SenderChain   []B64           `json:"sender_chain"`
-	Method        string          `json:"method"`
-	Params        json.RawMessage `json:"params"`
-	Result        json.RawMessage `json:"result"`
-	Error         json.RawMessage `json:"error"`
-	MsgID         string          `json:"msg_id"`
-	TS            int64           `json:"ts"`
-	Exp           int64           `json:"exp"`
-	Cty           string          `json:"cty"`
-	EphemeralSeed B64             `json:"ephemeral_seed"`
-}
-
-func (a sealArgs) opts(recipient *PublicKey) (SealOpts, error) {
-	sender, err := privIn(a.SenderPKCS8, "sender_pkcs8")
+// sealArgs reads what seal_request and seal_result share, in the core's order (api/envelopes.rs):
+// the sender's key, the chain (decoded where it is read, required only when the form needs it),
+// the form, the body's own members (`body`: method and params, or result and error), msg_id, ts, exp,
+// the members after it (`after`: cty), and the test-only seed. Every member is a value as given: ts
+// and exp may be 0, method and cty may be "" (C2, T7, R18), and the defaults are an absent member's.
+// The chain's presence and length are judged when the proof member is made, after all of them, as
+// the core judges them (F10, R19).
+func sealArgs(a args, recipient *PublicKey, body, after func(*SealOpts) error) (SealOpts, error) {
+	o := SealOpts{RecipientKey: recipient}
+	var err error
+	if o.Sender, err = a.priv("sender_pkcs8"); err != nil {
+		return o, err
+	}
+	if o.SenderChain, err = a.presentChain("sender_chain"); err != nil {
+		return o, err
+	}
+	form, err := a.optStr("form")
 	if err != nil {
-		return SealOpts{}, err
+		return o, err
 	}
-	form := a.Form
-	if form == "" {
-		form = "chain"
+	o.Form = "chain"
+	if form != nil {
+		o.Form = *form
 	}
-	if form != "chain" && form != "leaf" {
-		return SealOpts{}, errArg("form is chain or leaf")
+	if o.Form != "chain" && o.Form != "leaf" {
+		return o, errArg("form is chain or leaf")
 	}
-	if form == "chain" && a.SenderChain == nil {
-		return SealOpts{}, errArg("the chain form needs sender_chain")
+	if err := body(&o); err != nil {
+		return o, err
 	}
-	if a.MsgID == "" {
-		return SealOpts{}, errArg("msg_id is required")
+	if o.MsgID, err = a.id("msg_id"); err != nil {
+		return o, err
 	}
-	if a.TS == 0 {
-		return SealOpts{}, errArg("ts is required")
+	if o.TS, err = a.int("ts"); err != nil {
+		return o, err
 	}
-	if a.EphemeralSeed != nil && len(a.EphemeralSeed) != 32 {
-		return SealOpts{}, parseError{"ephemeral_seed must be 32 bytes"}
+	exp, err := a.optInt("exp")
+	if err != nil {
+		return o, err
 	}
-	return SealOpts{RecipientKey: recipient, Sender: sender, Form: form, SenderChain: chainOf(a.SenderChain), MsgID: a.MsgID, TS: a.TS, Exp: a.Exp, Seed: a.EphemeralSeed}, nil
+	o.Exp = o.TS + 600
+	if exp != nil {
+		o.Exp = *exp
+	}
+	if after != nil {
+		if err := after(&o); err != nil {
+			return o, err
+		}
+	}
+	if o.Seed, err = a.seed32("ephemeral_seed"); err != nil {
+		return o, err
+	}
+	if o.Form == "chain" && o.SenderChain == nil {
+		return o, errArg("the chain form needs sender_chain")
+	}
+	return o, nil
 }

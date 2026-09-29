@@ -16,7 +16,7 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   the wrong type, an undeclared member, and each required member absent beside each other member of
   the wrong type (read order) — 1103 cases, varied from one named hand-written case per function
   that succeeds on both ports. 463 cases failed when they were written (459 generated, and 4 written
-  beside them), 213 fail today (211 and 2); each is listed in `js/cases/known-divergences.json` with
+  beside them), 122 fail today (120 and 2); each is listed in `js/cases/known-divergences.json` with
   the audit finding that closes it, and the run fails on any other failure, on an entry whose case
   passes, and on an entry nobody has.
 - The coverage gate fails when a declared error code is not produced by both ports in one case they
@@ -70,6 +70,17 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   `issue_tbs_from_csr` check the request before `root_cn`, `now` and `valid_days`, and answer bytes
   that do not read as `parse`, as the core does, where this port said `bad_request` for everything
   (R27, T15, F3).
+- **A zero value is a value at the envelope boundary too** (cluster B): the Go port's `seal_request`
+  and `seal_result` seal `ts: 0`, `exp: 0`, `method: ""` and `cty: ""` as given, as the core and the
+  seed do, where it read them as absent (a `ts` of 0 refused, an `exp` of 0 made ts+600, an empty
+  method or cty replaced by its default); an absent `params` is `{}`, as the contract's note says,
+  where it was refused as not JSON (T7, F8, R17, R18, C2, F9). `hpke_seal` and `hpke_open` require
+  `info`, `plaintext`, `enc` and `ct`, which were read as empty (R15, F7); `ephemeral_seed` of any
+  length but 32, `""` included, is `bad_request` `ephemeral_seed is 32 bytes` in both functions,
+  where it was `parse` in one and a fresh seal in the other (R16, T13). The members are read in the
+  core's order, the chain judged when the proof member is made, before the result (F10, R19). The
+  typed `SealRequest` and `SealResult` keep their zero-value defaults (the node sets `Exp` and never
+  `Cty`); an absent `Params` there is `{}` too.
 - The core reads three functions in the contract's order where the Go port already did: `card_decode`
   reads `vcard` before `now` (R25); `key_from_seed` reads `alg` before the seed (T21, R01; the Go port's
   `KeyFromSeed` also judges the algorithm first now); `vault_seal` answers `empty passphrase` before a
