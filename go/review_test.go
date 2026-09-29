@@ -375,32 +375,23 @@ func TestEveryP256SignatureIsTheLowSTwin(t *testing.T) {
 	}
 }
 
-// RFC 8785 prints a number as ECMAScript's Number does. The first ten rows are `canonical.rs`'s own
-// table, so the two ports are held to one list; the rest are where this port used to differ from it
-// and from the seed — Go's `%g` writes a two-digit exponent and turns to one at 1e-5, negative zero
-// printed as `-0`, and an integer past 2^53 kept digits a double does not have.
+// RFC 8785 prints a number as ECMAScript's Number does. The rows are contract/contract.json's
+// CanonicalNumbers, one list, which canonical.rs's numbers_as_ecmascript_prints_them runs through the
+// Rust core too (each port carried its own copy of the table until 2026-09-29, held to the other by
+// nothing but a comment saying so). Among them are where this port used to differ from the core and
+// the seed: Go's `%g` writes a two-digit exponent and turns to one at 1e-5, negative zero printed as
+// `-0`, and an integer past 2^53 kept digits a double does not have.
 func TestNumbersAsECMAScriptPrintsThem(t *testing.T) {
-	for _, c := range [][2]string{
-		{"1e21", "1e+21"},
-		{"1.5e300", "1.5e+300"},
-		{"1e-7", "1e-7"},
-		{"0.000001", "0.000001"},
-		{"100.0", "100"},
-		{"9223372036854775808.0", "9223372036854776000"},
-		{"1e20", "100000000000000000000"},
-		{"0.1", "0.1"},
-		{"-0.0", "0"},
-		{"42", "42"},
-		{"1e-5", "0.00001"},
-		{"0.0000001", "1e-7"},
-		{"1.25e-9", "1.25e-9"},
-		{"-1e-7", "-1e-7"},
-		{"1e100", "1e+100"},
-		{"9007199254740992", "9007199254740992"},
-		{"9007199254740993", "9007199254740992"},
-		{"-9007199254740993", "-9007199254740992"},
-		{"12345678901234567890", "12345678901234567000"},
-	} {
+	var table struct {
+		Const [][2]string `json:"const"`
+	}
+	if err := json.Unmarshal(contractDefs(t)["CanonicalNumbers"], &table); err != nil {
+		t.Fatal(err)
+	}
+	if len(table.Const) < 19 {
+		t.Fatalf("the contract carries %d rows", len(table.Const))
+	}
+	for _, c := range table.Const {
 		v, err := decodeJSON([]byte(c[0]))
 		if err != nil {
 			t.Fatalf("%s: %v", c[0], err)

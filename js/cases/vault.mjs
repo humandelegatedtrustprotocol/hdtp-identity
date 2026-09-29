@@ -45,6 +45,22 @@ export default function vault({ add, expect }, f) {
   add('vault_open with a passphrase that is wrong', 'vault_open', { passphrase: 'wrong', vault: { format: 'pact-vault/1', kdf: { name: 'argon2id', ...K }, salt: b64url(new Uint8Array(16)), nonce: b64url(new Uint8Array(12)), ct: b64url(new Uint8Array(48)) } });
   add('vault_open of a document that is not a vault', 'vault_open', { passphrase: 'x', vault: { format: 'something-else' } });
   add('vault_open of no document at all', 'vault_open', { passphrase: 'x' });
+  // C12 — the ranges at their edges, from contract/contract.json's `Kdf`, which a test in each port holds
+  // its bounds to: the last value in, where it is cheap to derive with (t and p at the memory floor),
+  // and the first value out. The memory ceiling's accepted side is 2 GiB and is not asked for here; its
+  // refused side is the unit tests' (see the note on KDF_EDGES).
+  const { m_kib: M, t: T, p: P } = f.defs.Kdf.properties;
+  for (const [what, kdf, sealed] of [
+    ['the most passes the contract allows', { name: 'argon2id', m_kib: M.minimum, t: T.maximum, p: 1 }, true],
+    ['the most lanes the contract allows', { name: 'argon2id', m_kib: M.minimum, t: 1, p: P.maximum }, true],
+    ['one lane more than the contract allows', { name: 'argon2id', m_kib: M.minimum, t: 1, p: P.maximum + 1 }, false],
+    ['one KiB less than the contract allows', { name: 'argon2id', m_kib: M.minimum - 1, t: 1, p: 1 }, false],
+  ]) {
+    const args = { passphrase: 'a passphrase', plaintext: { v: 2 }, kdf, salt: SALT, nonce: NONCE };
+    add(`vault_seal with ${what}`, 'vault_seal', args);
+    if (sealed) add(`vault_open of what vault_seal made with ${what}`, 'vault_open', { passphrase: 'a passphrase', vault: f.wasm.call('vault_seal', args).vault });
+    else expect(`vault_seal with ${what}`, { error: 'vault', why: 'kdf parameters out of range' });
+  }
   for (const [what, kdf] of KDF_EDGES) {
     add(`vault_seal with ${what}`, 'vault_seal', { passphrase: 'a passphrase', plaintext: { v: 2 }, kdf, salt: SALT, nonce: NONCE });
     add(`vault_open of a document with ${what}`, 'vault_open', { passphrase: 'a passphrase', vault: { format: 'pact-vault/1', kdf, salt: SALT, nonce: NONCE, ct: b64url(new Uint8Array(32)) } });

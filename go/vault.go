@@ -105,8 +105,8 @@ func vaultDoc(v Vault) map[string]any {
 	}
 }
 
-// The range a passphrase KDF may name, at BOTH ends, matching the Rust core's four numbers exactly
-// (vault.rs). The parameters come out of the document and are used before the passphrase is tested,
+// The range a passphrase KDF may name, at BOTH ends: contract/contract.json's `Kdf`, which
+// constants_test.go holds these to (and vault.rs's tests the Rust core's). The parameters come out of the document and are used before the passphrase is tested,
 // so forging them is free: unbounded above, `m_kib: 4294967295` asked x/crypto/argon2 for terabytes;
 // unbounded below, `m_kib: 8` put the person's root behind a KDF a laptop brute-forces, and
 // x/crypto's own clamp then quietly rewrote the cost so this port could write a document the Rust

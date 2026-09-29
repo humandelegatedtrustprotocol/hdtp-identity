@@ -24,6 +24,14 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   `TestCallNeverPanics` reads it and now fails on an answer of `internal` (its `recover()` turned a
   panic into a JSON object, which the sweep accepted), and the core has the same sweep
   (`tests/boundary.rs`) (TC-14).
+- **One copy of each duplicated constant** (S6): `contract/contract.json` carries `Windows` (the
+  skew, the envelope lifetime, the tombstone and claim windows, the leaf ceiling, how far ahead a
+  signing request may expire), `KdfDefault` beside `Kdf`/`KdfArgs`'s bounds, `CanonicalNumbers`
+  (the 19-row ECMAScript number table each port's test carried a copy of, C11) and `LimitsIdle`; a
+  test in each port holds its constants to them (`tests/constants.rs`, `vault.rs`, `canonical.rs`;
+  `go/constants_test.go`, `review_test.go`). Parity cases sit at the edges they read: the tombstone
+  and claim windows a second inside and exactly at the end (C13), and the most passes and lanes, one
+  lane more and one KiB less than `Kdf` allows (C12).
 - **JS loader:** `call(name, null)` hands `null` to the core, which answers `args is a JSON object`
   as the Go port does; it used to be made `{}` (`js/index.mjs`, `js/worker.mjs`). Only `args` left
   out is `{}`. The parity case `args that are null` sends `null` for the first time (TC-2).

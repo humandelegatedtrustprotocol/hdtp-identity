@@ -87,7 +87,9 @@ impl Default for Kdf {
 /// with the person's ROOT behind a KDF a laptop brute-forces.
 ///
 /// The ceiling is far above any honest wallet and the floor is the documented default, so nothing a
-/// real caller asks for moves. The Go port carries the same four numbers.
+/// real caller asks for moves. The Go port carries the same four numbers, and contract/contract.json's
+/// `Kdf` and `KdfArgs` a third copy of them: a test here and one in go/constants_test.go hold each
+/// port's to the contract's.
 const MAX_M_KIB: u32 = 1 << 21; // 2 GiB
 const MIN_M_KIB: u32 = 8 * 1024; // 8 MiB: enough to be worth doing, low enough for a test
 const MAX_T: u32 = 16;
@@ -303,6 +305,43 @@ mod tests {
 
     fn small() -> Kdf {
         Kdf { m_kib: 8192, t: 1, p: 1 }
+    }
+
+    /// contract/contract.json's `Kdf`, `KdfArgs` and `KdfDefault` are the bounds and the default this
+    /// file writes down (and go/constants_test.go holds the Go port's to the same): each bound read
+    /// from the contract, and one past it refused through the boundary, which costs nothing because
+    /// the range is checked before Argon2id is asked for anything. The accepted side of the memory
+    /// ceiling is 2 GiB, which no test allocates; the equality above is what holds it.
+    #[test]
+    fn the_contracts_kdf_bounds_and_default_are_these() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../contract/contract.json");
+        let contract: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let defs = &contract["$defs"];
+        let mine = json!({ "m_kib": [MIN_M_KIB, MAX_M_KIB], "t": [1, MAX_T], "p": [1, MAX_P] });
+        for schema in ["Kdf", "KdfArgs"] {
+            let p = &defs[schema]["properties"];
+            let theirs = json!({
+                "m_kib": [p["m_kib"]["minimum"], p["m_kib"]["maximum"]],
+                "t": [p["t"]["minimum"], p["t"]["maximum"]],
+                "p": [p["p"]["minimum"], p["p"]["maximum"]],
+            });
+            assert_eq!(theirs, mine, "contract/contract.json's {schema} and this file's bounds");
+        }
+        assert_eq!(defs["KdfDefault"]["const"], Kdf::default().to_value(), "contract/contract.json's KdfDefault and Kdf::default()");
+        for (member, over) in [
+            ("m_kib", u64::from(MAX_M_KIB) + 1),
+            ("m_kib", u64::from(MIN_M_KIB) - 1),
+            ("t", u64::from(MAX_T) + 1),
+            ("t", 0),
+            ("p", u64::from(MAX_P) + 1),
+            ("p", 0),
+        ] {
+            let mut kdf = Kdf::default().to_value();
+            kdf[member] = json!(over);
+            let args = json!({ "passphrase": "x", "plaintext": { "v": 2 }, "kdf": kdf }).to_string();
+            let out: Value = serde_json::from_str(&crate::api::call("vault_seal", &args)).unwrap();
+            assert_eq!(out, json!({ "error": "vault", "why": "kdf parameters out of range" }), "{member} {over}");
+        }
     }
 
     #[test]

@@ -12,6 +12,7 @@
 //   - a sealed RESULT (`answerTo`, and the result in cases/envelopes.mjs): the seed seals requests.
 // And one is made by the OTHER port on purpose: 'verify a signature the other port made'.
 import { generateKeyPairSync } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { seed, ed25519FromSeed, x25519FromSeed, pkcs8Of, spkiOf, b64url, fingerprint, keyId } from '../../../pact-protocol/vectors/lib/keys.mjs';
 import { buildRoot, buildLeaf } from '../../../pact-protocol/vectors/lib/x509.mjs';
 import { encodeCard } from '../../../pact-protocol/vectors/lib/card.mjs';
@@ -111,8 +112,14 @@ export function fixtures({ wasm, go }) {
   // it is handed in, so none of its bytes reach an answer.
   const rsaSpki = b64url(generateKeyPairSync('rsa', { modulusLength: 2048 }).publicKey.export({ type: 'spki', format: 'der' }));
 
+  // The constants contract/contract.json carries once for both ports (its `Windows`, `Kdf`, …): a case
+  // at an edge reads the edge from here, so it moves with the contract and cannot go stale beside it.
+  const defs = JSON.parse(readFileSync(new URL('../../contract/contract.json', import.meta.url), 'utf8')).$defs;
+  // An instant `seconds` before `now`, as an argument writes one.
+  const before = (seconds) => new Date((at(now) - seconds) * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+
   return {
-    wasm, go, now, at, ENDPOINT,
+    wasm, go, now, at, ENDPOINT, defs, before,
     rootKey, hostKey, p256Key, callerKey,
     rootDer, leafDer, rootDerBytes, leafDerBytes,
     rootPkcs8, hostPkcs8, p256Pkcs8, callerPkcs8,

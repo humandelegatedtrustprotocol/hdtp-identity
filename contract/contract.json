@@ -237,6 +237,20 @@
       "required": ["root", "endpoint", "at"],
       "additionalProperties": false
     },
+    "Windows": {
+      "description": "The protocol's windows, in seconds unless named otherwise, as both ports hold them (a test in each holds its constants to these, and a host that needs one reads it here): `skew_s`, how far a received envelope's `ts` may be from now, and `max_lifetime_s`, the most `exp − ts` may be (SPEC §13.3); `tombstone_s`, how long a removal tombstone holds a returning root at `ask` (§5.3), and `claim_window_s`, how long an endpoint stays claimed by the root that was pinned at it (§5.2) — each an age strictly under the window; `max_leaf_days`, the longest leaf a verifier accepts (§14.2); `signing_max_ahead_s`, the furthest ahead a signing request may expire (§9.1).",
+      "const": { "skew_s": 300, "max_lifetime_s": 2592000, "tombstone_s": 2592000, "claim_window_s": 2592000, "max_leaf_days": 398, "signing_max_ahead_s": 600 }
+    },
+    "CanonicalNumbers": {
+      "description": "How the canonical JSON of an envelope header and a vault's authenticated data writes a number (RFC 8785 §3.2.2.3: as ECMAScript's Number prints it). Each row is a JSON number as a caller may write it and the text both ports canonicalise it to; a test in each port runs every row.",
+      "const": [
+        ["1e21", "1e+21"], ["1.5e300", "1.5e+300"], ["1e-7", "1e-7"], ["0.000001", "0.000001"], ["100.0", "100"],
+        ["9223372036854775808.0", "9223372036854776000"], ["1e20", "100000000000000000000"], ["0.1", "0.1"], ["-0.0", "0"], ["42", "42"],
+        ["1e-5", "0.00001"], ["0.0000001", "1e-7"], ["1.25e-9", "1.25e-9"], ["-1e-7", "-1e-7"], ["1e100", "1e+100"],
+        ["9007199254740992", "9007199254740992"], ["9007199254740993", "9007199254740992"], ["-9007199254740993", "-9007199254740992"],
+        ["12345678901234567890", "12345678901234567000"]
+      ]
+    },
     "NodeState": {
       "type": "object",
       "properties": {
@@ -401,7 +415,11 @@
       },
       "required": [],
       "additionalProperties": false,
-      "description": "The same, as an ARGUMENT to `vault_seal`: every member may be left out and takes the default (64 MiB, t 3, p 1), and what is given is held to the same range as a document's."
+      "description": "The same, as an ARGUMENT to `vault_seal`: every member may be left out and takes `KdfDefault`'s, and what is given is held to the same range as a document's."
+    },
+    "KdfDefault": {
+      "description": "The key derivation `vault_seal` uses for a member its caller leaves out: 64 MiB, three passes, one lane. A test in each port holds its default to this, and its bounds to `Kdf`'s and `KdfArgs`'s.",
+      "const": { "name": "argon2id", "m_kib": 65536, "t": 3, "p": 1 }
     },
     "VaultDocument": {
       "type": "object",
@@ -829,6 +847,10 @@
         "updated_at"
       ],
       "additionalProperties": false
+    },
+    "LimitsIdle": {
+      "description": "How long, in milliseconds, a bucket's row may sit untouched before it is full whatever it budgets: a host may delete a row older than this, and `limits_rules_check` refuses rules whose contact bucket takes longer to refill from empty (crates/pact-limits `IDLE_MS`, go/limits.go `LimitsIdleMS`; a test in each holds it to this).",
+      "const": 3600000
     }
   },
   "methods": {
