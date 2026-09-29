@@ -38,12 +38,12 @@ func callExportRead(a args) json.RawMessage {
 	if err != nil {
 		return failErr(codeArgs, err)
 	}
-	now, bad := a.instant("now")
-	if bad != nil {
-		return bad
+	now, err := a.instant("now")
+	if err != nil {
+		return failErr(codeFor(err, "parse"), err)
 	}
-	threadsCSV := a.optStr("threads_csv")
-	r, err := exportRead(directory, a.optStr("manifest"), a.optStr("contacts_csv"), threadsCSV, owner, now)
+	threadsCSV := a.optText("threads_csv")
+	r, err := exportRead(directory, a.optText("manifest"), a.optText("contacts_csv"), threadsCSV, owner, now)
 	if err != nil {
 		return fail(codeArgs, err.Error())
 	}
@@ -125,9 +125,9 @@ func callExportWrite(a args) json.RawMessage {
 	if err != nil {
 		return failErr(codeArgs, err)
 	}
-	at, bad := a.instant("exported_at")
-	if bad != nil {
-		return bad
+	at, err := a.instant("exported_at")
+	if err != nil {
+		return failErr(codeFor(err, "parse"), err)
 	}
 	tool, err := a.str("tool")
 	if err != nil {
@@ -230,9 +230,9 @@ func callBookRows(a args) json.RawMessage {
 	if err != nil {
 		return failErr(codeArgs, err)
 	}
-	at, bad := a.instant("exported_at")
-	if bad != nil {
-		return bad
+	at, err := a.instant("exported_at")
+	if err != nil {
+		return failErr(codeFor(err, "parse"), err)
 	}
 	rows, err := bookRows(contacts, at)
 	if err != nil {

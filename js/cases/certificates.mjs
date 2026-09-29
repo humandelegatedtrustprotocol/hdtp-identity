@@ -182,4 +182,8 @@ export default function certificates({ add, expect }, f) {
   add('is_normal_https with args holding a lone low surrogate', 'is_normal_https', { url: 'https://x.example/\udc00' });
   expect('is_normal_https with args holding a lone low surrogate', { error: 'bad_request', why: 'args: a string holds half of a UTF-16 surrogate pair' });
   add('is_normal_https with args holding a surrogate pair', 'is_normal_https', { url: 'https://x.example/\ud83d\ude00' });
+  // A member named exactly: the Go port's struct decoding matched members without regard to case, so
+  // `CN` filled `cn` there and a root was built for a member the Rust core never read.
+  add('build_root with CN, not cn', 'build_root', { CN: 'Mallory' });
+  expect('build_root with CN, not cn', { error: 'bad_request', why: 'build_root takes no member "CN"' });
 }

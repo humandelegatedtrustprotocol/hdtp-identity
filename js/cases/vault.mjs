@@ -150,4 +150,8 @@ export default function vault({ add, expect }, f) {
     ['a root held on a card, which this function cannot sign with', { error: 'bad_request', why: 'this root is held on a card: wallet_issue signs only with a key the vault holds' }],
   ]) expect(`wallet_issue with ${what}`, want);
   expect('vault_seal of an earlier generation under a KDF out of range', { error: 'bad_request', why: 'a vault plaintext is v 2: the root, or the record' });
+  // The contract's order: an empty passphrase is judged before a missing plaintext (T21). The core
+  // named the plaintext first, and the Go port the passphrase.
+  add('vault_seal with an empty passphrase and no plaintext', 'vault_seal', { passphrase: '', kdf: K });
+  expect('vault_seal with an empty passphrase and no plaintext', { error: 'bad_request', why: 'empty passphrase' });
 }

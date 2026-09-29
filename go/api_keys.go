@@ -1,20 +1,15 @@
 package pactidentity
 
 // The Keys section of contract/contract.json: a body for each function it declares, which
-// api.go's `functions` map dispatches by name, and the helpers only these use.
+// api.go's `functions` map dispatches by name, and the helpers only these use. Each reads its members
+// as api/keys.rs does, in its order.
 
 import "encoding/json"
 
-func callGenerateKey(args json.RawMessage) json.RawMessage {
-	var a struct {
-		Alg *string `json:"alg"`
-	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	alg, err := needStr(a.Alg, "alg")
+func callGenerateKey(a args) json.RawMessage {
+	alg, err := a.str("alg")
 	if err != nil {
-		return failErr(codeArgs, err)
+		return failAs(codeArgs, err)
 	}
 	priv, err := GenerateKey(alg)
 	if err != nil {
@@ -22,7 +17,7 @@ func callGenerateKey(args json.RawMessage) json.RawMessage {
 	}
 	o, err := keyOut(priv)
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs("parse", err)
 	}
 	return ok(o)
 }
@@ -30,129 +25,102 @@ func callGenerateKey(args json.RawMessage) json.RawMessage {
 // §2.1. Two calls rather than one so a wallet never hardcodes the salt: the constant lives here,
 // the vectors prove it, and a caller that gets it wrong fails loudly instead of quietly becoming
 // somebody else.
-func callPrfSalt(args json.RawMessage) json.RawMessage {
+func callPrfSalt(args) json.RawMessage {
 	return ok(map[string]any{"salt": B64(PrfSalt()), "infos": DerivationInfos})
 }
 
-func callDeriveSeed(args json.RawMessage) json.RawMessage {
-	var a struct {
-		Prf  B64     `json:"prf"`
-		Info *string `json:"info"`
-	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	if err := need(a.Prf, "prf"); err != nil {
-		return failErr(codeArgs, err)
-	}
-	info, err := needStr(a.Info, "info")
+func callDeriveSeed(a args) json.RawMessage {
+	prf, err := a.bytes("prf")
 	if err != nil {
-		return failErr(codeArgs, err)
+		return failAs(codeArgs, err)
 	}
-	seed, err := DeriveSeed(a.Prf, info)
+	info, err := a.str("info")
+	if err != nil {
+		return failAs(codeArgs, err)
+	}
+	seed, err := DeriveSeed(prf, info)
 	if err != nil {
 		return failErr(codeArgs, err)
 	}
 	return ok(map[string]any{"seed": B64(seed)})
 }
 
-func callKeyFromSeed(args json.RawMessage) json.RawMessage {
-	var a struct {
-		Alg  *string `json:"alg"`
-		Seed B64     `json:"seed"`
-	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	if err := need(a.Seed, "seed"); err != nil {
-		return failErr(codeArgs, err)
-	}
-	alg, err := needStr(a.Alg, "alg")
+// key_from_seed reads `alg` first, as CONTRACT §1 lists it: the algorithm, then the seed that is
+// read for it (T21's direction; the core read the seed's length first). A seed that is not a string
+// is `seed is required`, as the core reads it.
+func callKeyFromSeed(a args) json.RawMessage {
+	alg, err := a.str("alg")
 	if err != nil {
-		return failErr(codeArgs, err)
+		return failAs(codeArgs, err)
 	}
-	priv, err := KeyFromSeed(alg, a.Seed)
+	if err := algKnown(alg); err != nil {
+		return failAs(codeArgs, err)
+	}
+	if _, isText := a.text("seed"); !isText {
+		return fail(codeArgs, "seed is required")
+	}
+	seed, err := a.seed32("seed")
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs("parse", err)
+	}
+	priv, err := KeyFromSeed(alg, seed)
+	if err != nil {
+		return failAs("parse", err)
 	}
 	o, err := keyOut(priv)
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs("parse", err)
 	}
 	return ok(o)
 }
 
-func callPublicKey(args json.RawMessage) json.RawMessage {
-	var a struct {
-		PKCS8 B64 `json:"pkcs8"`
-	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	priv, err := privIn(a.PKCS8, "pkcs8")
+func callPublicKey(a args) json.RawMessage {
+	priv, err := a.priv("pkcs8")
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs("parse", err)
 	}
 	pub := priv.Public()
 	return ok(map[string]any{"alg": priv.Alg, "spki": B64url(pub.SPKI), "fingerprint": Fingerprint(pub.SPKI)})
 }
 
-func callKeyInfo(args json.RawMessage) json.RawMessage {
-	var a struct {
-		SPKI B64 `json:"spki"`
-	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	pub, err := pubIn(a.SPKI, "spki")
+func callKeyInfo(a args) json.RawMessage {
+	pub, err := a.pub("spki")
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs("parse", err)
 	}
 	return ok(map[string]any{"alg": pub.Alg, "fingerprint": Fingerprint(pub.SPKI), "key_id": B64url(KeyID(pub.SPKI))})
 }
 
-func callSign(args json.RawMessage) json.RawMessage {
-	var a struct {
-		PKCS8 B64 `json:"pkcs8"`
-		Data  B64 `json:"data"`
-	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	priv, err := privIn(a.PKCS8, "pkcs8")
+func callSign(a args) json.RawMessage {
+	priv, err := a.priv("pkcs8")
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs("parse", err)
 	}
-	if err := need(a.Data, "data"); err != nil {
-		return failErr(codeArgs, err)
-	}
-	sig, err := SignDetached(priv, a.Data)
+	data, err := a.bytes("data")
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs(codeArgs, err)
+	}
+	sig, err := SignDetached(priv, data)
+	if err != nil {
+		return failAs("parse", err)
 	}
 	return ok(map[string]any{"sig": B64url(sig)})
 }
 
-func callVerify(args json.RawMessage) json.RawMessage {
-	var a struct {
-		SPKI B64 `json:"spki"`
-		Data B64 `json:"data"`
-		Sig  B64 `json:"sig"`
-	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	pub, err := pubIn(a.SPKI, "spki")
+func callVerify(a args) json.RawMessage {
+	pub, err := a.pub("spki")
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs("parse", err)
 	}
-	if err := need(a.Data, "data"); err != nil {
-		return failErr(codeArgs, err)
+	data, err := a.bytes("data")
+	if err != nil {
+		return failAs(codeArgs, err)
 	}
-	if err := need(a.Sig, "sig"); err != nil {
-		return failErr(codeArgs, err)
+	sig, err := a.bytes("sig")
+	if err != nil {
+		return failAs(codeArgs, err)
 	}
-	return ok(map[string]any{"valid": VerifyDetached(pub, a.Data, a.Sig)})
+	return ok(map[string]any{"valid": VerifyDetached(pub, data, sig)})
 }
 
 func keyOut(priv *PrivateKey) (map[string]any, error) {

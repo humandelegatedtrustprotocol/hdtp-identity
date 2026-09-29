@@ -61,7 +61,7 @@ the tables is `contract/CONTRACT.template.md` and is written by hand.
 
 | Function | Input | Output | Notes |
 |---|---|---|---|
-| `version` | — | `spec`: string, `crate`?: string, `module`?: string<br>*never fails* | The build, not a rule: `spec` is the version of `pact-protocol/SPEC.md` the port implements and is the same everywhere; the other member names the port's own release, so the answers differ and nothing compares them. |
+| `version` | — | `spec`: string, `crate`?: string, `module`?: string<br>*fails:* `bad_request` | The build, not a rule: `spec` is the version of `pact-protocol/SPEC.md` the port implements and is the same everywhere; the other member names the port's own release, so the answers differ and nothing compares them. |
 - The Wasm boundary takes `&str` JSON and `&[u8]` DER and returns `String` JSON. The Go port exposes
   the same functions as Go functions on `[]byte`/`string` returning structs, plus a `pact-identity-go`
   binary that reads JSON requests on stdin, one per line (`{"fn": "<name>", "args": {...}}`), and
@@ -74,7 +74,7 @@ the tables is `contract/CONTRACT.template.md` and is written by hand.
 |---|---|---|---|
 | `generate_key` | `alg`: Alg | `alg`: Alg, `pkcs8`: Pkcs8, `spki`: Spki, `fingerprint`: Fingerprint<br>*fails:* `bad_request`, `unsupported` |  |
 | `key_from_seed` | `alg`: Alg, `seed`: Seed32 | `alg`: Alg, `pkcs8`: Pkcs8, `spki`: Spki, `fingerprint`: Fingerprint<br>*fails:* `bad_request`, `unsupported` | An Ed25519 seed is used directly; a P-256 scalar is the seed mod n, with 0 → 1 (the seed library's `keys.mjs`). Written for the vectors, and production API since SPEC §2.1: it is how a wallet turns a derived seed into its root. |
-| `prf_salt` | — | `salt`: Seed32, `infos`: [string]<br>*never fails* | SPEC §2.1's fixed PRF input, `SHA-256("pact/vault/1")`, and the three `info` strings. A call rather than a constant a caller copies, so the bytes live in one place and the vectors prove them. |
+| `prf_salt` | — | `salt`: Seed32, `infos`: [string]<br>*fails:* `bad_request` | SPEC §2.1's fixed PRF input, `SHA-256("pact/vault/1")`, and the three `info` strings. A call rather than a constant a caller copies, so the bytes live in one place and the vectors prove them. |
 | `derive_seed` | `prf`: Seed32, `info`: string | `seed`: Seed32<br>*fails:* `bad_request`, `parse` | `HKDF-SHA256(ikm = prf, salt = "", info, L = 32)`. **Refuses an `info` outside the three, and a `prf` that is not 32 bytes.** Both refusals are the point rather than hygiene: a mistyped domain separator would otherwise return 32 perfectly good bytes and silently derive an identity belonging to nobody, which is the one failure the derived-root design exists to prevent. |
 | `public_key` | `pkcs8`: Pkcs8 | `alg`: Alg, `spki`: Spki, `fingerprint`: Fingerprint<br>*fails:* `bad_request`, `parse`, `unsupported` |  |
 | `key_info` | `spki`: Spki | `alg`: Alg, `fingerprint`: Fingerprint, `key_id`: B64url<br>*fails:* `bad_request`, `parse`, `unsupported` | `key_id` is the 32 raw bytes of the fingerprint's hash. |
