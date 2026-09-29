@@ -23,8 +23,8 @@ func callCardEncode(a args) json.RawMessage {
 	if seal != nil {
 		sealPolicy = *seal
 	}
-	// A list of strings, or `extra is required` (the core drops an item that is not a string: the
-	// audit's T21, cluster C).
+	// A list of strings, or `extra is required`: an item that is not a string, null included, is
+	// refused, as the core refuses it (T21; it dropped the item and wrote the card without it).
 	var extra []string
 	if raw := a.present("extra"); raw != nil {
 		if raw[0] != '[' || json.Unmarshal(raw, &extra) != nil || holdsNull(raw) {

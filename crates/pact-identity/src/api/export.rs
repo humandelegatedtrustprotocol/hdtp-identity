@@ -41,7 +41,7 @@ pub(super) fn export_read(a: &Value) -> Result<Answer> {
     }
     let owner = s(a, "owner")?;
     let now = instant(a, "now")?;
-    let r = export::read(&directory, opt_s(a, "manifest"), opt_s(a, "contacts_csv"), opt_s(a, "threads_csv"), owner, now)?;
+    let r = export::read(&directory, opt_s(a, "manifest")?, opt_s(a, "contacts_csv")?, opt_s(a, "threads_csv")?, owner, now)?;
     // Written straight from the rows, which borrow the members' text: no tree of values beside them.
     Ok(Answer::Text(r.answer))
 }

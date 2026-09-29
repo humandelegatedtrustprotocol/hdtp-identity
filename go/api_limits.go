@@ -20,8 +20,8 @@ func limitsWhole(v any) (int64, bool) {
 	if !isNum {
 		return 0, false
 	}
-	i, err := strconv.ParseInt(string(n), 10, 64)
-	if err != nil || i < 0 || i > limitsMaxExact {
+	i, isInt := integerText(string(n))
+	if !isInt || i < 0 || i > limitsMaxExact {
 		return 0, false
 	}
 	return i, true

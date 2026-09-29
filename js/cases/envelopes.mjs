@@ -4,6 +4,7 @@ import { seed, b64url, pkcs8Of, spkiOf, fingerprint } from '../../../pact-protoc
 import { buildLeaf } from '../../../pact-protocol/vectors/lib/x509.mjs';
 import { sealDeterministic } from '../../../pact-protocol/vectors/lib/hpke.mjs';
 import { ENDPOINTS, bharat, BORN, DIES } from '../cast.mjs';
+import { RawArgs } from '../port.mjs';
 
 export default function envelopes({ add, expect }, f) {
   const { now, at, ENDPOINT, rootKey, hostKey, rootDer, leafDer, rootPkcs8, hostPkcs8, rootSpki, hostSpki, p256Spki, rsaSpki, rootFp, hostFp } = f;
@@ -68,6 +69,13 @@ export default function envelopes({ add, expect }, f) {
   ]) {
     add(`seal_request with ${what}`, 'seal_request', { ...toMe, ...args });
     expect(`seal_request with ${what}`, seeded(seedArgs));
+  }
+  // -0 is not an integer to the core's reader (serde takes it for a float), and the Go port sealed it
+  // as 0. Raw text: JSON.stringify writes -0 as 0.
+  for (const m of ['ts', 'exp']) {
+    const args = { ...toMe, params: {}, msg_id: 'p-8', ts: 1757000001, exp: 1757000601 };
+    add(`seal_request with ${m} -0`, 'seal_request', RawArgs.edit(args, `"${m}":${args[m]}`, `"${m}":-0`));
+    expect(`seal_request with ${m} -0`, { error: 'bad_request', why: `${m} is required` });
   }
   // The seed seals no results, so these two are held to each other.
   add('seal_result with ts 0 and exp 0', 'seal_result', { recipient_spki: hostSpki, sender_pkcs8: hostPkcs8, sender_chain: [leafDer, rootDer], result: { ok: true }, msg_id: 'p-7', ts: 0, exp: 0, ephemeral_seed: eph(7) });

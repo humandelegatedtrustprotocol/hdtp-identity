@@ -4,6 +4,7 @@
 // once its bucket is empty, the pending cap, a clock that went back, a stored aggregate over a burst
 // that shrank, and every argument that does not read. The sequences that hold the decision to the
 // cloud's TypeScript are js/cases/limits-vectors.json, replayed by js/limits.test.mjs.
+import { RawArgs } from '../port.mjs';
 
 export default function limits({ add, expect }) {
   // Arbitrary numbers, unlike PACT's defaults; the guest total and the pending cap have no approved
@@ -122,6 +123,10 @@ export default function limits({ add, expect }) {
     add(`limits_decide with ${what}`, 'limits_decide', decide({ kind: 'stranger_out' }, undefined, over));
     expect(`limits_decide with ${what}`, { error: 'bad_request', why });
   }
+  // -0 is not a whole number to the core's reader, which takes it for a float; the Go port read it
+  // as 0 and decided. Raw text: JSON.stringify writes -0 as 0.
+  add('limits_decide with a now of -0', 'limits_decide', RawArgs.edit(decide({ kind: 'stranger_out' }, undefined, { now: 1234567 }), '"now":1234567', '"now":-0'));
+  expect('limits_decide with a now of -0', { error: 'bad_request', why: 'now is a time in milliseconds' });
   add('limits_decide with nothing to work from', 'limits_decide', {});
   expect('limits_decide with nothing to work from', { error: 'bad_request', why: 'rules is required' });
 }

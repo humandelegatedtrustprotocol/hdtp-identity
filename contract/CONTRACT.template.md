@@ -40,6 +40,14 @@ the tables is `contract/CONTRACT.template.md` and is written by hand.
   (`parse`/`"not base64url"`, a parser's own words). A port whose zero value and missing value are
   the same thing loses this distinction, and both have: `{"spki": ""}` once read as "spki is
   required" in one port and as a truncated DER in the other. The JSON literal `null` counts as absent.
+- **A member of the wrong JSON type is refused, never read as absent** — an optional one too, which is
+  where the ports parted: one read `"serial": 7` as no serial and drew a random one, `"guest": "yes"`
+  as not a guest and `"exp": "7"` as ts + 600, and the other refused each. A base64url member that is
+  not a string answers `{"error": "parse", "why": "not base64url"}`, as bytes that will not decode
+  do; any other answers `bad_request` in words that name it — `<name> is required`, the words its
+  absence gets, unless the function has more particular ones (`first_line is a line number from 1`).
+  An integer is a number written without a fraction or an exponent, and not `-0`: `365.0` and `-0`
+  are not a number of days, although JavaScript reads both as one.
 - **The order a function reads its members is part of its answer.** When several required members are
   missing, the one named is the first the function needs, and both ports read them in the same order.
 - **A member a function does not declare is refused**, before any member is read: `{"error":

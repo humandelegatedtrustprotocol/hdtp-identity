@@ -65,17 +65,6 @@ func (a args) str(k string) (string, error) {
 	return s, nil
 }
 
-// optText is the core's `opt_s` as the export section reads it: anything but a string is absent.
-// Every other section refuses an optional member of the wrong type (optStr); the core reads them
-// all this way still, which the audit's cluster C changes in both ports.
-func (a args) optText(k string) *string {
-	s, isText := a.text(k)
-	if !isText {
-		return nil
-	}
-	return &s
-}
-
 // present is a member's JSON text, or nil when it is absent or null: CONTRACT §0, the JSON literal
 // null counts as absent.
 func (a args) present(k string) json.RawMessage {
@@ -95,8 +84,8 @@ func (a args) id(k string) (string, error) {
 	return s, err
 }
 
-// optStr is an optional string: absent or null is nil; present and not a string is `<k> is
-// required`, the answer for a member of the wrong type (the core's `opt_s` reads it as absent).
+// optStr is the core's `opt_s`, an optional string: absent or null is nil; present and not a string
+// is `<k> is required`, CONTRACT §0's answer for a member of the wrong type.
 func (a args) optStr(k string) (*string, error) {
 	if a.present(k) == nil {
 		return nil, nil
@@ -122,7 +111,7 @@ func (a args) instant(k string) (time.Time, error) {
 	return t, nil
 }
 
-// optInstant is the core's `opt_instant`, with optStr's reading of a member of the wrong type.
+// optInstant is the core's `opt_instant`: optStr's reading, then the instant's.
 func (a args) optInstant(k string) (*time.Time, error) {
 	s, err := a.optStr(k)
 	if s == nil || err != nil {
@@ -144,8 +133,8 @@ func (a args) bytes(k string) ([]byte, error) {
 	return a.optBytes(k)
 }
 
-// optBytes is the core's `opt_bytes`, with a member of the wrong type refused as bytes that will not
-// decode (the core's reads it as absent). Absent or null is nil; `""` is a non-nil empty slice.
+// optBytes is the core's `opt_bytes`: absent or null is nil; a member of the wrong type is refused as
+// bytes that will not decode; `""` is a non-nil empty slice.
 func (a args) optBytes(k string) ([]byte, error) {
 	if a.present(k) == nil {
 		return nil, nil
@@ -161,8 +150,8 @@ func (a args) optBytes(k string) ([]byte, error) {
 	return b, err
 }
 
-// int is the core's `int`: an integer written without a fraction or an exponent that fits 64 bits;
-// anything else, absent and null included, is `<k> is required`.
+// int is the core's `int`: an integer as integerText reads one; anything else, absent and null
+// included, is `<k> is required`.
 func (a args) int(k string) (int64, error) {
 	n, err := a.optInt(k)
 	if err == nil && n == nil {
@@ -174,22 +163,34 @@ func (a args) int(k string) (int64, error) {
 	return *n, nil
 }
 
-// optInt is an optional integer: absent or null is nil; present and not an integer is `<k> is
-// required` (the core's `opt_int` reads it as absent).
+// optInt is the core's `opt_int`, an optional integer: absent or null is nil; present and not an
+// integer is `<k> is required`.
 func (a args) optInt(k string) (*int64, error) {
 	raw := a.present(k)
 	if raw == nil {
 		return nil, nil
 	}
-	n, err := strconv.ParseInt(string(raw), 10, 64)
-	if err != nil {
+	n, isInt := integerText(string(raw))
+	if !isInt {
 		return nil, errArg(k + " is required")
 	}
 	return &n, nil
 }
 
-// boolean is an optional boolean: absent or null is false; present and not a boolean is `<k> is
-// required` (the core's `boolean` reads it as false, but for ledger_check's `move`).
+// integerText is a JSON number as the core reads an integer (serde_json's `as_i64`): digits with an
+// optional minus, no fraction, no exponent, within 64 bits — and not `-0`, which serde_json reads as
+// the float negative zero. strconv reads `-0` as 0, and so this port sealed an `exp` of -0 as 0 and
+// charged a limits `now` of -0 where the core refused both (S3-1).
+func integerText(s string) (int64, bool) {
+	if s == "-0" {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	return n, err == nil
+}
+
+// boolean is the core's `boolean`, an optional boolean: absent or null is false; present and not a
+// boolean is `<k> is required`.
 func (a args) boolean(k string) (bool, error) {
 	switch string(a.present(k)) {
 	case "":
