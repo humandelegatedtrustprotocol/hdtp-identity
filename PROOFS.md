@@ -8,9 +8,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 case can be listed as proven that did not pass. The cases that fail today are listed apart, at the
 end, each with the finding it waits on.
 
-Specification: **2.2.4**. **88** normative sentences, **2415** cross-port parity cases over **53** guarded functions, and **0** known divergences that fail today and are listed apart, at the end.
+Specification: **2.2.4**. **88** normative sentences, **2457** cross-port parity cases over **54** guarded functions, and **0** known divergences that fail today and are listed apart, at the end.
 
-Every answer of both ports is validated against `contract/contract.json` (**54** functions, spec 2.2.4): **4830** answers, of which **0** do not hold to the shape it declares — **0** of them in a known divergence. Of **124** declared error codes, **124** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 2.2.4): **4914** answers, of which **0** do not hold to the shape it declares — **0** of them in a known divergence. Of **127** declared error codes, **127** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 88 normative sentences of the specification
 
@@ -203,7 +203,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 2415 cross-port parity cases
+## The 2457 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -211,7 +211,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **2415** cases (**1133** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **53** of **53** functions compared whole on success.
+At the run that generated this file: **2457** cases (**1149** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **54** of **54** functions compared whole on success.
 
 ### `address_guard` — 50 cases · whole on success
 
@@ -726,6 +726,51 @@ At the run that generated this file: **2415** cases (**1133** of the run's cases
 - generated · decide · envelope absent, node "x"
 - generated · decide · node absent, now 7
 - generated · decide · node absent, envelope "x"
+
+### `decide_chain` — 42 cases · whole on success
+
+- decide_chain: a root nobody pins
+- decide_chain: a root nobody pins, at an address another root is pinned at
+- decide_chain: a root removed a second inside the tombstone window, with a newer leaf
+- decide_chain: a root removed exactly at the end of the tombstone window
+- decide_chain: a root removed with the leaf it presents
+- decide_chain: a blocked pin
+- decide_chain: a leaf older than the pinned one
+- decide_chain: a different leaf of the pinned one's notBefore
+- decide_chain: the pinned leaf
+- decide_chain: a newer leaf at the pinned endpoint
+- decide_chain: a pending_out pin
+- decide_chain: the pinned root at another endpoint, under auto
+- decide_chain: the pinned root at another endpoint, under ask
+- decide_chain: a pending_out pin at another endpoint, under ask
+- decide_chain: a pin and a removal tombstone for one root, at another endpoint under auto (N1, state B)
+- decide_chain with a chain of the leaf alone
+- decide_chain with a chain past its leaf's notAfter
+- decide_chain with a chain member that is not base64url
+- decide_chain with a chain that is not a list
+- decide_chain with a now that is not an instant
+- decide_chain with no node
+- decide_chain with no chain
+- decide_chain with no now
+- decide_chain with a node with no endpoint
+- decide_chain with a pinned leaf holding a key outside the profile
+- decide_chain with a pinned leaf that does not read
+- generated · decide_chain · {}
+- generated · decide_chain · the hostile object
+- generated · decide_chain · node absent
+- generated · decide_chain · node null
+- generated · decide_chain · chain absent
+- generated · decide_chain · chain null
+- generated · decide_chain · now absent
+- generated · decide_chain · now null
+- generated · decide_chain · an undeclared member
+- generated · decide_chain · chain holding a key outside the profile
+- generated · decide_chain · node absent, chain "x"
+- generated · decide_chain · node absent, now 7
+- generated · decide_chain · chain absent, node "x"
+- generated · decide_chain · chain absent, now 7
+- generated · decide_chain · now absent, node "x"
+- generated · decide_chain · now absent, chain "x"
 
 ### `derive_seed` — 18 cases · whole on success
 

@@ -126,3 +126,18 @@ pub(super) fn decide(a: &Value) -> Result<Value> {
     let input = DecideInput::read(a)?;
     serde_json::to_value(envelope::decide(&input)?).map_err(|_| Error::new("internal", crate::util::UNSERIALISABLE))
 }
+
+/// A chain proven at the TLS layer, decided by the pins (`envelope::decide_chain`). Read as `decide`
+/// reads its own: `node`, `chain` and `now` absent or null, in that order; then the node whole, by the
+/// one reader; the chain, as every function reads one; `now`.
+pub(super) fn decide_chain(a: &Value) -> Result<Value> {
+    for k in ["node", "chain", "now"] {
+        if a.get(k).is_none_or(Value::is_null) {
+            return Err(required(k));
+        }
+    }
+    let node = envelope::NodeState::read(&a["node"])?;
+    let chain = chain(a, "chain")?;
+    let now = instant(a, "now")?;
+    serde_json::to_value(envelope::decide_chain(&node, &chain, now)?).map_err(|_| Error::new("internal", crate::util::UNSERIALISABLE))
+}

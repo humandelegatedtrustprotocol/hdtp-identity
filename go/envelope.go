@@ -601,15 +601,22 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 	root, endpoint := vr.RootFingerprint, vr.Endpoint
 	leafB64 = B64url(chain[0])
 
-	// demote is the fact a host acts on, answered beside the reason rather than left to be read out of
-	// its words: a pin for this root stands, and the caller is a guest anyway (CW-11).
-	asGuest := func(why string, demote bool) Decision {
+	out, err := pinDecision(node, now, root, endpoint, chain[0])
+	if err != nil {
+		return unreadableState(unreadable, err)
+	}
+	switch out.kind {
+	case pinRefused:
+		return invalid(out.why)
+	case pinGuest:
+		// The guest binding is the call's: the method and tool, the card, and the receiver's own
+		// address (§14.5), judged here for the sealed door, per call.
 		if method != "tools/call" || !guestTools[tool] {
 			// Refused as a guest — with the root and the leaf named, so a host
 			// holding an older pin of this leaf's key learns the root above it (§14.3
 			// row 6) and decide again.
 			d := invalid("guest may only redeem or request")
-			d.Result["root"], d.Result["leaf"] = root, B64url(chain[0])
+			d.Result["root"], d.Result["leaf"] = root, leafB64
 			return d
 		}
 		cardText := ""
@@ -630,25 +637,116 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 		if endpoint == node.Endpoint {
 			return invalid("guest endpoint is this node's own address")
 		}
-		var claim any
+		return result("guest", root, endpoint, "chain", guestMembers(out))
+	case pinNewAddress:
+		effects = append(effects, out.effects...)
+		return result("pending_new_address", root, endpoint, "chain", newAddressMembers(out))
+	}
+	effects = append(effects, out.effects...)
+	if out.pendingOut {
+		if pendingAllows {
+			return result("pending", root, endpoint, "chain", nil)
+		}
+		return pendingApproval()
+	}
+	return result("contact", root, endpoint, "chain", nil)
+}
+
+// DecideChain is a chain proven outside an envelope — at the TLS layer, where the handshake is the leaf
+// key's signature — decided by the pins alone, exactly as Decide decides a chain inside one
+// (pinDecision; N1, N2). The chain is validated at now with no expectation, as Decide validates a
+// peer's, and one that fails is envelope_invalid `chain rule <n>: <reason>`, Decide's words for the
+// same chain. What is the call's and not the chain's — a guest's tools and card, the receiver's own
+// address, what a pending_out pin may call — the host applies to each call, as Decide applies it to
+// the envelope's. No `seen`: there is no envelope. The error is the node's own state that will not
+// read, as Decide's is.
+func DecideChain(now time.Time, chain [][]byte, node NodeState) (Decision, error) {
+	now = now.Truncate(time.Second)
+	vr := ValidateChain(chain, ChainOpts{Now: now})
+	if !vr.OK {
+		return invalid("chain rule " + itoa(vr.Rule) + ": " + vr.Reason), nil
+	}
+	root, endpoint := vr.RootFingerprint, vr.Endpoint
+	out, err := pinDecision(node, now, root, endpoint, chain[0])
+	if err != nil {
+		return Decision{}, classed(err)
+	}
+	answer := func(tier string, extra map[string]any) Decision {
+		r := map[string]any{"code": "ok", "tier": tier, "root": root, "endpoint": endpoint, "leaf": B64url(chain[0])}
+		for k, v := range extra {
+			r[k] = v
+		}
+		effects := out.effects
+		if effects == nil {
+			effects = []map[string]any{}
+		}
+		return Decision{Result: r, Effects: effects}
+	}
+	switch out.kind {
+	case pinRefused:
+		return invalid(out.why), nil
+	case pinGuest:
+		return answer("guest", guestMembers(out)), nil
+	case pinNewAddress:
+		return answer("pending_new_address", newAddressMembers(out)), nil
+	}
+	if out.pendingOut {
+		return answer("pending", nil), nil
+	}
+	return answer("contact", nil), nil
+}
+
+// The kinds of pinOutcome.
+const (
+	pinContact    = "contact"
+	pinNewAddress = "new_address"
+	pinGuest      = "guest"
+	pinRefused    = "refused"
+)
+
+// pinOutcome is what the pins decide about a chain proven at now — validated, and signed for by its
+// leaf's key in an envelope or in a TLS handshake: the chain half of Decide, which DecideChain answers
+// on its own for a host's TLS door, as the core's `pinned`. The node's TLS door made this decision
+// itself and parted from the envelope's on a removal tombstone and on a conflicting leaf (N1, N2). The
+// effects are the pin's moves; Decide adds the envelope's `seen`.
+//
+//	contact      the pin stands, renewed, or moved under auto; pendingOut while the pin is pending_out,
+//	             whose calls wait for the answer save the pending tier's own
+//	new_address  a new address for the owner: under ask, or forced to ask by a removal tombstone
+//	guest        why, whether a pin stands behind it (demote), and the root claiming its address
+//	refused      a different leaf with the pinned one's notBefore (§14.3)
+type pinOutcome struct {
+	kind       string
+	pendingOut bool
+	forced     bool
+	why        string
+	demote     bool
+	claim      any
+	effects    []map[string]any
+}
+
+// pinDecision decides a proven chain by the pins. The error is the node's own state that will not read,
+// in its reader's class: a pinned leaf, a tombstone's instant or its leaf.
+func pinDecision(node NodeState, now time.Time, root, endpoint string, leaf []byte) (pinOutcome, error) {
+	// The root that claims this address, for a guest: a pin at it, or a former endpoint within the
+	// claim window (§5.2).
+	claim := func() any {
 		for _, p := range node.Pins {
 			if p.Root != root && p.Endpoint == endpoint {
-				claim = p.Root
-				break
+				return p.Root
 			}
 		}
-		if claim == nil {
-			for _, f := range node.FormerEndpoints {
-				at, ok := parseInstant(f.At)
-				if f.Endpoint == endpoint && f.Root != root && ok && now.Sub(at) < ClaimWindow {
-					claim = f.Root
-					break
-				}
+		for _, f := range node.FormerEndpoints {
+			at, ok := parseInstant(f.At)
+			if f.Endpoint == endpoint && f.Root != root && ok && now.Sub(at) < ClaimWindow {
+				return f.Root
 			}
 		}
-		return result("guest", root, endpoint, "chain", map[string]any{"why": why, "demote": demote, "address_claim": claim})
+		return nil
 	}
-
+	guest := func(why string, demote bool) (pinOutcome, error) {
+		return pinOutcome{kind: pinGuest, why: why, demote: demote, claim: claim()}, nil
+	}
 	var pin *Pin
 	for i := range node.Pins {
 		if node.Pins[i].Root == root {
@@ -658,78 +756,86 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 	}
 	if pin == nil {
 		// The FIRST tombstone for this root, as the core reads it; the seed keeps one per root, so a
-		// second is a host's mistake and not a second chance. This loop used to try every one.
+		// second is a host's mistake and not a second chance.
 		for _, t := range node.Tombstones {
 			if t.Root != root {
 				continue
 			}
 			at, ok := parseInstant(t.At)
 			if !ok {
-				return unreadableState(unreadable, parseError{"not an RFC 3339 instant: " + t.At})
+				return pinOutcome{}, parseError{"not an RFC 3339 instant: " + t.At}
 			}
 			if now.Sub(at) < Tombstone {
 				was, err := DecodeB64url(t.Leaf)
 				if err != nil {
-					return unreadableState(unreadable, err)
+					return pinOutcome{}, err
 				}
-				cmp, err := CompareLeaves(was, chain[0])
+				cmp, err := CompareLeaves(was, leaf)
 				if err != nil {
-					return unreadableState(unreadable, err)
+					return pinOutcome{}, err
 				}
 				if cmp == "newer" {
-					effects = append(effects, map[string]any{"op": "pending", "root": root, "endpoint": endpoint, "why": "returned after removal", "leaf": B64url(chain[0])})
-					return result("pending_new_address", root, endpoint, "chain", map[string]any{"forced": "tombstone", "decision": "ask"})
+					return pinOutcome{kind: pinNewAddress, forced: true, effects: []map[string]any{
+						{"op": "pending", "root": root, "endpoint": endpoint, "why": "returned after removal", "leaf": B64url(leaf)},
+					}}, nil
 				}
 			}
 			break
 		}
-		return asGuest("unknown root", false)
+		return guest("unknown root", false)
 	}
 	if pin.State == "blocked" {
-		return asGuest("blocked", true)
+		return guest("blocked", true)
 	}
 	pinnedDER, err := DecodeB64url(pin.Leaf)
 	if err != nil {
-		return unreadableState(unreadable, err)
+		return pinOutcome{}, err
 	}
-	cmp, err := CompareLeaves(pinnedDER, chain[0])
+	cmp, err := CompareLeaves(pinnedDER, leaf)
 	if err != nil {
-		return unreadableState(unreadable, err)
+		return pinOutcome{}, err
 	}
 	if cmp == "superseded" {
-		return asGuest("superseded leaf", true)
+		return guest("superseded leaf", true)
 	}
 	if cmp == "conflict" {
-		return invalid("a different leaf with the same notBefore")
+		return pinOutcome{kind: pinRefused, why: "a different leaf with the same notBefore"}, nil
 	}
-
 	// §14.3 is absolute: a newer leaf from the root takes priority the instant it is seen, whatever the
 	// validity of the older one. At another address it is a new address; under `ask` the owner decides.
-	pinnedEndpoint := pin.Endpoint
+	effects := []map[string]any{}
 	if endpoint != pin.Endpoint {
 		if node.AcceptNewHosts != "auto" {
-			effects = append(effects, map[string]any{"op": "pending", "root": root, "endpoint": endpoint, "why": "ask", "leaf": B64url(chain[0])})
-			return result("pending_new_address", root, endpoint, "chain", map[string]any{"decision": "ask"})
+			return pinOutcome{kind: pinNewAddress, effects: []map[string]any{
+				{"op": "pending", "root": root, "endpoint": endpoint, "why": "ask", "leaf": B64url(leaf)},
+			}}, nil
 		}
 		effects = append(effects,
 			map[string]any{"op": "former_endpoint", "root": root, "endpoint": pin.Endpoint, "at": now.UTC().Format(time.RFC3339)},
-			map[string]any{"op": "pin_update", "root": root, "endpoint": endpoint, "leaf": B64url(chain[0])},
+			map[string]any{"op": "pin_update", "root": root, "endpoint": endpoint, "leaf": B64url(leaf)},
 			map[string]any{"op": "event", "event": "new_address", "root": root, "endpoint": endpoint},
 		)
-		pinnedEndpoint = endpoint
 	} else if cmp == "newer" {
 		effects = append(effects,
-			map[string]any{"op": "pin_update", "root": root, "endpoint": pin.Endpoint, "leaf": B64url(chain[0])},
+			map[string]any{"op": "pin_update", "root": root, "endpoint": endpoint, "leaf": B64url(leaf)},
 			map[string]any{"op": "event", "event": "renewal", "root": root},
 		)
 	}
-	if pin.State == "pending_out" {
-		if pendingAllows {
-			return result("pending", root, pinnedEndpoint, "chain", nil)
-		}
-		return pendingApproval()
+	return pinOutcome{kind: pinContact, pendingOut: pin.State == "pending_out", effects: effects}, nil
+}
+
+// guestMembers is a guest answer's own members: the reason, demote (CW-11) and the address claim.
+func guestMembers(out pinOutcome) map[string]any {
+	return map[string]any{"why": out.why, "demote": out.demote, "address_claim": out.claim}
+}
+
+// newAddressMembers is a new address's own members: forced by a tombstone, and the owner's to decide.
+func newAddressMembers(out pinOutcome) map[string]any {
+	extra := map[string]any{"decision": "ask"}
+	if out.forced {
+		extra["forced"] = "tombstone"
 	}
-	return result("contact", root, pinnedEndpoint, "chain", nil)
+	return extra
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }

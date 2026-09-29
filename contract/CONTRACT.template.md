@@ -283,6 +283,14 @@ A `pending_new_address` result is the host's to answer as SPEC §5.3 words it: t
 brought the new address answers `{"status": "pending"}`; every other call from that address, until the
 owner decides, answers `pending_approval`.
 
+`decide_chain` is the same pin decision for a chain proven outside an envelope — at the TLS layer, where
+the handshake is the leaf key's signature — so a host's two doors cannot decide one caller two ways
+(the node's TLS door did, on a removal tombstone and on a conflicting leaf). Both functions take it
+from one place in each port; `js/doors.test.mjs` holds the two answers to each other over every
+outcome. What is the call's and not the chain's — the guest binding, the receiver's own address, what
+a `pending_out` pin may call — the host applies to each call on its TLS door, as `decide` applies it
+to the envelope's.
+
 ## 6. Vault (SPEC §9; the format shared by the wallet page and the CLI)
 
 A wallet keeps two sealed documents, and both are this envelope:

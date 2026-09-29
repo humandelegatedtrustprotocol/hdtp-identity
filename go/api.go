@@ -249,6 +249,7 @@ var functions = map[string]function{
 	"open_result":    {[]string{"envelope", "my_pkcs8", "my_spki", "msg_id", "now", "pins", "expected_root", "expected_endpoint"}, callOpenResult},
 	"follow_renewed": {[]string{"answer", "pinned_root", "pinned_leaf", "dialed", "now"}, callFollowRenewed},
 	"decide":         {[]string{"now", "envelope", "node"}, callDecide},
+	"decide_chain":   {[]string{"node", "chain", "now"}, callDecideChain},
 
 	// Vault: api_vault.go
 	"vault_seal":   {[]string{"passphrase", "plaintext", "kdf", "salt", "nonce"}, callVaultSeal},

@@ -347,6 +347,14 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   where the two differed; the answer is read as it was sent (anything wrong with it is `ok: false`),
   the pin is the host's (a fault is an error of the call). Typed: `refresh::check` (Rust),
   `RefreshCheck` (Go).
+- **`decide_chain`, a contract function** (N1, N2, the port's side): the pin decision of `decide`,
+  answered on its own for a chain proven at the TLS layer, so a host's TLS door decides a caller as
+  its sealed door does. The node's TLS door decided client chains by hand and parted from `decide` on
+  a removal tombstone and on a conflicting leaf. `decide` and `decide_chain` take the decision from one
+  function in each port (`pinned` / `pinDecision`); `decide`'s answers did not change (every `decide`
+  and `open_result` case answered byte for byte as before the change). The answer is `decide`'s less
+  what is the call's; its effects are the pin's moves (`PinEffect`, the contract's `Effect` less
+  `seen`). Typed: `envelope::decide_chain` (Rust), `DecideChain` (Go).
 
 ## 0.4.1 — 2026-09-28
 
