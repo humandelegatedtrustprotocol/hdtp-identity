@@ -2,6 +2,7 @@
 import { b64url } from '../../../pact-protocol/vectors/lib/keys.mjs';
 import { read as derRead, children as derChildren, tlv as derTlv, seq as derSeq, set as derSet, bitstr as derBitstr, int as derInt } from '../../../pact-protocol/vectors/lib/der.mjs';
 import { signDetached } from '../../../pact-protocol/vectors/lib/hpke.mjs';
+import { ZONED } from './certificates.mjs';
 
 export default function csr({ add, expect }, f) {
   const { now, ENDPOINT, hostKey, rootDer, rootPkcs8, rootSpki, hostPkcs8, rootKeyId, csr: request, rootCsr, x25519SpkiDer } = f;
@@ -63,4 +64,18 @@ export default function csr({ add, expect }, f) {
   // A dns_name given as "" is refused where it is read (R26, F4); see certificates.mjs.
   add('csr_new with a dns_name that is empty', 'csr_new', { cn: 'Alina Rao', host_pkcs8: hostPkcs8, endpoint: ENDPOINT, dns_name: '' });
   expect('csr_new with a dns_name that is empty', { error: 'bad_request', why: 'dns_name is empty' });
+
+  // A request naming an IPv6 literal with a zone id (T1, C1, R09): csr_new writes what it is given
+  // (it judges no endpoint in either port), and a wallet asked to sign it must refuse it as not the
+  // normal form. Port-built: the seed builds no certificate signing request.
+  for (const endpoint of ZONED.slice(0, 2)) {
+    const zoned = f.wasm.call('csr_new', { cn: 'Alina Rao', host_pkcs8: hostPkcs8, endpoint }).der;
+    const refused = 'endpoint is not an https URL in normal form';
+    add(`csr_check of a request naming ${endpoint}`, 'csr_check', { der: zoned });
+    expect(`csr_check of a request naming ${endpoint}`, { ok: false, why: refused });
+    add(`issue_from_csr of a request naming ${endpoint}`, 'issue_from_csr', { csr: zoned, root_cn: 'A', root_pkcs8: rootPkcs8, now });
+    expect(`issue_from_csr of a request naming ${endpoint}`, { error: 'bad_request', why: refused });
+    add(`issue_tbs_from_csr of a request naming ${endpoint}`, 'issue_tbs_from_csr', { csr: zoned, root_cn: 'A', root_spki: rootSpki, now });
+    expect(`issue_tbs_from_csr of a request naming ${endpoint}`, { error: 'bad_request', why: refused });
+  }
 }

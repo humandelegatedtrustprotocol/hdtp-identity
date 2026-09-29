@@ -5,6 +5,13 @@ import { ecdsaTwin, ecdsaIsLowS, read as derRead, children as derChildren } from
 import { signDetached } from '../../../pact-protocol/vectors/lib/hpke.mjs';
 import { bharat, BORN } from '../cast.mjs';
 
+// An IPv6 literal with a zone id, in every spelling a URL parser might be handed one (T1, C1, R09).
+export const ZONED = [
+  'https://[2001:db8::1%25eth0]/mcp', 'https://[2001:db8::1%eth0]/mcp', 'https://[fe80::1%eth0]/mcp', 'https://[::1%lo]/mcp',
+  'https://[2001:db8::1%x@evil.example]/mcp', 'https://[2001:db8::1%x?y]/mcp', 'https://[2001:db8::1%x#y]/mcp',
+  'https://[2001:db8::1%X]/mcp', 'https://[2001:db8::1%25eth0]:8443/mcp',
+];
+
 const LOCAL = [
   // 255.255.255.255 is the one spelling of "not a real peer" that netip has no predicate for, so the
   // Go guard admitted it while Rust's `is_broadcast` refused: a stranger's card could name the IPv4
@@ -197,4 +204,47 @@ export default function certificates({ add, expect }, f) {
   // empty dNSName, which rule 5 then refused, and the Go port wrote none.
   add('build_leaf with a dns_name that is empty', 'build_leaf', { cn: 'Alina Rao', root_cn: 'Alina Rao', root_pkcs8: rootPkcs8, host_spki: hostSpki, endpoint: ENDPOINT, dns_name: '', not_before: now, not_after: '2027-09-01T00:00:00Z', serial: SERIAL });
   expect('build_leaf with a dns_name that is empty', { error: 'bad_request', why: 'dns_name is empty' });
+
+  // ── F: a zone id in an IPv6 literal (T1, C1, R09, R10, F15) ──────────────────────────────────────
+  //
+  // §14.1's normal form is RFC 3986's, which has no zone in an IPv6 literal, and the seed's
+  // isNormalHttps parses with WHATWG's URL, which refuses a `%` inside the brackets. The Go port
+  // read the literal with netip, which takes any zone after `%` — `%eth0`, `%25eth0`, and
+  // `%x@evil.example`, `%x?y` and `%x#y`, whose `@`, `?` and `#` its own doc comment says the normal
+  // form never holds — so a zoned global address was normal https and passed the address guard there,
+  // and a zoned private one was refused for a different reason, where the core refused every one as
+  // not the normal form.
+  for (const url of ZONED) {
+    add(`is_normal_https with a zone id: ${url}`, 'is_normal_https', { url });
+    expect(`is_normal_https with a zone id: ${url}`, { normal: false });
+    add(`address_guard with a zone id: ${url}`, 'address_guard', { endpoint: url, guest: true });
+    expect(`address_guard with a zone id: ${url}`, { ok: false, why: 'endpoint is not an https URL in normal form' });
+  }
+  for (const endpoint of ZONED.slice(0, 2)) {
+    const zonedLeaf = alinaLeaf({ endpoint, label: `parity/zone/${endpoint}` });
+    add(`validate_chain of a leaf naming ${endpoint}`, 'validate_chain', { chain: [zonedLeaf, rootDer], now });
+    expect(`validate_chain of a leaf naming ${endpoint}`, { ok: false, rule: 5, reason: 'endpoint is not an https URL in normal form' });
+    add(`build_leaf naming ${endpoint}`, 'build_leaf', { cn: 'A', root_cn: 'A', root_pkcs8: rootPkcs8, host_spki: hostSpki, endpoint, not_before: now, not_after: '2027-09-01T00:00:00Z', serial: SERIAL });
+    expect(`build_leaf naming ${endpoint}`, { error: 'bad_request', why: 'endpoint is not an https URL in normal form' });
+    add(`leaf_tbs naming ${endpoint}`, 'leaf_tbs', { cn: 'A', root_cn: 'A', root_spki: rootSpki, host_spki: hostSpki, endpoint, not_before: now, not_after: '2027-09-01T00:00:00Z', serial: SERIAL });
+    expect(`leaf_tbs naming ${endpoint}`, { error: 'bad_request', why: 'endpoint is not an https URL in normal form' });
+  }
+  // ip_is_private has no URL around it, so it cannot lean on the normal form: the rule is its own. A
+  // zone is RFC 4007's interface scope, which a global address never carries (§6), so an IPv6 literal
+  // with one is never a public address: private, in both ports, the core included (it could not parse
+  // one, and answered false — a resolver's `fe80::1%eth0` was public to it). netip's reading of the
+  // text is kept: an empty zone, or a zone on an IPv4 address, is no address at all.
+  for (const [ip, isPrivate] of [
+    ['fe80::1%eth0', true], ['2001:db8::1%eth0', true], ['[fe80::1%eth0]', true], ['::ffff:10.0.0.1%eth0', true],
+    ['2606:4700:4700::1111%25eth0', true], ['fe80::1%eth0%x', true], ['fe80::1%', false], ['10.0.0.1%eth0', false], ['8.8.8.8%eth0', false],
+  ]) {
+    add(`ip_is_private with a zone id: ${ip}`, 'ip_is_private', { ip });
+    expect(`ip_is_private with a zone id: ${ip}`, { private: isPrivate });
+  }
+  // R11: one pair of brackets is an IPv6 literal's spelling; a second pair is not an address. The core
+  // stripped every bracket from both ends and the Go port one from each.
+  for (const [ip, isPrivate] of [['[[::1]]', false], [']::1[', false], ['[[10.0.0.1]]', false], ['[::1', true], ['::1]', true], ['[10.0.0.1]', true], ['[8.8.8.8]', false]]) {
+    add(`ip_is_private in brackets: ${ip}`, 'ip_is_private', { ip });
+    expect(`ip_is_private in brackets: ${ip}`, { private: isPrivate });
+  }
 }

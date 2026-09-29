@@ -8,9 +8,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 case can be listed as proven that did not pass. The cases that fail today are listed apart, at the
 end, each with the finding it waits on.
 
-Specification: **2.2.4**. **88** normative sentences, **1975** cross-port parity cases over **50** guarded functions, and **4** known divergences that fail today and are listed apart, at the end.
+Specification: **2.2.4**. **88** normative sentences, **2027** cross-port parity cases over **50** guarded functions, and **4** known divergences that fail today and are listed apart, at the end.
 
-Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **3958** answers, of which **2** do not hold to the shape it declares — **2** of them in a known divergence. Of **99** declared error codes, **99** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **4062** answers, of which **2** do not hold to the shape it declares — **2** of them in a known divergence. Of **99** declared error codes, **99** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 88 normative sentences of the specification
 
@@ -203,7 +203,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 1975 cross-port parity cases
+## The 2027 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -211,9 +211,9 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **1975** cases (**1068** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
+At the run that generated this file: **2027** cases (**1068** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
 
-### `address_guard` — 41 cases · whole on success
+### `address_guard` — 50 cases · whole on success
 
 - address_guard https://255.255.255.255/mcp
 - address_guard https://127.0.0.1/mcp
@@ -247,6 +247,15 @@ At the run that generated this file: **1975** cases (**1068** of the run's cases
 - address_guard https://[2002:c0a8:101::1]/mcp
 - address_guard https://[64:ff9b::808:808]/mcp
 - address_guard https://[2606:4700:4700::1111]/mcp
+- address_guard with a zone id: https://[2001:db8::1%25eth0]/mcp
+- address_guard with a zone id: https://[2001:db8::1%eth0]/mcp
+- address_guard with a zone id: https://[fe80::1%eth0]/mcp
+- address_guard with a zone id: https://[::1%lo]/mcp
+- address_guard with a zone id: https://[2001:db8::1%x@evil.example]/mcp
+- address_guard with a zone id: https://[2001:db8::1%x?y]/mcp
+- address_guard with a zone id: https://[2001:db8::1%x#y]/mcp
+- address_guard with a zone id: https://[2001:db8::1%X]/mcp
+- address_guard with a zone id: https://[2001:db8::1%25eth0]:8443/mcp
 - generated · address_guard · {}
 - generated · address_guard · endpoint absent
 - generated · address_guard · endpoint null
@@ -315,7 +324,7 @@ At the run that generated this file: **1975** cases (**1068** of the run's cases
 - generated · book_rows · contacts absent, exported_at 7
 - generated · book_rows · exported_at absent, contacts "x"
 
-### `build_leaf` — 84 cases · whole on success
+### `build_leaf` — 86 cases · whole on success
 
 - build_leaf
 - build_leaf over 398 days
@@ -325,6 +334,8 @@ At the run that generated this file: **1975** cases (**1068** of the run's cases
 - build_leaf naming https://a.example/x/
 - build_leaf with no not_before
 - build_leaf with a dns_name that is empty
+- build_leaf naming https://[2001:db8::1%25eth0]/mcp
+- build_leaf naming https://[2001:db8::1%eth0]/mcp
 - generated · build_leaf · {}
 - generated · build_leaf · cn absent
 - generated · build_leaf · cn null
@@ -503,7 +514,7 @@ At the run that generated this file: **1975** cases (**1068** of the run's cases
 - generated · compare_leaves · pinned absent, presented 7
 - generated · compare_leaves · presented absent, pinned 7
 
-### `csr_check` — 26 cases · whole on success
+### `csr_check` — 28 cases · whole on success
 
 - csr_check of bytes that are not a request
 - csr_check of a certificate
@@ -524,6 +535,8 @@ At the run that generated this file: **1975** cases (**1068** of the run's cases
 - csr_check: a key outside the profile AND a malformed attribute set: which is said first
 - csr_check on another port, asking for the host's dNSName
 - csr_check on another port, asking for some other dNSName
+- csr_check of a request naming https://[2001:db8::1%25eth0]/mcp
+- csr_check of a request naming https://[2001:db8::1%eth0]/mcp
 - generated · csr_check · {}
 - generated · csr_check · the hostile object
 - generated · csr_check · der absent
@@ -958,7 +971,7 @@ At the run that generated this file: **1975** cases (**1068** of the run's cases
 - generated · export_read_messages · media absent, contacts "x"
 - generated · export_read_messages · media absent, first_line "7"
 
-### `export_write` — 61 cases · whole on success
+### `export_write` — 63 cases · whole on success
 
 - export_write: every formula prefix, quoting and line breaks, sorted rows
 - export_write: a book
@@ -972,6 +985,8 @@ At the run that generated this file: **1975** cases (**1068** of the run's cases
 - export_write: a private key as the owner_name
 - export_write: a private key as the tool
 - export_write: 5000 media files
+- export_write of a row naming https://[2001:db8::1%25eth0]/mcp
+- export_write of a row naming https://[2001:db8::1%eth0]/mcp
 - export_write: an exported_at with a lower-case z
 - export_write: a contact added with a lower-case z
 - export_write: an exported_at with a comma before the fraction
@@ -1039,11 +1054,13 @@ At the run that generated this file: **1975** cases (**1068** of the run's cases
 - generated · export_write_messages · an undeclared member
 - generated · export_write_messages · messages absent, msg_ids "x"
 
-### `follow_renewed` — 42 cases · whole on success
+### `follow_renewed` — 44 cases · whole on success
 
 - follow_renewed on a chain to another root
 - follow_renewed on a chain that is not one
 - follow_renewed on the same leaf
+- follow_renewed to a leaf naming https://[2001:db8::1%25eth0]/mcp
+- follow_renewed to a leaf naming https://[2001:db8::1%eth0]/mcp
 - follow_renewed with nothing to work from
 - follow_renewed on an answer that is some other code
 - follow_renewed on a certificate_renewed answer with no data at all
@@ -1197,7 +1214,7 @@ At the run that generated this file: **1975** cases (**1068** of the run's cases
 - generated · hpke_seal · plaintext absent, aad 7
 - generated · hpke_seal · plaintext absent, ephemeral_seed 7
 
-### `ip_is_private` — 29 cases · whole on success
+### `ip_is_private` — 45 cases · whole on success
 
 - ip_is_private "10.0.0.1"
 - ip_is_private "8.8.8.8"
@@ -1224,12 +1241,28 @@ At the run that generated this file: **1975** cases (**1068** of the run's cases
 - ip_is_private ::ffff:127.0.0.1
 - ip_is_private ::1
 - ip_is_private ::
+- ip_is_private with a zone id: fe80::1%eth0
+- ip_is_private with a zone id: 2001:db8::1%eth0
+- ip_is_private with a zone id: [fe80::1%eth0]
+- ip_is_private with a zone id: ::ffff:10.0.0.1%eth0
+- ip_is_private with a zone id: 2606:4700:4700::1111%25eth0
+- ip_is_private with a zone id: fe80::1%eth0%x
+- ip_is_private with a zone id: fe80::1%
+- ip_is_private with a zone id: 10.0.0.1%eth0
+- ip_is_private with a zone id: 8.8.8.8%eth0
+- ip_is_private in brackets: [[::1]]
+- ip_is_private in brackets: ]::1[
+- ip_is_private in brackets: [[10.0.0.1]]
+- ip_is_private in brackets: [::1
+- ip_is_private in brackets: ::1]
+- ip_is_private in brackets: [10.0.0.1]
+- ip_is_private in brackets: [8.8.8.8]
 - generated · ip_is_private · {}
 - generated · ip_is_private · ip absent
 - generated · ip_is_private · ip null
 - generated · ip_is_private · an undeclared member
 
-### `is_normal_https` — 32 cases · whole on success
+### `is_normal_https` — 41 cases · whole on success
 
 - is_normal_https "https://agent.alina.example/mcp"
 - is_normal_https "https://agent.alina.example:8443/mcp"
@@ -1259,12 +1292,21 @@ At the run that generated this file: **1975** cases (**1068** of the run's cases
 - is_normal_https with nothing to work from
 - is_normal_https with args holding a lone low surrogate
 - is_normal_https with args holding a surrogate pair
+- is_normal_https with a zone id: https://[2001:db8::1%25eth0]/mcp
+- is_normal_https with a zone id: https://[2001:db8::1%eth0]/mcp
+- is_normal_https with a zone id: https://[fe80::1%eth0]/mcp
+- is_normal_https with a zone id: https://[::1%lo]/mcp
+- is_normal_https with a zone id: https://[2001:db8::1%x@evil.example]/mcp
+- is_normal_https with a zone id: https://[2001:db8::1%x?y]/mcp
+- is_normal_https with a zone id: https://[2001:db8::1%x#y]/mcp
+- is_normal_https with a zone id: https://[2001:db8::1%X]/mcp
+- is_normal_https with a zone id: https://[2001:db8::1%25eth0]:8443/mcp
 - generated · is_normal_https · {}
 - generated · is_normal_https · url absent
 - generated · is_normal_https · url null
 - generated · is_normal_https · an undeclared member
 
-### `issue_from_csr` — 48 cases · whole on success
+### `issue_from_csr` — 50 cases · whole on success
 
 - issue_from_csr with an explicit zero validity
 - issue_from_csr over 398 days
@@ -1275,6 +1317,8 @@ At the run that generated this file: **1975** cases (**1068** of the run's cases
 - issue_from_csr
 - issue_from_csr refusing a root given as a key id
 - issue_from_csr with no now
+- issue_from_csr of a request naming https://[2001:db8::1%25eth0]/mcp
+- issue_from_csr of a request naming https://[2001:db8::1%eth0]/mcp
 - generated · issue_from_csr · {}
 - generated · issue_from_csr · the hostile object
 - generated · issue_from_csr · csr absent
@@ -1315,10 +1359,12 @@ At the run that generated this file: **1975** cases (**1068** of the run's cases
 - generated · issue_from_csr · now absent, valid_days "7"
 - generated · issue_from_csr · now absent, root_pkcs8 7
 
-### `issue_tbs_from_csr` — 41 cases · whole on success
+### `issue_tbs_from_csr` — 43 cases · whole on success
 
 - issue_tbs_from_csr of a request that is a truncated SEQUENCE
 - issue_tbs_from_csr
+- issue_tbs_from_csr of a request naming https://[2001:db8::1%25eth0]/mcp
+- issue_tbs_from_csr of a request naming https://[2001:db8::1%eth0]/mcp
 - generated · issue_tbs_from_csr · {}
 - generated · issue_tbs_from_csr · the hostile object
 - generated · issue_tbs_from_csr · csr absent
@@ -1404,10 +1450,12 @@ At the run that generated this file: **1975** cases (**1068** of the run's cases
 - generated · key_info · spki null
 - generated · key_info · an undeclared member
 
-### `leaf_tbs` — 78 cases · whole on success
+### `leaf_tbs` — 80 cases · whole on success
 
 - leaf_tbs
 - leaf_tbs with no issuer
+- leaf_tbs naming https://[2001:db8::1%25eth0]/mcp
+- leaf_tbs naming https://[2001:db8::1%eth0]/mcp
 - generated · leaf_tbs · {}
 - generated · leaf_tbs · cn absent
 - generated · leaf_tbs · cn null
@@ -1485,7 +1533,7 @@ At the run that generated this file: **1975** cases (**1068** of the run's cases
 - generated · leaf_tbs · root_spki absent, not_after 7
 - generated · leaf_tbs · root_spki absent, serial 7
 
-### `ledger_check` — 56 cases · whole on success
+### `ledger_check` — 58 cases · whole on success
 
 - ledger_check: a renewal where the live leaf is
 - ledger_check: a move, not chosen
@@ -1520,6 +1568,8 @@ At the run that generated this file: **1975** cases (**1068** of the run's cases
 - ledger_check with a move that is not a boolean
 - ledger_check with nothing to work from
 - ledger_check over a ledger that reads
+- ledger_check for https://[2001:db8::1%25eth0]/mcp
+- ledger_check for https://[2001:db8::1%eth0]/mcp
 - generated · ledger_check · {}
 - generated · ledger_check · the hostile object
 - generated · ledger_check · root absent
@@ -2094,7 +2144,7 @@ At the run that generated this file: **1975** cases (**1068** of the run's cases
 - generated · suite_for · spki null
 - generated · suite_for · an undeclared member
 
-### `validate_chain` — 55 cases · whole on success
+### `validate_chain` — 57 cases · whole on success
 
 - validate_chain of a real chain
 - validate_chain against the root and endpoint it really has
@@ -2134,6 +2184,8 @@ At the run that generated this file: **1975** cases (**1068** of the run's cases
 - validate_chain in the leaf's last second, with a fraction
 - validate_chain with an expected_root that is empty
 - validate_chain with an expected_endpoint that is empty
+- validate_chain of a leaf naming https://[2001:db8::1%25eth0]/mcp
+- validate_chain of a leaf naming https://[2001:db8::1%eth0]/mcp
 - generated · validate_chain · {}
 - generated · validate_chain · the hostile object
 - generated · validate_chain · chain absent

@@ -13,6 +13,7 @@ import { createHash } from 'node:crypto';
 import { readZip } from '../zip.mjs';
 import readerCases from './export-reader.mjs';
 import exportInstants from './export-instants.mjs';
+import { ZONED } from './certificates.mjs';
 
 const CORPUS = new URL('../../go/exportcorpus/', import.meta.url);
 const sha = (b) => createHash('sha256').update(b).digest('hex');
@@ -273,6 +274,12 @@ export default function exportCases({ add, expect }, f) {
   add('export_manifest: 5000 media files, the manifest under 64 KiB', 'export_manifest', { partial: manyWritten.partial });
   if (Buffer.byteLength(wasm.call('export_manifest', { partial: manyWritten.partial }).manifest) >= 64 * 1024) throw new Error('export_manifest: 5000 media files make a manifest of 64 KiB or more');
 
+  // A contact row naming an IPv6 literal with a zone id (T1, C1, R09): a row whose endpoint is not the
+  // normal form is refused by the writer, as every other one is.
+  for (const endpoint of ZONED.slice(0, 2)) {
+    add(`export_write of a row naming ${endpoint}`, 'export_write', { owner, owner_name: 'Olive', exported_at: now, tool: 'parity', contacts: [row({ endpoint })] });
+    expect(`export_write of a row naming ${endpoint}`, { error: 'bad_request', why: 'contacts[0], column endpoint: not an https URL in normal form' });
+  }
   // The reader's refusals, one per rule §9.2 names (SPEC 9.2#10, #13, #15): js/cases/export-reader.mjs.
   readerCases({ add, expect }, f);
   // One instant grammar in the export (SPEC 2.2.2): js/cases/export-instants.mjs.

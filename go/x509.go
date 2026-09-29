@@ -784,8 +784,9 @@ func hostOf(endpoint string) string {
 }
 
 // IsNormalHTTPS is the normal form of §14.1: what the string must already be, so nothing is normalised
-// at comparison time — https, lowercase host, no userinfo, no DEFAULT port, no query or fragment, a non-empty path
-// with no trailing slash, no dot segments, and percent-encoding uppercase and minimal.
+// at comparison time — https, lowercase host, no userinfo, no DEFAULT port, no query or fragment, an
+// IPv6 literal with no zone id, a non-empty path with no trailing slash, no dot segments, and
+// percent-encoding uppercase and minimal.
 func IsNormalHTTPS(s string) bool {
 	if !strings.HasPrefix(s, "https://") {
 		return false
@@ -863,6 +864,13 @@ func normalHost(h string) bool {
 			if rest[0] != ':' || !normalPort(rest[1:]) {
 				return false
 			}
+		}
+		// No zone id, in any spelling: RFC 3986 has none in an IPv6 literal, and WHATWG's URL, which the
+		// seed parses with, refuses a `%` inside the brackets. netip reads `%` as the start of one and
+		// takes any text after it (`%eth0`, `%25eth0`, `%x@evil.example`), and printed it back, so the
+		// comparison below held and a zoned literal was the normal form here and nowhere else.
+		if strings.IndexByte(h[1:end], '%') >= 0 {
+			return false
 		}
 		ip := parseIP(h[1:end])
 		return ip.IsValid() && ip.Is6() && !ip.Is4In6() && ip.String() == h[1:end]
