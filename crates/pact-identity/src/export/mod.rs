@@ -680,7 +680,7 @@ pub fn read_end(manifest_text: &str, end: &End<'_>) -> Result<()> {
 /// A ContactRow handed to `export_write`, as its cells.
 fn contact_cells(v: &Value) -> std::result::Result<Vec<String>, (usize, String)> {
     let Some(o) = v.as_object() else { return Err((0, "a contact row is an object".into())) };
-    if let Some(k) = crate::ledger::stranger(o, &CONTACT_COLUMNS) {
+    if let Some(k) = crate::util::stranger(o, &CONTACT_COLUMNS) {
         return Err((0, format!("{k} is not a column of contacts.csv")));
     }
     let mut cells = Vec::new();
@@ -718,7 +718,7 @@ fn contact_cells(v: &Value) -> std::result::Result<Vec<String>, (usize, String)>
 
 fn thread_cells(v: &Value) -> std::result::Result<Vec<String>, (usize, String)> {
     let Some(o) = v.as_object() else { return Err((0, "a thread row is an object".into())) };
-    if let Some(k) = crate::ledger::stranger(o, &THREAD_COLUMNS) {
+    if let Some(k) = crate::util::stranger(o, &THREAD_COLUMNS) {
         return Err((0, format!("{k} is not a column of threads.csv")));
     }
     THREAD_COLUMNS
@@ -855,7 +855,7 @@ pub fn book_rows(contacts: &[Value], exported_at: i64) -> Result<Vec<Value>> {
     let mut rows = Vec::new();
     for (i, c) in contacts.iter().enumerate() {
         let Some(o) = c.as_object() else { return refuse(format!("contacts[{i}] is an object")) };
-        if let Some(k) = crate::ledger::stranger(o, &VAULT_CONTACT) {
+        if let Some(k) = crate::util::stranger(o, &VAULT_CONTACT) {
             return refuse(format!("contacts[{i}]: {} is not a member of a wallet contact", crate::canonical::string(&k)));
         }
         for m in ["root", "endpoint"] {

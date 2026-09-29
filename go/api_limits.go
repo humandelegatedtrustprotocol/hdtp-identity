@@ -207,19 +207,50 @@ type limitsAnswer struct {
 	Writes     []limitsWrite `json:"writes"`
 }
 
-func callLimitsDecide(a args) json.RawMessage {
-	// In the order the function needs them (CONTRACT §0): the rules, what is charged, when, the rows.
+// limitsRulesAndCharge reads the rules and the charge, in that order and in these words: what
+// limits_decide and limits_buckets both read first, by one reader, as the core's rules_and_charge.
+func limitsRulesAndCharge(a args) (LimitsRules, LimitsCharge, json.RawMessage) {
 	doc := a.value("rules")
 	if doc == nil {
-		return fail(codeArgs, "rules is required")
+		return nil, LimitsCharge{}, fail(codeArgs, "rules is required")
 	}
 	rules, err := limitsReadRules(doc)
 	if err != nil {
-		return fail(codeArgs, "the limits rules cannot be enforced: "+err.Error())
+		return nil, LimitsCharge{}, fail(codeArgs, "the limits rules cannot be enforced: "+err.Error())
 	}
 	charge, err := limitsReadCharge(a.value("charge"))
 	if err != nil {
-		return failErr(codeArgs, err)
+		return nil, LimitsCharge{}, failErr(codeArgs, err)
+	}
+	return rules, charge, nil
+}
+
+type limitsBucketOut struct {
+	Key       string  `json:"key"`
+	PerSecond float64 `json:"per_second"`
+	Burst     float64 `json:"burst"`
+}
+
+// callLimitsBuckets answers the buckets a charge is charged to, in charge order, each with its key,
+// rate and burst: the rows a host holds for limits_decide's `state`, from Buckets, the one place the
+// key scheme is written. The Wasm could decide a charge and not say which rows it reads (X2).
+func callLimitsBuckets(a args) json.RawMessage {
+	rules, charge, bad := limitsRulesAndCharge(a)
+	if bad != nil {
+		return bad
+	}
+	out := []limitsBucketOut{}
+	for _, b := range charge.Buckets(rules) {
+		out = append(out, limitsBucketOut{Key: b.Key, PerSecond: b.PerSecond, Burst: b.Burst})
+	}
+	return ok(map[string]any{"buckets": out})
+}
+
+func callLimitsDecide(a args) json.RawMessage {
+	// In the order the function needs them (CONTRACT §0): the rules, what is charged, when, the rows.
+	rules, charge, bad := limitsRulesAndCharge(a)
+	if bad != nil {
+		return bad
 	}
 	// Absent or null is `now is required`, as CONTRACT §0 has every absent member (S1-2).
 	if a.present("now") == nil {

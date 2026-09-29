@@ -270,4 +270,5 @@ var functions = map[string]function{
 	// Limits: api_limits.go
 	"limits_rules_check": {[]string{"rules"}, callLimitsRulesCheck},
 	"limits_decide":      {[]string{"rules", "charge", "now", "state"}, callLimitsDecide},
+	"limits_buckets":     {[]string{"rules", "charge"}, callLimitsBuckets},
 }

@@ -2169,6 +2169,41 @@
         "bad_request"
       ],
       "notes": "SPEC §12's call budgets as one decision (crates/pact-limits; go/limits.go). A call is charged one token in EVERY bucket of its charge, or in none: a refusal spends nothing. A bucket's level is `min(burst, tokens + elapsed × rate)`, `elapsed` the seconds since `updated_at` and never negative (a clock that went back refills nothing, and the row is written with the earlier time); a level under 1 refuses, with `retry_after = max(1, ceil((1 − level) / rate))`. The arithmetic is the cloud's `RateLimiter.take` operation for operation in IEEE double precision, and `js/cases/limits-vectors.json` holds the two to the same decisions and the same bits. A host may delete a row idle for over an hour: under rules `limits_rules_check` passes it is full, and no decision changes. In order: `rules` (absent: `rules is required`; not enforceable: `the limits rules cannot be enforced: <limits_rules_check's why>`), `charge` (not an object: `charge is required`; `charge.kind is required`; `charge.kind is one of …`; a member its kind does not hold, the first in sorted order: `a <kind> charge holds <members>, and nothing else: <member>`; `charge.<member> is required` for a string that is absent or empty, `charge.<member> is a whole number` for a count, `charge.root is a string or null`, `charge.source is required`, `charge.addressed is required`), `now` (absent or null: `now is required`; otherwise `now is a time in milliseconds`: a whole number from 0 to 2^53 − 1, written without a fraction or an exponent), `state` (not an object: `state is an object of rows by bucket`; a row, in sorted order of key, that does not read: `the state's row <key> does not read: <member>`)."
+    },
+    "limits_buckets": {
+      "section": "limits",
+      "params": {
+        "type": "object",
+        "properties": {
+          "rules": { "$ref": "#/$defs/LimitsRules" },
+          "charge": { "$ref": "#/$defs/LimitsCharge" }
+        },
+        "required": ["rules", "charge"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "buckets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": { "type": "string", "description": "The row's key, as `limits_decide`'s `state` and `writes` name it." },
+                "per_second": { "type": "number", "description": "The sustained rate, in calls a second: for `identity` and `out:identity`, `contact_cap` × `contact_calls_per_second`, at most `identity_capacity_per_second` and at least 1." },
+                "burst": { "type": "number", "description": "The most calls the bucket holds; a bucket with no row is full." }
+              },
+              "required": ["key", "per_second", "burst"],
+              "additionalProperties": false
+            },
+            "description": "The buckets the charge is charged to, in charge order; none for `pending_in`, a count."
+          }
+        },
+        "required": ["buckets"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request"],
+      "notes": "The rows `limits_decide` reads for a charge, so a host can fetch them before it asks: the key scheme `LimitsCharge` describes, from the one place it is written (crates/pact-limits `Charge::buckets`; go/limits.go `Buckets`), where a host on the Wasm had to derive it a second time. Reads `rules` and then `charge` exactly as `limits_decide` does, in its words (`rules is required`; `the limits rules cannot be enforced: <why>`; the charge's own refusals)."
     }
   }
 }
