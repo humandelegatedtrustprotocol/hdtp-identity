@@ -799,6 +799,10 @@ mod tests {
             "https://a.example:65536/mcp",
             "https://a.example:/mcp",
             "https://[2001:db8::1]8443/mcp",
+            // No zone id in an IPv6 literal, in any spelling: `std` cannot parse one, and that is the rule.
+            "https://[2001:db8::1%eth0]/mcp",
+            "https://[2001:db8::1%25eth0]/mcp",
+            "https://[fe80::1%eth0]/mcp",
         ] {
             assert!(!is_normal_https(bad), "{bad}");
         }

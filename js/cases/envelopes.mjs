@@ -6,6 +6,7 @@ import { sealDeterministic, signDetached, suiteForKey } from '../../../pact-prot
 import { canonical } from '../../../pact-protocol/vectors/lib/canonical.mjs';
 import { ENDPOINTS, bharat, BORN, DIES } from '../cast.mjs';
 import { RawArgs } from '../port.mjs';
+import { ZONED } from './certificates.mjs';
 
 export default function envelopes({ add, expect }, f) {
   const { now, at, ENDPOINT, rootKey, hostKey, rootDer, leafDer, rootPkcs8, hostPkcs8, rootSpki, hostSpki, p256Spki, rsaSpki, rootFp, hostFp } = f;
@@ -45,6 +46,13 @@ export default function envelopes({ add, expect }, f) {
   add('follow_renewed on a chain to another root', 'follow_renewed', { answer: { code: 'certificate_renewed', data: { chain: [leafDer, rootDer] } }, pinned_root: 'sha256:' + 'A'.repeat(43), pinned_leaf: leafDer, dialed: ENDPOINT, now });
   add('follow_renewed on a chain that is not one', 'follow_renewed', { answer: { code: 'certificate_renewed', data: { chain: [] } }, pinned_root: rootFp, pinned_leaf: leafDer, dialed: ENDPOINT, now });
   add('follow_renewed on the same leaf', 'follow_renewed', { answer: { code: 'certificate_renewed', data: { chain: [leafDer, rootDer] } }, pinned_root: rootFp, pinned_leaf: leafDer, dialed: ENDPOINT, now });
+  // A renewed chain whose leaf names an IPv6 literal with a zone id fails rule 5 for the normal form,
+  // before the endpoint is compared with the one dialed (T1, C1, R09).
+  for (const endpoint of ZONED.slice(0, 2)) {
+    const zonedLeaf = f.alinaLeaf({ endpoint, label: `parity/zone/${endpoint}` });
+    add(`follow_renewed to a leaf naming ${endpoint}`, 'follow_renewed', { answer: { code: 'certificate_renewed', data: { chain: [zonedLeaf, rootDer] } }, pinned_root: rootFp, pinned_leaf: leafDer, dialed: ENDPOINT, now });
+    expect(`follow_renewed to a leaf naming ${endpoint}`, { follow: false, why: 'chain rule 5: endpoint is not an https URL in normal form' });
+  }
 
   // A request the seed can make and both ports must answer identically: the header carries the rules.
   add('seal_request', 'seal_request', { recipient_leaf: leafDer, sender_pkcs8: hostPkcs8, form: 'chain', sender_chain: [leafDer, rootDer], method: 'tools/call', params: { name: 'send_message' }, msg_id: 'p-2', ts: at(now), ephemeral_seed: eph(7) });

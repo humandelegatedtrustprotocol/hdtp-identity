@@ -3,6 +3,7 @@
 // One case per notice kind, the refusal that is the only thing `move` changes, an entry of another
 // root that must not move the answer, the live leaf as the NEWEST entry (never the newest unexpired
 // one), and every ledger that does not read. The last case is the control that must get through.
+import { ZONED } from './certificates.mjs';
 
 export default function ledger({ add, expect }, f) {
   const { now, ENDPOINT, rootFp } = f;
@@ -89,4 +90,10 @@ export default function ledger({ add, expect }, f) {
   // The control that must get through: a ledger that reads, with an origin and another root's entry.
   add('ledger_check over a ledger that reads', 'ledger_check', ask([{ ...here[0], origin: 'https://app.example' }, good], { move: false }));
   expect('ledger_check over a ledger that reads', { refusal: null, known_endpoint: true, new_host: false });
+
+  // An endpoint that is an IPv6 literal with a zone id is not the normal form (T1, C1, R09).
+  for (const endpoint of ZONED.slice(0, 2)) {
+    add(`ledger_check for ${endpoint}`, 'ledger_check', ask(here, { endpoint }));
+    expect(`ledger_check for ${endpoint}`, { error: 'bad_request', why: 'endpoint is not an https URL in normal form' });
+  }
 }

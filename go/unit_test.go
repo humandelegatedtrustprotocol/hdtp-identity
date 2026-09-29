@@ -16,7 +16,9 @@ import (
 
 func TestIsNormalHTTPS(t *testing.T) {
 	good := []string{"https://agent.alina.example/mcp", "https://alina.host.example/alina/mcp", "https://a.example/x/y-z_1.2~", "https://a.example/%2F", "https://192.0.2.1/mcp", "https://[2001:db8::1]/mcp"}
-	bad := []string{"http://agent.alina.example/mcp", "https://agent.alina.example/", "https://agent.alina.example", "https://Agent.Alina.example/mcp", "https://agent.alina.example@mallory.example/mcp", "https://agent.alina.example:443/mcp", "https://agent.alina.example/mcp/", "https://agent.alina.example/mcp?x=1", "https://agent.alina.example/mcp#f", "https://agent.alina.example/mcp/../admin", "https://agent.alina.example/./mcp", "https://a.example/%2f", "https://a.example/%41", "https://a.example/a b", "https://a.example/a\\b", "https://a.example/ü", "https://a.example/%zz", "https://.a.example/mcp", "https://a..example/mcp", "https://01.2.3.4/mcp", "https://[2001:DB8::1]/mcp", "https://[::ffff:1.2.3.4]/mcp"}
+	bad := []string{"http://agent.alina.example/mcp", "https://agent.alina.example/", "https://agent.alina.example", "https://Agent.Alina.example/mcp", "https://agent.alina.example@mallory.example/mcp", "https://agent.alina.example:443/mcp", "https://agent.alina.example/mcp/", "https://agent.alina.example/mcp?x=1", "https://agent.alina.example/mcp#f", "https://agent.alina.example/mcp/../admin", "https://agent.alina.example/./mcp", "https://a.example/%2f", "https://a.example/%41", "https://a.example/a b", "https://a.example/a\\b", "https://a.example/ü", "https://a.example/%zz", "https://.a.example/mcp", "https://a..example/mcp", "https://01.2.3.4/mcp", "https://[2001:DB8::1]/mcp", "https://[::ffff:1.2.3.4]/mcp",
+		// No zone id in an IPv6 literal, in any spelling (T1, C1, R09): netip reads one and prints it back.
+		"https://[2001:db8::1%eth0]/mcp", "https://[2001:db8::1%25eth0]/mcp", "https://[2001:db8::1%x@evil.example]/mcp", "https://[2001:db8::1%x?y]/mcp", "https://[fe80::1%eth0]/mcp"}
 	for _, u := range good {
 		if !IsNormalHTTPS(u) {
 			t.Errorf("should be normal: %s", u)
@@ -47,7 +49,11 @@ func TestAddressGuard(t *testing.T) {
 	if ok, _ := AddressGuard(endpointB, endpointB, false); !ok {
 		t.Error("a contact may name the receiver's endpoint (the guard is for guests)")
 	}
-	for ip, want := range map[string]bool{"255.255.255.255": true, "127.0.0.1": true, "8.8.8.8": false, "::1": true, "2001:db8::1": false, "::ffff:192.168.0.1": true, "not an ip": false} {
+	for ip, want := range map[string]bool{"255.255.255.255": true, "127.0.0.1": true, "8.8.8.8": false, "::1": true, "2001:db8::1": false, "::ffff:192.168.0.1": true, "not an ip": false,
+		// A zone id is never public; an empty zone, or one on an IPv4 address, is no address (R10, F15).
+		"fe80::1%eth0": true, "2001:db8::1%eth0": true, "[fe80::1%eth0]": true, "fe80::1%": false, "10.0.0.1%eth0": false,
+		// One pair of brackets, no more (R11).
+		"[::1]": true, "[[::1]]": false, "]::1[": false} {
 		if IPIsPrivate(ip) != want {
 			t.Errorf("ip_is_private(%s) should be %v", ip, want)
 		}

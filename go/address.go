@@ -23,11 +23,21 @@ var privateRanges = []string{
 }
 
 // IPIsPrivate reports whether an IP literal is one the guard refuses: loopback, link-local, private
-// (RFC 1918), carrier-grade NAT, unspecified, unique-local, or an IPv4-mapped form of any of them.
+// (RFC 1918), carrier-grade NAT, unspecified, unique-local, an IPv4-mapped form of any of them, or an
+// IPv6 literal with a zone id. One leading `[` and one trailing `]` are dropped, as a URL writes an
+// IPv6 host; text that is no address — a zone on an IPv4 address or an empty one included, as netip
+// reads them — is not private.
 func IPIsPrivate(ip string) bool {
 	a := parseIP(strings.TrimSuffix(strings.TrimPrefix(ip, "["), "]"))
 	if !a.IsValid() {
 		return false
+	}
+	// A zone is an interface scope (RFC 4007 §6), which no global address carries: a literal with one
+	// is never a public address, whatever the address is. netip judged `fe80::1%eth0` by its address
+	// and `2001:db8::1%eth0` as public, and the core could not read either and answered false, so a
+	// resolver's zoned link-local answer was public to the Wasm.
+	if a.Zone() != "" {
+		return true
 	}
 	a = a.Unmap()
 	// An IPv6 literal that EMBEDS an IPv4 address is judged by it, because a translator will dial it:
