@@ -8,7 +8,7 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 case can be listed as proven that did not pass. The cases that fail today are listed apart, at the
 end, each with the finding it waits on.
 
-Specification: **2.2.4**. **88** normative sentences, **1909** cross-port parity cases over **50** guarded functions, and **68** known divergences that fail today and are listed apart, at the end.
+Specification: **2.2.4**. **88** normative sentences, **1917** cross-port parity cases over **50** guarded functions, and **60** known divergences that fail today and are listed apart, at the end.
 
 Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **3954** answers, of which **37** do not hold to the shape it declares — **37** of them in a known divergence. Of **96** declared error codes, **96** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
@@ -203,7 +203,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 1909 cross-port parity cases
+## The 1917 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -211,7 +211,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **1909** cases (**1103** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
+At the run that generated this file: **1917** cases (**1103** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
 
 ### `address_guard` — 40 cases · whole on success
 
@@ -787,7 +787,7 @@ At the run that generated this file: **1909** cases (**1103** of the run's cases
 - generated · export_read · now absent, threads_csv 7
 - generated · export_read · now absent, owner 7
 
-### `export_read_end` — 94 cases · whole on success
+### `export_read_end` — 96 cases · whole on success
 
 - export_read_end: what was written
 - export corpus valid-export.zip: export_read_end
@@ -821,6 +821,8 @@ At the run that generated this file: **1909** cases (**1103** of the run's cases
 - generated · export_read_end · the hostile object
 - generated · export_read_end · manifest absent
 - generated · export_read_end · manifest null
+- generated · export_read_end · lines absent
+- generated · export_read_end · lines null
 - generated · export_read_end · ids absent
 - generated · export_read_end · ids null
 - generated · export_read_end · msg_ids absent
@@ -1518,7 +1520,7 @@ At the run that generated this file: **1909** cases (**1103** of the run's cases
 - generated · ledger_check · now absent, endpoint 7
 - generated · ledger_check · now absent, move "yes"
 
-### `limits_decide` — 73 cases · whole on success
+### `limits_decide` — 75 cases · whole on success
 
 - limits_decide: a contact in, fresh
 - limits_decide: a contact in, empty
@@ -1582,6 +1584,8 @@ At the run that generated this file: **1909** cases (**1103** of the run's cases
 - generated · limits_decide · rules null
 - generated · limits_decide · charge absent
 - generated · limits_decide · charge null
+- generated · limits_decide · now absent
+- generated · limits_decide · now null
 - generated · limits_decide · state "x"
 - generated · limits_decide · an undeclared member
 - generated · limits_decide · rules absent, charge "x"
@@ -2201,7 +2205,7 @@ At the run that generated this file: **1909** cases (**1103** of the run's cases
 
 - version with a member it does not declare
 
-### `wallet_issue` — 74 cases · whole on success
+### `wallet_issue` — 78 cases · whole on success
 
 - wallet_issue
 - wallet_issue from a vault that carries a ledger
@@ -2241,6 +2245,10 @@ At the run that generated this file: **1909** cases (**1103** of the run's cases
 - wallet_issue: a request carrying a CARD-held sibling root's key
 - generated · wallet_issue · {}
 - generated · wallet_issue · the hostile object
+- generated · wallet_issue · vault_plaintext absent
+- generated · wallet_issue · vault_plaintext null
+- generated · wallet_issue · record_plaintext absent
+- generated · wallet_issue · record_plaintext null
 - generated · wallet_issue · root_fingerprint absent
 - generated · wallet_issue · root_fingerprint null
 - generated · wallet_issue · csr absent
@@ -2278,7 +2286,7 @@ At the run that generated this file: **1909** cases (**1103** of the run's cases
 - generated · wallet_issue · now absent, valid_days "7"
 - generated · wallet_issue · now absent, move "yes"
 
-## The 68 known divergences
+## The 60 known divergences
 
 Cases that FAIL today, each excused by `js/cases/known-divergences.json` only while it fails exactly
 as its entry says, and each waiting on the audit finding named beside it (the port-parity audit of
@@ -2341,14 +2349,6 @@ as its entry says, and each waiting on the audit finding named beside it (the po
 - generated · vault_seal · salt "" — R29, C6 (differ)
 - generated · vault_seal · salt 7 — F17 (wasm off the contract, go off the contract, differ)
 - generated · vault_seal · nonce 7 — F17 (wasm off the contract, go off the contract, differ)
-- generated · wallet_issue · vault_plaintext absent — S1-2 (wasm not as expected, go not as expected)
-- generated · wallet_issue · vault_plaintext null — S1-2 (wasm not as expected, go not as expected)
-- generated · wallet_issue · record_plaintext absent — S1-2 (wasm not as expected, go not as expected)
-- generated · wallet_issue · record_plaintext null — S1-2 (wasm not as expected, go not as expected)
 - generated · wallet_issue · move "yes" — F5, R02 (wasm off the contract, differ)
 - generated · wallet_issue · vault_plaintext absent, move "yes" — F5 (differ)
 - generated · wallet_issue · record_plaintext absent, move "yes" — F5 (differ)
-- generated · export_read_end · lines absent — S1-3 (wasm not as expected, go not as expected)
-- generated · export_read_end · lines null — S1-3 (wasm not as expected, go not as expected)
-- generated · limits_decide · now absent — S1-2 (wasm not as expected, go not as expected)
-- generated · limits_decide · now null — S1-2 (wasm not as expected, go not as expected)

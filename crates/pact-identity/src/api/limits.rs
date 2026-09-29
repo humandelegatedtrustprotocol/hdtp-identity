@@ -117,6 +117,9 @@ pub(super) fn limits_decide(a: &Value) -> Result<Value> {
     let Some(doc) = a.get("rules").filter(|v| !v.is_null()) else { return err("bad_request", "rules is required") };
     let rules = read_rules(doc).map_err(|why| Error::new("bad_request", format!("the limits rules cannot be enforced: {why}")))?;
     let charge = read_charge(a.get("charge"))?;
+    if a.get("now").is_none_or(Value::is_null) {
+        return err("bad_request", "now is required");
+    }
     let now = whole(a.get("now")).ok_or_else(|| Error::new("bad_request", "now is a time in milliseconds"))?;
     let mut store = read_state(a.get("state"))?;
     let decision = decide(&rules, &charge, now, &mut store);

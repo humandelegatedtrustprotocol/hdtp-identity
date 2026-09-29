@@ -16,7 +16,7 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   the wrong type, an undeclared member, and each required member absent beside each other member of
   the wrong type (read order) — 1103 cases, varied from one named hand-written case per function
   that succeeds on both ports. 463 cases failed when they were written (459 generated, and 4 written
-  beside them), 68 fail today (66 and 2); each is listed in `js/cases/known-divergences.json` with
+  beside them), 60 fail today (58 and 2); each is listed in `js/cases/known-divergences.json` with
   the audit finding that closes it, and the run fails on any other failure, on an entry whose case
   passes, and on an entry nobody has.
 - The coverage gate fails when a declared error code is not produced by both ports in one case they
@@ -103,6 +103,13 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   `dns_name` given as `""` to `csr_new`, `build_leaf` or `leaf_tbs` is refused in both ports,
   `dns_name is empty`: the core wrote an empty dNSName, which rule 5 then refuses, and the Go port
   wrote none.
+- **Three required members absent are `<name> is required`, as §0 says every one is** (S1-2, S1-3,
+  which the generated cases found): `wallet_issue`'s `vault_plaintext` and `record_plaintext` (they
+  said `…: the root lives there` and `…: the ledger lives there`, which a document that is not an
+  object still says), `limits_decide`'s `now` (it said `now is a time in milliseconds`, which a
+  `now` that is not one still says), and `export_read_end`'s `lines`, which both ports read as 0
+  lines and refused the file for its count instead. The contract's notes said the other words, and
+  say these now.
 - The core reads three functions in the contract's order where the Go port already did: `card_decode`
   reads `vcard` before `now` (R25); `key_from_seed` reads `alg` before the seed (T21, R01; the Go port's
   `KeyFromSeed` also judges the algorithm first now); `vault_seal` answers `empty passphrase` before a

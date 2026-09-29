@@ -107,7 +107,7 @@ export default function limits({ add, expect }) {
     ['a guest charge with no addressed', { charge: { kind: 'guest_in', root: 'rG', source: 's1' } }, 'charge.addressed is required'],
     ['an integration charge with no contact', { charge: { kind: 'integration', integration: 'i1' } }, 'charge.contact is required'],
     ['a pending count that is a string', { charge: { kind: 'pending_in', held: '2' } }, 'charge.held is a whole number'],
-    ['no now', { now: undefined }, 'now is a time in milliseconds'],
+    ['no now', { now: undefined }, 'now is required'],
     ['a negative now', { now: -1 }, 'now is a time in milliseconds'],
     ['a now with a fraction', { now: 1000.5 }, 'now is a time in milliseconds'],
     ['a now past 2^53', { now: 2 ** 53 }, 'now is a time in milliseconds'],
