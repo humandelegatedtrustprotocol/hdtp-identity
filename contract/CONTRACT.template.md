@@ -43,10 +43,11 @@ the tables is `contract/CONTRACT.template.md` and is written by hand.
   carries the same words: chain rule 1, `csr_check`, `card_decode`). The seed's `parse` refuses it in
   the same words.
 - **Every function returns one JSON object.** Success shapes are listed per function. Failure is
-  `{"error": "<code>", "why": "<one line>"}`, where `code` is a spec error where one applies
-  (`envelope_invalid`, `chain_required`, `certificate_renewed`, `bad_request`, `pending_approval`) and
-  otherwise one of `parse`, `profile`, `unsupported`, `key`, `vault`, `internal`. Ports never throw
-  across the boundary.
+  `{"error": "<code>", "why": "<one line>"}`, where `code` is one of the contract's `ErrorCode`
+  ({{error_codes}}), and each function lists the codes it can fail with, which `js/parity.mjs` holds
+  both ports to. `chain_required`, `certificate_renewed` and `pending_approval` are not failures: they
+  are the `code` of an answer of `decide` (§5.1), which succeeds. Ports never throw across the
+  boundary.
 - **A member that is absent is not a member that is empty.** Absent answers `{"error": "bad_request",
   "why": "<name> is required"}` naming the member the caller left out; present but unusable — `""`,
   bytes that will not decode, a string where an object belongs — answers what is wrong with the value
@@ -72,11 +73,14 @@ the tables is `contract/CONTRACT.template.md` and is written by hand.
 - **`why` is part of the answer.** Two ports refusing the same call in different words is a
   divergence, not a detail: it is what a person debugging reads, and what a caller's test asserts. No
   `why` may be a library's own error text — one port cannot reproduce another library's wording.
-- **Half a surrogate pair is refused before anything else.** Arguments holding a `\u` escape of half
-  a UTF-16 surrogate pair (a high one not followed by a low one, or a low one alone) answer
-  `{"error": "bad_request", "why": "args: a string holds half of a UTF-16 surrogate pair"}` from
-  every function, before the arguments are read: one JSON parser refuses such text and another reads
-  it as U+FFFD, and a port must not answer by its parser's choice.
+- **The name is judged first.** A name no function has answers `{"error": "unsupported", "why": "no
+  function named <name>"}`, whatever the arguments are — a list, `null`, text that does not parse, or
+  any of what the next two rules refuse. Everything below is judged only for a function that exists.
+- **Half a surrogate pair is refused next, before the arguments are read.** Arguments holding a `\u`
+  escape of half a UTF-16 surrogate pair (a high one not followed by a low one, or a low one alone)
+  answer `{"error": "bad_request", "why": "args: a string holds half of a UTF-16 surrogate pair"}`
+  from every function: one JSON parser refuses such text and another reads it as U+FFFD, and a port
+  must not answer by its parser's choice.
 - **So is what one JSON parser refuses and another reads**, next: a number that is infinite as a
   double (`1e400`) answers `{"error": "bad_request", "why": "args: a number is outside the range of a
   double"}`, and arrays and objects nested more than 127 deep, the arguments object counted, `args:
@@ -90,10 +94,12 @@ the tables is `contract/CONTRACT.template.md` and is written by hand.
 
 {{table:build}}
 - The Wasm boundary takes `&str` JSON and `&[u8]` DER and returns `String` JSON. The Go port exposes
-  the same functions as Go functions on `[]byte`/`string` returning structs, plus a `pact-identity-go`
-  binary that reads JSON requests on stdin, one per line (`{"fn": "<name>", "args": {...}}`), and
-  writes one JSON answer per line, so the JavaScript suites can aim the same cases at both ports
-  through one process per run.
+  the same boundary as `Call(name, args)`, and most of the functions also as Go functions on
+  `[]byte`/`string` returning structs; the export section is reached through `Call` alone, beside the
+  two typed conveniences for a whole file, `ReadExportZip` and `WriteExportZip` (§6.2). It also builds a
+  `pact-identity-go` binary that reads JSON requests on stdin, one per line (`{"fn": "<name>", "args":
+  {...}}`), and writes one JSON answer per line, so the JavaScript suites can aim the same cases at
+  both ports through one process per run.
 
 ## 1. Keys
 

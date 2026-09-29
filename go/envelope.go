@@ -308,12 +308,14 @@ func numberOf(v any) (float64, bool) {
 func headerTypesOK(h map[string]any) bool {
 	for _, k := range []string{"v", "ts", "exp"} {
 		// decodeJSON keeps numbers as json.Number, which a JSON string never becomes: a `"1757000000"`
-		// arrives as a Go string and is refused here rather than coerced downstream.
+		// arrives as a Go string and is refused here rather than coerced downstream. An integer is what
+		// the core reads as one (integerText): `-0` is not, where n.Int64() read it as 0 and the header
+		// went on to the time window while the core refused its types (S3-1).
 		n, ok := h[k].(json.Number)
 		if !ok {
 			return false
 		}
-		if _, err := n.Int64(); err != nil {
+		if _, isInt := integerText(string(n)); !isInt {
 			return false
 		}
 	}

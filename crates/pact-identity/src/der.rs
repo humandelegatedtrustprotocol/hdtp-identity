@@ -47,9 +47,6 @@ pub fn octet(b: &[u8]) -> Vec<u8> {
 pub fn utf8(s: &str) -> Vec<u8> {
     tlv(0x0c, s.as_bytes())
 }
-pub fn ia5(s: &str) -> Vec<u8> {
-    tlv(0x16, s.as_bytes())
-}
 pub fn boolean(v: bool) -> Vec<u8> {
     tlv(0x01, &[if v { 0xff } else { 0x00 }])
 }

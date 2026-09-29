@@ -273,38 +273,35 @@ pub fn id_ledger(vault: &str, root: Option<&str>, json: bool) -> Res<i32> {
         eprintln!("no record at {}: this vault's ledger is not here", r.path);
     }
     let now = now_or(None)?;
-    let ledger: Vec<Value> = r.plaintext["ledger"].as_array().cloned().unwrap_or_default();
+    let ledger = &r.plaintext["ledger"];
     let filter = root.map(String::from);
-    let rows: Vec<&Value> = ledger.iter().filter(|l| filter.as_deref().is_none_or(|f| l["root"].as_str() == Some(f))).collect();
+    let rows: Vec<(usize, &Value)> = ledger
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| filter.as_deref().is_none_or(|f| l["root"].as_str() == Some(f)))
+        .collect();
     if json {
-        println!("{}", serde_json::to_string_pretty(&rows)?);
+        println!("{}", serde_json::to_string_pretty(&rows.iter().map(|(_, l)| l).collect::<Vec<_>>())?);
         return Ok(0);
     }
     if rows.is_empty() {
         println!("{}", if r.found { "no leaves issued" } else { "no ledger here" });
         return Ok(0);
     }
-    // The current leaf of a root is the live one with the latest notBefore.
-    let mut seen: Vec<&str> = rows.iter().filter_map(|l| l["root"].as_str()).collect();
-    seen.sort_unstable();
-    seen.dedup();
-    let current: Vec<usize> = seen
-        .iter()
-        .filter_map(|fp| {
-            let fp = *fp;
-            rows.iter()
-                .enumerate()
-                .filter(|(_, l)| {
-                    l["root"].as_str() == Some(fp) && l["not_after"].as_str().and_then(|t| parse_rfc3339(t).ok()).is_some_and(|t| t > now)
-                })
-                .max_by_key(|(_, l)| l["not_before"].as_str().and_then(|t| parse_rfc3339(t).ok()).unwrap_or(0))
-                .map(|(i, _)| i)
-        })
-        .collect();
-    for (i, l) in rows.iter().enumerate() {
+    let current = match current_entries(ledger, &rows, now) {
+        Ok(current) => current,
+        Err(why) => {
+            eprintln!("the ledger does not read ({why}): no entry is marked current");
+            Vec::new()
+        }
+    };
+    for (i, l) in &rows {
         println!(
             "{} {}  {}  {} to {}  root {}{}",
-            if current.contains(&i) { "*" } else { " " },
+            if current.contains(i) { "*" } else { " " },
             l["issued_at"].as_str().unwrap_or("-"),
             l["endpoint"].as_str().unwrap_or("-"),
             l["not_before"].as_str().unwrap_or("-"),
@@ -315,6 +312,23 @@ pub fn id_ledger(vault: &str, root: Option<&str>, json: bool) -> Res<i32> {
     }
     println!("* current");
     Ok(0)
+}
+
+/// The entries of the listing that are current: each root's live leaf, as the core's ledger rules name
+/// it (`ledger::live_entry`, what `ledger_check` reports as `live`) — its newest entry by notBefore,
+/// the first of equals, if that has not expired. This picked the newest of the UNEXPIRED entries and
+/// the last of equals, so the `*` could sit on an entry the rules treat as history (X8).
+fn current_entries(ledger: &Value, rows: &[(usize, &Value)], now: i64) -> Result<Vec<usize>, String> {
+    let mut roots: Vec<&str> = rows.iter().filter_map(|(_, l)| l["root"].as_str()).collect();
+    roots.sort_unstable();
+    roots.dedup();
+    let mut current = Vec::new();
+    for fp in roots {
+        if let Some(i) = pact_identity::ledger::live_entry(ledger, fp, now).map_err(|e| e.why)? {
+            current.push(i);
+        }
+    }
+    Ok(current)
 }
 
 pub fn id_show(vault: &str, root: Option<&str>, out: Option<&str>) -> Res<i32> {
@@ -403,4 +417,50 @@ pub fn id_restore(from: &str, vault: &str) -> Res<i32> {
     }
     landed.iter_mut().for_each(crate::io::wipe);
     Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pact_identity::time::format_rfc3339;
+
+    const ROOT: &str = "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    const OTHER: &str = "sha256:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+    const A: &str = "https://agent.alina.example/mcp";
+    const B: &str = "https://alina.host.example/alina/mcp";
+    const NOW: i64 = 1_789_214_400; // 2026-09-12T12:00:00Z
+    const DAY: i64 = 86_400;
+
+    fn entry(root: &str, endpoint: &str, nb: i64, na: i64) -> Value {
+        json!({ "root": root, "endpoint": endpoint, "not_before": format_rfc3339(nb), "not_after": format_rfc3339(na), "issued_at": format_rfc3339(nb) })
+    }
+
+    fn marked(ledger: &Value, root: Option<&str>) -> Result<Vec<usize>, String> {
+        let rows: Vec<(usize, &Value)> =
+            ledger.as_array().unwrap().iter().enumerate().filter(|(_, l)| root.is_none_or(|r| l["root"].as_str() == Some(r))).collect();
+        current_entries(ledger, &rows, NOW)
+    }
+
+    /// The `*` of `pact id ledger` sits on the entry the ledger rules call live, and on no other (X8).
+    #[test]
+    fn the_listing_marks_the_leaf_the_rules_call_live() {
+        // Two entries share the newest notBefore: the first of them, in ledger order, as the core
+        // reads it — max_by_key marked the last.
+        let tie = json!([
+            entry(ROOT, A, NOW - 10 * DAY, NOW + 300 * DAY),
+            entry(ROOT, B, NOW - DAY, NOW + 90 * DAY),
+            entry(ROOT, A, NOW - DAY, NOW + 90 * DAY)
+        ]);
+        assert_eq!(marked(&tie, None), Ok(vec![1]));
+        // The newest has expired and an older one has not: nothing is current. This marked the older
+        // one, the newest of the unexpired, which the rules treat as history.
+        let expired = json!([entry(ROOT, A, NOW - 10 * DAY, NOW + 300 * DAY), entry(ROOT, B, NOW - 2 * DAY, NOW - DAY)]);
+        assert_eq!(marked(&expired, None), Ok(vec![]));
+        // Each root's own, by its index in the ledger, whether or not the listing is filtered to it.
+        let two = json!([entry(OTHER, B, NOW - DAY, NOW + 90 * DAY), entry(ROOT, A, NOW - 10 * DAY, NOW + 300 * DAY)]);
+        assert_eq!(marked(&two, None), Ok(vec![1, 0]));
+        assert_eq!(marked(&two, Some(ROOT)), Ok(vec![1]));
+        // A ledger the rules refuse has no current entry to mark.
+        assert!(marked(&json!([{ "root": ROOT, "endpoint": A }]), None).is_err());
+    }
 }

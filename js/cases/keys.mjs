@@ -67,8 +67,11 @@ export default function keys({ add, expect }, f) {
   add('public_key of a P-256 key', 'public_key', { pkcs8: p256Pkcs8 });
   add('key_info', 'key_info', { spki: hostSpki });
   add('key_info of a P-256 key', 'key_info', { spki: p256Spki });
-  // Ed25519 is deterministic, so the signature itself is compared; P-256's ECDSA is not, so the
-  // signature is described and `verify` below proves each port accepts the other's.
+  // Ed25519 is deterministic, so the signature itself is compared. P-256's ECDSA is deterministic in
+  // the core (RFC 6979) and randomised in the Go port (measured: two signatures of one message are
+  // equal from the Wasm and differ from Go), and an ECDSA signature is "to be verified, never
+  // compared" (SPEC Appendix B's generator note), so the signature is described and `verify` below
+  // proves each port accepts the other's.
   add('sign', 'sign', { pkcs8: hostPkcs8, data: b64url(new Uint8Array([1, 2, 3, 4])) });
   add('sign with a P-256 key', 'sign', { pkcs8: p256Pkcs8, data: b64url(new Uint8Array([1, 2, 3, 4])) }, (a) => (a?.sig ? { ...a, sig: '<an ECDSA signature>' } : a));
   // Made by the OTHER port, on purpose: this is the case that says each accepts the other's.

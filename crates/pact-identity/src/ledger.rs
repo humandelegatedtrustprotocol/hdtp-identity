@@ -112,6 +112,44 @@ pub struct Facts {
     pub kind: Kind,
 }
 
+fn instant(l: &Value, m: &str) -> Option<i64> {
+    l.get(m).and_then(|t| t.as_str()).and_then(|t| parse_rfc3339(t).ok())
+}
+
+/// This root's newest entry by `not_before`, as its index in the ledger and that `not_before`: the
+/// first of equals, in ledger order, in both ports (§14.3: a later notBefore supersedes every earlier
+/// leaf). Over entries `read` has read.
+fn newest(entries: &[Value], root: &str) -> Option<(usize, i64)> {
+    let mut best: Option<(usize, i64)> = None;
+    for (i, l) in entries.iter().enumerate() {
+        if l.get("root").and_then(|r| r.as_str()) != Some(root) {
+            continue;
+        }
+        if let Some(t) = instant(l, "not_before") {
+            if best.is_none_or(|(_, n)| t > n) {
+                best = Some((i, t));
+            }
+        }
+    }
+    best
+}
+
+/// An entry's `not_after`, when it is after `now`: whether the newest entry is live.
+fn live_of(l: &Value, now: i64) -> Option<i64> {
+    instant(l, "not_after").filter(|na| *na > now)
+}
+
+/// The live leaf of `root`, as the index of its entry in the ledger: the entry `check` reports as
+/// `live` — the root's newest by `not_before`, the first of equals, if it has not expired. An older
+/// entry still in its validity is history, not live. The `pact` CLI marks this entry as current, so
+/// its listing and the rules name the same one (X8: it marked the newest UNEXPIRED entry, and the
+/// last of equals). A ledger that does not read is refused, as `check` refuses it.
+pub fn live_entry(ledger: &Value, root: &str, now: i64) -> Result<Option<usize>> {
+    read(ledger)?;
+    let entries = ledger.as_array().map(Vec::as_slice).unwrap_or_default();
+    Ok(newest(entries, root).filter(|(i, _)| live_of(&entries[*i], now).is_some()).map(|(i, _)| i))
+}
+
 /// The rules, over a ledger (`None` when the signer has none to read). `endpoint` is the request's,
 /// in the normal form of §14.1.
 pub fn check(ledger: Option<&Value>, root: &str, endpoint: &str, now: i64, moving: bool) -> Result<Facts> {
@@ -129,24 +167,15 @@ pub fn check(ledger: Option<&Value>, root: &str, endpoint: &str, now: i64, movin
         });
     };
     read(ledger)?;
-    let at = |l: &Value, m: &str| l.get(m).and_then(|t| t.as_str()).and_then(|t| parse_rfc3339(t).ok());
+    let entries = ledger.as_array().map(Vec::as_slice).unwrap_or_default();
     let endpoint_of = |l: &Value| l.get("endpoint").and_then(|e| e.as_str()).unwrap_or("").to_string();
-    let mine: Vec<&Value> =
-        ledger.as_array().map(|a| a.iter().filter(|l| l.get("root").and_then(|r| r.as_str()) == Some(root)).collect()).unwrap_or_default();
+    let mine: Vec<&Value> = entries.iter().filter(|l| l.get("root").and_then(|r| r.as_str()) == Some(root)).collect();
     let host = x509::host_of(endpoint);
     let new_host = !mine.iter().any(|l| x509::host_of(&endpoint_of(l)) == host);
     let known_endpoint = mine.iter().any(|l| endpoint_of(l) == endpoint);
-    // The first of the newest wins a tie, in ledger order, in both ports.
-    let mut newest: Option<(i64, &Value)> = None;
-    for l in &mine {
-        if let Some(t) = at(l, "not_before") {
-            if newest.is_none_or(|(n, _)| t > n) {
-                newest = Some((t, l));
-            }
-        }
-    }
-    let previous_not_before = newest.map(|(t, _)| t);
-    let live = newest.and_then(|(_, l)| at(l, "not_after").filter(|na| *na > now).map(|na| (endpoint_of(l), na)));
+    let newest = newest(entries, root);
+    let previous_not_before = newest.map(|(_, t)| t);
+    let live = newest.and_then(|(i, _)| live_of(&entries[i], now).map(|na| (endpoint_of(&entries[i]), na)));
     let elsewhere = live.as_ref().filter(|(e, _)| e != endpoint);
     let kind = match (elsewhere, known_endpoint) {
         (Some(_), true) => Kind::MoveBack,
@@ -245,6 +274,30 @@ mod tests {
 
     /// An entry that does not read is refused, never skipped — a `not_before` that does not parse
     /// included, whichever root it names.
+    #[test]
+    fn the_live_entry_is_the_newest_the_first_of_equals_and_none_when_the_newest_has_expired() {
+        let day = 86_400;
+        // Two entries share the newest notBefore: the first of them, in ledger order, is live.
+        let tie = json!([
+            entry(ROOT, A, NOW - 10 * day, NOW + 300 * day),
+            entry(ROOT, B, NOW - day, NOW + 90 * day),
+            entry(ROOT, A, NOW - day, NOW + 90 * day)
+        ]);
+        assert_eq!(live_entry(&tie, ROOT, NOW), Ok(Some(1)));
+        // The newest has expired and an older one has not: nothing is live, and the older one is history.
+        let expired = json!([entry(ROOT, A, NOW - 10 * day, NOW + 300 * day), entry(ROOT, B, NOW - 2 * day, NOW - day)]);
+        assert_eq!(live_entry(&expired, ROOT, NOW), Ok(None));
+        // Another root's entries are not this root's, and `check` reports the same entry as live.
+        let mixed = json!([entry(OTHER, B, NOW - day, NOW + 90 * day), entry(ROOT, A, NOW - 10 * day, NOW + 300 * day)]);
+        assert_eq!(live_entry(&mixed, ROOT, NOW), Ok(Some(1)));
+        for (ledger, want) in
+            [(&tie, Some((B.to_string(), NOW + 90 * day))), (&expired, None), (&mixed, Some((A.to_string(), NOW + 300 * day)))]
+        {
+            assert_eq!(check(Some(ledger), ROOT, A, NOW, true).unwrap().live, want);
+        }
+        assert!(live_entry(&json!([{ "root": ROOT }]), ROOT, NOW).is_err(), "a ledger that does not read");
+    }
+
     #[test]
     fn ledger_check_refuses_an_entry_that_does_not_read() {
         let day = 86_400;

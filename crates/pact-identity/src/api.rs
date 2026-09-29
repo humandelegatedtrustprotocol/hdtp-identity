@@ -290,8 +290,15 @@ fn dispatch(name: &str, a: &Value) -> Result<Answer> {
         "limits_rules_check" => limits::limits_rules_check(a)?,
         "limits_decide" => limits::limits_decide(a)?,
         "version" => json!({ "crate": env!("CARGO_PKG_VERSION"), "spec": SPEC_VERSION }),
-        other => return err("unsupported", format!("no function named {other}")),
+        // `call` names a function nobody declares before this is reached; `declared` and this match are
+        // one list, which every_function_declares_the_contracts_members and js/parity.mjs hold.
+        other => return Err(unknown(other)),
     }))
+}
+
+/// The answer to a name no function has, whatever the arguments are (CONTRACT §0).
+fn unknown(name: &str) -> Error {
+    Error::new("unsupported", format!("no function named {name}"))
 }
 
 /// The members each function declares, `params.properties` of contract/contract.json, in its order.
@@ -373,9 +380,15 @@ pub const LONE_SURROGATE: &str = "args: a string holds half of a UTF-16 surrogat
 
 /// The boundary. `args` is one JSON object; the answer is one JSON object, never an exception.
 pub fn call(name: &str, args: &str) -> String {
+    // The name first: one the contract does not have is `unsupported`, whatever the arguments are
+    // (CONTRACT §0). This read the arguments first, so a list, null or half a surrogate pair beside an
+    // unknown name was a refusal of the arguments here and `unsupported` in the Go port (R34).
+    if declared(name).is_none() {
+        return answer(Err(unknown(name)));
+    }
     // A \u escape of half a surrogate pair: serde_json refuses it in words of its own, and Go's
-    // encoding/json reads it as U+FFFD, so the two ports answered it two ways. Both name it first,
-    // in these words, before anything reads the arguments.
+    // encoding/json reads it as U+FFFD, so the two ports answered it two ways. Both name it next, in
+    // these words, before anything reads the arguments.
     if crate::util::lone_surrogate(args) {
         return json!({ "error": "bad_request", "why": LONE_SURROGATE }).to_string();
     }
@@ -507,6 +520,14 @@ mod tests {
         assert_eq!(doc["max_depth"], json!(crate::util::JSON_MAX_DEPTH));
         for c in doc["calls"].as_array().unwrap() {
             assert_eq!(answer(c["args"].as_str().unwrap()), c["want"], "key_info({})", c["args"]);
+        }
+        // A name no function has is judged before the arguments are read, whatever they are (R34).
+        let unknown = &doc["unknown_name"];
+        let texts = unknown["args"].as_array().unwrap();
+        assert!(texts.len() >= 5, "js/boundary-text.json's unknown_name holds {} texts", texts.len());
+        for t in texts {
+            let out: Value = serde_json::from_str(&call(unknown["fn"].as_str().unwrap(), t.as_str().unwrap())).unwrap();
+            assert_eq!(out, unknown["want"], "{}({t})", unknown["fn"]);
         }
         let nested = |n: usize| format!(r#"{{"spki":{}1{}}}"#, "[".repeat(n), "]".repeat(n));
         assert_eq!(answer(&nested(crate::util::JSON_MAX_DEPTH - 1)), doc["nested"]["within"]);
