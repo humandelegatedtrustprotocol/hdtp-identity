@@ -213,7 +213,9 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
     let leaf_b64 = b64u(&chain[0]);
     let endpoint = v.endpoint.clone();
 
-    let as_guest = |why: &str| -> DecideOutput {
+    // `demote` is the fact a host acts on, answered beside the reason rather than left to be read out
+    // of its words: a pin for this root stands, and the caller is a guest anyway (CW-11).
+    let as_guest = |why: &str, demote: bool| -> DecideOutput {
         if method != "tools/call" || !tool_ref.map(|t| GUEST_TOOLS.contains(&t)).unwrap_or(false) {
             // Refused as a guest — with the root and the leaf named, so a host holding an older pin of
             // this leaf's key learns the root above it and decides again.
@@ -243,6 +245,7 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
             .map(|f| f.root.clone());
         let mut extra = Map::new();
         extra.insert("why".into(), json!(why));
+        extra.insert("demote".into(), json!(demote));
         extra.insert("address_claim".into(), held.or(former).map(Value::String).unwrap_or(Value::Null));
         ok("guest", &root, &endpoint, "chain", &leaf_b64, extra, Vec::new())
     };
@@ -260,14 +263,14 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
                 return Ok(ok("pending_new_address", &root, &endpoint, "chain", &leaf_b64, extra, effects));
             }
         }
-        return Ok(as_guest("unknown root"));
+        return Ok(as_guest("unknown root", false));
     };
     if p.state == "blocked" {
-        return Ok(as_guest("blocked"));
+        return Ok(as_guest("blocked", true));
     }
     let cmp = compare_leaves(&from_b64u(&p.leaf)?, &chain[0])?;
     if cmp == "superseded" {
-        return Ok(as_guest("superseded leaf"));
+        return Ok(as_guest("superseded leaf", true));
     }
     if cmp == "conflict" {
         return Ok(invalid("a different leaf with the same notBefore"));

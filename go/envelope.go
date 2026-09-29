@@ -599,7 +599,9 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 	root, endpoint := vr.RootFingerprint, vr.Endpoint
 	leafB64 = B64url(chain[0])
 
-	asGuest := func(why string) Decision {
+	// demote is the fact a host acts on, answered beside the reason rather than left to be read out of
+	// its words: a pin for this root stands, and the caller is a guest anyway (CW-11).
+	asGuest := func(why string, demote bool) Decision {
 		if method != "tools/call" || !guestTools[tool] {
 			// Refused as a guest — with the root and the leaf named, so a host
 			// holding an older pin of this leaf's key learns the root above it (§14.3
@@ -642,7 +644,7 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 				}
 			}
 		}
-		return result("guest", root, endpoint, "chain", map[string]any{"why": why, "address_claim": claim})
+		return result("guest", root, endpoint, "chain", map[string]any{"why": why, "demote": demote, "address_claim": claim})
 	}
 
 	var pin *Pin
@@ -679,10 +681,10 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 			}
 			break
 		}
-		return asGuest("unknown root")
+		return asGuest("unknown root", false)
 	}
 	if pin.State == "blocked" {
-		return asGuest("blocked")
+		return asGuest("blocked", true)
 	}
 	pinnedDER, err := DecodeB64url(pin.Leaf)
 	if err != nil {
@@ -693,7 +695,7 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 		return unreadableState(unreadable, err)
 	}
 	if cmp == "superseded" {
-		return asGuest("superseded leaf")
+		return asGuest("superseded leaf", true)
 	}
 	if cmp == "conflict" {
 		return invalid("a different leaf with the same notBefore")
