@@ -8,9 +8,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 case can be listed as proven that did not pass. The cases that fail today are listed apart, at the
 end, each with the finding it waits on.
 
-Specification: **2.2.4**. **88** normative sentences, **2149** cross-port parity cases over **50** guarded functions, and **3** known divergences that fail today and are listed apart, at the end.
+Specification: **2.2.4**. **88** normative sentences, **2154** cross-port parity cases over **50** guarded functions, and **3** known divergences that fail today and are listed apart, at the end.
 
-Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **4304** answers, of which **2** do not hold to the shape it declares — **2** of them in a known divergence. Of **117** declared error codes, **117** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **4314** answers, of which **2** do not hold to the shape it declares — **2** of them in a known divergence. Of **117** declared error codes, **117** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 88 normative sentences of the specification
 
@@ -203,7 +203,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 2149 cross-port parity cases
+## The 2154 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -211,7 +211,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **2149** cases (**1108** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
+At the run that generated this file: **2154** cases (**1108** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
 
 ### `address_guard` — 50 cases · whole on success
 
@@ -2138,7 +2138,7 @@ At the run that generated this file: **2149** cases (**1108** of the run's cases
 - generated · sign · pkcs8 absent, data 7
 - generated · sign · data absent, pkcs8 7
 
-### `signing_request_check` — 95 cases · whole on success
+### `signing_request_check` — 100 cases · whole on success
 
 - signing_request_check: a renewal from a localhost node
 - signing_request_check: a move from an https host, without root_cert
@@ -2215,6 +2215,11 @@ At the run that generated this file: **2149** cases (**1108** of the run's cases
 - signing_request_check with no now
 - signing_request_check with root_spkis that do not read
 - signing_request_check with nothing to work from
+- signing_request_check of a request carrying a key outside the profile: rsa
+- signing_request_check of a request carrying a key outside the profile: P-384
+- signing_request_check of a request carrying a key outside the profile: X25519
+- signing_request_check of a request carrying a key outside the profile: Ed25519 with a NULL
+- signing_request_check of a request whose root certificate holds a key outside the profile
 - generated · signing_request_check · {}
 - generated · signing_request_check · the hostile object
 - generated · signing_request_check · request absent
