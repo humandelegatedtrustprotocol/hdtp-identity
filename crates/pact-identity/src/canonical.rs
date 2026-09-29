@@ -109,33 +109,19 @@ mod tests {
             serde_json::from_str(r#"{"v":2,"suite":"PACT-SEAL-P256","kid":"k","ts":1,"exp":2,"cty":"c","msg_id":"m\n"}"#).unwrap();
         assert_eq!(canonical(&v), r#"{"cty":"c","exp":2,"kid":"k","msg_id":"m\n","suite":"PACT-SEAL-P256","ts":1,"v":2}"#);
     }
+    /// The rows are contract/contract.json's `CanonicalNumbers`, one list, which go/review_test.go's
+    /// TestNumbersAsECMAScriptPrintsThem runs through the Go port too. (Each port carried its own copy
+    /// of the table until 2026-09-29, held to the other by nothing but a comment saying so.)
     #[test]
     fn numbers_as_ecmascript_prints_them() {
-        let cases: &[(&str, &str)] = &[
-            ("1e21", "1e+21"),
-            ("1.5e300", "1.5e+300"),
-            ("1e-7", "1e-7"),
-            ("0.000001", "0.000001"),
-            ("100.0", "100"),
-            ("9223372036854775808.0", "9223372036854776000"), // the shortest round-trip form, as ECMAScript prints 2^63
-            ("1e20", "100000000000000000000"),
-            ("0.1", "0.1"),
-            ("-0.0", "0"),
-            ("42", "42"),
-            // …and the rows the Go port's table has carried since 2026-09-21: the two are one list.
-            ("1e-5", "0.00001"),
-            ("0.0000001", "1e-7"),
-            ("1.25e-9", "1.25e-9"),
-            ("-1e-7", "-1e-7"),
-            ("1e100", "1e+100"),
-            ("9007199254740992", "9007199254740992"),
-            ("9007199254740993", "9007199254740992"),
-            ("-9007199254740993", "-9007199254740992"),
-            ("12345678901234567890", "12345678901234567000"),
-        ];
-        for (input, want) in cases {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../contract/contract.json");
+        let contract: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let rows = contract["$defs"]["CanonicalNumbers"]["const"].as_array().unwrap();
+        assert!(rows.len() >= 19, "the contract carries {} rows", rows.len());
+        for row in rows {
+            let (input, want) = (row[0].as_str().unwrap(), row[1].as_str().unwrap());
             let v: Value = serde_json::from_str(input).unwrap();
-            assert_eq!(canonical(&v), *want, "{input}");
+            assert_eq!(canonical(&v), want, "{input}");
         }
     }
 }
