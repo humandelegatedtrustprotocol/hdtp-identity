@@ -441,38 +441,15 @@ mod tests {
         for args in ["[]", "null", "3", "\"x\"", "true"] {
             assert!(call("verify", args).contains("args is a JSON object"), "verify({args})");
         }
-        // Text that does not parse is not an object: fixed words, never serde's (F21), as the Go
-        // port's Call answers it (go/api_args_test.go holds that side).
-        for args in ["{", r#"{"spki":"x"} x"#, "{\"spki\":\"\u{1}\"}", r#"{"spki":"\q"}"#] {
-            assert_eq!(call("verify", args), r#"{"error":"bad_request","why":"args is a JSON object"}"#, "verify({args})");
-        }
         // Half a surrogate pair, in either order and at the end, is refused in fixed words; a whole
         // pair, and an escaped backslash before a `u`, are text.
         for args in [r#"{"spki":"a\ud800"}"#, r#"{"spki":"\udc00b"}"#, r#"{"spki":"\ud800\u0041"}"#] {
             assert!(call("verify", args).contains(LONE_SURROGATE), "{args}");
         }
-        // What one port's parser refuses and the other's reads is named before anything reads the
-        // arguments, export_read_end's lean path included, in fixed words (R40, S3-2): a number that is
-        // infinite as a double, and containers nested more than 127 deep — the first in text order.
-        // Strings are text, and a number that is merely small is not infinite.
-        let beyond = r#"{"error":"bad_request","why":"args: a number is outside the range of a double"}"#;
-        let deep = r#"{"error":"bad_request","why":"args: nested more than 127 deep"}"#;
+        // export_read_end's lean path answers what the ordinary one does, a number past the largest
+        // double in a member it does not read included: the fixed words, never `ok` (R40).
         let wide = r#"{"x":1e400,"manifest":"{}","lines":0,"ids":[],"msg_ids":[],"reply_tos":[],"media_seen":[],"media":[]}"#;
-        assert_eq!(call("export_read_end", wide), beyond);
-        let nested = |n: usize| format!(r#"{{"spki":{}1{}}}"#, "[".repeat(n), "]".repeat(n));
-        assert_eq!(call("key_info", &nested(127)), deep);
-        assert_eq!(call("key_info", &nested(126)), r#"{"error":"parse","why":"not base64url"}"#);
-        for (args, want) in [
-            (r#"{"x":-1e400}"#, beyond),
-            (r#"{"x":1.7976931348623159e308}"#, beyond),
-            (&format!(r#"{{"x":1e400,"y":{}}}"#, "[".repeat(128) + &"]".repeat(128)), beyond),
-            (&format!(r#"{{"y":{},"x":1e400}}"#, "[".repeat(128) + &"]".repeat(128)), deep),
-        ] {
-            assert_eq!(call("version", args), want, "version({args})");
-        }
-        for args in [r#"{"x":1.7976931348623158e308}"#, r#"{"x":1e-400}"#, r#"{"x":"1e400"}"#, r#"{"x":"[[[[","y":"\"1e400"}"#] {
-            assert_eq!(call("version", args), r#"{"error":"bad_request","why":"version takes no member \"x\""}"#, "version({args})");
-        }
+        assert_eq!(call("export_read_end", wide), r#"{"error":"bad_request","why":"args: a number is outside the range of a double"}"#);
         for args in [r#"{"x":"\ud83d\ude00"}"#, r#"{"x":"\\ud800"}"#] {
             assert!(!call("version", args).contains(LONE_SURROGATE), "{args}");
         }
@@ -505,20 +482,40 @@ mod tests {
         assert_eq!(serial(&a(r#"{"serial":7}"#)).err(), undecodable);
         assert_eq!(boolean(&a(r#"{"k":"yes"}"#), "k").err(), required("k"));
         assert_eq!(boolean(&a(r#"{"k":1}"#), "k").err(), required("k"));
-        // An integer is what serde_json reads as an i64: no fraction, no exponent, and not -0, which
-        // it reads as a float. go/api_args.go's integerText reads the same set.
-        for not_an_integer in
-            [r#"{"k":"7"}"#, r#"{"k":1.5}"#, r#"{"k":7.0}"#, r#"{"k":1e2}"#, r#"{"k":-0}"#, r#"{"k":9223372036854775808}"#]
-        {
-            assert_eq!(opt_int(&a(not_an_integer), "k").err(), required("k"), "{not_an_integer}");
-        }
-        assert_eq!(opt_int(&a(r#"{"k":-9223372036854775808}"#), "k"), Ok(Some(i64::MIN)));
-        assert_eq!(opt_int(&a(r#"{"k":0}"#), "k"), Ok(Some(0)));
+        // An integer is what serde_json reads as an i64, the list in js/boundary-text.json (below);
+        // -0, which it reads as a float, is not a number of days.
+        assert_eq!(opt_int(&a(r#"{"k":"7"}"#), "k").err(), required("k"));
         assert_eq!(valid_days(&a(r#"{"valid_days":-0}"#)).err(), required("valid_days"));
         // `extra` is a list of strings, every item: one that is not — null included — was dropped.
         for extra in [r#"["X-A:1",7]"#, "[null]", r#""X-A:1""#] {
             let out: Value = serde_json::from_str(&call("card_encode", &format!(r#"{{"fn":"A","cert":"AAAA","extra":{extra}}}"#))).unwrap();
             assert_eq!(out, json!({ "error": "bad_request", "why": "extra is required" }), "extra {extra}");
+        }
+    }
+
+    /// The arguments text both ports read alike, one list for both: js/boundary-text.json, which
+    /// go/api_args_test.go reads too. Text that does not parse is not an object, in fixed words and
+    /// never serde's (F21); what one parser refuses and the other reads — a number infinite as a
+    /// double, containers nested past `JSON_MAX_DEPTH` — is named before the arguments are read (R40,
+    /// S3-2); and an integer is what serde_json reads as an i64, which -0 is not (S3-1). The parity
+    /// harness cannot send text that does not parse, nor ask a reader about one token.
+    #[test]
+    fn the_arguments_text_is_read_as_the_go_port_reads_it() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../js/boundary-text.json");
+        let doc: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let answer = |args: &str| serde_json::from_str::<Value>(&call("key_info", args)).unwrap();
+        assert_eq!(doc["max_depth"], json!(crate::util::JSON_MAX_DEPTH));
+        for c in doc["calls"].as_array().unwrap() {
+            assert_eq!(answer(c["args"].as_str().unwrap()), c["want"], "key_info({})", c["args"]);
+        }
+        let nested = |n: usize| format!(r#"{{"spki":{}1{}}}"#, "[".repeat(n), "]".repeat(n));
+        assert_eq!(answer(&nested(crate::util::JSON_MAX_DEPTH - 1)), doc["nested"]["within"]);
+        assert_eq!(answer(&nested(crate::util::JSON_MAX_DEPTH)), doc["nested"]["beyond"]);
+        for (list, read) in [("read", true), ("refused", false)] {
+            for t in doc["integers"][list].as_array().unwrap() {
+                let a: Value = serde_json::from_str(&format!(r#"{{"k":{}}}"#, t.as_str().unwrap())).unwrap();
+                assert_eq!(matches!(opt_int(&a, "k"), Ok(Some(_))), read, "{t}");
+            }
         }
     }
 
