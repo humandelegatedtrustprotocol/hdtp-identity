@@ -21,7 +21,10 @@
 //   null         the same member as the JSON literal null, which §0 says is absent: the same answer;
 //   ""           each optional member that takes a string, as "" (§0: empty is not absent);
 //   wrong type   each optional member of the wrong JSON type — a number for a string, a string for an
-//                object, a list or a number, "yes" for a boolean;
+//                object, a list or a number, "yes" for a boolean — held to CONTRACT §0's answer for it:
+//                bytes are `{"error": "parse", "why": "not base64url"}`, as bytes that will not decode
+//                are, and any other member is `bad_request` in words that name it. An optional member
+//                of the wrong type is a caller's mistake, never a member left out;
 //   undeclared   one member the contract does not declare, on a call that succeeds;
 //   read order   for each ordered pair (a, b) of members where a is required: a left out AND b of the
 //                wrong type. The member named is the one the function reads first (CONTRACT §0: "both
@@ -128,6 +131,23 @@ export function wrongTypeFor(schema, root) {
   return numeric ? '7' : 'x';
 }
 
+/** Whether a member is bytes: `B64url`, or a name the contract gives it (`Serial`, `Spki`, `Seed32`…). */
+export function isBytes(schema, root) {
+  if (!schema || schema === true || !schema.$ref) return false;
+  const name = /^#\/\$defs\/(.+)$/.exec(schema.$ref)[1];
+  return name === 'B64url' || isBytes(root.$defs[name], root);
+}
+
+/**
+ * CONTRACT §0's answer to a member of the wrong type: bytes answer `parse`, `not base64url`, as bytes
+ * that will not decode do; any other member answers `bad_request`, naming it — `<name> is required`,
+ * or the particular words a function has for it (`first_line is a line number from 1`).
+ */
+export function wrongTypeAnswer(name, schema, root) {
+  if (isBytes(schema, root)) return { error: 'parse', why: 'not base64url' };
+  return { error: 'bad_request', why: new RegExp(`\\b${name}\\b`) };
+}
+
 const show = (v) => JSON.stringify(v);
 
 /**
@@ -185,7 +205,7 @@ export function generate(contract, bases) {
       if (required.includes(name)) continue;
       if (admitted(schema, root).has('string')) add(`${name} ""`, fn, { ...base.args, [name]: '' }, how, 'an optional string empty');
       const wrong = wrongTypeFor(schema, root);
-      if (wrong !== undefined) add(`${name} ${show(wrong)}`, fn, { ...base.args, [name]: wrong }, how, 'an optional member of the wrong type');
+      if (wrong !== undefined) add(`${name} ${show(wrong)}`, fn, { ...base.args, [name]: wrong }, how, 'an optional member of the wrong type', wrongTypeAnswer(name, schema, root));
     }
     add('an undeclared member', fn, { ...base.args, [UNDECLARED]: 1 }, how, 'an undeclared member');
     for (const a of required) {

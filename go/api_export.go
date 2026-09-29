@@ -42,8 +42,16 @@ func callExportRead(a args) json.RawMessage {
 	if err != nil {
 		return failErr(codeFor(err, "parse"), err)
 	}
-	threadsCSV := a.optText("threads_csv")
-	r, err := exportRead(directory, a.optText("manifest"), a.optText("contacts_csv"), threadsCSV, owner, now)
+	// The three texts, in the core's order, each a string or not given: one of another type is refused,
+	// where both ports read it as absent (CONTRACT §0, F5).
+	var texts [3]*string
+	for i, k := range []string{"manifest", "contacts_csv", "threads_csv"} {
+		if texts[i], err = a.optStr(k); err != nil {
+			return failErr(codeArgs, err)
+		}
+	}
+	threadsCSV := texts[2]
+	r, err := exportRead(directory, texts[0], texts[1], threadsCSV, owner, now)
 	if err != nil {
 		return fail(codeArgs, err.Error())
 	}

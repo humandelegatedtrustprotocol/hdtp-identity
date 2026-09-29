@@ -6,7 +6,7 @@ import { mkdtempSync, writeFileSync, chmodSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { adapterPort } from './port.mjs';
+import { adapterPort, makePort, RawArgs } from './port.mjs';
 
 const real = fileURLToPath(new URL('../go/bin/pact-identity-go', import.meta.url));
 
@@ -57,4 +57,26 @@ test('a call that hangs is failed at its deadline, and the port goes on', () => 
   const port = adapterPort(fake(), { callMs: 3000 });
   assert.throws(() => port.call('hang', {}), /gave no answer to hang/);
   assert.equal(port.call('x', {}).n, 1, 'the hung process was killed and a new one answers');
+});
+
+// Raw arguments are what the cases cannot say as a value — `1e400`, `-0`, `8192.0` — so they are
+// worth something only if the text arrives as written. JSON.stringify of the value would send
+// `{"x":null}` for `{"x":1e400}`, and `0` for `-0`.
+test('raw arguments reach both ports as the text written, byte for byte', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pact-raw-'));
+  const echo = join(dir, 'adapter');
+  // A stand-in adapter that answers with the request line it read, in base64.
+  writeFileSync(echo, ['#!/bin/sh', 'while IFS= read -r line; do', `  printf '{"line":"%s"}\\n' "$(printf '%s' "$line" | base64 | tr -d '\\n')"`, 'done', ''].join('\n'));
+  chmodSync(echo, 0o755);
+  const text = '{"x":1e400,"y":-0,"z":8192.0}';
+  const line = Buffer.from(adapterPort(echo).call('f', new RawArgs(text)).line, 'base64').toString();
+  assert.equal(line, `{"fn":"f","args":${text}}`);
+  const wasm = await makePort('wasm');
+  const out = wasm.call('version', new RawArgs('{"x":1e400}'));
+  assert.equal(out.error, 'bad_request');
+  assert.notEqual(out.why, 'version takes no member "x"', 'the core was handed the value, not the text');
+  assert.throws(() => new RawArgs('{"x":\n1}'), /one line/);
+  assert.throws(() => RawArgs.edit({ a: 1, b: 1 }, ':1', ':2'), /exactly once/);
+  assert.equal(RawArgs.edit({ a: 1, b: 2 }, '"b":2', '"b":-0').text, '{"a":1,"b":-0}');
+  assert.equal(JSON.stringify(new RawArgs('{}')), '{"raw":"{}"}');
 });

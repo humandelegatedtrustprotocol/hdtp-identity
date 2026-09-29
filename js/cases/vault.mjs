@@ -2,6 +2,7 @@
 import { seed, p256FromSeed, pkcs8Of, b64url, fingerprint } from '../../../pact-protocol/vectors/lib/keys.mjs';
 import { buildRoot } from '../../../pact-protocol/vectors/lib/x509.mjs';
 import { BORN } from '../cast.mjs';
+import { RawArgs } from '../port.mjs';
 
 const SALT = b64url(new Uint8Array(16).fill(3)), NONCE = b64url(new Uint8Array(12).fill(4));
 const K = { m_kib: 8192, t: 1, p: 1 };
@@ -38,7 +39,21 @@ export default function vault({ add, expect }, f) {
   add('vault_seal of an earlier generation', 'vault_seal', { passphrase: 'a passphrase', plaintext: { v: 1, roots: [], ledger: [], contacts: [] }, kdf: K, salt: SALT, nonce: NONCE });
   add('vault_seal of a plaintext with no generation', 'vault_seal', { passphrase: 'a passphrase', plaintext: { roots: [] }, kdf: K, salt: SALT, nonce: NONCE });
   // Port-built: the seed has no vault.
-  add('vault_open of what vault_seal made', 'vault_open', { passphrase: 'a passphrase', vault: f.wasm.call('vault_seal', { passphrase: 'a passphrase', plaintext: { v: 2, roots: [] }, kdf: K, salt: SALT, nonce: NONCE }).vault });
+  const opened = { passphrase: 'a passphrase', vault: f.wasm.call('vault_seal', { passphrase: 'a passphrase', plaintext: { v: 2, roots: [] }, kdf: K, salt: SALT, nonce: NONCE }).vault };
+  add('vault_open of what vault_seal made', 'vault_open', opened);
+  // A KDF parameter is a whole number written as one. The same document with `t` spelled `1.0` has the
+  // same canonical header, so it opened in the Go port, which read the number as a float, and was
+  // refused by the core, which reads an integer; and `m_kib` 8192.5 was cut to 8192 there and then
+  // failed as a wrong passphrase (C5). Raw text: JSON.stringify writes 1.0 as 1.
+  for (const [what, from, to] of [
+    ['t spelled 1.0', '"t":1,', '"t":1.0,'],
+    ['m_kib spelled 8192.0', '"m_kib":8192,', '"m_kib":8192.0,'],
+    ['p spelled 1e0', '"p":1}', '"p":1e0}'],
+    ['m_kib 8192.5', '"m_kib":8192,', '"m_kib":8192.5,'],
+  ]) {
+    add(`vault_open of what vault_seal made, with ${what}`, 'vault_open', RawArgs.edit(opened, from, to));
+    expect(`vault_open of what vault_seal made, with ${what}`, { error: 'vault', why: 'kdf parameters out of range' });
+  }
   add('vault_seal with a nonce that is not 12 bytes', 'vault_seal', { passphrase: 'a passphrase', plaintext: { v: 2 }, kdf: K, salt: SALT, nonce: b64url(new Uint8Array(8)) });
   add('vault_seal with an empty passphrase', 'vault_seal', { passphrase: '', plaintext: { v: 2 }, kdf: K });
   add('vault_seal with no plaintext', 'vault_seal', { passphrase: 'a passphrase', kdf: K });
@@ -117,6 +132,13 @@ export default function vault({ add, expect }, f) {
     const args = issueWith(over);
     for (const k of Object.keys(args)) if (args[k] === undefined) delete args[k];
     add(`wallet_issue with ${what}`, 'wallet_issue', args);
+  }
+  // An integer written with a fraction, and -0, which the core's reader takes for a float: neither is
+  // a number of days. The Go port read -0 as 0 and refused it as out of range. Raw text: JSON.stringify
+  // writes neither.
+  for (const [what, to] of [['-0', '-0'], ['365.0', '365.0']]) {
+    add(`wallet_issue with valid_days spelled ${what}`, 'wallet_issue', RawArgs.edit(issueWith({ valid_days: 365 }), '"valid_days":365', `"valid_days":${to}`));
+    expect(`wallet_issue with valid_days spelled ${what}`, { error: 'bad_request', why: 'valid_days is required' });
   }
   // The control that must get through: a ledger that reads, an entry for another root, and an origin.
   add('wallet_issue over a ledger that reads', 'wallet_issue', issueWith({ valid_days: 30, record_plaintext: { ...record, ledger: [{ ...entry, root: 'sha256:' + 'B'.repeat(43), origin: 'https://app.example' }] } }), f.withoutSerial('der'));

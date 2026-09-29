@@ -47,6 +47,6 @@ pub(super) fn wallet_issue(a: &Value) -> Result<Value> {
         &bytes(a, "csr")?,
         instant(a, "now")?,
         valid_days(a)?,
-        boolean(a, "move"),
+        boolean(a, "move")?,
     )
 }

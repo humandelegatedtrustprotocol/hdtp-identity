@@ -97,3 +97,60 @@ func TestAnEmptyExpectationIsNotGivenOnlyToAGoCaller(t *testing.T) {
 		t.Errorf("FollowRenewed to an empty dialed address: %v %q", follow, why)
 	}
 }
+
+// An integer is what the core reads as one (serde_json's `as_i64`): no fraction, no exponent, within
+// 64 bits, and not -0, which serde_json reads as a float. strconv reads -0 as 0, so this port sealed
+// an `exp` of -0 and decided a limits `now` of -0 where the core refused both (S3-1).
+func TestAnIntegerIsWhatTheCoreReadsAsOne(t *testing.T) {
+	for text, want := range map[string]bool{
+		"0": true, "7": true, "-7": true, "9223372036854775807": true, "-9223372036854775808": true,
+		"-0": false, "7.0": false, "1.5": false, "1e2": false, `"7"`: false, "9223372036854775808": false, "-9223372036854775809": false,
+	} {
+		if _, isInt := integerText(text); isInt != want {
+			t.Errorf("integerText(%s) = %v, want %v", text, isInt, want)
+		}
+		_, err := args{"k": json.RawMessage(text)}.optInt("k")
+		if (err == nil) != want {
+			t.Errorf("optInt(%s): %v", text, err)
+		}
+	}
+	if n, err := (args{"k": json.RawMessage("null")}).optInt("k"); n != nil || err != nil {
+		t.Errorf("optInt(null) = %v, %v: null is absent", n, err)
+	}
+	if _, isWhole := limitsWhole(json.Number("-0")); isWhole {
+		t.Error("limitsWhole(-0) read a whole number")
+	}
+}
+
+// A vault document's KDF parameters are whole numbers written as whole numbers, as the core reads
+// them: `t` spelled 1.0 gives the canonical header `t` 1 gives, and opened here (C11's verifier, C5).
+func TestAVaultsKDFNumbersAreWholeNumbers(t *testing.T) {
+	doc := func(member string, n json.Number) map[string]any {
+		kdf := map[string]any{"name": "argon2id", "m_kib": json.Number("8192"), "t": json.Number("1"), "p": json.Number("1")}
+		kdf[member] = n
+		return map[string]any{"format": VaultFormat, "kdf": kdf, "salt": "AAAAAAAAAAAAAAAAAAAAAA", "nonce": "AAAAAAAAAAAAAAAA", "ct": "AAAA"}
+	}
+	for _, c := range []struct {
+		member string
+		n      json.Number
+	}{{"t", "1.0"}, {"m_kib", "8192.0"}, {"p", "1e0"}, {"m_kib", "8192.5"}, {"p", "257"}, {"t", "-0"}} {
+		_, err := VaultOpenDoc("x", doc(c.member, c.n))
+		if err == nil || err.Error() != "kdf parameters out of range" {
+			t.Errorf("%s %s: %v", c.member, c.n, err)
+		}
+	}
+	// The control: whole numbers read, and the document fails only at the passphrase.
+	if _, err := VaultOpenDoc("x", doc("t", "1")); err == nil || err.Error() == "kdf parameters out of range" {
+		t.Errorf("whole numbers: %v", err)
+	}
+	// A Go caller's own decoding kept no spelling: a float64 counts when it is whole, and only then.
+	half := doc("t", "1")
+	half["kdf"].(map[string]any)["t"] = 1.5
+	if _, err := VaultOpenDoc("x", half); err == nil || err.Error() != "kdf parameters out of range" {
+		t.Errorf("t 1.5 as a float64: %v", err)
+	}
+	half["kdf"].(map[string]any)["t"] = 1.0
+	if _, err := VaultOpenDoc("x", half); err == nil || err.Error() == "kdf parameters out of range" {
+		t.Errorf("t 1 as a float64: %v", err)
+	}
+}

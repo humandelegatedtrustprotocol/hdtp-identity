@@ -65,8 +65,8 @@ pub(super) fn validate_chain(a: &Value) -> Result<Value> {
     Ok(chain_result(x509::validate_chain(
         &chain(a, "chain")?,
         instant(a, "now")?,
-        opt_s(a, "expected_root"),
-        opt_s(a, "expected_endpoint"),
+        opt_s(a, "expected_root")?,
+        opt_s(a, "expected_endpoint")?,
     )))
 }
 
@@ -79,7 +79,7 @@ pub(super) fn is_normal_https(a: &Value) -> Result<Value> {
 }
 
 pub(super) fn address_guard(a: &Value) -> Result<Value> {
-    Ok(match address::address_guard(s(a, "endpoint")?, opt_s(a, "self_endpoint"), boolean(a, "guest")) {
+    Ok(match address::address_guard(s(a, "endpoint")?, opt_s(a, "self_endpoint")?, boolean(a, "guest")?) {
         Ok(()) => json!({ "ok": true }),
         Err(e) => json!({ "ok": false, "why": e.why }),
     })

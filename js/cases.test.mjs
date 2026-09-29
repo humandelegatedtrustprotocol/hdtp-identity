@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { collect, CASE_FILES } from './cases/index.mjs';
-import { generate, pickBases, wrongTypeFor, BASES, HOSTILE } from './cases/generated.mjs';
+import { generate, pickBases, wrongTypeFor, wrongTypeAnswer, BASES, HOSTILE } from './cases/generated.mjs';
 import { readKnown, verdict } from './cases/known.mjs';
 
 const contract = {
@@ -109,9 +109,23 @@ test('every function gets {} and the hostile members it declares; one with a bas
   assert.deepEqual(byId.get('pkcs8 null').args, { pkcs8: null, data: 'BB' });
   assert.deepEqual(byId.get('data absent, pkcs8 7').args, { pkcs8: 7 });
   assert.equal(byId.get('an undeclared member').args.not_a_member, 1);
-  // §0's answer for an absent member, and for null, which is absent.
+  // §0's answer for an absent member, and for null, which is absent; and for an optional member of
+  // the wrong type, which is refused in words that name it and never read as absent.
   assert.deepEqual(expected.get('generated · sign · data null'), { error: 'bad_request', why: 'data is required' });
-  assert.equal(expected.size, 4);
+  assert.deepEqual(expected.get('generated · sign · deep "yes"'), { error: 'bad_request', why: /\bdeep\b/ });
+  assert.equal(expected.size, 5);
+});
+
+test('an optional member of the wrong type is held to §0: bytes do not decode, anything else is named', () => {
+  const root = { $defs: { B64url: { type: 'string' }, Serial: { $ref: '#/$defs/B64url' }, Form: { enum: ['chain', 'leaf'] } } };
+  const bytes = { error: 'parse', why: 'not base64url' };
+  assert.deepEqual(wrongTypeAnswer('aad', { $ref: '#/$defs/B64url' }, root), bytes);
+  assert.deepEqual(wrongTypeAnswer('serial', { $ref: '#/$defs/Serial' }, root), bytes);
+  const named = wrongTypeAnswer('exp', { type: 'integer' }, root);
+  assert.equal(named.error, 'bad_request');
+  assert.ok(named.why.test('exp is required') && named.why.test('the record\'s exp is a list'));
+  assert.ok(!named.why.test('expected_root is required'), 'the member by its whole name, not a prefix of another');
+  assert.equal(wrongTypeAnswer('form', { $ref: '#/$defs/Form' }, root).error, 'bad_request');
 });
 
 test('an optional string is also tried as "", and a wrong type is one the member does not admit', () => {

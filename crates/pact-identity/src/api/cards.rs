@@ -5,12 +5,19 @@ use crate::card;
 
 pub(super) fn card_encode(a: &Value) -> Result<Value> {
     Ok({
-        let extra: Vec<String> = a
-            .get("extra")
-            .and_then(|e| e.as_array())
-            .map(|items| items.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
-            .unwrap_or_default();
-        json!({ "vcard": card::encode(s(a, "fn")?, &bytes(a, "cert")?, opt_s(a, "seal"), &extra)? })
+        let (name, cert, seal) = (s(a, "fn")?, bytes(a, "cert")?, opt_s(a, "seal")?);
+        // A list of strings, or `extra is required`: an item that was not a string — a number, or
+        // null — was dropped here and the card written without it, where the Go port refused the call
+        // (T21). Read last, in the contract's order; it was read first, which mattered only once it
+        // could refuse.
+        let extra: Vec<String> = match a.get("extra") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(Value::Array(items)) => {
+                items.iter().map(|x| x.as_str().map(str::to_string)).collect::<Option<_>>().ok_or_else(|| required("extra"))?
+            }
+            Some(_) => return Err(required("extra")),
+        };
+        json!({ "vcard": card::encode(name, &cert, seal, &extra)? })
     })
 }
 

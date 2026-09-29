@@ -32,7 +32,7 @@
 // collects them), and in js/cases/generated.mjs, which makes the shapes of a caller's mistake for
 // every function from the contract itself; this file only runs them.
 import { readFileSync } from 'node:fs';
-import { makePort } from './port.mjs';
+import { makePort, RawArgs } from './port.mjs';
 import { loadContract, judge } from '../contract/contract.mjs';
 import { fixtures } from './cases/fixtures.mjs';
 import { collect } from './cases/index.mjs';
@@ -118,6 +118,11 @@ const excused = []; // [{ id, fn, findings, fails }]
 // alike: what the failure side of the coverage gate is judged on (below).
 const comparedCodes = new Map();
 
+// A member of an expected answer is the value the answer's member must be, or a pattern its text must
+// match where the contract fixes part of the words (the member a refusal names) and not all of them.
+const holds = (v, got) => (v instanceof RegExp ? typeof got === 'string' && v.test(got) : got === v);
+const shown = (want) => JSON.stringify(want, (_, v) => (v instanceof RegExp ? String(v) : v));
+
 for (const c of cases) {
   const { id, fn, args, how } = c;
   if (only && !id.includes(only) && fn !== only) continue;
@@ -130,7 +135,7 @@ for (const c of cases) {
   for (const [port, got] of [['wasm', raw], ['go', rawGo]]) {
     if (got?.threw) { fails.push(`${port} threw`); said.push(`  THREW  ${id}  (${port}): ${got.threw}`); continue; }
     held++;
-    const wrong = judge(contract, fn, args, got);
+    const wrong = judge(contract, fn, args instanceof RawArgs ? args.value : args, got);
     if (wrong.length) {
       offContract++;
       fails.push(`${port} off the contract`);
@@ -142,10 +147,10 @@ for (const c of cases) {
   const want = expected.get(id)?.want;
   // `decide` answers under `result`; a refusal is the answer itself.
   const judged = (got) => got?.result ?? got;
-  const missed = want ? [['wasm', raw], ['go', rawGo]].filter(([, got]) => !got?.threw && Object.entries(want).some(([k, v]) => judged(got)?.[k] !== v)) : [];
+  const missed = want ? [['wasm', raw], ['go', rawGo]].filter(([, got]) => !got?.threw && Object.entries(want).some(([k, v]) => !holds(v, judged(got)?.[k]))) : [];
   for (const [port, got] of missed) {
     fails.push(`${port} not as expected`);
-    said.push(`  NOT AS EXPECTED  ${id}  (${port}): want ${JSON.stringify(want)}, got ${JSON.stringify(judged(got))}`);
+    said.push(`  NOT AS EXPECTED  ${id}  (${port}): want ${shown(want)}, got ${JSON.stringify(judged(got))}`);
   }
   if (!missed.length && !raw?.threw && !rawGo?.threw) {
     const a = pick(raw, how, wasm);
