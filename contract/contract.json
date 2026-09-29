@@ -1220,7 +1220,8 @@
         "required": ["normal"],
         "additionalProperties": false
       },
-      "errors": ["bad_request"]
+      "errors": ["bad_request"],
+      "notes": "An IPv6 literal carries no zone id, in any spelling (`[fe80::1%eth0]`, `[2001:db8::1%25eth0]`): RFC 3986 has none, and the WHATWG parser the seed's `isNormalHttps` uses refuses a `%` inside the brackets. So `address_guard`, chain rule 5, `csr_check`, `ledger_check` and the export's endpoint column refuse one as not the normal form."
     },
     "address_guard": {
       "section": "certificates",
@@ -1263,7 +1264,8 @@
         "required": ["private"],
         "additionalProperties": false
       },
-      "errors": ["bad_request"]
+      "errors": ["bad_request"],
+      "notes": "The predicate `address_guard` applies to a literal host, for the host to apply to what it resolves. One leading `[` and one trailing `]` are dropped, as a URL writes an IPv6 host, and no more. An IPv6 literal with a zone id (`fe80::1%eth0`) is private whatever its address: a zone is an interface scope (RFC 4007 §6), which no global address carries. Text that is no address is not private: an empty zone, and a zone on an IPv4 address, are no address, as Go's `netip` reads them."
     },
     "csr_new": {
       "section": "csr",

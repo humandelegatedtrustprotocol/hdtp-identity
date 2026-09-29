@@ -154,6 +154,16 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   answers a member the map does not hold `<name> is a number`, as a document without it is answered
   (it read 0 and said `is at least 1`); `LimitsDecide` refuses a `Kind` nobody has, `Which`
   `charge.kind` (it charged no bucket and allowed the call). The crate's types cannot hold either.
+- **An IPv6 literal with a zone id is not the normal form** (cluster F; T1, C1, R09): the Go port read
+  `https://[2001:db8::1%eth0]/mcp` — and `%25eth0`, `%x@evil.example`, `%x?y` — with netip, which
+  takes any zone and prints it back, so it was normal https there: a leaf naming one passed chain
+  rule 5, a request naming one was issued, `address_guard` passed a zoned global address, and a
+  zoned private one was refused for being private where the core refused it as not the normal form.
+  Every reader of an endpoint now refuses a `%` inside the brackets, as the core and the seed do.
+  `ip_is_private` answers `true` for an IPv6 literal with a zone (R10, F15): the core could not read
+  one and answered `false`, and the Go port judged the address and ignored the zone, so
+  `2001:db8::1%eth0` was public to both and `fe80::1%eth0` to the core. It drops one `[` and one `]`
+  and no more (R11): the core dropped every bracket, so `[[::1]]` was loopback there.
 - **JS loader:** `call(name, null)` hands `null` to the core, which answers `args is a JSON object`
   as the Go port does; it used to be made `{}` (`js/index.mjs`, `js/worker.mjs`). Only `args` left
   out is `{}`. The parity case `args that are null` sends `null` for the first time (TC-2).
