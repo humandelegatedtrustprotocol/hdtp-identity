@@ -41,7 +41,9 @@ pub(super) fn refresh_check(a: &Value) -> Result<Value> {
     let Some(pin) = a.get("pin").filter(|v| !v.is_null()) else { return Err(required("pin")) };
     let Some(pin) = pin.as_object() else { return Err(required("pin")) };
     let member = |k: &str| pin.get(k).and_then(Value::as_str).ok_or_else(|| required(&format!("pin.{k}")));
-    let (root, endpoint) = (member("root")?, member("endpoint")?);
+    let root = member("root")?;
+    refresh::pin_root(root)?;
+    let endpoint = member("endpoint")?;
     let leaf = match pin.get("leaf") {
         None | Some(Value::Null) => return Err(required("pin.leaf")),
         Some(Value::String(l)) => from_b64u(l)?,

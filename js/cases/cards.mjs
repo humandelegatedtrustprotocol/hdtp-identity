@@ -152,6 +152,15 @@ export default function cards({ add, expect }, f) {
     // The pin's leaf is read before the answer, in its reader's class: a key outside the profile is
     // `unsupported`, whatever the peer sent.
     ['a pinned leaf holding a key outside the profile', { pin: pin(f.foreignLeaf('Ed25519 with a NULL')), answer: good, now }, { error: 'unsupported' }],
+    // The pin's root is a Fingerprint (the contract's type for it): one that is not is the host's
+    // fault, an error of the call read with the pin, before the answer. Both ports compared it with the
+    // card's and answered `ok: false`, `the card names another root`, blaming the peer (a lead of the
+    // port-parity verification, 2026-09-30).
+    ['a pin whose root is not a fingerprint', { pin: { ...pin(), root: 'abc' }, answer: good, now }, { error: 'bad_request', why: 'pin.root is not a fingerprint' }],
+    ['a pin whose root is empty', { pin: { ...pin(), root: '' }, answer: good, now }, { error: 'bad_request', why: 'pin.root is not a fingerprint' }],
+    ['a pin whose root is a character short', { pin: { ...pin(), root: rootFp.slice(0, -1) }, answer: good, now }, { error: 'bad_request', why: 'pin.root is not a fingerprint' }],
+    ['a pin whose root is not a fingerprint and no endpoint', { pin: { root: 'abc', leaf: leafDer }, answer: good, now }, { error: 'bad_request', why: 'pin.root is not a fingerprint' }],
+    ['a pin whose root is not a fingerprint and no answer', { pin: { ...pin(), root: 'abc' }, now }, { error: 'bad_request', why: 'pin.root is not a fingerprint' }],
     ['no answer', { pin: pin(), now }, { error: 'bad_request', why: 'answer is required' }],
     ['no now', { pin: pin(), answer: good }, { error: 'bad_request', why: 'now is required' }],
   ]) {
