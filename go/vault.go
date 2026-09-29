@@ -234,6 +234,16 @@ func stranger[V any](doc map[string]V, allowed []string) string {
 	return extra[0]
 }
 
+// member is a member a document declares, read as CONTRACT §0 reads every member: the JSON literal
+// null is absent, as the core's `member` reads it. These readers took a null member for one of the
+// wrong type (836d080), so a root's `pkcs8: null` was `does not read: pkcs8` where its absence is a
+// card-held root. A member a document does not declare is refused whatever it holds, null too
+// (stranger), as a function's arguments are.
+func member(o map[string]any, k string) (any, bool) {
+	v, has := o[k]
+	return v, has && v != nil
+}
+
 // CheckFile holds the file's plaintext to CONTRACT §6, as the Rust core's check_file does, in the
 // same order and the same words. Held where the rules read it, not at seal and open, which carry the
 // documents a live wallet already keeps.
@@ -267,18 +277,18 @@ func fileOf(raw json.RawMessage) (map[string]any, error) {
 	// Then each member, as CONTRACT §6 types it, in the order VaultPlaintext lists them. This port
 	// decoded the documents into typed structs, so a member of the wrong type anywhere in them was
 	// `arguments do not read`, where the core read it as absent, skipped it, or carried it (F18, R31).
-	roots, has := doc["roots"]
+	roots, has := member(doc, "roots")
 	if err := readRoots(roots, has, "vault", true); err != nil {
 		return nil, err
 	}
-	if prf, has := doc["prf"]; has {
+	if prf, has := member(doc, "prf"); has {
 		text, isText := prf.(string)
 		b, err := DecodeB64url(text)
 		if !isText || err != nil || len(b) != 32 {
 			return nil, errors.New("the vault's prf does not read")
 		}
 	}
-	passkey, has := doc["passkey"]
+	passkey, has := member(doc, "passkey")
 	return doc, readPasskey(passkey, has, "vault")
 }
 
@@ -329,7 +339,7 @@ func readRoots(roots any, present bool, whose string, required bool) error {
 			{"holder", func(v any) bool { _, isObject := v.(map[string]any); return isObject }},
 			{"rebound_at", func(v any) bool { _, whole := asU64(v); return whole }},
 		} {
-			if v, has := o[c.m]; has && !c.reads(v) {
+			if v, has := member(o, c.m); has && !c.reads(v) {
 				return unread(c.m)
 			}
 		}
@@ -367,7 +377,7 @@ func readContacts(contacts any) error {
 			}
 		}
 		for _, m := range []string{"name", "leaf", "root_cert", "added"} {
-			v, has := o[m]
+			v, has := member(o, m)
 			if !has {
 				continue
 			}
@@ -423,25 +433,25 @@ func recordOf(raw json.RawMessage) (map[string]any, error) {
 		return nil, errors.New("record_plaintext holds v, roots, ledger, contacts, passkey and backup_verified_at, and nothing else: " + k)
 	}
 	// Then each member, in the order RecordPlaintext lists them.
-	roots, has := doc["roots"]
+	roots, has := member(doc, "roots")
 	if err := readRoots(roots, has, "record", false); err != nil {
 		return nil, err
 	}
-	if ledger, has := doc["ledger"]; has {
+	if ledger, has := member(doc, "ledger"); has {
 		if err := ReadLedger(ledger); err != nil {
 			return nil, err
 		}
 	}
-	if contacts, has := doc["contacts"]; has {
+	if contacts, has := member(doc, "contacts"); has {
 		if err := readContacts(contacts); err != nil {
 			return nil, err
 		}
 	}
-	passkey, has := doc["passkey"]
+	passkey, has := member(doc, "passkey")
 	if err := readPasskey(passkey, has, "record"); err != nil {
 		return nil, err
 	}
-	if b, has := doc["backup_verified_at"]; has {
+	if b, has := member(doc, "backup_verified_at"); has {
 		if _, whole := asU64(b); !whole {
 			return nil, errors.New("the record's backup_verified_at does not read")
 		}

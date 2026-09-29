@@ -48,7 +48,8 @@ pub fn read(ledger: &Value) -> Result<()> {
                 return unread(m);
             }
         }
-        if o.get("origin").is_some_and(|v| !v.is_string()) {
+        // Null is absent (CONTRACT §0): a null origin is no origin, where it read as one of the wrong type.
+        if o.get("origin").is_some_and(|v| !v.is_string() && !v.is_null()) {
             return unread("origin");
         }
         if let Some(k) = stranger(o, ENTRY_MEMBERS) {

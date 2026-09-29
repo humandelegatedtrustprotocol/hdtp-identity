@@ -387,6 +387,15 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   vault document, two ciphertexts under one salt and nonce. What they seal now is what the seed seals
   from `JSON.parse` of the same text, but where `JSON.parse` moves a member: it enumerates
   integer-like names first, and the ports keep the order written.
+- **`null` is absent inside the wallet's documents too** (CONTRACT §0; a lead of the port-parity
+  verification, 2026-09-30): `wallet_issue`'s readers of the vault and the record, and a ledger
+  entry's `origin` (`ledger_check` too), read a `null` member the document declares as absent, in both
+  ports. Since the documents were first held to their schemas (836d080, in this Unreleased section)
+  both ports read it as a member of the wrong type: a root's `pkcs8: null` was `the vault's root 0
+  does not read: pkcs8` where its absence is a card-held root, and a record's `ledger: null` or
+  `contacts: null`, or a vault's `prf: null`, refused a document their absence lets through. A member
+  a document does not declare is still refused whatever it holds, `null` included, as a function's
+  arguments are.
 
 ## 0.4.1 — 2026-09-28
 
