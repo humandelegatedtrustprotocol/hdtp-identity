@@ -8,11 +8,11 @@
 //! host reads from its configuration. The crate carries no default rule set on purpose: a compiled
 //! default is the host's fail-safe, logged when used, and never a second source of truth.
 //!
-//! The arithmetic is the cloud's `RateLimiter.take` (`gateway/src/identity/limits.ts`, pact-cloud
-//! 988f410) operation for operation, in IEEE double precision, so the two decide alike on every input
-//! and the rows one wrote read the same to the other. `js/cases/limits-vectors.json` holds that
-//! equivalence: sequences generated against the TypeScript over SQLite, replayed here, through the
-//! Wasm and through the Go port.
+//! The arithmetic is what the cloud's `RateLimiter.take` was (`gateway/src/identity/limits.ts`, the
+//! same bytes from pact-cloud 449b273 to b781b53), operation for operation, in IEEE double precision,
+//! so the rows the cloud wrote before it moved to this crate (ba68f9c) read the same after.
+//! `js/cases/limits-vectors.json`, a fixed record of that TypeScript's decisions over SQLite, holds
+//! this crate, the Wasm and the Go port to it.
 
 /// One token bucket: the row it is kept in, its sustained rate in calls a second, and the most calls
 /// it holds. A bucket with no row is full.
