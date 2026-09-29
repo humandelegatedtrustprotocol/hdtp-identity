@@ -396,6 +396,13 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   `contacts: null`, or a vault's `prf: null`, refused a document their absence lets through. A member
   a document does not declare is still refused whatever it holds, `null` included, as a function's
   arguments are.
+- **`refresh_check`: a pin whose root is not a fingerprint is an error of the call** (a lead of the
+  port-parity verification, 2026-09-30), `bad_request` `pin.root is not a fingerprint`, read with the
+  pin and before the answer, in both ports and in the typed `refresh::check` and `RefreshCheck`. Both
+  compared it with the card's root and answered `ok: false`, `the card names another root, not the
+  pinned one`: the host's damaged pin, reported as the peer's fault. The contract already typed
+  `pin.root` as a `Fingerprint`, and an answer to one that was not was off the contract. `decide`,
+  `decide_chain` and `open_result` read a pin's root as the contract types it there, a string.
 
 ## 0.4.1 — 2026-09-28
 

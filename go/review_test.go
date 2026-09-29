@@ -621,3 +621,21 @@ func TestAPendingContactsSealedListingAnswersAtThePendingTier(t *testing.T) {
 		}
 	}
 }
+
+// The typed RefreshCheck, which the node calls, refuses a pin whose root is not a fingerprint before
+// it reads the pinned leaf or the answer, as the JSON boundary does: compared with the card's root it
+// was the peer's fault (`the card names another root`), where it is the host's.
+func TestTheTypedRefreshRefusesAPinRootThatIsNotAFingerprint(t *testing.T) {
+	alina := reviewIdentity(t, "ed25519", reviewEndpoint)
+	for _, root := range []string{"abc", "", alina.rootFP[:len(alina.rootFP)-1]} {
+		_, err := RefreshCheck(RefreshPin{Root: root, Endpoint: reviewEndpoint, Leaf: alina.leaf}, json.RawMessage(`{}`), time.Now())
+		if err == nil || err.Error() != "pin.root is not a fingerprint" {
+			t.Errorf("a pin whose root is %q: %v", root, err)
+		}
+	}
+	// The control: a fingerprint gets past the pin, to the answer, which is refused as the peer's.
+	v, err := RefreshCheck(RefreshPin{Root: alina.rootFP, Endpoint: reviewEndpoint, Leaf: alina.leaf}, json.RawMessage(`{}`), time.Now())
+	if err != nil || v.OK || v.Why != "the answer to get_card carries no signed card" {
+		t.Errorf("a pin that reads: %+v, %v", v, err)
+	}
+}
