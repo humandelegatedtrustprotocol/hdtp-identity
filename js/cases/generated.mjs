@@ -3,9 +3,10 @@
 //
 // The hand-written cases stop where their author stopped. The audit of 2026-09-29 measured it: they
 // tried the first member of a function and not the rest, 14 functions had no `{}` case at all, and
-// no case sent a member the contract does not declare. Behind those gaps were answers the two ports
-// gave differently (report §2.6, fix 1). These are the shapes a caller gets wrong, taken from the
-// contract's own description of each function's arguments:
+// the four cases that sent a member the contract does not declare each sent it beside a missing
+// one, so none asked what a call that otherwise succeeds does with it. Behind those gaps were
+// answers the two ports gave differently (report §2.6, fix 1). These are the shapes a caller gets
+// wrong, taken from the contract's own description of each function's arguments:
 //
 //   {}           the empty object, compared whole;
 //   hostile      js/cases/hostile.json, the object go/unit_test.go's TestCallNeverPanics sweeps every
