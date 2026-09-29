@@ -180,6 +180,11 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   `unsupported` without declaring it, in one port or both, declare it: the certificate builders and
   readers, the request functions, `hpke_seal` and `hpke_open`, `seal_request` and `seal_result`,
   `open_result` and `wallet_issue`. The parity gate puts such a key into every member that holds one.
+- An Ed25519 key whose 32 bytes decode to no point is `parse` `Ed25519 key is not a point` in the Go
+  port and the seed, as the core answers (S4-1, found here): both read it as a key, so a leaf
+  carrying one validated there and was refused at chain rule 1 by the core. A point of small order is
+  a point, and a non-canonical spelling of one reads as the libraries of both ports read it (410
+  inputs, every one answered alike by both ports and the seed).
 - A suite that is not the recipient key's is `envelope_invalid` `suite does not fit the key` at
   `hpke_seal`, as the Go port and the core's own `open_result` say it; the core said `unsupported`
   (F6, R14). A seal to an Ed25519 key of small order meets an all-zero DH output and is
