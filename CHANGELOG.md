@@ -14,7 +14,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   function the contract declares, `{}`, the hostile object, each required member absent and `null`
   (held to CONTRACT §0's `<name> is required`), each optional string `""`, each optional member of
   the wrong type, an undeclared member, and each required member absent beside each other member of
-  the wrong type (read order) — 1103 cases, varied from one named hand-written case per function
+  the wrong type (read order) — 1068 cases today (1103 when written; the hostile object is now sent
+  only to the 15 functions that declare one of its members), varied from one named hand-written case per function
   that succeeds on both ports. 463 cases failed when they were written (459 generated, and 4 written
   beside them), 60 fail today (58 and 2); each is listed in `js/cases/known-divergences.json` with
   the audit finding that closes it, and the run fails on any other failure, on an entry whose case
@@ -24,7 +25,9 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 - `js/cases/hostile.json` is the one hostile object: the generated cases send it to both ports, Go's
   `TestCallNeverPanics` reads it and now fails on an answer of `internal` (its `recover()` turned a
   panic into a JSON object, which the sweep accepted), and the core has the same sweep
-  (`tests/boundary.rs`) (TC-14).
+  (`tests/boundary.rs`) (TC-14). Since a member a function does not declare is refused before any is
+  read, each function is sent the hostile members it declares (the whole object reached no body),
+  and both sweeps fail on the undeclared-member refusal and when fewer than ten functions are reached.
 - **One copy of each duplicated constant** (S6): `contract/contract.json` carries `Windows` (the
   skew, the envelope lifetime, the tombstone and claim windows, the leaf ceiling, how far ahead a
   signing request may expire), `KdfDefault` beside `Kdf`/`KdfArgs`'s bounds, `CanonicalNumbers`
