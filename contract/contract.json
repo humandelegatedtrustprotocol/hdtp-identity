@@ -1642,8 +1642,8 @@
           "form": { "$ref": "#/$defs/Form" },
           "sender_chain": { "$ref": "#/$defs/Chain" },
           "msg_id": { "type": "string", "minLength": 1 },
-          "ts": { "type": "integer" },
-          "exp": { "type": "integer" },
+          "ts": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
+          "exp": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
           "ephemeral_seed": { "$ref": "#/$defs/Seed32" },
           "method": { "type": "string" },
           "params": true,
@@ -1654,7 +1654,7 @@
       },
       "result": { "$ref": "#/$defs/Envelope" },
       "errors": ["bad_request", "envelope_invalid", "parse", "unsupported"],
-      "notes": "`form` absent is `chain`, which needs `sender_chain`; `method` absent is `tools/call`; `params` absent is `{}`; `exp` absent is `ts + 600`; `cty` absent is a call."
+      "notes": "`form` absent is `chain`, which needs `sender_chain`; `method` absent is `tools/call`; `params` absent is `{}`; `exp` absent is `ts + 600`; `cty` absent is a call. `ts` and `exp` are integers a header carries as themselves, from −(2^53 − 1) to 2^53 − 1: RFC 8785 writes a number as the double it is, so one past that would be sealed as another. `ts` is judged first, then `exp`, the default included, each `bad_request` `<ts|exp> is an integer from -(2^53 - 1) to 2^53 - 1`; both after the members are read (a 31-byte `ephemeral_seed` is named before them) and before the proof member (a chain of one, or none in the chain form, is named after them)."
     },
     "seal_result": {
       "section": "envelopes",
@@ -1666,8 +1666,8 @@
           "form": { "$ref": "#/$defs/Form" },
           "sender_chain": { "$ref": "#/$defs/Chain" },
           "msg_id": { "type": "string", "minLength": 1 },
-          "ts": { "type": "integer" },
-          "exp": { "type": "integer" },
+          "ts": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
+          "exp": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
           "ephemeral_seed": { "$ref": "#/$defs/Seed32" },
           "result": true,
           "error": true
@@ -1677,7 +1677,7 @@
       },
       "result": { "$ref": "#/$defs/Envelope" },
       "errors": ["bad_request", "envelope_invalid", "parse", "unsupported"],
-      "notes": "Exactly one of `result` and `error`. `cty` is `application/pact-result+json`."
+      "notes": "Exactly one of `result` and `error`. `cty` is `application/pact-result+json`. `ts` and `exp` (absent: `ts + 600`) are held as `seal_request` holds them, first."
     },
     "open_result": {
       "section": "envelopes",

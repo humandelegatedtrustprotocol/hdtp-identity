@@ -289,6 +289,42 @@ fn an_envelope_asking_to_be_remembered_for_a_year_is_refused() {
     assert_eq!(edge["result"]["code"], "ok", "{edge}");
 }
 
+/// A header's `ts` and `exp` are integers it carries as themselves (2^53 - 1 either way): RFC 8785 writes
+/// the double, so past that the core sealed a header whose `ts` was not the one it was given, and a
+/// `ts` of i64::MAX with no `exp` overflowed computing the default (a panic in this debug build, a
+/// wrapped `exp` in the Wasm). go/review_test.go's TestTheTypedSealRefusesAHeaderIntegerItCannotCarry
+/// is the Go port's twin; js/parity.mjs holds both at the JSON boundary.
+#[test]
+fn a_header_integer_the_header_cannot_carry_is_refused_before_the_default_is_computed() {
+    let alina = pair("ed25519", E_A);
+    let seal = |fn_: &str, ts: Value, exp: Option<i64>| {
+        let mut args = json!({
+            "sender_pkcs8": alina.leaf_key["pkcs8"], "sender_chain": [b64u(&alina.leaf), b64u(&alina.root)],
+            "msg_id": "m", "ts": ts,
+        });
+        if fn_ == "seal_request" {
+            args["recipient_leaf"] = json!(b64u(&alina.leaf));
+        } else {
+            args["recipient_spki"] = alina.leaf_key["spki"].clone();
+            args["result"] = json!({});
+        }
+        if let Some(exp) = exp {
+            args["exp"] = json!(exp);
+        }
+        call(fn_, args)
+    };
+    let out = |m: &str| json!({ "error": "bad_request", "why": format!("{m} is an integer from -(2^53 - 1) to 2^53 - 1") });
+    const MAX: i64 = (1 << 53) - 1;
+    for fn_ in ["seal_request", "seal_result"] {
+        assert_eq!(seal(fn_, json!(i64::MAX), None), out("ts"), "{fn_}");
+        assert_eq!(seal(fn_, json!(i64::MIN), None), out("ts"), "{fn_}");
+        assert_eq!(seal(fn_, json!(MAX + 1), Some(1)), out("ts"), "{fn_}");
+        assert_eq!(seal(fn_, json!(MAX), None), out("exp"), "{fn_}");
+        assert_eq!(seal(fn_, json!(1), Some(-MAX - 1)), out("exp"), "{fn_}");
+        assert!(seal(fn_, json!(MAX), Some(MAX))["protected"].is_string(), "{fn_} at the edge");
+    }
+}
+
 // ── §13.1#1: `enc` is exactly the suite's Npk, under each suite, in both directions ──
 /// `sig` covers `protected ‖ enc ‖ ct` with nothing between them, so a byte moved across the enc/ct
 /// boundary leaves the signed bytes as they were: the forgery is signed, and the length is the one

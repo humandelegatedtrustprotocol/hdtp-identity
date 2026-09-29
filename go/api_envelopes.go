@@ -632,8 +632,7 @@ func sealArgs(a args, recipient *PublicKey, body, after func(*SealOpts) error) (
 	if o.Seed, err = a.seed32("ephemeral_seed"); err != nil {
 		return o, err
 	}
-	if o.Form == "chain" && o.SenderChain == nil {
-		return o, errArg("the chain form needs sender_chain")
-	}
+	// The chain form's missing chain is the seal's to name (proofMember), after the header's times,
+	// as the core's `proof` names it.
 	return o, nil
 }
