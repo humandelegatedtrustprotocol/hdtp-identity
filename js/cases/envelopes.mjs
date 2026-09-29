@@ -1,12 +1,12 @@
 // §5 of the contract: envelopes — the suite, HPKE, sealing and opening, following a renewal, and the
 // receiving decision.
-import { seed, b64url, pkcs8Of, spkiOf, fingerprint } from '../../../pact-protocol/vectors/lib/keys.mjs';
+import { seed, b64url, pkcs8Of, spkiOf, fingerprint, x25519FromSeed } from '../../../pact-protocol/vectors/lib/keys.mjs';
 import { buildLeaf, parse } from '../../../pact-protocol/vectors/lib/x509.mjs';
 import { sealDeterministic, signDetached, suiteForKey } from '../../../pact-protocol/vectors/lib/hpke.mjs';
 import { canonical } from '../../../pact-protocol/vectors/lib/canonical.mjs';
 import { ENDPOINTS, bharat, BORN, DIES } from '../cast.mjs';
 import { RawArgs } from '../port.mjs';
-import { createPublicKey } from 'node:crypto';
+import { createHash, createPublicKey } from 'node:crypto';
 import { ZONED } from './certificates.mjs';
 
 export default function envelopes({ add, expect }, f) {
@@ -458,4 +458,42 @@ export default function envelopes({ add, expect }, f) {
     add(`seal_result to an Ed25519 key of small order: ${what}`, 'seal_result', { recipient_spki: b64url(spki), sender_pkcs8: hostPkcs8, sender_chain: [leafDer, rootDer], result: { ok: true }, msg_id: 'p-low', ts: at(now), ephemeral_seed: eph(7) });
     expect(`seal_result to an Ed25519 key of small order: ${what}`, lowOrder);
   }
+
+  // ── T5: an open is by a key of the suite's own algorithm ─────────────────────────────────────────
+  //
+  // The Go port's open read a P-256 key's seed, which it does not have, under PACT-SEAL-X25519, and so
+  // used the scalar of the empty seed — SHA-512 of nothing, clamped: a public constant. Any P-256 key
+  // then opened a seal to the Ed25519 key whose X25519 form is that constant's point, through
+  // hpke_open and decide alike; the core refuses a P-256 key there. The crafted key is computed here
+  // from the empty seed (RFC 7748 §4.1 backwards: y = (u - 1) / (u + 1)), and the seal is the seed's.
+  const P = (1n << 255n) - 19n;
+  const le = (b) => b.reduceRight((v, x) => (v << 8n) | BigInt(x), 0n);
+  const modpow = (b, e) => { let r = 1n; b %= P; for (; e > 0n; e >>= 1n, b = (b * b) % P) if (e & 1n) r = (r * b) % P; return r; };
+  const emptyScalar = createHash('sha512').update(Buffer.alloc(0)).digest().subarray(0, 32);
+  const u = le(Buffer.from(x25519FromSeed(emptyScalar).pub.export({ format: 'jwk' }).x, 'base64url'));
+  const y = (((u - 1n + P) % P) * modpow((u + 1n) % P, P - 2n)) % P;
+  const craftedSpki = Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), Buffer.from(Array.from({ length: 32 }, (_, i) => Number((y >> BigInt(8 * i)) & 0xffn)))]);
+  const craftedPub = createPublicKey({ key: craftedSpki, format: 'der', type: 'spki' });
+  const admitted = sealDeterministic('PACT-SEAL-X25519', craftedPub, Buffer.from('PACT-SEAL-v2'), Buffer.alloc(0), Buffer.from('admitted'), Buffer.alloc(32, 3));
+  const doesNotOpen = { error: 'envelope_invalid', why: 'does not open' };
+  for (const [who, pkcs8] of [['a P-256 key', f.p256Pkcs8], ['another P-256 key', b64url(pkcs8Of(bharat.host.priv))]]) {
+    add(`hpke_open of a seal to the empty seed's key, by ${who}`, 'hpke_open', { suite: 'PACT-SEAL-X25519', recipient_pkcs8: pkcs8, recipient_spki: b64url(craftedSpki), info: 'PACT-SEAL-v2', aad: '', enc: b64url(admitted.enc), ct: b64url(admitted.ct) });
+    expect(`hpke_open of a seal to the empty seed's key, by ${who}`, doesNotOpen);
+  }
+  // The control: a seal opened by the key it was made for.
+  expect('hpke_open of what hpke_seal made', { plaintext: b64url(new Uint8Array([1, 2, 3])) });
+  // An Ed25519 key under the P-256 suite, and a P-256 key under the X25519 suite, each with the other
+  // key's public half: the private key is held to the suite before anything else.
+  const toP256 = sealDeterministic('PACT-SEAL-P256', f.p256Key.pub, Buffer.from('PACT-SEAL-v2'), Buffer.alloc(0), Buffer.from('x'), Buffer.alloc(32, 4));
+  add('hpke_open under the P-256 suite by an Ed25519 key', 'hpke_open', { suite: 'PACT-SEAL-P256', recipient_pkcs8: hostPkcs8, recipient_spki: p256Spki, info: 'PACT-SEAL-v2', aad: '', enc: b64url(toP256.enc), ct: b64url(toP256.ct) });
+  expect('hpke_open under the P-256 suite by an Ed25519 key', doesNotOpen);
+  add('hpke_open under the X25519 suite by a P-256 key', 'hpke_open', { ...hpkeOpen, recipient_pkcs8: f.p256Pkcs8 });
+  expect('hpke_open under the X25519 suite by a P-256 key', doesNotOpen);
+  // And through decide: a node that holds the crafted key's leaf with a P-256 key beside it. The Go
+  // port opened the stranger's call and decided on it.
+  const craftedLeaf = buildLeaf({ cn: 'Alina Rao', rootCn: 'Alina Rao', root: rootKey, hostKey: { pub: craftedPub }, endpoint: ENDPOINT, notBefore: BORN, notAfter: DIES, label: 'parity/empty-seed' });
+  const toCrafted = request({ params: { name: 'send_message' }, msgId: 'p-t5', recipientLeaf: craftedLeaf });
+  const craftedNode = { ...node, chain: [b64url(craftedLeaf), rootDer], keys: [{ kid: fingerprint(craftedPub), leaf: b64url(craftedLeaf), pkcs8: f.p256Pkcs8, current: true }] };
+  add('decide on a call sealed to the empty seed\'s key, held beside a P-256 key', 'decide', { now, envelope: toCrafted, node: craftedNode });
+  expect('decide on a call sealed to the empty seed\'s key, held beside a P-256 key', { code: 'envelope_invalid', why: 'does not open' });
 }

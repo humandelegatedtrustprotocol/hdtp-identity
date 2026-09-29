@@ -107,6 +107,9 @@ func rootTBS(cn string, pub *PublicKey, notBefore time.Time, serial []byte) (tbs
 
 // RootTBS is the external-signing seam: the bytes a root key must sign, and the algorithm identifier.
 func RootTBS(cn string, pub *PublicKey, notBefore time.Time, serial []byte) (tbs []byte, alg []byte, err error) {
+	if err := needPublic(pub, "the root's public key"); err != nil {
+		return nil, nil, err
+	}
 	return rootTBS(cn, pub, notBefore, serial)
 }
 
@@ -127,6 +130,9 @@ func Assemble(tbs, alg, sig []byte) []byte {
 
 // BuildRoot signs a root with its own key.
 func BuildRoot(o RootOpts) ([]byte, error) {
+	if err := needPrivate(o.Key, "the root's key"); err != nil {
+		return nil, err
+	}
 	signer := o.Key.Signer()
 	tbs, alg, err := rootTBS(o.CN, signer.Public, o.NotBefore, o.Serial)
 	if err != nil {
@@ -227,10 +233,24 @@ func leafTBS(o LeafOpts, rootPub *PublicKey) (tbs, alg []byte, err error) {
 }
 
 // LeafTBS is the seam for a leaf: what the root must sign, from the root's public key alone.
-func LeafTBS(o LeafOpts) (tbs, alg []byte, err error) { return leafTBS(o, o.RootPub) }
+func LeafTBS(o LeafOpts) (tbs, alg []byte, err error) {
+	if err := needPublic(o.RootPub, "the root's public key"); err != nil {
+		return nil, nil, err
+	}
+	if err := needPublic(o.HostPub, "the host's public key"); err != nil {
+		return nil, nil, err
+	}
+	return leafTBS(o, o.RootPub)
+}
 
 // BuildLeaf issues a leaf under the root key.
 func BuildLeaf(o LeafOpts) ([]byte, error) {
+	if err := needPrivate(o.RootKey, "the root's key"); err != nil {
+		return nil, err
+	}
+	if err := needPublic(o.HostPub, "the host's public key"); err != nil {
+		return nil, err
+	}
 	signer := o.RootKey.Signer()
 	tbs, alg, err := leafTBS(o, signer.Public)
 	if err != nil {

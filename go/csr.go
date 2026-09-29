@@ -23,6 +23,9 @@ func csrInfo(cn string, pub *PublicKey, endpoint, dnsName string) []byte {
 
 // CSRNew makes a request for the endpoint, signed by the host key.
 func CSRNew(cn string, host *PrivateKey, endpoint, dnsName string) ([]byte, error) {
+	if err := needPrivate(host, "the host's key"); err != nil {
+		return nil, err
+	}
 	signer := host.Signer()
 	info := csrInfo(cn, signer.Public, endpoint, dnsName)
 	sig, err := signer.Sign(info)
@@ -302,8 +305,12 @@ func planOf(info CSRInfo, o IssueOpts) (LeafOpts, error) {
 	}, nil
 }
 
-// IssueFromCSR is CSRCheck followed by BuildLeaf under the wallet's monotonic rule.
+// IssueFromCSR is CSRCheck followed by BuildLeaf under the wallet's monotonic rule. The root's key is
+// asked for first, as the core's issue_from_csr reads root_pkcs8 first.
 func IssueFromCSR(csr []byte, o IssueOpts) (Issued, error) {
+	if err := needPrivate(o.RootKey, "the root's key"); err != nil {
+		return Issued{}, err
+	}
 	lo, err := issuePlan(csr, o)
 	if err != nil {
 		return Issued{}, err
@@ -319,8 +326,12 @@ func issuedLeaf(lo LeafOpts) (Issued, error) {
 	return Issued{DER: der, Endpoint: lo.Endpoint, NotBefore: lo.NotBefore, NotAfter: lo.NotAfter}, nil
 }
 
-// IssueTBSFromCSR is the same plan for a root that signs elsewhere.
+// IssueTBSFromCSR is the same plan for a root that signs elsewhere; the root's public key first, as
+// the core's issue_tbs_from_csr reads root_spki first.
 func IssueTBSFromCSR(csr []byte, o IssueOpts) (Issued, error) {
+	if err := needPublic(o.RootPub, "the root's public key"); err != nil {
+		return Issued{}, err
+	}
 	lo, err := issuePlan(csr, o)
 	if err != nil {
 		return Issued{}, err
