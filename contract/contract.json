@@ -2023,6 +2023,27 @@
       "errors": ["bad_request", "parse"],
       "notes": "The wallet's book as rows of contacts.csv, the one mapping every wallet uses (SPEC §9.2: a book is an export of contacts only). Each contact, in order: an object (`contacts[<i>] is an object`), no member but `root`, `endpoint`, `name`, `leaf`, `root_cert` and `added` (the first other, in sorted order: `contacts[<i>]: \"<m>\" is not a member of a wallet contact`), `root` and `endpoint` strings (`contacts[<i>]: <m> is required`), the rest strings when present (`contacts[<i>]: <m> is a string`). A row carries the root, the endpoint, the name (empty when absent), the leaf and the root certificate (null when absent), and `added` (the export's time when absent); its other columns are what a contact the wallet keeps is: an empty `display_name`, `status` `active`, `was_active` true, and nothing granted either way. The rows are not checked here: export_write holds each to the reader's rules."
     },
+    "media_holds_private_key": {
+      "section": "export",
+      "params": {
+        "type": "object",
+        "properties": {
+          "bytes": { "$ref": "#/$defs/B64url", "description": "A media file's bytes, all of them." }
+        },
+        "required": ["bytes"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "holds_private_key": { "type": "boolean", "description": "The bytes are a private key in DER, PKCS #8 or SEC1 by shape whatever the algorithm, or are UTF-8 text holding one: PEM armour naming a private key, or a word (split at ASCII whitespace) that decodes as base64 or base64url to one." }
+        },
+        "required": ["holds_private_key"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "parse"],
+      "notes": "SPEC §9.2's key material over a media file, the check CONTRACT §6.2 leaves to a host because the core never sees a file: every port's export reader judges a media file by it, and a host that streams media asks it here rather than keeping a copy. It reads leniently, as a lenient decoder would: a word forgives its padding, either alphabet and a last character whose spare bits are set, and a DER length may take any definite form of up to four octets, minimal or not, so that nothing a person's tools read as a key is passed as none. `js/key-material.json` is the list of cases."
+    },
     "limits_rules_check": {
       "section": "limits",
       "params": {

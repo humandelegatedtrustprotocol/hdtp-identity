@@ -328,6 +328,17 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   Wasm could decide a charge and not say which rows it reads, so a host on it had to derive the key
   scheme and the identity rate a second time. It reads `rules` and `charge` as `limits_decide` does,
   by the same reader, in its words.
+- **`media_holds_private_key`, a contract function** (CW-07, R38): whether a media file's bytes are key
+  material, by the rule both ports' export readers apply to a media file. A host that streams media
+  asks it; the cloud kept a third copy in TypeScript. **Key material is read leniently now, in both
+  ports**, wherever it is looked for (cells, message bodies, manifest members, media): a base64 word
+  forgives a last character whose spare bits are set, and a DER length may take any definite form of
+  up to four octets, minimal or not. SPEC §9.2 refuses anything "that decodes as a private key", and
+  a key spelled so decodes to the key under atob, Node's Buffer and OpenSSL; the ports read it as no
+  key where the cloud's copy refused it. So an export or an import holding such a spelling is refused
+  (a message leaves with its file) where the node and the CLI passed it. `js/key-material.json` is
+  the one list of cases. Every other reader stays strict: an argument's bytes are still base64url by
+  CONTRACT §0's rule.
 
 ## 0.4.1 — 2026-09-28
 

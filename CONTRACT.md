@@ -13,7 +13,7 @@ the spec leaves a byte to the implementer, `pact-protocol/vectors/lib/*.mjs` —
 which every port must match byte for byte on the vectors in
 `pact-protocol/vectors/pact-2.0-vectors.json` and in SPEC.md Appendix B.
 
-**This file is generated.** `contract/contract.json` is the source: 52 functions, each with
+**This file is generated.** `contract/contract.json` is the source: 53 functions, each with
 the shape of its arguments, the shape of its answer and the error codes it may fail with, over the
 domain types they are assembled from. `js/parity.mjs` validates every answer of BOTH ports against
 that same file, so these tables and the gate cannot describe different contracts — which they did:
@@ -424,7 +424,8 @@ the host can do, and the words both hosts of this repository use for it (the Go 
   sha256 is not its name`): the manifest lists the text members only, and a media member is bound
   by its name and counted by `counts.media` (SPEC 2.2.2);
 - refuse a media file whose bytes are a private key — PKCS #8 or SEC1 in DER, or text holding one
-  (`media/<h>: holds a private key`);
+  (`media/<h>: holds a private key`) — which it asks `media_holds_private_key`, the rule both ports'
+  readers apply, rather than keep a copy of it;
 - hand `export_read_end` the media `export_read` answered, so a media file no message names is
   refused.
 
@@ -435,9 +436,9 @@ a Rust host that write the same rows write the same file. A media file is stored
 What a contact controls never stops the export (SPEC 9.2#22–25): `export_write_messages` leaves out
 a message whose body is a private key and answers it in `left_out`, and a host that writes in
 batches names the file's msg_ids in `msg_ids`, so a reply to a message not carried is written null.
-The core never sees a media file's bytes, so the host checks each before it writes: a message whose
-file is a private key is left out with the file and listed with the rest, for the host to report to
-the person.
+The core never sees a media file's bytes unless it is handed them, so the host checks each before it
+writes, with `media_holds_private_key`: a message whose file is a private key is left out with the file
+and listed with the rest, for the host to report to the person.
 `book_rows` is the one mapping from the wallet's own book (`VaultContact`, §6) to those rows, which
 every wallet uses before `export_write` writes a book.
 
@@ -462,6 +463,7 @@ rules that no file does.
 | `export_manifest` | `partial`: ExportManifest, `hashes`?: `messages.jsonl`?: Sha256Hex, `messages`?: integer | `manifest`: string<br>*fails:* `bad_request` | export_write's partial manifest finished with what the host counted and hashed: held to the manifest's rules first, refused if it already counts or lists messages, `messages.jsonl` required in `hashes` when there are messages. |
 | `export_merge` | `held`: [ContactRow], `rows`: [ContactRow] | `write`: [ContactRow], `keep`: [Fingerprint], `conflicts`: [`root`: Fingerprint, `field`: endpoint\|leaf\|root_cert\|status\|permissions, `held`, `row`]<br>*fails:* `bad_request` | SPEC §9.2's import step 2: an imported leaf never replaces a pin the host validated itself (§14.5). A row whose root is not held is written; a row whose root is held WITHOUT a leaf is written when the row carries one (export_read kept it only because it validated); and what the person decided about that contact stays as held: a blocked contact stays blocked, and its `permissions` stay the ones granted. Every other held root is kept as held. Each of the endpoint, leaf and root certificate a row would change, and each of the `status` and `permissions` (a list compared as a set), is a conflict for the host to show. |
 | `book_rows` | `contacts`: [VaultContact], `exported_at`: InstantIn | `rows`: [ContactRow]<br>*fails:* `bad_request`, `parse` | The wallet's book as rows of contacts.csv, the one mapping every wallet uses (SPEC §9.2: a book is an export of contacts only). Each contact, in order: an object (`contacts[<i>] is an object`), no member but `root`, `endpoint`, `name`, `leaf`, `root_cert` and `added` (the first other, in sorted order: `contacts[<i>]: "<m>" is not a member of a wallet contact`), `root` and `endpoint` strings (`contacts[<i>]: <m> is required`), the rest strings when present (`contacts[<i>]: <m> is a string`). A row carries the root, the endpoint, the name (empty when absent), the leaf and the root certificate (null when absent), and `added` (the export's time when absent); its other columns are what a contact the wallet keeps is: an empty `display_name`, `status` `active`, `was_active` true, and nothing granted either way. The rows are not checked here: export_write holds each to the reader's rules. |
+| `media_holds_private_key` | `bytes`: B64url | `holds_private_key`: boolean<br>*fails:* `bad_request`, `parse` | SPEC §9.2's key material over a media file, the check CONTRACT §6.2 leaves to a host because the core never sees a file: every port's export reader judges a media file by it, and a host that streams media asks it here rather than keeping a copy. It reads leniently, as a lenient decoder would: a word forgives its padding, either alphabet and a last character whose spare bits are set, and a DER length may take any definite form of up to four octets, minimal or not, so that nothing a person's tools read as a key is passed as none. `js/key-material.json` is the list of cases. |
 
 ### 6.3 The call budgets (SPEC §12)
 

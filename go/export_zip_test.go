@@ -3,10 +3,11 @@ package pactidentity
 import (
 	"archive/zip"
 	"bytes"
-	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -211,22 +212,41 @@ func TestAnExportOf5000MediaWritesAndReadsBack(t *testing.T) {
 }
 
 // A media file is key material when its bytes are a PKCS #8 or SEC1 key in DER, or text holding one
-// in PEM or base64 (SPEC 2.2.2, 9.2#15). A document, and DER that is not a key, are not.
+// in PEM or base64 (SPEC 2.2.2, 9.2#15), read leniently: js/key-material.json, the one list of cases,
+// which the core's a_media_file_is_key_material_in_der_or_pem and the parity cases read too.
 func TestAMediaFileIsKeyMaterialInDEROrPEM(t *testing.T) {
-	key, _ := KeyFromSeed(AlgEd25519, Seed("export/media-key"))
-	pkcs8, _ := key.PKCS8()
-	sec1 := append([]byte{0x30, 0x25, 0x02, 0x01, 0x01, 0x04, 0x20}, Seed("export/media-sec1")...)
-	armour := func(label string, der []byte) []byte {
-		return []byte("-----BEGIN " + label + "-----\n" + base64.StdEncoding.EncodeToString(der) + "\n-----END " + label + "-----\n")
+	raw, err := os.ReadFile("../js/key-material.json")
+	if err != nil {
+		t.Fatal(err)
 	}
-	for what, b := range map[string][]byte{"PKCS #8 DER": pkcs8, "SEC1 DER": sec1, "PKCS #8 PEM": armour("PRIVATE KEY", pkcs8), "SEC1 PEM": armour("EC PRIVATE KEY", sec1)} {
-		if !mediaHoldsPrivateKey(b) {
-			t.Errorf("%s is key material", what)
+	var doc struct {
+		Cases []struct {
+			What  string  `json:"what"`
+			Hex   *string `json:"hex"`
+			Text  *string `json:"text"`
+			Holds bool    `json:"holds"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Cases) < 20 {
+		t.Fatalf("js/key-material.json holds %d cases", len(doc.Cases))
+	}
+	for _, c := range doc.Cases {
+		var b []byte
+		switch {
+		case c.Hex != nil && c.Text == nil:
+			if b, err = hex.DecodeString(*c.Hex); err != nil {
+				t.Fatal(err)
+			}
+		case c.Text != nil && c.Hex == nil:
+			b = []byte(*c.Text)
+		default:
+			t.Fatalf("a case is hex or text: %s", c.What)
 		}
-	}
-	for what, b := range map[string][]byte{"a document": []byte("%PDF-1.7\nthe bytes of a.pdf\n"), "DER that is no key": {0x30, 0x03, 0x02, 0x01, 0x05}} {
-		if mediaHoldsPrivateKey(b) {
-			t.Errorf("%s is not key material", what)
+		if mediaHoldsPrivateKey(b) != c.Holds {
+			t.Errorf("%s: holds a private key %v, want %v", c.What, !c.Holds, c.Holds)
 		}
 	}
 }
