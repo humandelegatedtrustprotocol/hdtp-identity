@@ -37,7 +37,7 @@
     "B64url": {
       "type": "string",
       "pattern": "^[A-Za-z0-9_-]*$",
-      "description": "Bytes, as base64url without padding. An ANSWER always spells them this way. An ARGUMENT is read forgivingly about padding and alphabet (§0); the members of an envelope that travelled are not (§5)."
+      "description": "Bytes, as base64url without padding. An ANSWER always spells them this way. An ARGUMENT is read forgivingly about padding and the standard alphabet, and about nothing else: whitespace of any kind is refused (§0). The members of an envelope that travelled are not read forgivingly at all (§5)."
     },
     "Alg": { "enum": ["ed25519", "p256"], "description": "A key algorithm. A key of any other is refused where it is read (CONTRACT §0)." },
     "Fingerprint": {
@@ -1443,7 +1443,7 @@
         "additionalProperties": false
       },
       "errors": ["bad_request"],
-      "notes": "Every refusal is `bad_request` with the exact `why` strings of `card.mjs`."
+      "notes": "Every refusal is `bad_request` with the exact `why` strings of `card.mjs`. An empty `X-PACT-VERSION` names no version (`no X-PACT-VERSION`). `X-PACT-CERT` is read as every string a port did not write is read (§0), so a stray character, whitespace or a spare bit set is `certificate does not parse: not base64url`."
     },
     "suite_for": {
       "section": "envelopes",
@@ -1588,7 +1588,7 @@
         "additionalProperties": false
       },
       "errors": ["bad_request", "envelope_invalid", "parse", "unsupported"],
-      "notes": "The caller side of §13.2: opens, requires `result` xor `error` plus one of `chain`/`leaf`, validates the chain to `expected_root` and `expected_endpoint` or finds the named leaf among `pins`, refuses a superseded leaf, verifies `sig`, checks `cty` and `msg_id`. Every refusal of the ENVELOPE is `{\"error\": \"envelope_invalid\", \"why\"}`. `leaf_update` is a leaf newer than the pin, for the host to store. An absent or null `envelope` is the caller's omission, `bad_request` `envelope is required` (CONTRACT §0); a present one is read for its four members in order (`protected`, `enc`, `ct`, `sig`), and one that is not an object, or lacks a member or holds one that is not a string, is `envelope_invalid` naming it (`envelope is required`, `envelope.sig is required`). `pins` absent or null is none; a pin is read for `root`, `endpoint`, `leaf`, `state` and `leaf_fingerprint` in that order, and one that is not an object or lacks a required member, or holds one of the wrong type, is `bad_request` naming it by its path (`pins[0] is required`, `pins[0].root is required`)."
+      "notes": "The caller side of §13.2: opens, requires `result` xor `error` plus one of `chain`/`leaf`, validates the chain to `expected_root` and `expected_endpoint` or finds the named leaf among `pins`, refuses a superseded leaf, verifies `sig`, checks `cty` and `msg_id`. Every refusal of the ENVELOPE is `{\"error\": \"envelope_invalid\", \"why\"}`. `leaf_update` is a leaf newer than the pin, for the host to store. An absent or null `envelope` is the caller's omission, `bad_request` `envelope is required` (CONTRACT §0); a present one is read for its four members in order (`protected`, `enc`, `ct`, `sig`), and one that is not an object, or lacks a member or holds one that is not a string, is `envelope_invalid` naming it (`envelope is required`, `envelope.sig is required`). `pins` absent or null is none; a pin is read for `root`, `endpoint`, `leaf`, `state` and `leaf_fingerprint` in that order, and one that is not an object or lacks a required member, or holds one of the wrong type, is `bad_request` naming it by its path (`pins[0] is required`, `pins[0].root is required`). A chain in the plaintext with a member that is not a string, or does not read as base64url, is `envelope_invalid` `plaintext shape`, as in `decide`. The first pin for the chain's root is the one read, as `decide` reads a node's pins; a pin whose leaf does not read is an error of the call in its reader's class (`parse`; `unsupported` for a key outside the profile), never `superseded leaf`."
     },
     "follow_renewed": {
       "section": "envelopes",

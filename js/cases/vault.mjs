@@ -176,4 +176,24 @@ export default function vault({ add, expect }, f) {
   // named the plaintext first, and the Go port the passphrase.
   add('vault_seal with an empty passphrase and no plaintext', 'vault_seal', { passphrase: '', kdf: K });
   expect('vault_seal with an empty passphrase and no plaintext', { error: 'bad_request', why: 'empty passphrase' });
+
+  // ── H: a vault's bytes are read strictly (C8) ────────────────────────────────────────────────────
+  //
+  // The Go port skipped a stray character in `ct` and opened a document the core refuses as damaged.
+  // The tag covers the decoded bytes, so this was a second spelling of one document rather than a
+  // forgery — and two readers that forgive different things disagree about which documents open. The
+  // salt and the nonce are refused the same way. The control, `ct` padded, opens in both.
+  const doc = opened.vault;
+  const at5 = (text, c) => text.slice(0, 5) + c + text.slice(5);
+  const damaged = { error: 'vault', why: 'the passphrase is wrong or the vault is damaged' };
+  for (const [what, over, want] of [
+    ['a ct with a stray character', { ct: at5(doc.ct, '.') }, damaged],
+    ['a ct with a no-break space', { ct: at5(doc.ct, '\u00a0') }, damaged],
+    ['a nonce with a stray character', { nonce: at5(doc.nonce, '!') }, damaged],
+    ['a salt with a stray character', { salt: at5(doc.salt, '!') }, damaged],
+    ['a ct padded (the control)', { ct: doc.ct + '='.repeat((4 - (doc.ct.length % 4)) % 4) }, { plaintext: { v: 2, roots: [] } }],
+  ]) {
+    add(`vault_open of what vault_seal made, with ${what}`, 'vault_open', { ...opened, vault: { ...doc, ...over } });
+    expect(`vault_open of what vault_seal made, with ${what}`, want);
+  }
 }

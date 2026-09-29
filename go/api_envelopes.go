@@ -278,7 +278,7 @@ func chainOfAny(v any) ([][]byte, bool) {
 		if !isStr {
 			return nil, false
 		}
-		b, err := decodeB64url(s)
+		b, err := DecodeB64url(s)
 		if err != nil {
 			return nil, false
 		}

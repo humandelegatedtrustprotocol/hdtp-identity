@@ -511,4 +511,74 @@ export default function envelopes({ add, expect }, f) {
     add(`open_result in the leaf form, with a pin holding a key outside the profile: ${kind}`, 'open_result', open(leafForm, { pins: [{ root: rootFp, endpoint: ENDPOINT, leaf, state: 'active' }] }));
     expect(`open_result in the leaf form, with a pin holding a key outside the profile: ${kind}`, refused);
   }
+
+  // ── H: what a peer put in its plaintext, and what a host holds, is read strictly ─────────────────
+  //
+  // A chain member in the plaintext that does not read: the Go port and the seed skipped a stray
+  // character and the chain validated; the core refused it, as `plaintext shape` in decide and as a
+  // `parse` error of the CALL in open_result, whose refusals of an envelope are all envelope_invalid
+  // (T10, X9). The plaintext's shape now, in both ports and the seed. Sealed and signed by the seed over
+  // the body as written; the controls, padded, read.
+  const leafText = b64url(leafDerBytes), rootText = b64url(rootDerBytes);
+  const chainCall = (msgId, chain) => sealText({ to: toMyself, cty: 'application/pact-call+json', msgId, body: JSON.stringify({ method: 'tools/call', params: { name: 'send_message', arguments: {} }, chain }) });
+  const chainAnswer = (chain) => sealText({ to: callerKey.pub, cty: 'application/pact-result+json', msgId: 'r-1', body: JSON.stringify({ result: { ok: 1 }, chain }) });
+  for (const [what, member, reads] of [
+    ['a stray character', leafText.slice(0, 8) + '!' + leafText.slice(8), false],
+    ['a vertical tab', leafText.slice(0, 8) + '\u000b' + leafText.slice(8), false],
+    ['padding (the control)', leafText + '='.repeat((4 - (leafText.length % 4)) % 4), true],
+  ]) {
+    const onDecide = `decide on a call whose plaintext chain's leaf has ${what}`;
+    add(onDecide, 'decide', { now, envelope: chainCall('p-h', [member, rootText]), node: pinnedNode });
+    expect(onDecide, reads ? { code: 'ok', tier: 'contact' } : { code: 'envelope_invalid', why: 'plaintext shape' });
+    const onOpen = `open_result on an answer whose plaintext chain's leaf has ${what}`;
+    add(onOpen, 'open_result', open(chainAnswer([member, rootText])));
+    // An answer is held by its `result`, which is what the peer sent.
+    expect(onOpen, reads ? { ok: 1 } : { error: 'envelope_invalid', why: 'plaintext shape' });
+  }
+
+  // The caller's pin, in the chain form: one whose leaf does not read, or reads to a key outside the
+  // profile, is an error of the call in its reader's class, as the core's `?` has it. The Go port read
+  // it leniently and answered `superseded leaf` for any that did not parse (T10).
+  const pinOf = (leaf) => ({ pins: [{ root: rootFp, endpoint: ENDPOINT, leaf, state: 'active' }] });
+  add('open_result in the chain form, with a pin whose leaf is not base64url', 'open_result', open(chainForm, pinOf('!!!')));
+  expect('open_result in the chain form, with a pin whose leaf is not base64url', { error: 'parse', why: 'not base64url' });
+  add('open_result in the chain form, with a pin whose leaf is not a certificate', 'open_result', open(chainForm, pinOf('AAAA')));
+  expect('open_result in the chain form, with a pin whose leaf is not a certificate', { error: 'parse' });
+  add('open_result in the chain form, with a pin whose leaf has a stray character', 'open_result', open(chainForm, pinOf(leafDer.slice(0, 8) + '!' + leafDer.slice(8))));
+  expect('open_result in the chain form, with a pin whose leaf has a stray character', { error: 'parse', why: 'not base64url' });
+  for (const [kind, { oid }] of Object.entries(f.foreign)) {
+    const id = `open_result in the chain form, with a pin holding a key outside the profile: ${kind}`;
+    add(id, 'open_result', open(chainForm, pinOf(f.foreignLeaf(kind))));
+    expect(id, { error: 'unsupported', why: `unsupported key type ${oid}` });
+  }
+  // The control: the pin as held, read.
+  add('open_result in the chain form, with the pin as held', 'open_result', open(chainForm, pinOf(leafDer)));
+  expect('open_result in the chain form, with the pin as held', { ok: 1 });
+  // Two pins for the chain's root: the first is the one read, as the core reads it and as decide reads
+  // a node's pins in both ports. The Go port read every one, so a second pin newer than the chain, or
+  // one that did not read, refused a result the first accepted (S5-2).
+  const newerLeaf = b64url(buildLeaf({ cn: 'Alina Rao', rootCn: 'Alina Rao', root: rootKey, hostKey, endpoint: ENDPOINT, notBefore: new Date('2026-09-20T00:00:00Z'), notAfter: DIES, label: 'parity/s5-2/newer' }));
+  for (const [what, second, want] of [
+    ['a newer leaf', newerLeaf, { ok: 1 }],
+    ['an older leaf', olderLeaf, { ok: 1 }],
+    ['a leaf that is not a certificate', 'AAAA', { ok: 1 }],
+  ]) {
+    const id = `open_result in the chain form, with two pins for its root: the first as held, the second ${what}`;
+    add(id, 'open_result', open(chainForm, { pins: [...pinOf(leafDer).pins, ...pinOf(second).pins] }));
+    expect(id, want);
+  }
+  add('open_result in the chain form, with two pins for its root: the first newer, the second as held', 'open_result', open(chainForm, { pins: [...pinOf(newerLeaf).pins, ...pinOf(leafDer).pins] }));
+  expect('open_result in the chain form, with two pins for its root: the first newer, the second as held', { error: 'envelope_invalid', why: 'superseded leaf' });
+
+  // A held key that does not read is the node's own state that does not read: an error of the call in
+  // its reader's class (CONTRACT §5), as the core answers it. The Go port answered `does not open`,
+  // which tells the peer about the host's damaged state and skips the host's audit of it (R23).
+  for (const [what, pkcs8, want] of [
+    ['is not base64url', heldKey.pkcs8.slice(0, 8) + '!' + heldKey.pkcs8.slice(8), { error: 'parse', why: 'not base64url' }],
+    ['is not a key', 'AAAA', { error: 'parse' }],
+    ['holds a key outside the profile', f.outside.Pkcs8, { error: 'unsupported', why: 'unsupported key type 1.3.101.112' }],
+  ]) {
+    add(`decide with a held key whose PKCS #8 ${what}`, 'decide', { now, envelope: sealed, node: { ...node, keys: [{ ...heldKey, pkcs8 }] } });
+    expect(`decide with a held key whose PKCS #8 ${what}`, want);
+  }
 }

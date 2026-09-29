@@ -187,7 +187,7 @@ func holdsPrivateKey(text string) bool {
 			end++
 		}
 		if w := text[start:end]; len(w) > 0 && w[0] == 'M' && isBase64Text(w) {
-			if der, err := decodeB64url(w); err == nil && isPrivateKeyDER(der) {
+			if der, err := DecodeB64url(w); err == nil && isPrivateKeyDER(der) {
 				return true
 			}
 		}
@@ -243,7 +243,7 @@ func exportCertificate(cell string) (*Cert, string) {
 	if !isB64url(cell) {
 		return nil, "not base64url"
 	}
-	der, err := decodeB64url(cell)
+	der, err := DecodeB64url(cell)
 	if err != nil {
 		return nil, "not base64url"
 	}

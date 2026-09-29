@@ -261,7 +261,7 @@ func SigningRequestCheck(request map[string]any, origin string, now time.Time, r
 		return nil, refuseSigning("valid_days is a whole number of days from 1 to 398")
 	}
 	state := text["state"]
-	if raw, err := decodeB64url(state); len(state) != 43 || !isB64url(state) || err != nil || len(raw) != 32 {
+	if raw, err := DecodeB64url(state); len(state) != 43 || !isB64url(state) || err != nil || len(raw) != 32 {
 		return nil, refuseSigning("state is 32 bytes, base64url")
 	}
 	expect := text["expect_root"]
@@ -271,7 +271,7 @@ func SigningRequestCheck(request map[string]any, origin string, now time.Time, r
 	if cert, has := text["root_cert"]; has {
 		var der []byte
 		if isB64url(cert) {
-			der, err = decodeB64url(cert)
+			der, err = DecodeB64url(cert)
 		}
 		if !isB64url(cert) || err != nil {
 			return nil, refuseSigning("root_cert is not base64url")
@@ -291,7 +291,7 @@ func SigningRequestCheck(request map[string]any, origin string, now time.Time, r
 	if !isB64url(csrText) {
 		return nil, refuseSigning("csr is not base64url")
 	}
-	der, err := decodeB64url(csrText)
+	der, err := DecodeB64url(csrText)
 	if err != nil {
 		return nil, refuseSigning("not base64url")
 	}
