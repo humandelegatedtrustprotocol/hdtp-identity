@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -45,34 +44,6 @@ func ok(v any) json.RawMessage {
 
 func timeOut(t time.Time) string { return t.UTC().Format(time.RFC3339) }
 
-// The default validity belongs to the boundary: an absent member means a year, and an explicit zero
-// is refused, as the Rust core refuses it. (A Go caller of the library passes a real number or
-// omits the field, which its struct cannot tell from zero — hence the pointer here.)
-func daysOr(v *int) (int, error) {
-	if v == nil {
-		return 365, nil
-	}
-	if *v < 1 || *v > MaxLeafDays {
-		return 0, errArg("validity must be between one and 398 days")
-	}
-	return *v, nil
-}
-
-// timeIn reads a REQUIRED instant. Absent, it is `<name> is required` and `bad_request`, as every
-// other absent member is (CONTRACT §0) and as the core says it; this port said "an instant is
-// required" and called it `parse`, in every function that takes one. Present and unreadable is `parse`.
-func timeIn(s *string, name string) (time.Time, error) {
-	if s == nil {
-		return time.Time{}, errArg(name + " is required")
-	}
-	// The one grammar (parseInstantZ): time.RFC3339 took an offset `now` in every function.
-	t, ok := parseInstantZ(*s)
-	if !ok {
-		return time.Time{}, parseError{"not an RFC 3339 instant: " + *s}
-	}
-	return t, nil
-}
-
 // A caller's arguments that will not read are a caller mistake, so they answer `bad_request` here
 // and in the Rust core alike (CONTRACT §0: the same names, the same shapes, the same codes).
 const codeArgs = "bad_request"
@@ -104,66 +75,6 @@ func codeFor(err error, fallback string) string {
 		return "vault"
 	}
 	return fallback
-}
-
-func decodeArgs(args json.RawMessage, into any) error {
-	if len(args) == 0 {
-		args = []byte("{}")
-	}
-	err := json.Unmarshal(args, into)
-	// A member of the wrong JSON type. encoding/json says so in its own words — "json: cannot unmarshal
-	// string into Go struct field sealArgs.sender_chain of type []pactidentity.B64" — which the other
-	// port cannot reproduce and CONTRACT §0 says it will not have to. The core reads a member with an
-	// accessor that finds nothing of the type it wants and answers `<name> is required`; so does this.
-	var mismatch *json.UnmarshalTypeError
-	if errors.As(err, &mismatch) {
-		if mismatch.Field != "" && !strings.Contains(mismatch.Field, ".") {
-			return errArg(mismatch.Field + " is required")
-		}
-		return errArg("arguments do not read")
-	}
-	return err
-}
-
-// privIn and pubIn take the member's own name so an absent key is reported the way the caller wrote
-// it — `host_pkcs8 is required`, not `pkcs8 is required`, when that is the member that is missing.
-// Absent is `== nil` (see b64.go): a member present as "" is not missing, it is bytes that will not
-// parse, and the parser says so, as the Rust core does.
-func privIn(der B64, name string) (*PrivateKey, error) {
-	if der == nil {
-		return nil, errArg(name + " is required")
-	}
-	return ParsePKCS8(der)
-}
-
-func pubIn(spki B64, name string) (*PublicKey, error) {
-	if spki == nil {
-		return nil, errArg(name + " is required")
-	}
-	pub, err := ParseSPKI(spki)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := AlgorithmOf(pub); err != nil {
-		return nil, err
-	}
-	return pub, nil
-}
-
-// need is the same rule for a member the function reads directly rather than through a key parser.
-func need(b B64, name string) error {
-	if b == nil {
-		return errArg(name + " is required")
-	}
-	return nil
-}
-
-// needStr is the same rule for a string member: absent (nil) is a caller's mistake that names it.
-func needStr(s *string, name string) (string, error) {
-	if s == nil {
-		return "", errArg(name + " is required")
-	}
-	return *s, nil
 }
 
 func certOut(c *Cert) map[string]any {
@@ -271,18 +182,6 @@ type function struct {
 	call    func(args) json.RawMessage
 }
 
-// viaJSON is a body that still reads its arguments from their JSON text, handed the object Call
-// read. It goes as each section moves to reading `args`.
-func viaJSON(body func(json.RawMessage) json.RawMessage) func(args) json.RawMessage {
-	return func(a args) json.RawMessage {
-		raw, err := json.Marshal(map[string]json.RawMessage(a))
-		if err != nil {
-			return fail("internal", err.Error())
-		}
-		return body(raw)
-	}
-}
-
 // functions is the dispatcher: every name contract/contract.json declares, grouped by its sections,
 // each naming the function in api_<section>.go that answers it.
 var functions = map[string]function{
@@ -328,14 +227,14 @@ var functions = map[string]function{
 	"card_decode": {[]string{"vcard", "now"}, callCardDecode},
 
 	// Envelopes: api_envelopes.go
-	"suite_for":      {[]string{"spki"}, viaJSON(callSuiteFor)},
+	"suite_for":      {[]string{"spki"}, callSuiteFor},
 	"hpke_seal":      {[]string{"suite", "recipient_spki", "info", "aad", "plaintext", "ephemeral_seed"}, callHPKESeal},
 	"hpke_open":      {[]string{"suite", "recipient_pkcs8", "recipient_spki", "info", "aad", "enc", "ct"}, callHPKEOpen},
 	"seal_request":   {[]string{"recipient_leaf", "sender_pkcs8", "form", "sender_chain", "msg_id", "ts", "exp", "ephemeral_seed", "method", "params", "cty"}, callSealRequest},
 	"seal_result":    {[]string{"recipient_spki", "sender_pkcs8", "form", "sender_chain", "msg_id", "ts", "exp", "ephemeral_seed", "result", "error"}, callSealResult},
-	"open_result":    {[]string{"envelope", "my_pkcs8", "my_spki", "msg_id", "now", "pins", "expected_root", "expected_endpoint"}, viaJSON(callOpenResult)},
-	"follow_renewed": {[]string{"answer", "pinned_root", "pinned_leaf", "dialed", "now"}, viaJSON(callFollowRenewed)},
-	"decide":         {[]string{"now", "envelope", "node"}, viaJSON(callDecide)},
+	"open_result":    {[]string{"envelope", "my_pkcs8", "my_spki", "msg_id", "now", "pins", "expected_root", "expected_endpoint"}, callOpenResult},
+	"follow_renewed": {[]string{"answer", "pinned_root", "pinned_leaf", "dialed", "now"}, callFollowRenewed},
+	"decide":         {[]string{"now", "envelope", "node"}, callDecide},
 
 	// Vault: api_vault.go
 	"vault_seal":   {[]string{"passphrase", "plaintext", "kdf", "salt", "nonce"}, callVaultSeal},

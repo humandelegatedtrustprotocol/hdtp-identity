@@ -8,9 +8,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 case can be listed as proven that did not pass. The cases that fail today are listed apart, at the
 end, each with the finding it waits on.
 
-Specification: **2.2.4**. **88** normative sentences, **1828** cross-port parity cases over **50** guarded functions, and **122** known divergences that fail today and are listed apart, at the end.
+Specification: **2.2.4**. **88** normative sentences, **1895** cross-port parity cases over **50** guarded functions, and **75** known divergences that fail today and are listed apart, at the end.
 
-Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **3900** answers, of which **37** do not hold to the shape it declares — **37** of them in a known divergence. Of **96** declared error codes, **96** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **3940** answers, of which **37** do not hold to the shape it declares — **37** of them in a known divergence. Of **96** declared error codes, **96** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 88 normative sentences of the specification
 
@@ -203,7 +203,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 1828 cross-port parity cases
+## The 1895 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -211,7 +211,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **1828** cases (**1103** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
+At the run that generated this file: **1895** cases (**1103** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
 
 ### `address_guard` — 40 cases · whole on success
 
@@ -546,7 +546,7 @@ At the run that generated this file: **1828** cases (**1103** of the run's cases
 - generated · csr_new · endpoint absent, host_pkcs8 7
 - generated · csr_new · endpoint absent, dns_name 7
 
-### `decide` — 67 cases · whole on success
+### `decide` — 84 cases · whole on success
 
 - decide on an envelope from a pinned contact
 - decide on a pinned contact's call that names no tool
@@ -606,6 +606,17 @@ At the run that generated this file: **1828** cases (**1103** of the run's cases
 - decide on a PACT-SEAL-X25519 envelope whose encapsulated key is one byte long
 - decide on a PACT-SEAL-P256 envelope whose encapsulated key is one byte short
 - decide on a PACT-SEAL-P256 envelope whose encapsulated key is one byte long
+- decide with an envelope with no sig
+- decide with an envelope that is not an object
+- decide with a node with no endpoint
+- decide with a node that is not an object
+- decide with a held key with no kid
+- decide with a pin with no leaf
+- decide with pins that are not a list
+- decide with a seen entry that is not a string
+- decide with an accept_new_hosts that is neither auto nor ask
+- decide with a node and an envelope both short a member
+- decide on a contact at a new endpoint, the node saying no accept_new_hosts
 - generated · decide · {}
 - generated · decide · the hostile object
 - generated · decide · now absent
@@ -615,6 +626,12 @@ At the run that generated this file: **1828** cases (**1103** of the run's cases
 - generated · decide · node absent
 - generated · decide · node null
 - generated · decide · an undeclared member
+- generated · decide · now absent, envelope "x"
+- generated · decide · now absent, node "x"
+- generated · decide · envelope absent, now 7
+- generated · decide · envelope absent, node "x"
+- generated · decide · node absent, now 7
+- generated · decide · node absent, envelope "x"
 
 ### `derive_seed` — 19 cases · whole on success
 
@@ -1002,7 +1019,7 @@ At the run that generated this file: **1828** cases (**1103** of the run's cases
 - generated · export_write_messages · an undeclared member
 - generated · export_write_messages · messages absent, msg_ids "x"
 
-### `follow_renewed` — 30 cases · whole on success
+### `follow_renewed` — 40 cases · whole on success
 
 - follow_renewed on a chain to another root
 - follow_renewed on a chain that is not one
@@ -1017,6 +1034,9 @@ At the run that generated this file: **1828** cases (**1103** of the run's cases
 - follow_renewed on a chain of none
 - follow_renewed to a leaf OLDER than the one pinned
 - follow_renewed with no now
+- follow_renewed on an answer whose code is not a string
+- follow_renewed on an answer whose data is not an object
+- follow_renewed on an answer that is not an object
 - generated · follow_renewed · {}
 - generated · follow_renewed · the hostile object
 - generated · follow_renewed · pinned_root absent
@@ -1027,10 +1047,17 @@ At the run that generated this file: **1828** cases (**1103** of the run's cases
 - generated · follow_renewed · dialed null
 - generated · follow_renewed · now absent
 - generated · follow_renewed · now null
+- generated · follow_renewed · answer ""
 - generated · follow_renewed · an undeclared member
+- generated · follow_renewed · pinned_root absent, pinned_leaf 7
+- generated · follow_renewed · pinned_root absent, dialed 7
+- generated · follow_renewed · pinned_root absent, now 7
 - generated · follow_renewed · pinned_leaf absent, pinned_root 7
+- generated · follow_renewed · pinned_leaf absent, dialed 7
+- generated · follow_renewed · pinned_leaf absent, now 7
 - generated · follow_renewed · dialed absent, pinned_root 7
 - generated · follow_renewed · dialed absent, pinned_leaf 7
+- generated · follow_renewed · dialed absent, now 7
 - generated · follow_renewed · now absent, pinned_root 7
 - generated · follow_renewed · now absent, pinned_leaf 7
 - generated · follow_renewed · now absent, dialed 7
@@ -1590,7 +1617,7 @@ At the run that generated this file: **1828** cases (**1103** of the run's cases
 
 - a function nobody defines
 
-### `open_result` — 39 cases · whole on success
+### `open_result` — 79 cases · whole on success
 
 - open_result of a request envelope
 - open_result with nothing to work from
@@ -1616,21 +1643,61 @@ At the run that generated this file: **1828** cases (**1103** of the run's cases
 - open_result on a PACT-SEAL-X25519 answer whose encapsulated key is one byte long
 - open_result on a PACT-SEAL-P256 answer whose encapsulated key is one byte short
 - open_result on a PACT-SEAL-P256 answer whose encapsulated key is one byte long
+- open_result with an envelope with no ct
+- open_result with an envelope that is not an object
+- open_result with a pin with no root
+- open_result with a pin whose root is not a string
+- open_result with a pin that is not an object
+- open_result with pins that are null
 - generated · open_result · {}
 - generated · open_result · the hostile object
+- generated · open_result · envelope absent
+- generated · open_result · envelope null
 - generated · open_result · my_pkcs8 absent
 - generated · open_result · my_pkcs8 null
 - generated · open_result · my_spki absent
 - generated · open_result · my_spki null
+- generated · open_result · msg_id absent
+- generated · open_result · msg_id null
 - generated · open_result · now absent
 - generated · open_result · now null
+- generated · open_result · pins "x"
 - generated · open_result · an undeclared member
+- generated · open_result · envelope absent, my_pkcs8 7
+- generated · open_result · envelope absent, my_spki 7
+- generated · open_result · envelope absent, msg_id 7
+- generated · open_result · envelope absent, now 7
+- generated · open_result · envelope absent, pins "x"
+- generated · open_result · envelope absent, expected_root 7
+- generated · open_result · envelope absent, expected_endpoint 7
+- generated · open_result · my_pkcs8 absent, envelope "x"
+- generated · open_result · my_pkcs8 absent, my_spki 7
+- generated · open_result · my_pkcs8 absent, msg_id 7
+- generated · open_result · my_pkcs8 absent, now 7
+- generated · open_result · my_pkcs8 absent, pins "x"
+- generated · open_result · my_pkcs8 absent, expected_root 7
+- generated · open_result · my_pkcs8 absent, expected_endpoint 7
+- generated · open_result · my_spki absent, envelope "x"
 - generated · open_result · my_spki absent, my_pkcs8 7
+- generated · open_result · my_spki absent, msg_id 7
+- generated · open_result · my_spki absent, now 7
+- generated · open_result · my_spki absent, pins "x"
+- generated · open_result · my_spki absent, expected_root 7
+- generated · open_result · my_spki absent, expected_endpoint 7
+- generated · open_result · msg_id absent, envelope "x"
 - generated · open_result · msg_id absent, my_pkcs8 7
 - generated · open_result · msg_id absent, my_spki 7
+- generated · open_result · msg_id absent, now 7
+- generated · open_result · msg_id absent, pins "x"
+- generated · open_result · msg_id absent, expected_root 7
+- generated · open_result · msg_id absent, expected_endpoint 7
+- generated · open_result · now absent, envelope "x"
 - generated · open_result · now absent, my_pkcs8 7
 - generated · open_result · now absent, my_spki 7
 - generated · open_result · now absent, msg_id 7
+- generated · open_result · now absent, pins "x"
+- generated · open_result · now absent, expected_root 7
+- generated · open_result · now absent, expected_endpoint 7
 
 ### `parse_certificate` — 23 cases · whole on success
 
@@ -2197,7 +2264,7 @@ At the run that generated this file: **1828** cases (**1103** of the run's cases
 - generated · wallet_issue · now absent, valid_days "7"
 - generated · wallet_issue · now absent, move "yes"
 
-## The 122 known divergences
+## The 75 known divergences
 
 Cases that FAIL today, each excused by `js/cases/known-divergences.json` only while it fails exactly
 as its entry says, and each waiting on the audit finding named beside it (the port-parity audit of
@@ -2259,57 +2326,10 @@ as its entry says, and each waiting on the audit finding named beside it (the po
 - generated · seal_result · ephemeral_seed 7 — F5, R02 (wasm off the contract, differ)
 - generated · seal_result · msg_id absent, form 7 — F5 (differ)
 - generated · seal_result · ts absent, form 7 — F5 (differ)
-- generated · open_result · envelope absent — S1-1 (wasm not as expected, go not as expected)
-- generated · open_result · envelope null — S1-1 (wasm not as expected, go not as expected)
-- generated · open_result · msg_id absent — F11, R20 (go not as expected)
-- generated · open_result · msg_id null — F11, R20 (go not as expected)
-- generated · open_result · pins "x" — R21, F11 (differ)
 - generated · open_result · expected_root "" — R07, F4, T14 (differ)
 - generated · open_result · expected_root 7 — F5, R02 (wasm off the contract, differ)
 - generated · open_result · expected_endpoint "" — R07, F4, T14 (differ)
 - generated · open_result · expected_endpoint 7 — F5, R02 (wasm off the contract, differ)
-- generated · open_result · envelope absent, my_pkcs8 7 — S1-1, F19 (differ)
-- generated · open_result · envelope absent, my_spki 7 — S1-1, F19 (differ)
-- generated · open_result · envelope absent, msg_id 7 — S1-1, F19 (differ)
-- generated · open_result · envelope absent, now 7 — S1-1, F19 (differ)
-- generated · open_result · envelope absent, pins "x" — S1-1, F19 (differ)
-- generated · open_result · envelope absent, expected_root 7 — S1-1, F19 (differ)
-- generated · open_result · envelope absent, expected_endpoint 7 — S1-1, F19 (differ)
-- generated · open_result · my_pkcs8 absent, envelope "x" — F11, F19 (differ)
-- generated · open_result · my_pkcs8 absent, my_spki 7 — F19 (differ)
-- generated · open_result · my_pkcs8 absent, msg_id 7 — F19 (differ)
-- generated · open_result · my_pkcs8 absent, now 7 — F19 (differ)
-- generated · open_result · my_pkcs8 absent, pins "x" — R21, F19 (differ)
-- generated · open_result · my_pkcs8 absent, expected_root 7 — F5, F19 (differ)
-- generated · open_result · my_pkcs8 absent, expected_endpoint 7 — F5, F19 (differ)
-- generated · open_result · my_spki absent, envelope "x" — F11, F19 (differ)
-- generated · open_result · my_spki absent, msg_id 7 — F19 (differ)
-- generated · open_result · my_spki absent, now 7 — F19 (differ)
-- generated · open_result · my_spki absent, pins "x" — R21, F19 (differ)
-- generated · open_result · my_spki absent, expected_root 7 — F5, F19 (differ)
-- generated · open_result · my_spki absent, expected_endpoint 7 — F5, F19 (differ)
-- generated · open_result · msg_id absent, envelope "x" — F11, F19 (differ)
-- generated · open_result · msg_id absent, now 7 — F19 (differ)
-- generated · open_result · msg_id absent, pins "x" — R21, F19 (differ)
-- generated · open_result · msg_id absent, expected_root 7 — F5, F19 (differ)
-- generated · open_result · msg_id absent, expected_endpoint 7 — F5, F19 (differ)
-- generated · open_result · now absent, envelope "x" — F11, F19 (differ)
-- generated · open_result · now absent, pins "x" — R21, F19 (differ)
-- generated · open_result · now absent, expected_root 7 — F5, F19 (differ)
-- generated · open_result · now absent, expected_endpoint 7 — F5, F19 (differ)
-- generated · follow_renewed · answer "" — R22, F14 (differ)
-- generated · follow_renewed · pinned_root absent, pinned_leaf 7 — F19 (differ)
-- generated · follow_renewed · pinned_root absent, dialed 7 — F19 (differ)
-- generated · follow_renewed · pinned_root absent, now 7 — F19 (differ)
-- generated · follow_renewed · pinned_leaf absent, dialed 7 — F19 (differ)
-- generated · follow_renewed · pinned_leaf absent, now 7 — F19 (differ)
-- generated · follow_renewed · dialed absent, now 7 — F19 (differ)
-- generated · decide · now absent, envelope "x" — F19 (differ)
-- generated · decide · now absent, node "x" — F19 (differ)
-- generated · decide · envelope absent, now 7 — F19 (differ)
-- generated · decide · envelope absent, node "x" — F19 (differ)
-- generated · decide · node absent, now 7 — F19 (differ)
-- generated · decide · node absent, envelope "x" — F19 (differ)
 - generated · vault_seal · kdf "x" — R28, C4 (wasm off the contract, go off the contract, differ)
 - generated · vault_seal · salt "" — R29, C6 (differ)
 - generated · vault_seal · salt 7 — F17 (wasm off the contract, go off the contract, differ)
@@ -2319,8 +2339,8 @@ as its entry says, and each waiting on the audit finding named beside it (the po
 - generated · wallet_issue · record_plaintext absent — S1-2 (wasm not as expected, go not as expected)
 - generated · wallet_issue · record_plaintext null — S1-2 (wasm not as expected, go not as expected)
 - generated · wallet_issue · move "yes" — F5, R02 (wasm off the contract, differ)
-- generated · wallet_issue · vault_plaintext absent, move "yes" — F5, F19 (differ)
-- generated · wallet_issue · record_plaintext absent, move "yes" — F5, F19 (differ)
+- generated · wallet_issue · vault_plaintext absent, move "yes" — F5 (differ)
+- generated · wallet_issue · record_plaintext absent, move "yes" — F5 (differ)
 - generated · export_read_end · lines absent — S1-3 (wasm not as expected, go not as expected)
 - generated · export_read_end · lines null — S1-3 (wasm not as expected, go not as expected)
 - generated · limits_decide · now absent — S1-2 (wasm not as expected, go not as expected)

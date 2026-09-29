@@ -159,6 +159,12 @@ clarification this library fixes and Phase 0.5 folds into the spec.
 §14.3 and §14.4, over state the host supplies. It changes nothing; it returns what it decided and the
 effects the host must apply. `envelope.mjs receive()` is its specification, line for line.
 
+Its arguments are the host's, decoded by the host, so a fault in them fails the call (`bad_request`)
+and is never a decision about the peer: `node`, `envelope` and `now` absent or null, in that order
+(`<name> is required`); then the node read whole as `NodeState` says, then the envelope's four
+members in order, each named by its path when it is absent, null or not the type it is
+(`node.pins[0].leaf is required`, `envelope.sig is required`); then `now`.
+
 Input:
 
 ```json

@@ -4,7 +4,7 @@ package pactidentity
 // tests reached — review N-15 — so they live beside the tests that use them.
 
 // chainIn decodes a list of base64url members the way the wire does, for a test or a caller holding
-// strings rather than the boundary's B64. The boundary itself decodes strictly (b64.go).
+// strings rather than the boundary's arguments. The boundary itself decodes strictly (b64.go).
 func chainIn(chain []string) [][]byte {
 	out := make([][]byte, 0, len(chain))
 	for _, c := range chain {

@@ -3,21 +3,12 @@ package pactidentity
 // The Envelopes section of contract/contract.json: a body for each function it declares, which
 // api.go's `functions` map dispatches by name, and the helpers only these use.
 
-import (
-	"bytes"
-	"encoding/json"
-)
+import "encoding/json"
 
-func callSuiteFor(args json.RawMessage) json.RawMessage {
-	var a struct {
-		SPKI B64 `json:"spki"`
-	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	pub, err := pubIn(a.SPKI, "spki")
+func callSuiteFor(a args) json.RawMessage {
+	pub, err := a.pub("spki")
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs("parse", err)
 	}
 	s, _ := SuiteForKey(pub)
 	return ok(map[string]any{"suite": s})
@@ -171,38 +162,59 @@ func callSealResult(a args) json.RawMessage {
 	return ok(env)
 }
 
-func callOpenResult(args json.RawMessage) json.RawMessage {
-	var a struct {
-		Envelope         *Envelope `json:"envelope"`
-		MyPKCS8          B64       `json:"my_pkcs8"`
-		MySPKI           B64       `json:"my_spki"`
-		MsgID            string    `json:"msg_id"`
-		Now              *string   `json:"now"`
-		Pins             []Pin     `json:"pins"`
-		ExpectedRoot     string    `json:"expected_root"`
-		ExpectedEndpoint string    `json:"expected_endpoint"`
+func callOpenResult(a args) json.RawMessage {
+	// Absent is the caller's omission (CONTRACT §0, `envelope is required`); present, every refusal
+	// of the envelope is `envelope_invalid`, and names the member that is not there (T9, F12, S1-1).
+	raw := a.present("envelope")
+	if raw == nil {
+		return fail(codeArgs, "envelope is required")
 	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	if a.Envelope == nil {
-		return fail("envelope_invalid", "envelope members")
-	}
-	priv, err := privIn(a.MyPKCS8, "my_pkcs8")
+	env, err := wireOf(a.value("envelope"))
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failErr("envelope_invalid", err)
 	}
-	me, err := pubIn(a.MySPKI, "my_spki")
+	priv, err := a.priv("my_pkcs8")
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs("parse", err)
 	}
-	now, err := timeIn(a.Now, "now")
+	me, err := a.pub("my_spki")
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs("parse", err)
 	}
-	opened, err := OpenResult(*a.Envelope, OpenOpts{Recipient: priv, RecipientPublic: me, MsgID: a.MsgID, Now: now, Pins: a.Pins, ExpectedRoot: a.ExpectedRoot, ExpectedEndpoint: a.ExpectedEndpoint})
+	// A pin is read whole and refused by the member it lacks: one lacking its root or endpoint
+	// opened here as though it were a pin (F11, R20).
+	var pins []Pin
+	if v := a.value("pins"); v != nil {
+		if pins, err = listOf(v, "pins", pinOf); err != nil {
+			return failAs(codeArgs, err)
+		}
+	}
+	msgID, err := a.str("msg_id")
 	if err != nil {
-		return failErr(codeFor(err, "envelope_invalid"), err)
+		return failAs(codeArgs, err)
+	}
+	now, err := a.instant("now")
+	if err != nil {
+		return failAs("parse", err)
+	}
+	root, err := a.optStr("expected_root")
+	if err != nil {
+		return failAs(codeArgs, err)
+	}
+	endpoint, err := a.optStr("expected_endpoint")
+	if err != nil {
+		return failAs(codeArgs, err)
+	}
+	o := OpenOpts{Recipient: priv, RecipientPublic: me, MsgID: msgID, Now: now, Pins: pins}
+	if root != nil {
+		o.ExpectedRoot = *root
+	}
+	if endpoint != nil {
+		o.ExpectedEndpoint = *endpoint
+	}
+	opened, err := OpenResult(env, o)
+	if err != nil {
+		return failAs("envelope_invalid", err)
 	}
 	out := map[string]any{"ok": true, "root": opened.Root, "endpoint": opened.Endpoint, "form": opened.Form}
 	if opened.Result != nil {
@@ -217,81 +229,325 @@ func callOpenResult(args json.RawMessage) json.RawMessage {
 	return ok(out)
 }
 
-func callFollowRenewed(args json.RawMessage) json.RawMessage {
-	var a struct {
-		Answer struct {
-			Code string `json:"code"`
-			Data struct {
-				// Raw, because ABSENT and EMPTY are different answers (CONTRACT §0): no `chain`
-				// member — or one that is not a list of base64url strings — is "no chain", and
-				// `[]` is a chain of 0 that rule 1 refuses. Decoded as a slice, both were nil.
-				Chain json.RawMessage `json:"chain"`
-			} `json:"data"`
-		} `json:"answer"`
-		PinnedRoot *string `json:"pinned_root"`
-		PinnedLeaf B64     `json:"pinned_leaf"`
-		Dialed     *string `json:"dialed"`
-		Now        *string `json:"now"`
-	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	pinnedRoot, err := needStr(a.PinnedRoot, "pinned_root")
+// follow_renewed reads the pin it follows from, then the peer's answer as it was sent, whatever its
+// shape (the contract's `answer: true`): a code that is not `certificate_renewed` and a `data.chain`
+// that is not a list of base64url strings are answers, `{follow: false}`, as the core gives them,
+// where this port refused them as arguments that did not read (F14, R22).
+func callFollowRenewed(a args) json.RawMessage {
+	pinnedRoot, err := a.str("pinned_root")
 	if err != nil {
-		return failErr(codeArgs, err)
+		return failAs(codeArgs, err)
 	}
-	if err := need(a.PinnedLeaf, "pinned_leaf"); err != nil {
-		return failErr(codeArgs, err)
-	}
-	dialed, err := needStr(a.Dialed, "dialed")
+	pinnedLeaf, err := a.bytes("pinned_leaf")
 	if err != nil {
-		return failErr(codeArgs, err)
+		return failAs(codeArgs, err)
 	}
-	now, err := timeIn(a.Now, "now")
+	dialed, err := a.str("dialed")
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs(codeArgs, err)
 	}
-	if a.Answer.Code != "certificate_renewed" {
+	now, err := a.instant("now")
+	if err != nil {
+		return failAs("parse", err)
+	}
+	answer, _ := a.value("answer").(map[string]any)
+	if code, _ := answer["code"].(string); code != "certificate_renewed" {
 		return ok(map[string]any{"follow": false, "why": "not certificate_renewed"})
 	}
-	var answered []B64
-	if raw := bytes.TrimSpace(a.Answer.Data.Chain); len(raw) == 0 || raw[0] != '[' || json.Unmarshal(raw, &answered) != nil {
+	data, _ := answer["data"].(map[string]any)
+	chain, isChain := chainOfAny(data["chain"])
+	if !isChain {
 		return ok(map[string]any{"follow": false, "why": "no chain"})
 	}
-	follow, why, leaf := FollowRenewed(chainOf(answered), pinnedRoot, a.PinnedLeaf, dialed, now)
+	follow, why, leaf := FollowRenewed(chain, pinnedRoot, pinnedLeaf, dialed, now)
 	if !follow {
 		return ok(map[string]any{"follow": false, "why": why})
 	}
 	return ok(map[string]any{"follow": true, "leaf": B64url(leaf)})
 }
 
-func callDecide(args json.RawMessage) json.RawMessage {
-	var a struct {
-		Now      *string    `json:"now"`
-		Envelope *Envelope  `json:"envelope"`
-		Node     *NodeState `json:"node"`
+// chainOfAny is the core's `chain_of`: a list of base64url strings, or nothing.
+func chainOfAny(v any) ([][]byte, bool) {
+	items, isList := v.([]any)
+	if !isList {
+		return nil, false
 	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
+	out := make([][]byte, 0, len(items))
+	for _, item := range items {
+		s, isStr := item.(string)
+		if !isStr {
+			return nil, false
+		}
+		b, err := decodeB64url(s)
+		if err != nil {
+			return nil, false
+		}
+		out = append(out, b)
 	}
+	return out, true
+}
+
+func callDecide(a args) json.RawMessage {
 	// Without a node there is nothing to decide against: no keys, no pins, no tombstones. This
 	// port answered anyway, refusing the envelope for an "unknown kid" — a decision that reads
 	// like a verdict on the envelope and is really a verdict on an argument that was not there.
-	if a.Node == nil {
-		return failErr(codeArgs, errArg("node is required"))
+	for _, k := range []string{"node", "envelope", "now"} {
+		if a.present(k) == nil {
+			return fail(codeArgs, k+" is required")
+		}
 	}
-	if a.Envelope == nil {
-		return failErr(codeArgs, errArg("envelope is required"))
-	}
-	now, err := timeIn(a.Now, "now")
+	// Then each is read whole, and a member it lacks is named by its path: this port decided on
+	// the zero value (a node with no endpoint was `ok`; an envelope with no `sig` a refusal of the
+	// signature) where the core refused the call (T9, F13, R22).
+	node, err := nodeStateOf(a.value("node"))
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs(codeArgs, err)
 	}
-	d, err := Decide(now, *a.Envelope, *a.Node)
+	env, err := wireOf(a.value("envelope"))
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs(codeArgs, err)
+	}
+	now, err := a.instant("now")
+	if err != nil {
+		return failAs("parse", err)
+	}
+	d, err := Decide(now, env, node)
+	if err != nil {
+		return failAs("parse", err)
 	}
 	return ok(d)
+}
+
+// ── the objects inside a member, read by hand (api/envelopes.rs reads them the same way, in the same order)
+
+// required is `<path> is required`: a member of an object inside the arguments that is absent, null
+// or not the type it is, named as CONTRACT §0 names a member of the arguments.
+func required(path string) error { return errArg(path + " is required") }
+
+type shape struct {
+	o    map[string]any
+	path string
+}
+
+func shapeOf(v any, path string) (shape, error) {
+	o, isObj := v.(map[string]any)
+	if !isObj {
+		return shape{}, required(path)
+	}
+	return shape{o, path}, nil
+}
+
+func (s shape) text(k string) (string, error) {
+	v, isStr := s.o[k].(string)
+	if !isStr {
+		return "", required(s.path + "." + k)
+	}
+	return v, nil
+}
+
+func (s shape) optText(k string) (*string, error) {
+	switch v := s.o[k].(type) {
+	case nil:
+		return nil, nil
+	case string:
+		return &v, nil
+	}
+	return nil, required(s.path + "." + k)
+}
+
+func (s shape) flag(k string) (bool, error) {
+	switch v := s.o[k].(type) {
+	case nil:
+		return false, nil
+	case bool:
+		return v, nil
+	}
+	return false, required(s.path + "." + k)
+}
+
+// listOf reads a list, each item by `each`, named `<path>[<i>]`.
+func listOf[T any](v any, path string, each func(any, string) (T, error)) ([]T, error) {
+	items, isList := v.([]any)
+	if !isList {
+		return nil, required(path)
+	}
+	out := make([]T, 0, len(items))
+	for i, item := range items {
+		t, err := each(item, path+"["+itoa(i)+"]")
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, nil
+}
+
+// optList is an optional list member: absent or null is empty.
+func optList[T any](s shape, k string, each func(any, string) (T, error)) ([]T, error) {
+	if s.o[k] == nil {
+		return nil, nil
+	}
+	return listOf(s.o[k], s.path+"."+k, each)
+}
+
+func (s shape) texts(k string) ([]string, error) {
+	return optList(s, k, func(v any, path string) (string, error) {
+		t, isStr := v.(string)
+		if !isStr {
+			return "", required(path)
+		}
+		return t, nil
+	})
+}
+
+// wireOf is the four members of an envelope as it arrived, in the order the contract lists them:
+// strings that may be anything, judged later by the function.
+func wireOf(v any) (Envelope, error) {
+	s, err := shapeOf(v, "envelope")
+	if err != nil {
+		return Envelope{}, err
+	}
+	var e Envelope
+	for _, m := range []struct {
+		k  string
+		to *string
+	}{{"protected", &e.Protected}, {"enc", &e.Enc}, {"ct", &e.Ct}, {"sig", &e.Sig}} {
+		if *m.to, err = s.text(m.k); err != nil {
+			return Envelope{}, err
+		}
+	}
+	return e, nil
+}
+
+// pinOf is a pin, open_result's or a node's: root, endpoint and leaf; `state` absent is `active`.
+func pinOf(v any, path string) (Pin, error) {
+	s, err := shapeOf(v, path)
+	if err != nil {
+		return Pin{}, err
+	}
+	var p Pin
+	if p.Root, err = s.text("root"); err != nil {
+		return Pin{}, err
+	}
+	if p.Endpoint, err = s.text("endpoint"); err != nil {
+		return Pin{}, err
+	}
+	if p.Leaf, err = s.text("leaf"); err != nil {
+		return Pin{}, err
+	}
+	state, err := s.optText("state")
+	if err != nil {
+		return Pin{}, err
+	}
+	p.State = "active"
+	if state != nil {
+		p.State = *state
+	}
+	fp, err := s.optText("leaf_fingerprint")
+	if err != nil {
+		return Pin{}, err
+	}
+	if fp != nil {
+		p.LeafFingerprint = *fp
+	}
+	return p, nil
+}
+
+// nodeStateOf is the node state, member by member in the contract's order (NodeState). An absent
+// `accept_new_hosts` is `auto` (SPEC §5.3, the contract's description); this port read it as its
+// zero value, and so held a moved contact the core followed (T8). Anything but `auto` or `ask` is
+// refused. The typed Decide keeps a Go caller's zero value, which the node fills itself.
+func nodeStateOf(v any) (NodeState, error) {
+	s, err := shapeOf(v, "node")
+	if err != nil {
+		return NodeState{}, err
+	}
+	var n NodeState
+	if n.Endpoint, err = s.text("endpoint"); err != nil {
+		return NodeState{}, err
+	}
+	hosts, err := s.optText("accept_new_hosts")
+	if err != nil {
+		return NodeState{}, err
+	}
+	switch {
+	case hosts == nil:
+		n.AcceptNewHosts = "auto"
+	case *hosts == "auto" || *hosts == "ask":
+		n.AcceptNewHosts = *hosts
+	default:
+		return NodeState{}, errArg("node.accept_new_hosts is auto or ask")
+	}
+	if n.Chain, err = s.texts("chain"); err != nil {
+		return NodeState{}, err
+	}
+	if n.Keys, err = optList(s, "keys", func(v any, path string) (HeldKey, error) {
+		k, err := shapeOf(v, path)
+		if err != nil {
+			return HeldKey{}, err
+		}
+		var h HeldKey
+		if h.Kid, err = k.text("kid"); err != nil {
+			return HeldKey{}, err
+		}
+		if h.Leaf, err = k.text("leaf"); err != nil {
+			return HeldKey{}, err
+		}
+		if h.PKCS8, err = k.text("pkcs8"); err != nil {
+			return HeldKey{}, err
+		}
+		h.Current, err = k.flag("current")
+		return h, err
+	}); err != nil {
+		return NodeState{}, err
+	}
+	if n.Former, err = s.texts("former"); err != nil {
+		return NodeState{}, err
+	}
+	if n.SiblingKids, err = s.texts("sibling_kids"); err != nil {
+		return NodeState{}, err
+	}
+	if n.Pins, err = optList(s, "pins", pinOf); err != nil {
+		return NodeState{}, err
+	}
+	if n.Tombstones, err = optList(s, "tombstones", func(v any, path string) (TombstoneRec, error) {
+		t, err := shapeOf(v, path)
+		if err != nil {
+			return TombstoneRec{}, err
+		}
+		var r TombstoneRec
+		if r.Root, err = t.text("root"); err != nil {
+			return TombstoneRec{}, err
+		}
+		if r.Leaf, err = t.text("leaf"); err != nil {
+			return TombstoneRec{}, err
+		}
+		r.At, err = t.text("at")
+		return r, err
+	}); err != nil {
+		return NodeState{}, err
+	}
+	if n.FormerEndpoints, err = optList(s, "former_endpoints", func(v any, path string) (FormerEndpoint, error) {
+		f, err := shapeOf(v, path)
+		if err != nil {
+			return FormerEndpoint{}, err
+		}
+		var r FormerEndpoint
+		if r.Root, err = f.text("root"); err != nil {
+			return FormerEndpoint{}, err
+		}
+		if r.Endpoint, err = f.text("endpoint"); err != nil {
+			return FormerEndpoint{}, err
+		}
+		r.At, err = f.text("at")
+		return r, err
+	}); err != nil {
+		return NodeState{}, err
+	}
+	if n.Seen, err = s.texts("seen"); err != nil {
+		return NodeState{}, err
+	}
+	return n, nil
 }
 
 // sealArgs reads what seal_request and seal_result share, in the core's order (api/envelopes.rs):
