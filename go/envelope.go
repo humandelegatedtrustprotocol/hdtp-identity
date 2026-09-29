@@ -279,6 +279,39 @@ type FormerEndpoint struct {
 	At       string `json:"at"`
 }
 
+// hostRoot holds a root the host keeps — a pin's, a tombstone's, a former endpoint's — to the
+// contract's Fingerprint, naming the member by its path. Read as any string, it was a root nothing
+// matched, and a pin or a former endpoint whose root was "abc" came back as the answer's
+// address_claim "abc", which the contract types as a fingerprint.
+func hostRoot(root, path string) error {
+	if !IsFingerprint(root) {
+		return errArg(path + ".root is not a fingerprint")
+	}
+	return nil
+}
+
+// hostRoots is hostRoot over the node's pins, tombstones and former endpoints, in the order the
+// reader reads them: what the typed Decide and DecideChain ask first, since a Go caller's NodeState
+// never passed through the JSON reader.
+func hostRoots(node NodeState) error {
+	for i, p := range node.Pins {
+		if err := hostRoot(p.Root, "node.pins["+itoa(i)+"]"); err != nil {
+			return err
+		}
+	}
+	for i, t := range node.Tombstones {
+		if err := hostRoot(t.Root, "node.tombstones["+itoa(i)+"]"); err != nil {
+			return err
+		}
+	}
+	for i, f := range node.FormerEndpoints {
+		if err := hostRoot(f.Root, "node.former_endpoints["+itoa(i)+"]"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // NodeState is everything Decide reads.
 type NodeState struct {
 	Endpoint        string           `json:"endpoint"`
@@ -362,6 +395,9 @@ func headerTypesOK(h map[string]any) bool {
 // after removal into a plain guest, and one unparseable pin answered `chain_required` to a contact.
 // A decision made on state the node could not read is not a decision; the host is told instead.
 func Decide(now time.Time, env Envelope, node NodeState) (Decision, error) {
+	if err := hostRoots(node); err != nil {
+		return Decision{}, err
+	}
 	var unreadable error
 	d := decide(now.Truncate(time.Second), env, node, &unreadable)
 	if unreadable != nil {
@@ -688,6 +724,9 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 // the envelope's. No `seen`: there is no envelope. The error is the node's own state that will not
 // read, as Decide's is.
 func DecideChain(now time.Time, chain [][]byte, node NodeState) (Decision, error) {
+	if err := hostRoots(node); err != nil {
+		return Decision{}, err
+	}
 	now = now.Truncate(time.Second)
 	vr := ValidateChain(chain, ChainOpts{Now: now})
 	if !vr.OK {
@@ -902,6 +941,11 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 	}
 	if err := needPublic(o.RecipientPublic, "the recipient's public key"); err != nil {
 		return nil, err
+	}
+	for i, p := range o.Pins {
+		if err := hostRoot(p.Root, "pins["+itoa(i)+"]"); err != nil {
+			return nil, err
+		}
 	}
 	o.Now = o.Now.Truncate(time.Second)
 	aad, err := wireB64url(env.Protected)

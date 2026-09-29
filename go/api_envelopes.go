@@ -375,6 +375,16 @@ func (s shape) text(k string) (string, error) {
 	return v, nil
 }
 
+// root is the core's state.rs `root`: a root the host holds — a pin's, a tombstone's, a former
+// endpoint's — is a fingerprint, and one that is not is refused by its path (hostRoot).
+func (s shape) root() (string, error) {
+	r, err := s.text("root")
+	if err != nil {
+		return "", err
+	}
+	return r, hostRoot(r, s.path)
+}
+
 func (s shape) optText(k string) (*string, error) {
 	switch v := s.o[k].(type) {
 	case nil:
@@ -456,7 +466,7 @@ func pinOf(v any, path string) (Pin, error) {
 		return Pin{}, err
 	}
 	var p Pin
-	if p.Root, err = s.text("root"); err != nil {
+	if p.Root, err = s.root(); err != nil {
 		return Pin{}, err
 	}
 	if p.Endpoint, err = s.text("endpoint"); err != nil {
@@ -546,7 +556,7 @@ func nodeStateOf(v any) (NodeState, error) {
 			return TombstoneRec{}, err
 		}
 		var r TombstoneRec
-		if r.Root, err = t.text("root"); err != nil {
+		if r.Root, err = t.root(); err != nil {
 			return TombstoneRec{}, err
 		}
 		if r.Leaf, err = t.text("leaf"); err != nil {
@@ -563,7 +573,7 @@ func nodeStateOf(v any) (NodeState, error) {
 			return FormerEndpoint{}, err
 		}
 		var r FormerEndpoint
-		if r.Root, err = f.text("root"); err != nil {
+		if r.Root, err = f.root(); err != nil {
 			return FormerEndpoint{}, err
 		}
 		if r.Endpoint, err = f.text("endpoint"); err != nil {

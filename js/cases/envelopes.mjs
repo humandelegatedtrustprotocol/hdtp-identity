@@ -296,6 +296,26 @@ export default function envelopes({ add, expect }, f) {
   add('decide on a stranger at an endpoint another root left exactly at the end of the claim window', 'decide', claimed(CLAIM));
   expect('decide on a stranger at an endpoint another root left exactly at the end of the claim window', { code: 'ok', address_claim: null });
 
+  // A root the host holds — a pin's, a tombstone's, a former endpoint's — is a Fingerprint, and one
+  // that is not is the host's damaged state: an error of the call, named by its path, as a member of
+  // the wrong type is. Both ports read it as a root nothing matches, so a pin or a former endpoint
+  // whose root was 'abc' came back as the answer's `address_claim: "abc"`, which the contract types as
+  // a Fingerprint, and a tombstone whose root was 'abc' was skipped whatever else in it did not read
+  // (a lead of the port-parity verification, 2026-09-30, followed from refresh_check's pin).
+  {
+    const notFp = (path) => ({ error: 'bad_request', why: `${path}.root is not a fingerprint` });
+    const heldLeaf = open(leafForm, { pins: [{ ...pinned[0], root: 'abc' }] });
+    for (const [what, fn, args, want] of [
+      ['decide on a stranger at an endpoint a former endpoint whose root is not a fingerprint left', 'decide', { ...claimed(CLAIM - 1), node: { ...claimed(CLAIM - 1).node, former_endpoints: [{ ...claimed(CLAIM - 1).node.former_endpoints[0], root: 'abc' }] } }, notFp('node.former_endpoints[0]')],
+      ['decide on a peer with a tombstone whose root is not a fingerprint', 'decide', { ...tombstoned(60), node: { ...tombstoned(60).node, tombstones: [{ ...tombstoned(60).node.tombstones[0], root: 'abc' }] } }, notFp('node.tombstones[0]')],
+      ['decide on an envelope from a contact whose pin\'s root is not a fingerprint', 'decide', { now, envelope: sealed, node: { ...node, pins: [{ ...pinned[0], root: 'abc' }] } }, notFp('node.pins[0]')],
+      ['decide with a second pin whose root is empty', 'decide', { now, envelope: sealed, node: { ...node, pins: [pinned[0], { ...pinned[0], root: '' }] } }, notFp('node.pins[1]')],
+      ['open_result in the leaf form, from a held leaf whose pin\'s root is not a fingerprint', 'open_result', heldLeaf, notFp('pins[0]')],
+    ]) {
+      add(what, fn, args);
+      expect(what, want);
+    }
+  }
   // CW-11 — why a caller proven by a chain is a guest, and whether a pin stands behind it. The node
   // demoted a caller by matching the words of `why` ('blocked', 'superseded leaf') and the cloud
   // re-derived the same fact from its rows; the core answers it as a member, `demote`, and `why` is
@@ -733,6 +753,10 @@ export default function envelopes({ add, expect }, f) {
       add(`decide_chain: ${what}`, 'decide_chain', args);
       expect(`decide_chain: ${what}`, { result, effects });
     }
+    // A pin whose root is not a fingerprint is the host's damaged state, an error of the call, as in
+    // decide: it came back as `address_claim: "abc"`, off the contract.
+    add('decide_chain with a pin whose root is not a fingerprint', 'decide_chain', at({ pins: [{ ...pinned[0], root: 'abc' }] }));
+    expect('decide_chain with a pin whose root is not a fingerprint', { error: 'bad_request', why: 'node.pins[0].root is not a fingerprint' });
     // Another endpoint, under auto and under ask, and a pending_out pin that moved under ask: the
     // new-address rule comes before the pending_out one.
     const movedAt = (o, pins = pinned) => ({ ...at({ pins, ...o }), chain: chainOf(movedLeaf) });

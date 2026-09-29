@@ -224,8 +224,10 @@ fn a_pin_that_names_its_leaf_is_matched_by_name_and_only_the_match_is_parsed() {
         }
         p
     };
+    // Its root is a fingerprint, as every root a host holds must be (a root that is not one is refused
+    // by the reader, whatever the pin says it holds); its leaf is what has gone bad.
     let unreadable = |fp: Option<&str>| {
-        let mut p = json!({ "root": "sha256:a-row-gone-bad", "endpoint": "https://ghost.example/mcp", "leaf": "AAAA", "state": "active" });
+        let mut p = json!({ "root": format!("sha256:{}", "G".repeat(43)), "endpoint": "https://ghost.example/mcp", "leaf": "AAAA", "state": "active" });
         if let Some(fp) = fp {
             p["leaf_fingerprint"] = json!(fp);
         }

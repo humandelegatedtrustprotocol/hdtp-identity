@@ -401,8 +401,17 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   pin and before the answer, in both ports and in the typed `refresh::check` and `RefreshCheck`. Both
   compared it with the card's root and answered `ok: false`, `the card names another root, not the
   pinned one`: the host's damaged pin, reported as the peer's fault. The contract already typed
-  `pin.root` as a `Fingerprint`, and an answer to one that was not was off the contract. `decide`,
-  `decide_chain` and `open_result` read a pin's root as the contract types it there, a string.
+  `pin.root` as a `Fingerprint`, and an answer to one that was not was off the contract.
+- **Every root a host holds is a fingerprint** (the same lead, followed): a pin's (`decide`,
+  `decide_chain`, `open_result`), a tombstone's and a former endpoint's `root` that is not one is
+  `bad_request` `<path>.root is not a fingerprint` (`node.pins[0].root is not a fingerprint`), where
+  the reader reads the root, in both ports, and first in the typed Go `Decide`, `DecideChain` and
+  `OpenResult`, whose structs never pass through the reader. Both ports read it as a root nothing
+  matched: a pin or a former endpoint whose root was `abc` came back as the answer's
+  `address_claim: "abc"`, which the contract types as a fingerprint, and a tombstone whose root was
+  `abc` was skipped, whatever else in it did not read. The contract's `Pin`, `Tombstone` and
+  `FormerEndpoint` type `root` as a `Fingerprint`. A host whose rows carry a made-up root gets an
+  error from every decision until the row is repaired.
 
 ## 0.4.1 — 2026-09-28
 
