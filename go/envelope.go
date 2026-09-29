@@ -80,11 +80,7 @@ func sealBody(o SealOpts, signer *Signer, body []byte) (*Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	exp := o.Exp
-	if exp == 0 {
-		exp = o.TS + 600
-	}
-	aad := headerJSON(suite, Fingerprint(o.RecipientKey.SPKI), o.MsgID, o.TS, exp, o.Cty)
+	aad := headerJSON(suite, Fingerprint(o.RecipientKey.SPKI), o.MsgID, o.TS, o.Exp, o.Cty)
 	var enc, ct []byte
 	if o.Seed != nil {
 		enc, ct, err = sealWith(suite, o.RecipientKey, []byte(InfoV2), aad, body, o.Seed)
@@ -102,6 +98,11 @@ func sealBody(o SealOpts, signer *Signer, body []byte) (*Envelope, error) {
 }
 
 // SealRequest seals a call to a recipient leaf key: plaintext {method, params, chain|leaf}.
+//
+// A field left at its zero value takes the default a Go caller means by leaving it out: Method
+// tools/call, Cty application/pact-call+json, Exp TS+600, Params {}. The JSON boundary cannot mean
+// that — `exp: 0` and `method: ""` are values there, sealed as given, as the core and the seed seal
+// them (CONTRACT §0; C2, T7, R18) — so it resolves its own defaults and calls sealRequest.
 func SealRequest(o SealOpts) (*Envelope, error) {
 	if o.Method == "" {
 		o.Method = "tools/call"
@@ -109,6 +110,17 @@ func SealRequest(o SealOpts) (*Envelope, error) {
 	if o.Cty == "" {
 		o.Cty = CtyCall
 	}
+	if o.Exp == 0 {
+		o.Exp = o.TS + 600
+	}
+	if o.Params == nil {
+		o.Params = json.RawMessage(`{}`)
+	}
+	return sealRequest(o)
+}
+
+// sealRequest seals exactly what it is given.
+func sealRequest(o SealOpts) (*Envelope, error) {
 	params, err := compactJSON(o.Params)
 	if err != nil {
 		return nil, errors.New("params is not JSON")
@@ -127,8 +139,28 @@ func SealRequest(o SealOpts) (*Envelope, error) {
 }
 
 // SealResult seals a result back: plaintext {result|error, chain|leaf}, cty application/pact-result+json.
+// An Exp left at zero is TS+600, as SealRequest's is; the JSON boundary calls sealResult with its own.
 func SealResult(o SealOpts) (*Envelope, error) {
+	if o.Exp == 0 {
+		o.Exp = o.TS + 600
+	}
+	return sealResult(o)
+}
+
+// sealResult seals exactly what it is given. The proof member is judged before the result, as the
+// core's seal_result judges them: a chain of one beside no result was named for the result here and
+// for the chain there (R19).
+func sealResult(o SealOpts) (*Envelope, error) {
 	o.Cty = CtyResult
+	if o.Sender == nil {
+		return nil, errArg("the sender's key is required")
+	}
+	// One expansion of the sender's key for the leaf form's fingerprint and the signature.
+	signer := o.Sender.Signer()
+	proof, err := proofMember(o, signer)
+	if err != nil {
+		return nil, err
+	}
 	var lead []byte
 	switch {
 	case o.Result != nil && o.Error == nil:
@@ -145,15 +177,6 @@ func SealResult(o SealOpts) (*Envelope, error) {
 		lead = concat([]byte(`{"error":`), e)
 	default:
 		return nil, errArg("a result carries exactly one of result and error")
-	}
-	if o.Sender == nil {
-		return nil, errArg("the sender's key is required")
-	}
-	// One expansion of the sender's key for the leaf form's fingerprint and the signature.
-	signer := o.Sender.Signer()
-	proof, err := proofMember(o, signer)
-	if err != nil {
-		return nil, err
 	}
 	return sealBody(o, signer, concat(lead, proof, []byte("}")))
 }

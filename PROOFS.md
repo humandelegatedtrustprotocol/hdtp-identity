@@ -8,9 +8,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 case can be listed as proven that did not pass. The cases that fail today are listed apart, at the
 end, each with the finding it waits on.
 
-Specification: **2.2.4**. **88** normative sentences, **1729** cross-port parity cases over **50** guarded functions, and **213** known divergences that fail today and are listed apart, at the end.
+Specification: **2.2.4**. **88** normative sentences, **1828** cross-port parity cases over **50** guarded functions, and **122** known divergences that fail today and are listed apart, at the end.
 
-Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **3884** answers, of which **43** do not hold to the shape it declares — **43** of them in a known divergence. Of **96** declared error codes, **96** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **3900** answers, of which **37** do not hold to the shape it declares — **37** of them in a known divergence. Of **96** declared error codes, **96** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 88 normative sentences of the specification
 
@@ -203,7 +203,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 1729 cross-port parity cases
+## The 1828 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -211,7 +211,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **1729** cases (**1103** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
+At the run that generated this file: **1828** cases (**1103** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
 
 ### `address_guard` — 40 cases · whole on success
 
@@ -1048,7 +1048,7 @@ At the run that generated this file: **1729** cases (**1103** of the run's cases
 - generated · generate_key · alg null
 - generated · generate_key · an undeclared member
 
-### `hpke_open` — 31 cases · whole on success
+### `hpke_open` — 56 cases · whole on success
 
 - hpke_open of a ciphertext that is not one
 - hpke_open with nothing to work from
@@ -1064,25 +1064,50 @@ At the run that generated this file: **1729** cases (**1103** of the run's cases
 - generated · hpke_open · recipient_pkcs8 null
 - generated · hpke_open · recipient_spki absent
 - generated · hpke_open · recipient_spki null
+- generated · hpke_open · info absent
+- generated · hpke_open · info null
+- generated · hpke_open · enc absent
+- generated · hpke_open · enc null
+- generated · hpke_open · ct absent
+- generated · hpke_open · ct null
 - generated · hpke_open · aad ""
 - generated · hpke_open · an undeclared member
+- generated · hpke_open · suite absent, recipient_pkcs8 7
+- generated · hpke_open · suite absent, recipient_spki 7
+- generated · hpke_open · suite absent, info 7
+- generated · hpke_open · suite absent, aad 7
+- generated · hpke_open · suite absent, enc 7
+- generated · hpke_open · suite absent, ct 7
 - generated · hpke_open · recipient_pkcs8 absent, suite 7
+- generated · hpke_open · recipient_pkcs8 absent, recipient_spki 7
+- generated · hpke_open · recipient_pkcs8 absent, info 7
+- generated · hpke_open · recipient_pkcs8 absent, aad 7
+- generated · hpke_open · recipient_pkcs8 absent, enc 7
+- generated · hpke_open · recipient_pkcs8 absent, ct 7
 - generated · hpke_open · recipient_spki absent, suite 7
 - generated · hpke_open · recipient_spki absent, recipient_pkcs8 7
+- generated · hpke_open · recipient_spki absent, info 7
+- generated · hpke_open · recipient_spki absent, aad 7
+- generated · hpke_open · recipient_spki absent, enc 7
+- generated · hpke_open · recipient_spki absent, ct 7
 - generated · hpke_open · info absent, suite 7
 - generated · hpke_open · info absent, recipient_pkcs8 7
 - generated · hpke_open · info absent, recipient_spki 7
+- generated · hpke_open · info absent, aad 7
+- generated · hpke_open · info absent, enc 7
+- generated · hpke_open · info absent, ct 7
 - generated · hpke_open · enc absent, suite 7
 - generated · hpke_open · enc absent, recipient_pkcs8 7
 - generated · hpke_open · enc absent, recipient_spki 7
 - generated · hpke_open · enc absent, info 7
+- generated · hpke_open · enc absent, ct 7
 - generated · hpke_open · ct absent, suite 7
 - generated · hpke_open · ct absent, recipient_pkcs8 7
 - generated · hpke_open · ct absent, recipient_spki 7
 - generated · hpke_open · ct absent, info 7
 - generated · hpke_open · ct absent, enc 7
 
-### `hpke_seal` — 17 cases · whole on success
+### `hpke_seal` — 35 cases · whole on success
 
 - hpke_seal with a suite nobody has
 - hpke_seal with nothing to work from
@@ -1093,14 +1118,32 @@ At the run that generated this file: **1729** cases (**1103** of the run's cases
 - generated · hpke_seal · suite null
 - generated · hpke_seal · recipient_spki absent
 - generated · hpke_seal · recipient_spki null
+- generated · hpke_seal · info absent
+- generated · hpke_seal · info null
+- generated · hpke_seal · plaintext absent
+- generated · hpke_seal · plaintext null
 - generated · hpke_seal · aad ""
+- generated · hpke_seal · ephemeral_seed ""
 - generated · hpke_seal · an undeclared member
+- generated · hpke_seal · suite absent, recipient_spki 7
+- generated · hpke_seal · suite absent, info 7
+- generated · hpke_seal · suite absent, aad 7
+- generated · hpke_seal · suite absent, plaintext 7
+- generated · hpke_seal · suite absent, ephemeral_seed 7
 - generated · hpke_seal · recipient_spki absent, suite 7
+- generated · hpke_seal · recipient_spki absent, info 7
+- generated · hpke_seal · recipient_spki absent, aad 7
+- generated · hpke_seal · recipient_spki absent, plaintext 7
+- generated · hpke_seal · recipient_spki absent, ephemeral_seed 7
 - generated · hpke_seal · info absent, suite 7
 - generated · hpke_seal · info absent, recipient_spki 7
+- generated · hpke_seal · info absent, aad 7
+- generated · hpke_seal · info absent, plaintext 7
+- generated · hpke_seal · info absent, ephemeral_seed 7
 - generated · hpke_seal · plaintext absent, suite 7
 - generated · hpke_seal · plaintext absent, recipient_spki 7
 - generated · hpke_seal · plaintext absent, info 7
+- generated · hpke_seal · plaintext absent, ephemeral_seed 7
 
 ### `ip_is_private` — 30 cases · whole on success
 
@@ -1681,7 +1724,7 @@ At the run that generated this file: **1729** cases (**1103** of the run's cases
 - generated · root_tbs · not_before absent, spki 7
 - generated · root_tbs · not_before absent, serial 7
 
-### `seal_request` — 33 cases · whole on success
+### `seal_request` — 66 cases · whole on success
 
 - seal_request with no recipient
 - seal_request with a form nobody has
@@ -1691,6 +1734,11 @@ At the run that generated this file: **1729** cases (**1103** of the run's cases
 - seal_request
 - seal_request with no msg_id at all
 - seal_request with an ephemeral_seed, which neither port takes
+- seal_request with no params
+- seal_request with exp 0
+- seal_request with ts 0
+- seal_request with an empty method and an empty cty
+- seal_request with neither msg_id nor sender_chain
 - seal_request with nothing to work from
 - seal_request in the chain form with no sender_chain
 - seal_request whose sender_chain is not base64url
@@ -1705,23 +1753,54 @@ At the run that generated this file: **1729** cases (**1103** of the run's cases
 - generated · seal_request · msg_id null
 - generated · seal_request · ts absent
 - generated · seal_request · ts null
+- generated · seal_request · form ""
 - generated · seal_request · sender_chain "x"
+- generated · seal_request · ephemeral_seed ""
+- generated · seal_request · method ""
 - generated · seal_request · params ""
+- generated · seal_request · cty ""
 - generated · seal_request · an undeclared member
+- generated · seal_request · recipient_leaf absent, sender_pkcs8 7
+- generated · seal_request · recipient_leaf absent, form 7
+- generated · seal_request · recipient_leaf absent, sender_chain "x"
+- generated · seal_request · recipient_leaf absent, msg_id 7
+- generated · seal_request · recipient_leaf absent, ts "7"
+- generated · seal_request · recipient_leaf absent, exp "7"
+- generated · seal_request · recipient_leaf absent, ephemeral_seed 7
+- generated · seal_request · recipient_leaf absent, method 7
+- generated · seal_request · recipient_leaf absent, cty 7
 - generated · seal_request · sender_pkcs8 absent, recipient_leaf 7
+- generated · seal_request · sender_pkcs8 absent, form 7
+- generated · seal_request · sender_pkcs8 absent, sender_chain "x"
+- generated · seal_request · sender_pkcs8 absent, msg_id 7
+- generated · seal_request · sender_pkcs8 absent, ts "7"
+- generated · seal_request · sender_pkcs8 absent, exp "7"
+- generated · seal_request · sender_pkcs8 absent, ephemeral_seed 7
+- generated · seal_request · sender_pkcs8 absent, method 7
+- generated · seal_request · sender_pkcs8 absent, cty 7
 - generated · seal_request · msg_id absent, recipient_leaf 7
 - generated · seal_request · msg_id absent, sender_pkcs8 7
 - generated · seal_request · msg_id absent, sender_chain "x"
+- generated · seal_request · msg_id absent, ts "7"
+- generated · seal_request · msg_id absent, exp "7"
+- generated · seal_request · msg_id absent, ephemeral_seed 7
+- generated · seal_request · msg_id absent, cty 7
 - generated · seal_request · ts absent, recipient_leaf 7
 - generated · seal_request · ts absent, sender_pkcs8 7
 - generated · seal_request · ts absent, sender_chain "x"
 - generated · seal_request · ts absent, msg_id 7
+- generated · seal_request · ts absent, exp "7"
+- generated · seal_request · ts absent, ephemeral_seed 7
+- generated · seal_request · ts absent, cty 7
 
-### `seal_result` — 28 cases · whole on success
+### `seal_result` — 51 cases · whole on success
 
 - seal_result
 - seal_result with no recipient
 - seal_result with neither a result nor an error
+- seal_result with ts 0 and exp 0
+- seal_result with a chain of one and neither a result nor an error
+- seal_result with a chain and neither a result nor an error
 - seal_result with nothing to work from
 - seal_result of a real result
 - seal_result whose sender_chain is not base64url
@@ -1735,18 +1814,38 @@ At the run that generated this file: **1729** cases (**1103** of the run's cases
 - generated · seal_result · msg_id null
 - generated · seal_result · ts absent
 - generated · seal_result · ts null
+- generated · seal_result · form ""
 - generated · seal_result · sender_chain "x"
+- generated · seal_result · ephemeral_seed ""
 - generated · seal_result · result ""
 - generated · seal_result · error ""
 - generated · seal_result · an undeclared member
+- generated · seal_result · recipient_spki absent, sender_pkcs8 7
+- generated · seal_result · recipient_spki absent, form 7
+- generated · seal_result · recipient_spki absent, sender_chain "x"
+- generated · seal_result · recipient_spki absent, msg_id 7
+- generated · seal_result · recipient_spki absent, ts "7"
+- generated · seal_result · recipient_spki absent, exp "7"
+- generated · seal_result · recipient_spki absent, ephemeral_seed 7
 - generated · seal_result · sender_pkcs8 absent, recipient_spki 7
+- generated · seal_result · sender_pkcs8 absent, form 7
+- generated · seal_result · sender_pkcs8 absent, sender_chain "x"
+- generated · seal_result · sender_pkcs8 absent, msg_id 7
+- generated · seal_result · sender_pkcs8 absent, ts "7"
+- generated · seal_result · sender_pkcs8 absent, exp "7"
+- generated · seal_result · sender_pkcs8 absent, ephemeral_seed 7
 - generated · seal_result · msg_id absent, recipient_spki 7
 - generated · seal_result · msg_id absent, sender_pkcs8 7
 - generated · seal_result · msg_id absent, sender_chain "x"
+- generated · seal_result · msg_id absent, ts "7"
+- generated · seal_result · msg_id absent, exp "7"
+- generated · seal_result · msg_id absent, ephemeral_seed 7
 - generated · seal_result · ts absent, recipient_spki 7
 - generated · seal_result · ts absent, sender_pkcs8 7
 - generated · seal_result · ts absent, sender_chain "x"
 - generated · seal_result · ts absent, msg_id 7
+- generated · seal_result · ts absent, exp "7"
+- generated · seal_result · ts absent, ephemeral_seed 7
 
 ### `sign` — 15 cases · whole on success
 
@@ -2098,7 +2197,7 @@ At the run that generated this file: **1729** cases (**1103** of the run's cases
 - generated · wallet_issue · now absent, valid_days "7"
 - generated · wallet_issue · now absent, move "yes"
 
-## The 213 known divergences
+## The 122 known divergences
 
 Cases that FAIL today, each excused by `js/cases/known-divergences.json` only while it fails exactly
 as its entry says, and each waiting on the audit finding named beside it (the port-parity audit of
@@ -2140,117 +2239,26 @@ as its entry says, and each waiting on the audit finding named beside it (the po
 - generated · issue_tbs_from_csr · previous_not_before 7 — F5, R02 (wasm off the contract, differ)
 - generated · card_encode · seal 7 — F5, R02 (wasm off the contract, differ)
 - generated · card_encode · extra "x" — T21 (wasm off the contract, differ)
-- generated · hpke_seal · info absent — R15, F7 (go off the contract, go not as expected)
-- generated · hpke_seal · info null — R15, F7 (go off the contract, go not as expected)
-- generated · hpke_seal · plaintext absent — R15, F7 (go off the contract, go not as expected)
-- generated · hpke_seal · plaintext null — R15, F7 (go off the contract, go not as expected)
 - generated · hpke_seal · aad 7 — F5, R02 (wasm off the contract, differ)
-- generated · hpke_seal · ephemeral_seed "" — R16, T13 (differ)
 - generated · hpke_seal · ephemeral_seed 7 — F5, R02 (wasm off the contract, differ)
-- generated · hpke_seal · suite absent, recipient_spki 7 — F19 (differ)
-- generated · hpke_seal · suite absent, info 7 — F19 (differ)
-- generated · hpke_seal · suite absent, aad 7 — F5, F19 (differ)
-- generated · hpke_seal · suite absent, plaintext 7 — F19 (differ)
-- generated · hpke_seal · suite absent, ephemeral_seed 7 — F5, F19 (differ)
-- generated · hpke_seal · recipient_spki absent, info 7 — F19 (differ)
-- generated · hpke_seal · recipient_spki absent, aad 7 — F5, F19 (differ)
-- generated · hpke_seal · recipient_spki absent, plaintext 7 — F19 (differ)
-- generated · hpke_seal · recipient_spki absent, ephemeral_seed 7 — F5, F19 (differ)
-- generated · hpke_seal · info absent, aad 7 — F5, F19 (differ)
-- generated · hpke_seal · info absent, plaintext 7 — F19 (differ)
-- generated · hpke_seal · info absent, ephemeral_seed 7 — F5, F19 (differ)
-- generated · hpke_seal · plaintext absent, aad 7 — F5, F19 (differ)
-- generated · hpke_seal · plaintext absent, ephemeral_seed 7 — F5, F19 (differ)
-- generated · hpke_open · info absent — R15, F7 (go not as expected)
-- generated · hpke_open · info null — R15, F7 (go not as expected)
-- generated · hpke_open · enc absent — R15, F7 (go not as expected)
-- generated · hpke_open · enc null — R15, F7 (go not as expected)
-- generated · hpke_open · ct absent — R15, F7 (go not as expected)
-- generated · hpke_open · ct null — R15, F7 (go not as expected)
+- generated · hpke_seal · plaintext absent, aad 7 — F5 (differ)
 - generated · hpke_open · aad 7 — F5, R02 (differ)
-- generated · hpke_open · suite absent, recipient_pkcs8 7 — F19 (differ)
-- generated · hpke_open · suite absent, recipient_spki 7 — F19 (differ)
-- generated · hpke_open · suite absent, info 7 — F19 (differ)
-- generated · hpke_open · suite absent, aad 7 — F5, F19 (differ)
-- generated · hpke_open · suite absent, enc 7 — F19 (differ)
-- generated · hpke_open · suite absent, ct 7 — F19 (differ)
-- generated · hpke_open · recipient_pkcs8 absent, recipient_spki 7 — F19 (differ)
-- generated · hpke_open · recipient_pkcs8 absent, info 7 — F19 (differ)
-- generated · hpke_open · recipient_pkcs8 absent, aad 7 — F5, F19 (differ)
-- generated · hpke_open · recipient_pkcs8 absent, enc 7 — F19 (differ)
-- generated · hpke_open · recipient_pkcs8 absent, ct 7 — F19 (differ)
-- generated · hpke_open · recipient_spki absent, info 7 — F19 (differ)
-- generated · hpke_open · recipient_spki absent, aad 7 — F5, F19 (differ)
-- generated · hpke_open · recipient_spki absent, enc 7 — F19 (differ)
-- generated · hpke_open · recipient_spki absent, ct 7 — F19 (differ)
-- generated · hpke_open · info absent, aad 7 — F5, F19 (differ)
-- generated · hpke_open · info absent, enc 7 — F19 (differ)
-- generated · hpke_open · info absent, ct 7 — F19 (differ)
-- generated · hpke_open · enc absent, aad 7 — F5, F19 (differ)
-- generated · hpke_open · enc absent, ct 7 — F19 (differ)
-- generated · hpke_open · ct absent, aad 7 — F5, F19 (differ)
-- generated · seal_request · form "" — R18 (go off the contract, differ)
+- generated · hpke_open · enc absent, aad 7 — F5 (differ)
+- generated · hpke_open · ct absent, aad 7 — F5 (differ)
 - generated · seal_request · form 7 — F5, R02 (wasm off the contract, differ)
 - generated · seal_request · exp "7" — C3 (wasm off the contract, differ)
-- generated · seal_request · ephemeral_seed "" — R16, T13 (differ)
 - generated · seal_request · ephemeral_seed 7 — F5, R02 (wasm off the contract, differ)
-- generated · seal_request · method "" — R18 (differ)
 - generated · seal_request · method 7 — F5, R02 (wasm off the contract, differ)
-- generated · seal_request · cty "" — R18 (differ)
 - generated · seal_request · cty 7 — F5, R02 (wasm off the contract, differ)
-- generated · seal_request · recipient_leaf absent, sender_pkcs8 7 — F10 (differ)
-- generated · seal_request · recipient_leaf absent, form 7 — F5, F10 (differ)
-- generated · seal_request · recipient_leaf absent, sender_chain "x" — F5, F10 (differ)
-- generated · seal_request · recipient_leaf absent, msg_id 7 — F10 (differ)
-- generated · seal_request · recipient_leaf absent, ts "7" — F10 (differ)
-- generated · seal_request · recipient_leaf absent, exp "7" — F5, F10 (differ)
-- generated · seal_request · recipient_leaf absent, ephemeral_seed 7 — F5, F10 (differ)
-- generated · seal_request · recipient_leaf absent, method 7 — F5, F10 (differ)
-- generated · seal_request · recipient_leaf absent, cty 7 — F5, F10 (differ)
-- generated · seal_request · sender_pkcs8 absent, form 7 — F5, F10 (differ)
-- generated · seal_request · sender_pkcs8 absent, sender_chain "x" — F5, F10 (differ)
-- generated · seal_request · sender_pkcs8 absent, msg_id 7 — F10 (differ)
-- generated · seal_request · sender_pkcs8 absent, ts "7" — F10 (differ)
-- generated · seal_request · sender_pkcs8 absent, exp "7" — F5, F10 (differ)
-- generated · seal_request · sender_pkcs8 absent, ephemeral_seed 7 — F5, F10 (differ)
-- generated · seal_request · sender_pkcs8 absent, method 7 — F5, F10 (differ)
-- generated · seal_request · sender_pkcs8 absent, cty 7 — F5, F10 (differ)
-- generated · seal_request · msg_id absent, form 7 — F5, F10 (differ)
-- generated · seal_request · msg_id absent, ts "7" — F10 (differ)
-- generated · seal_request · msg_id absent, exp "7" — F5, F10 (differ)
-- generated · seal_request · msg_id absent, ephemeral_seed 7 — F5, F10 (differ)
-- generated · seal_request · msg_id absent, method 7 — F5, F10 (differ)
-- generated · seal_request · msg_id absent, cty 7 — F5, F10 (differ)
-- generated · seal_request · ts absent, form 7 — F5, F10 (differ)
-- generated · seal_request · ts absent, exp "7" — F5, F10 (differ)
-- generated · seal_request · ts absent, ephemeral_seed 7 — F5, F10 (differ)
-- generated · seal_request · ts absent, method 7 — F5, F10 (differ)
-- generated · seal_request · ts absent, cty 7 — F5, F10 (differ)
-- generated · seal_result · form "" — R18 (go off the contract, differ)
+- generated · seal_request · msg_id absent, form 7 — F5 (differ)
+- generated · seal_request · msg_id absent, method 7 — F5 (differ)
+- generated · seal_request · ts absent, form 7 — F5 (differ)
+- generated · seal_request · ts absent, method 7 — F5 (differ)
 - generated · seal_result · form 7 — F5, R02 (wasm off the contract, differ)
 - generated · seal_result · exp "7" — C3 (wasm off the contract, differ)
-- generated · seal_result · ephemeral_seed "" — R16, T13 (differ)
 - generated · seal_result · ephemeral_seed 7 — F5, R02 (wasm off the contract, differ)
-- generated · seal_result · recipient_spki absent, sender_pkcs8 7 — R19 (differ)
-- generated · seal_result · recipient_spki absent, form 7 — F5, R19 (differ)
-- generated · seal_result · recipient_spki absent, sender_chain "x" — F5, R19 (differ)
-- generated · seal_result · recipient_spki absent, msg_id 7 — R19 (differ)
-- generated · seal_result · recipient_spki absent, ts "7" — R19 (differ)
-- generated · seal_result · recipient_spki absent, exp "7" — F5, R19 (differ)
-- generated · seal_result · recipient_spki absent, ephemeral_seed 7 — F5, R19 (differ)
-- generated · seal_result · sender_pkcs8 absent, form 7 — F5, R19 (differ)
-- generated · seal_result · sender_pkcs8 absent, sender_chain "x" — F5, R19 (differ)
-- generated · seal_result · sender_pkcs8 absent, msg_id 7 — R19 (differ)
-- generated · seal_result · sender_pkcs8 absent, ts "7" — R19 (differ)
-- generated · seal_result · sender_pkcs8 absent, exp "7" — F5, R19 (differ)
-- generated · seal_result · sender_pkcs8 absent, ephemeral_seed 7 — F5, R19 (differ)
-- generated · seal_result · msg_id absent, form 7 — F5, R19 (differ)
-- generated · seal_result · msg_id absent, ts "7" — R19 (differ)
-- generated · seal_result · msg_id absent, exp "7" — F5, R19 (differ)
-- generated · seal_result · msg_id absent, ephemeral_seed 7 — F5, R19 (differ)
-- generated · seal_result · ts absent, form 7 — F5, R19 (differ)
-- generated · seal_result · ts absent, exp "7" — F5, R19 (differ)
-- generated · seal_result · ts absent, ephemeral_seed 7 — F5, R19 (differ)
+- generated · seal_result · msg_id absent, form 7 — F5 (differ)
+- generated · seal_result · ts absent, form 7 — F5 (differ)
 - generated · open_result · envelope absent — S1-1 (wasm not as expected, go not as expected)
 - generated · open_result · envelope null — S1-1 (wasm not as expected, go not as expected)
 - generated · open_result · msg_id absent — F11, R20 (go not as expected)

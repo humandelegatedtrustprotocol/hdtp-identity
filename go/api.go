@@ -329,10 +329,10 @@ var functions = map[string]function{
 
 	// Envelopes: api_envelopes.go
 	"suite_for":      {[]string{"spki"}, viaJSON(callSuiteFor)},
-	"hpke_seal":      {[]string{"suite", "recipient_spki", "info", "aad", "plaintext", "ephemeral_seed"}, viaJSON(callHPKESeal)},
-	"hpke_open":      {[]string{"suite", "recipient_pkcs8", "recipient_spki", "info", "aad", "enc", "ct"}, viaJSON(callHPKEOpen)},
-	"seal_request":   {[]string{"recipient_leaf", "sender_pkcs8", "form", "sender_chain", "msg_id", "ts", "exp", "ephemeral_seed", "method", "params", "cty"}, viaJSON(callSealRequest)},
-	"seal_result":    {[]string{"recipient_spki", "sender_pkcs8", "form", "sender_chain", "msg_id", "ts", "exp", "ephemeral_seed", "result", "error"}, viaJSON(callSealResult)},
+	"hpke_seal":      {[]string{"suite", "recipient_spki", "info", "aad", "plaintext", "ephemeral_seed"}, callHPKESeal},
+	"hpke_open":      {[]string{"suite", "recipient_pkcs8", "recipient_spki", "info", "aad", "enc", "ct"}, callHPKEOpen},
+	"seal_request":   {[]string{"recipient_leaf", "sender_pkcs8", "form", "sender_chain", "msg_id", "ts", "exp", "ephemeral_seed", "method", "params", "cty"}, callSealRequest},
+	"seal_result":    {[]string{"recipient_spki", "sender_pkcs8", "form", "sender_chain", "msg_id", "ts", "exp", "ephemeral_seed", "result", "error"}, callSealResult},
 	"open_result":    {[]string{"envelope", "my_pkcs8", "my_spki", "msg_id", "now", "pins", "expected_root", "expected_endpoint"}, viaJSON(callOpenResult)},
 	"follow_renewed": {[]string{"answer", "pinned_root", "pinned_leaf", "dialed", "now"}, viaJSON(callFollowRenewed)},
 	"decide":         {[]string{"now", "envelope", "node"}, viaJSON(callDecide)},
