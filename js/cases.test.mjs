@@ -5,7 +5,6 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { collect, CASE_FILES } from './cases/index.mjs';
 import { generate, pickBases, wrongTypeFor, wrongTypeAnswer, keyedOf, BASES, HOSTILE } from './cases/generated.mjs';
-import { readKnown, verdict } from './cases/known.mjs';
 
 const contract = {
   sections: { build: 'The build', keys: 'Keys', cards: 'Cards' },
@@ -58,9 +57,9 @@ test('a section of the contract with no case file is a problem, except the build
 // A section's cases may be split across files: `<section>-<part>.mjs`, imported by the section's file
 // and called by it. Anything else on disk is a file the collection never runs.
 test('every case file on disk is one the collection runs, as a section or a part its section calls', () => {
-  // index collects, fixtures feeds, generated makes cases from the contract and known reads the list
-  // of known divergences: none of them is a section's cases.
-  const onDisk = readdirSync(new URL('./cases/', import.meta.url)).filter((f) => f.endsWith('.mjs') && !['index.mjs', 'fixtures.mjs', 'generated.mjs', 'known.mjs'].includes(f)).map((f) => f.slice(0, -4));
+  // index collects, fixtures feeds, and generated makes cases from the contract: none of them is a
+  // section's cases.
+  const onDisk = readdirSync(new URL('./cases/', import.meta.url)).filter((f) => f.endsWith('.mjs') && !['index.mjs', 'fixtures.mjs', 'generated.mjs'].includes(f)).map((f) => f.slice(0, -4));
   for (const s of CASE_FILES) assert.ok(onDisk.includes(s), `js/cases/${s}.mjs is not on disk`);
   for (const f of onDisk.filter((f) => !CASE_FILES.includes(f))) {
     const section = CASE_FILES.find((s) => f.startsWith(`${s}-`));
@@ -186,45 +185,4 @@ test('a base is named, found, of its function, and succeeds on both ports, or th
   assert.equal(picked.bases.get('sign'), good);
   // Every other name in BASES is a function this small contract does not declare: each is a problem.
   assert.equal(picked.problems.length, Object.keys(BASES).length - 1);
-});
-
-// ── the known divergences (js/cases/known.mjs) ──────────────────────────────────────────────────
-test('a known divergence is excused only while it fails exactly as its entry says', () => {
-  const entry = { findings: ['F5'], fails: new Set(['differ', 'wasm off the contract']) };
-  assert.equal(verdict(undefined, []), 'pass');
-  assert.equal(verdict(entry, ['wasm off the contract', 'differ']), 'known');
-  assert.equal(verdict(undefined, ['differ']), 'new');
-  assert.equal(verdict(entry, ['differ']), 'changed');
-  assert.equal(verdict(entry, ['differ', 'wasm off the contract', 'go off the contract']), 'changed');
-  assert.equal(verdict(entry, []), 'stale');
-  // A port that threw is never excused, whatever the entry says.
-  assert.equal(verdict({ findings: ['F5'], fails: new Set(['differ']) }, ['go threw']), 'new');
-});
-
-test('the list is held to its own shape: a finding for every entry, a known way to fail, new findings described', () => {
-  const { entries, problems } = readKnown({
-    new_findings: { 'S1-1': 'x', 'S1-9': 'described and never used' },
-    cases: {
-      a: { findings: ['F5', 'R02'], fails: ['differ'] },
-      b: { findings: [], fails: ['differ'] },
-      c: { findings: ['nope'], fails: ['differ'] },
-      d: { findings: ['T6'], fails: ['differ', 'differ'] },
-      e: { findings: ['T6'], fails: ['wasm threw'] },
-      f: { findings: ['S1-1', 'S1-2'], fails: ['go not as expected'] },
-    },
-  });
-  assert.deepEqual([...entries.keys()], ['a', 'c', 'f']);
-  assert.deepEqual(problems, [
-    'js/cases/known-divergences.json: "b" names no finding',
-    'js/cases/known-divergences.json: "c" names nope, which is not a finding\'s id',
-    'js/cases/known-divergences.json: "d" says it fails as ["differ","differ"]: a set of wasm off the contract | go off the contract | wasm not as expected | go not as expected | differ',
-    'js/cases/known-divergences.json: "e" says it fails as ["wasm threw"]: a set of wasm off the contract | go off the contract | wasm not as expected | go not as expected | differ',
-    'js/cases/known-divergences.json names S1-2, and new_findings does not say what it is',
-    'js/cases/known-divergences.json describes S1-9, and no entry names it',
-  ]);
-});
-
-test('the committed list reads with no problem', () => {
-  const { problems } = readKnown(JSON.parse(readFileSync(new URL('./cases/known-divergences.json', import.meta.url), 'utf8')));
-  assert.deepEqual(problems, []);
 });
