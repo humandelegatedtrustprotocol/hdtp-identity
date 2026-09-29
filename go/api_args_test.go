@@ -154,3 +154,60 @@ func TestAVaultsKDFNumbersAreWholeNumbers(t *testing.T) {
 		t.Errorf("t 1 as a float64: %v", err)
 	}
 }
+
+// What one port's parser refuses and the other's reads is named at Call before any member is read,
+// in the core's words, the first in text order (R40, S3-2); and every text this port reads refuses
+// it, as serde_json does. The edges: 127 containers deep reads and 128 does not;
+// 1.7976931348623158e308 rounds to the largest double and 1.7976931348623159e308 to infinity; 1e-400
+// is 0; a number in a string is text. Text that does not parse is `args is a JSON object`, as the
+// core answers it (the adapter's request line cannot carry it, so parity cannot ask).
+func TestJSONTheCoreDoesNotReadIsNotReadHere(t *testing.T) {
+	const beyond = `{"error":"bad_request","why":"args: a number is outside the range of a double"}`
+	const deep = `{"error":"bad_request","why":"args: nested more than 127 deep"}`
+	nested := func(n int) string { return strings.Repeat("[", n) + "1" + strings.Repeat("]", n) }
+	for args, want := range map[string]string{
+		`{"x":1e400,"manifest":"{}"}`:            beyond,
+		`{"x":-1e400}`:                           beyond,
+		`{"x":1.7976931348623159e308}`:           beyond,
+		`{"x":1e400,"y":` + nested(128) + `}`:    beyond,
+		`{"y":` + nested(128) + `,"x":1e400}`:    deep,
+		`{"spki":` + nested(126) + `}`:           `{"error":"parse","why":"not base64url"}`,
+		`{"spki":` + nested(127) + `}`:           deep,
+		`{"x":1.7976931348623158e308}`:           `{"error":"bad_request","why":"key_info takes no member \"x\""}`,
+		`{"x":1e-400}`:                           `{"error":"bad_request","why":"key_info takes no member \"x\""}`,
+		`{"x":"1e400","y":"[[[[","z":"\"1e400"}`: `{"error":"bad_request","why":"key_info takes no member \"x\""}`,
+		`{`:                                      `{"error":"bad_request","why":"args is a JSON object"}`,
+		`{"spki":"x"} x`:                         `{"error":"bad_request","why":"args is a JSON object"}`,
+		"{\"spki\":\"\x01\"}":                    `{"error":"bad_request","why":"args is a JSON object"}`,
+		`{"spki":"\q"}`:                          `{"error":"bad_request","why":"args is a JSON object"}`,
+	} {
+		if out := string(Call("key_info", json.RawMessage(args))); out != want {
+			t.Errorf("key_info(%.60s) = %s, want %s", args, out, want)
+		}
+	}
+	for _, text := range []string{`{"x":1e400}`, `{"x":` + nested(127) + `}`} {
+		if _, err := decodeJSON([]byte(text)); err == nil {
+			t.Errorf("decodeJSON read %.40s", text)
+		}
+	}
+	if _, err := decodeJSON([]byte(`{"x":` + nested(126) + `}`)); err != nil {
+		t.Errorf("decodeJSON at 127 deep: %v", err)
+	}
+}
+
+// A vault's plaintext is JSON exactly when the core's parser reads it: one holding a number infinite
+// as a double opened here, where the core finds the vault damaged (R40). The control opens.
+func TestAVaultPlaintextTheCoreCannotReadIsDamage(t *testing.T) {
+	kdf := &KDF{Name: "argon2id", MKiB: 8192, T: 1, P: 1}
+	for plaintext, want := range map[string]error{`{"v":2,"roots":[],"n":1e400}`: errVault, `{"v":2,"roots":[],"n":1e308}`: nil} {
+		sealed, err := vaultSealAny("a passphrase", []byte(plaintext), kdf, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := json.Marshal(sealed)
+		doc, _ := decodeJSON(raw)
+		if _, err := VaultOpenDoc("a passphrase", doc.(map[string]any)); err != want {
+			t.Errorf("%s opened as %v, want %v", plaintext, err, want)
+		}
+	}
+}

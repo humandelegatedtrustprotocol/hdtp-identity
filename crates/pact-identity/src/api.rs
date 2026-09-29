@@ -379,6 +379,13 @@ pub fn call(name: &str, args: &str) -> String {
     if crate::util::lone_surrogate(args) {
         return json!({ "error": "bad_request", "why": LONE_SURROGATE }).to_string();
     }
+    // What one port's JSON parser refuses and the other's reads — a number infinite as a double, or
+    // containers nested past serde_json's limit — named next, in fixed words: the core answered
+    // serde's own (`args: number out of range at line 1 column 10`) and the Go port read the
+    // arguments and went on (R40, S3-2).
+    if let Some(why) = crate::util::json_limit(args) {
+        return json!({ "error": "bad_request", "why": format!("args: {why}") }).to_string();
+    }
     // export_read_end's lists can hold an id per message of a file; its arguments are read straight
     // from their text when they read (api/export.rs), rather than into a tree of values first.
     if name == "export_read_end" {
@@ -393,8 +400,10 @@ pub fn call(name: &str, args: &str) -> String {
     }
     let a: Value = match serde_json::from_str(args) {
         Ok(v @ Value::Object(_)) => v,
-        Ok(_) => return json!({ "error": "bad_request", "why": "args is a JSON object" }).to_string(),
-        Err(e) => return json!({ "error": "bad_request", "why": format!("args: {e}") }).to_string(),
+        // Text that does not parse is not an object either, in the words the Go port's `Call` has for
+        // both: serde's own (`args: EOF while parsing an object at line 1 column 1`) went into `why`,
+        // which CONTRACT §0 forbids (F21).
+        _ => return json!({ "error": "bad_request", "why": "args is a JSON object" }).to_string(),
     };
     if let Some(e) = undeclared(name, a.as_object().into_iter().flat_map(|o| o.keys().map(String::as_str))) {
         return answer(Err(e));
@@ -432,16 +441,38 @@ mod tests {
         for args in ["[]", "null", "3", "\"x\"", "true"] {
             assert!(call("verify", args).contains("args is a JSON object"), "verify({args})");
         }
-        assert!(call("verify", "{").contains("args:"));
+        // Text that does not parse is not an object: fixed words, never serde's (F21), as the Go
+        // port's Call answers it (go/api_args_test.go holds that side).
+        for args in ["{", r#"{"spki":"x"} x"#, "{\"spki\":\"\u{1}\"}", r#"{"spki":"\q"}"#] {
+            assert_eq!(call("verify", args), r#"{"error":"bad_request","why":"args is a JSON object"}"#, "verify({args})");
+        }
         // Half a surrogate pair, in either order and at the end, is refused in fixed words; a whole
         // pair, and an escaped backslash before a `u`, are text.
         for args in [r#"{"spki":"a\ud800"}"#, r#"{"spki":"\udc00b"}"#, r#"{"spki":"\ud800\u0041"}"#] {
             assert!(call("verify", args).contains(LONE_SURROGATE), "{args}");
         }
-        // export_read_end's lean path answers what the ordinary one does, a number out of range in a
-        // member it does not read included: serde's range error, never `ok`.
+        // What one port's parser refuses and the other's reads is named before anything reads the
+        // arguments, export_read_end's lean path included, in fixed words (R40, S3-2): a number that is
+        // infinite as a double, and containers nested more than 127 deep — the first in text order.
+        // Strings are text, and a number that is merely small is not infinite.
+        let beyond = r#"{"error":"bad_request","why":"args: a number is outside the range of a double"}"#;
+        let deep = r#"{"error":"bad_request","why":"args: nested more than 127 deep"}"#;
         let wide = r#"{"x":1e400,"manifest":"{}","lines":0,"ids":[],"msg_ids":[],"reply_tos":[],"media_seen":[],"media":[]}"#;
-        assert!(call("export_read_end", wide).contains("\"why\":\"args: number out of range"), "{}", call("export_read_end", wide));
+        assert_eq!(call("export_read_end", wide), beyond);
+        let nested = |n: usize| format!(r#"{{"spki":{}1{}}}"#, "[".repeat(n), "]".repeat(n));
+        assert_eq!(call("key_info", &nested(127)), deep);
+        assert_eq!(call("key_info", &nested(126)), r#"{"error":"parse","why":"not base64url"}"#);
+        for (args, want) in [
+            (r#"{"x":-1e400}"#, beyond),
+            (r#"{"x":1.7976931348623159e308}"#, beyond),
+            (&format!(r#"{{"x":1e400,"y":{}}}"#, "[".repeat(128) + &"]".repeat(128)), beyond),
+            (&format!(r#"{{"y":{},"x":1e400}}"#, "[".repeat(128) + &"]".repeat(128)), deep),
+        ] {
+            assert_eq!(call("version", args), want, "version({args})");
+        }
+        for args in [r#"{"x":1.7976931348623158e308}"#, r#"{"x":1e-400}"#, r#"{"x":"1e400"}"#, r#"{"x":"[[[[","y":"\"1e400"}"#] {
+            assert_eq!(call("version", args), r#"{"error":"bad_request","why":"version takes no member \"x\""}"#, "version({args})");
+        }
         for args in [r#"{"x":"\ud83d\ude00"}"#, r#"{"x":"\\ud800"}"#] {
             assert!(!call("version", args).contains(LONE_SURROGATE), "{args}");
         }

@@ -6,6 +6,7 @@ package pactidentity
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -15,8 +16,14 @@ import (
 )
 
 // decodeJSON reads JSON into the generic shape (map[string]any, []any, json.Number, string, bool, nil),
-// keeping numbers as written.
+// keeping numbers as written — and refuses what the core's serde_json refuses and encoding/json
+// reads (jsonLimit), so that every text this port reads, an envelope's header and body, a manifest,
+// a line of messages.jsonl, is JSON to it exactly when it is JSON to the core. A body holding
+// `1e400` was decided `ok` here and refused as `does not open` there (R40).
 func decodeJSON(b []byte) (any, error) {
+	if why := jsonLimit(b); why != "" {
+		return nil, errors.New(why)
+	}
 	d := json.NewDecoder(bytes.NewReader(b))
 	d.UseNumber()
 	var v any
@@ -27,6 +34,61 @@ func decodeJSON(b []byte) (any, error) {
 		return nil, fmt.Errorf("trailing JSON")
 	}
 	return v, nil
+}
+
+// jsonMaxDepth is how many containers JSON text may nest, one inside another: serde_json refuses the
+// 128th, and encoding/json reads ten thousand.
+const jsonMaxDepth = 127
+
+// What jsonLimit finds, in the words both ports answer.
+const (
+	jsonNumberBeyondDouble = "a number is outside the range of a double"
+	jsonNestedTooDeep      = "nested more than 127 deep"
+)
+
+// jsonLimit is the core's `json_limit` (crates/pact-identity/src/util.rs), the same scan: the first
+// thing, in text order, that JSON text holds and one port's parser refuses while the other's reads
+// it — a number infinite as a double, or containers nested more than jsonMaxDepth deep. Strings are
+// skipped, escapes and all. "" when there is none.
+func jsonLimit(text []byte) string {
+	depth := 0
+	for i := 0; i < len(text); {
+		switch c := text[i]; {
+		case c == '"':
+			i++
+			for i < len(text) && text[i] != '"' {
+				if text[i] == '\\' {
+					i++
+				}
+				i++
+			}
+			i++
+		case c == '[' || c == '{':
+			depth++
+			if depth > jsonMaxDepth {
+				return jsonNestedTooDeep
+			}
+			i++
+		case c == ']' || c == '}':
+			if depth > 0 {
+				depth--
+			}
+			i++
+		case c == '-' || c >= '0' && c <= '9':
+			start := i
+			for i < len(text) && strings.IndexByte("0123456789+-.eE", text[i]) >= 0 {
+				i++
+			}
+			// ParseFloat is ±Inf, with ErrRange, for a number past the largest double; a number
+			// that underflows is 0 (or a subnormal), not infinite, as it is to serde_json.
+			if f, _ := strconv.ParseFloat(string(text[start:i]), 64); math.IsInf(f, 0) {
+				return jsonNumberBeyondDouble
+			}
+		default:
+			i++
+		}
+	}
+	return ""
 }
 
 // Canonical serialises a generic JSON value per RFC 8785.

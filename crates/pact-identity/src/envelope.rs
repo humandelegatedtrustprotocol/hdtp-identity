@@ -114,7 +114,7 @@ fn seal_body(
 ) -> Result<Wire> {
     let suite = suite_for(recipient);
     let aad = header(suite, &recipient.fingerprint(), msg_id, ts, exp, cty);
-    let plaintext = serde_json::to_vec(body).map_err(|e| Error::new("internal", e.to_string()))?;
+    let plaintext = serde_json::to_vec(body).map_err(|_| Error::new("internal", crate::util::UNSERIALISABLE))?;
     let (enc, ct) = hpke::seal(suite, recipient, INFO_V2, &aad, &plaintext, seed)?;
     let mut signed = aad.clone();
     signed.extend_from_slice(&enc);

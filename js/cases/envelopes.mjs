@@ -1,8 +1,9 @@
 // §5 of the contract: envelopes — the suite, HPKE, sealing and opening, following a renewal, and the
 // receiving decision.
 import { seed, b64url, pkcs8Of, spkiOf, fingerprint } from '../../../pact-protocol/vectors/lib/keys.mjs';
-import { buildLeaf } from '../../../pact-protocol/vectors/lib/x509.mjs';
-import { sealDeterministic } from '../../../pact-protocol/vectors/lib/hpke.mjs';
+import { buildLeaf, parse } from '../../../pact-protocol/vectors/lib/x509.mjs';
+import { sealDeterministic, signDetached, suiteForKey } from '../../../pact-protocol/vectors/lib/hpke.mjs';
+import { canonical } from '../../../pact-protocol/vectors/lib/canonical.mjs';
 import { ENDPOINTS, bharat, BORN, DIES } from '../cast.mjs';
 import { RawArgs } from '../port.mjs';
 
@@ -363,4 +364,48 @@ export default function envelopes({ add, expect }, f) {
   expect('follow_renewed with a pinned_root that is empty', { follow: false, why: 'chain rule 2: root is not the one expected' });
   add('follow_renewed with a dialed address that is empty', 'follow_renewed', { ...follow({ code: 'certificate_renewed', data: { chain: [leafDer, rootDer] } }), dialed: '' });
   expect('follow_renewed with a dialed address that is empty', { follow: false, why: 'chain rule 5: endpoint differs from the one in question' });
+
+  // ── what one port's parser refuses and the other's reads, inside an envelope (R40, S3-2) ──────
+  // A body or a header as TEXT, sealed and signed with the seed's own HPKE and signature: neither the
+  // seed's sealEnvelope nor `seal_result` can carry a number infinite as a double (JSON.stringify
+  // writes it as null, and both ports refuse it at their boundary). Everything else about each
+  // envelope is good, so a refusal is the text's. The core refused each — serde_json does not read
+  // them — and the Go port decided `ok` on a request whose body held 1e400, opened such a result, and
+  // named a header holding one `header member types`; one envelope was accepted by a node and refused
+  // by a hosted identity. The controls hold the largest double, and 127 deep.
+  const { leafDerBytes, rootDerBytes, callerKey } = f;
+  const sealText = ({ to, cty, msgId, body, header = (t) => t }) => {
+    const suite = suiteForKey(to);
+    const aad = Buffer.from(header(canonical({ v: 2, suite, kid: fingerprint(to), msg_id: msgId, ts: at(now), exp: at(now) + 600, cty })));
+    const { enc, ct } = sealDeterministic(suite, to, Buffer.from('PACT-SEAL-v2'), aad, Buffer.from(body), Buffer.alloc(32, 9));
+    return { protected: b64url(aad), enc: b64url(enc), ct: b64url(ct), sig: b64url(signDetached(hostKey.priv, Buffer.concat([aad, enc, ct]))) };
+  };
+  const toMyself = parse(leafDerBytes).publicKey;
+  const chainText = JSON.stringify([b64url(leafDerBytes), b64url(rootDerBytes)]);
+  const nestedText = (n) => '['.repeat(n) + '1' + ']'.repeat(n);
+  const callText = (msgId, argsText, o = {}) =>
+    sealText({ to: toMyself, cty: 'application/pact-call+json', msgId, body: `{"method":"tools/call","params":{"name":"send_message","arguments":${argsText}},"chain":${chainText}}`, ...o });
+  const pinnedNode = { ...node, pins: pinned };
+  const notJSON = { code: 'envelope_invalid', why: 'does not open' };
+  // The body is the first container and params the second; `arguments` is the arrays.
+  for (const [what, msgId, argsText, want] of [
+    ['a body holding a number past the largest double', 'p-r40-1', '{"n":1e400}', notJSON],
+    ['a body nested 128 deep', 'p-r40-2', nestedText(126), notJSON],
+    ['a body holding the largest double', 'p-r40-3', '{"n":1.7976931348623157e308}', { code: 'ok', tier: 'contact' }],
+    ['a body nested 127 deep', 'p-r40-4', nestedText(125), { code: 'ok', tier: 'contact' }],
+  ]) {
+    add(`decide on an envelope with ${what}`, 'decide', { now, envelope: callText(msgId, argsText), node: pinnedNode });
+    expect(`decide on an envelope with ${what}`, want);
+  }
+  add('decide on an envelope whose header holds a ts past the largest double', 'decide', {
+    now, envelope: callText('p-r40-5', '{}', { header: (t) => t.replace(`"ts":${at(now)}`, '"ts":1e400') }), node: pinnedNode,
+  });
+  expect('decide on an envelope whose header holds a ts past the largest double', { code: 'envelope_invalid', why: 'protected is not JSON' });
+  const resultText = (resultJSON) =>
+    sealText({ to: callerKey.pub, cty: 'application/pact-result+json', msgId: 'r-1', body: `{"result":${resultJSON},"chain":${chainText}}` });
+  add('open_result on an answer whose result holds a number past the largest double', 'open_result', open(resultText('{"n":1e400}')));
+  expect('open_result on an answer whose result holds a number past the largest double', { error: 'envelope_invalid', why: 'does not open' });
+  add('open_result on an answer whose result holds the largest double', 'open_result', open(resultText('{"n":1.7976931348623157e308}')));
+  // An answer is held by its `result`, which is what the peer sent.
+  expect('open_result on an answer whose result holds the largest double', { n: 1.7976931348623157e308 });
 }

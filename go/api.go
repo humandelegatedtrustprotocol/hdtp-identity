@@ -37,7 +37,8 @@ func failAs(fallback string, err error) json.RawMessage { return failErr(codeFor
 func ok(v any) json.RawMessage {
 	b, err := json.Marshal(v)
 	if err != nil {
-		return fail("internal", err.Error())
+		// encoding/json's words are not an answer (CONTRACT §0); the core's line for the same.
+		return fail("internal", "does not serialise as JSON")
 	}
 	return b
 }
@@ -147,6 +148,12 @@ func Call(name string, args json.RawMessage) (out json.RawMessage) {
 	// before anything reads the arguments or the name.
 	if loneSurrogate(args) {
 		return fail(codeArgs, loneSurrogateWhy)
+	}
+	// What one port's JSON parser refuses and the other's reads — a number infinite as a double, or
+	// containers nested past serde_json's limit — named next, in the core's words: this port read the
+	// arguments and went on where the core answered serde's text (R40, S3-2).
+	if why := jsonLimit(args); why != "" {
+		return fail(codeArgs, "args: "+why)
 	}
 	fn, found := functions[name]
 	if !found {
