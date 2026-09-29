@@ -154,8 +154,8 @@ func Call(name string, args json.RawMessage) (out json.RawMessage) {
 	}
 	// Arguments are an object, or the member is not there at all. A list, a bare scalar or the literal
 	// `null` is a caller's mistake named here, once, rather than as whatever encoding/json says about
-	// the struct it failed to fill — which leaks a Go type into an answer the Rust core gives in four
-	// words. `null` belongs with the rest: the Rust core's `call` matches an object or refuses, and an
+	// the map readArgs could not fill — which leaks a Go type into an answer the Rust core gives in
+	// four words. `null` belongs with the rest: the Rust core's `call` matches an object or refuses, and an
 	// absent `args` is a zero-length message, still distinguishable, so nothing else moves.
 	// js/parity.mjs holds the Rust core to the same answers (js/cases/dispatcher.mjs).
 	if t := bytes.TrimSpace(args); len(t) > 0 && t[0] != '{' {
