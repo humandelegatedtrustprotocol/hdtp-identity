@@ -31,11 +31,17 @@ pub fn b64u(b: &[u8]) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b)
 }
 
-/// Accepts what Node's `Buffer.from(s, 'base64url')` accepts: url-safe or standard alphabet, padding optional.
+/// Bytes a caller hands the boundary (CONTRACT §0): base64url, forgiving the padding and the standard
+/// alphabet's `+` and `/`, and nothing else — whitespace of any kind is a character outside the
+/// alphabet, and a last character with a spare bit set is refused. js/b64url-arguments.json is the
+/// list of cases this and the Go port's DecodeB64url are held to. It is NOT what Node's
+/// `Buffer.from(s, 'base64url')` accepts, which skips any character it does not know and cannot fail.
+/// It forgave every Unicode whitespace character, and the Go port four, so a key with a vertical tab
+/// in it was read here and refused there (C10); the contract forgives padding and alphabet, and no
+/// whitespace, so neither port does.
 pub fn from_b64u(s: &str) -> Result<Vec<u8>> {
     let cleaned: String = s
         .chars()
-        .filter(|c| !c.is_whitespace())
         .map(|c| match c {
             '+' => '-',
             '/' => '_',
@@ -50,8 +56,8 @@ pub fn from_b64u(s: &str) -> Result<Vec<u8>> {
 
 /// A member of an envelope, as it travels: unpadded base64url in its ONE canonical spelling (§13.1).
 ///
-/// `from_b64u` is for what a caller hands the boundary, and is forgiving on purpose — padding, the
-/// standard alphabet, whitespace. None of that may be forgiven on the wire: `sig` covers the DECODED
+/// `from_b64u` is for what a caller hands the boundary, and is forgiving on purpose — padding and the
+/// standard alphabet. Neither may be forgiven on the wire: `sig` covers the DECODED
 /// bytes, so every extra spelling a reader accepts is another envelope that verifies, and two readers
 /// that forgive different things disagree about which envelopes exist. The Go port forgave a stray
 /// character and a set spare bit, and accepted what this core refused.
@@ -172,4 +178,29 @@ pub fn lone_surrogate(text: &str) -> bool {
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+
+    /// Bytes a caller hands the boundary, read as js/b64url-arguments.json says: one list, which the
+    /// Go port's DecodeB64url is held to as well. This reader forgave every Unicode whitespace
+    /// character and the Go port four, so a key with a vertical tab in it was a key here and `parse`
+    /// there (C10).
+    #[test]
+    fn arguments_are_read_as_one_list_says() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../js/b64url-arguments.json");
+        let doc: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let cases = doc["cases"].as_array().unwrap();
+        assert!(cases.len() >= 20, "js/b64url-arguments.json holds {} cases", cases.len());
+        for c in cases {
+            let (name, input) = (c["name"].as_str().unwrap(), c["in"].as_str().unwrap());
+            match c["hex"].as_str() {
+                Some(want) => assert_eq!(from_b64u(input).map(|b| hex(&b)), Ok(want.to_string()), "{name}"),
+                None => assert_eq!(from_b64u(input), Err(Error::new("parse", "not base64url")), "{name}"),
+            }
+        }
+    }
 }

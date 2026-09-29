@@ -151,42 +151,6 @@ func newP256(scalar []byte) (*PrivateKey, error) {
 // B64url encodes without padding, the JSON form of every byte string in the contract.
 func B64url(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
 
-// b64Index maps a byte to its six bits, or -1. Built once: `FromB64url` rebuilt it on every call.
-var b64Index = func() (idx [256]int8) {
-	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
-	for i := range idx {
-		idx[i] = -1
-	}
-	for i := 0; i < len(alphabet); i++ {
-		idx[alphabet[i]] = int8(i)
-	}
-	idx['+'], idx['/'] = 62, 63
-	return idx
-}()
-
-// FromB64url decodes leniently, as Node's Buffer.from(s, 'base64url') does: characters outside the
-// alphabet are skipped, padding is ignored, and a trailing partial group is dropped.
-func FromB64url(s string) []byte {
-	idx := &b64Index
-	out := make([]byte, 0, len(s)*3/4)
-	var acc uint32
-	bits := 0
-	for i := 0; i < len(s); i++ {
-		v := idx[s[i]]
-		if v < 0 {
-			continue
-		}
-		acc = acc<<6 | uint32(v)
-		bits += 6
-		if bits >= 8 {
-			bits -= 8
-			out = append(out, byte(acc>>uint(bits)))
-			acc &= (1 << uint(bits)) - 1
-		}
-	}
-	return out
-}
-
 func sha256Sum(b []byte) []byte { h := sha256.Sum256(b); return h[:] }
 
 // Fingerprint is "sha256:" + base64url(SHA-256(SPKI)), applied to any key.

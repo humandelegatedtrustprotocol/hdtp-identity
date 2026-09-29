@@ -107,4 +107,22 @@ export default function keys({ add, expect }, f) {
   expect('key_info of an Ed25519 key that is not a point', { error: 'parse', why: 'Ed25519 key is not a point' });
   add('key_info of an Ed25519 key that is a point (the control)', 'key_info', { spki: ed25519Spki(3) });
   expect('key_info of an Ed25519 key that is a point (the control)', { alg: 'ed25519' });
+
+  // ── C10: no whitespace is forgiven in an argument's base64url ────────────────────────────────────
+  //
+  // The contract forgives padding and the standard alphabet in an argument (§0), and nothing else
+  // (js/b64url-arguments.json, which both ports' tests read). The core forgave every Unicode
+  // whitespace character and the Go port four, so a key with a vertical tab in it was a key to the
+  // Wasm and `parse` to the Go port. The control, the key as written, reads.
+  const { hostPkcs8: heldPkcs8, hostSpki: heldSpki, hostFp } = f;
+  const inside = (c) => heldPkcs8.slice(0, 8) + c + heldPkcs8.slice(8);
+  for (const [what, c] of [
+    ['a space', ' '], ['a tab', '\t'], ['CR LF', '\r\n'], ['a vertical tab', '\u000b'], ['a form feed', '\u000c'],
+    ['a next line', '\u0085'], ['a no-break space', '\u00a0'], ['a line separator', '\u2028'],
+  ]) {
+    add(`public_key of a key with ${what} inside`, 'public_key', { pkcs8: inside(c) });
+    expect(`public_key of a key with ${what} inside`, { error: 'parse', why: 'not base64url' });
+  }
+  add('public_key of the key as written (the control)', 'public_key', { pkcs8: heldPkcs8 });
+  expect('public_key of the key as written (the control)', { alg: 'ed25519', spki: heldSpki, fingerprint: hostFp });
 }

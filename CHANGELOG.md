@@ -222,6 +222,29 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   envelope. `PrivateKey.Public()` and `.Signer()`, which have no error to answer with, answer nil for
   such a key; `Signer.Sign` on a nil or empty signer refuses, and `VerifyDetached` with such a key is
   false. `AlgorithmOf(nil)` is `the key is required` (it said `unsupported key type`).
+- **Bytes a port did not write are read by one rule, and it forgives no whitespace** (cluster H;
+  X9, T10, R23, R24, T11, C7, C8, C9, C10): base64url, forgiving the padding and the standard
+  alphabet's `+` and `/`, and nothing else (CONTRACT §0), in the arguments and in every string a
+  port reads that it did not write — a card's certificate, the chain in a peer's plaintext, a pin's
+  leaf, a held key, a vault's salt, nonce and ciphertext. `js/b64url-arguments.json` is the one list
+  of cases, read by both ports' tests. The core forgave every Unicode whitespace character and the
+  Go port space, tab, CR and LF, so a key with a vertical tab in it was a key to the Wasm and `parse`
+  to the Go port; the contract forgives neither. The Go port read the strings it did not write with
+  `FromB64url`, which skipped any character it did not know: a card whose certificate carried a
+  stray `!` was taken by the Go port and refused by the core (and the cloud, which runs it); a chain
+  member in a peer's plaintext with one validated, where the core refused it; a vault whose `ct`
+  carried one opened; a pin that did not read was `superseded leaf`, and a held key that did not
+  read was `does not open`, told to the peer where the core refuses the call as the host's state
+  that does not read (`parse`, or `unsupported` for a key outside the profile). A chain member in
+  the plaintext that does not read is `envelope_invalid` `plaintext shape` from `open_result` too,
+  where the core answered a `parse` error of the call. An empty `X-PACT-VERSION` is `no
+  X-PACT-VERSION` in the core, as the seed and the Go port say it (it said `version not
+  implemented`). The seed's card.mjs and envelope.mjs read by the same rule (pact-protocol PR #10).
+- `open_result` reads the first pin for the chain's root, as the core does and as `decide` reads a
+  node's pins in both ports (S5-2, found here): the Go port read every pin for the root, so a second
+  one newer than the chain, or one that did not read, refused an answer the first accepted.
+- **Removed public API** (cluster H): Go `FromB64url`, which could not fail. `DecodeB64url`, the
+  strict reader the port's boundary used unexported, is exported in its place.
 - **JS loader:** `call(name, null)` hands `null` to the core, which answers `args is a JSON object`
   as the Go port does; it used to be made `{}` (`js/index.mjs`, `js/worker.mjs`). Only `args` left
   out is `{}`. The parity case `args that are null` sends `null` for the first time (TC-2).

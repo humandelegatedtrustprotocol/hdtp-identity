@@ -23,7 +23,15 @@ the tables is `contract/CONTRACT.template.md` and is written by hand.
 
 ## 0. Conventions
 
-- **Bytes in JSON** are base64url without padding (`b64url`). The vector file alone uses hex.
+- **Bytes in JSON** are base64url without padding (`b64url`), and an answer always spells them so.
+  An argument's bytes are read forgiving the padding and the standard alphabet's `+` and `/`, and
+  nothing else: whitespace of any kind, any other character outside the alphabet, `=` anywhere but
+  the end, and a last character with a spare bit set are `{"error": "parse", "why": "not
+  base64url"}`. Every string a port reads that it did not write itself — a card's certificate, a
+  chain in a peer's plaintext, a pin's leaf, a held key, a vault's salt, nonce and ciphertext — is
+  read by the same rule and refused in its function's words. One list of cases,
+  `js/b64url-arguments.json`, holds both ports to it. The members of an envelope that travelled are
+  read by a stricter rule (§5). The vector file alone uses hex.
 - **Instants** in JSON are RFC 3339 UTC strings with second precision (`"2026-09-13T12:00:00Z"`);
   `ts` and `exp` inside an envelope header stay integer Unix seconds, as the spec says.
 - **Keys**: a private key is PKCS #8 DER; a public key is SubjectPublicKeyInfo DER. Algorithms are

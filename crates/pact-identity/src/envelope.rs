@@ -389,9 +389,13 @@ pub fn open_result(a: OpenResultArgs<'_>) -> Result<Value> {
     Ok(Value::Object(out))
 }
 
+/// The chain a peer put in its plaintext. A member that is not a string, or does not read, is the
+/// plaintext's shape: `open_result` answered one that did not read with the reader's own `parse`, an
+/// error of the CALL for what is a refusal of the ENVELOPE, where `decide` answered `plaintext shape`.
 fn chain_of(v: &Value) -> Result<Vec<Vec<u8>>> {
-    let Some(items) = v.as_array() else { return err("envelope_invalid", "plaintext shape") };
-    items.iter().map(|c| c.as_str().ok_or_else(|| Error::new("envelope_invalid", "plaintext shape")).and_then(from_b64u)).collect()
+    let shape = || Error::new("envelope_invalid", "plaintext shape");
+    let Some(items) = v.as_array() else { return Err(shape()) };
+    items.iter().map(|c| c.as_str().and_then(|s| from_b64u(s).ok()).ok_or_else(shape)).collect()
 }
 
 /// §14.4 on the caller's side: follow only a chain that validates to the pinned root at the dialed
