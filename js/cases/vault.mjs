@@ -92,6 +92,23 @@ export default function vault({ add, expect }, f) {
   add('wallet_issue for a second address', 'wallet_issue', { vault_plaintext: held, record_plaintext: moved, root_fingerprint: rootFp, csr, now });
   add('wallet_issue as a move', 'wallet_issue', { vault_plaintext: held, record_plaintext: moved, root_fingerprint: rootFp, csr, now, move: true }, f.withoutSerial('der'));
   add('wallet_issue with an empty vault', 'wallet_issue', { vault_plaintext: { v: 2, roots: [] }, record_plaintext: record, root_fingerprint: rootFp, csr, now });
+  // SPEC §2.2, before any certificate is issued (TC-8's behaviour half): the root key is the root the
+  // identity is known by; its certificate parses and is that key's; the key signs a challenge that
+  // verifies under the certificate's key; and the chain assembled validates to the root at the
+  // endpoint before it is returned. Both ports signed with whatever key sat beside the fingerprint,
+  // and returned a leaf that failed chain rule 3 (measured, 2026-09-29).
+  const rootEntry = held.roots[0];
+  const heldWith = (o) => ({ ...held, roots: [{ ...rootEntry, ...o }] });
+  const rootKeyedLeaf = f.alinaLeaf({ hostKey: f.rootKey, label: 'parity/root-keyed-leaf' });
+  for (const [what, vault, want] of [
+    ['a vault entry holding another key than its fingerprint names', heldWith({ pkcs8: f.p256Pkcs8 }), { error: 'bad_request', why: "the vault's root key is not the root it is filed under" }],
+    ['a vault entry whose certificate is another root\'s', heldWith({ cert: f.p256RootDer }), { error: 'bad_request', why: "the vault's root certificate is not its key's" }],
+    ['a vault entry whose certificate does not read', heldWith({ cert: 'AAAA' }), { error: 'parse' }],
+    ['a vault entry whose certificate is its key\'s and is no root', heldWith({ cert: rootKeyedLeaf }), { error: 'bad_request', why: /^the chain it issued does not validate: chain rule \d: / }],
+  ]) {
+    add(`wallet_issue from ${what}`, 'wallet_issue', { vault_plaintext: vault, record_plaintext: record, root_fingerprint: rootFp, csr, now });
+    expect(`wallet_issue from ${what}`, want);
+  }
 
   // The review of PR #29 (C6, C8-C11, C18): every argument absent and of the wrong type, every document
   // shape the contract refuses, and every ledger entry that does not read — one answer from both ports.

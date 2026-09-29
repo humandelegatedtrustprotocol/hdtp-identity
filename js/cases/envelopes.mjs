@@ -87,6 +87,17 @@ export default function envelopes({ add, expect }, f) {
     add(`seal_request with ${m} -0`, 'seal_request', RawArgs.edit(args, `"${m}":${args[m]}`, `"${m}":-0`));
     expect(`seal_request with ${m} -0`, { error: 'bad_request', why: `${m} is required` });
   }
+  // The JSON literal null is absent (CONTRACT §0), for the members sealed into the body too: both ports
+  // sealed `params: null`, `result: null` and `error: null` as present, so a null params was not the
+  // contract's `{}`, a null result alone was sealed, and a null result beside an error was refused as
+  // both. `params: null` is held to the envelope the seed seals with `{}`.
+  add('seal_request with params null', 'seal_request', { ...toMe, params: null, msg_id: 'p-9', ts: at(now) });
+  expect('seal_request with params null', seeded({ msgId: 'p-9' }));
+  const toThem = { recipient_spki: hostSpki, sender_pkcs8: hostPkcs8, sender_chain: [leafDer, rootDer], msg_id: 'p-10', ts: 1, ephemeral_seed: eph(7) };
+  add('seal_result with a result that is null', 'seal_result', { ...toThem, result: null });
+  expect('seal_result with a result that is null', { error: 'bad_request', why: 'a result carries exactly one of result and error' });
+  add('seal_result with a null result beside an error', 'seal_result', { ...toThem, result: null, error: { code: -32000, message: 'no' } });
+  add('seal_result with a null error beside a result', 'seal_result', { ...toThem, result: { ok: true }, error: null });
   // The seed seals no results, so these two are held to each other.
   add('seal_result with ts 0 and exp 0', 'seal_result', { recipient_spki: hostSpki, sender_pkcs8: hostPkcs8, sender_chain: [leafDer, rootDer], result: { ok: true }, msg_id: 'p-7', ts: 0, exp: 0, ephemeral_seed: eph(7) });
   // Two members missing: the one named is the first the core needs (F10, R19). The chain is judged

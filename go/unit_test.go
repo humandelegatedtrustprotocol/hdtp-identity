@@ -183,6 +183,57 @@ func TestVault(t *testing.T) {
 	}
 }
 
+// SPEC §2.2 on the software path (TC-8): WalletIssue signs only with a key that is the root the identity
+// is known by, whose certificate is that key's and signs a challenge under it, and returns only a
+// chain that validates to that root at the endpoint. It signed with whatever key sat beside the
+// fingerprint, and a leaf that failed chain rule 3 came back. The core's
+// a_vault_root_proves_itself_before_it_signs is the twin.
+func TestWalletIssueProvesTheRootBeforeItSigns(t *testing.T) {
+	now := time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC)
+	root, _ := KeyFromSeed(AlgEd25519, Seed("vault/root"))
+	other, _ := KeyFromSeed(AlgEd25519, Seed("vault/other"))
+	rootDer, _ := BuildRoot(RootOpts{CN: "Alina Rao", Key: root, NotBefore: now})
+	otherDer, _ := BuildRoot(RootOpts{CN: "Mallory", Key: other, NotBefore: now})
+	// A certificate of the root's own key that is no root: a leaf, under the root.
+	noRoot, err := BuildLeaf(LeafOpts{CN: "Alina Rao", RootCN: "Alina Rao", RootKey: root, HostPub: root.Public(), Endpoint: endpointA, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(24 * time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fp := Fingerprint(root.Public().SPKI)
+	vault := func(key *PrivateKey, cert []byte) VaultPlaintext {
+		pkcs8, _ := key.PKCS8()
+		return VaultPlaintext{V: 2, Roots: []VaultRoot{{Fingerprint: fp, CN: "Alina Rao", PKCS8: B64url(pkcs8), Cert: B64url(cert), Created: now.Format(time.RFC3339)}}}
+	}
+	host, _ := KeyFromSeed(AlgEd25519, Seed("vault/host"))
+	csr, _ := CSRNew("Alina Rao", host, endpointA, "")
+	issue := func(v VaultPlaintext) (*WalletIssued, error) {
+		return WalletIssue(v, RecordPlaintext{V: 2}, fp, csr, now, 365, false)
+	}
+	for what, c := range map[string]struct {
+		v    VaultPlaintext
+		want string
+	}{
+		"another key than its fingerprint names":   {vault(other, rootDer), "the vault's root key is not the root it is filed under"},
+		"another root's certificate":               {vault(root, otherDer), "the vault's root certificate is not its key's"},
+		"a certificate of its key that is no root": {vault(root, noRoot), "the chain it issued does not validate: chain rule "},
+	} {
+		if _, err := issue(c.v); err == nil || !strings.HasPrefix(err.Error(), c.want) || codeFor(err, "") != "bad_request" {
+			t.Errorf("%s: %v, want %q", what, err, c.want)
+		}
+	}
+	if rootProof != "PACT root proof v1\n" {
+		t.Errorf("the challenge is %q", rootProof)
+	}
+	// The control: the root, its certificate, and a chain that validates to it at the endpoint.
+	out, err := issue(vault(root, rootDer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vr := ValidateChain([][]byte{out.DER, rootDer}, ChainOpts{Now: now, ExpectedRoot: fp, ExpectedEndpoint: endpointA}); !vr.OK {
+		t.Errorf("the chain issued: rule %d, %s", vr.Rule, vr.Reason)
+	}
+}
+
 func TestWalletIssue(t *testing.T) {
 	now := time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC)
 	root, _ := GenerateKey(AlgEd25519)
