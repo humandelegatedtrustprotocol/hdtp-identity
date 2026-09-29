@@ -17,11 +17,11 @@
 //
 //   node js/parity.mjs [--only <text>] [--verbose] [--manifest <file>]
 //
-// It exits non-zero on any disagreement, on an answer off the contract, and when the contract's
-// surface grows without a case, so the harness cannot fall silently behind the thing it guards. The
-// one exception is a case js/cases/known-divergences.json excuses, and only while it fails exactly as
-// that entry says (js/cases/known.mjs): the divergences the generated cases found on the day they
-// were written, before any was fixed, each waiting on the audit finding it names.
+// It exits non-zero on any disagreement, on an answer off the contract, on an answer other than the
+// one a case expects, and when the contract's surface grows without a case, so the harness cannot
+// fall silently behind the thing it guards. There is no list of excused failures: the one the
+// port-parity work of 2026-09-29 kept while it fixed the divergences its generated cases found was
+// emptied by those fixes and deleted with its mechanism.
 //
 // It holds both ports to `contract/contract.json`, which is where the surface is WRITTEN DOWN: every
 // answer of every case, from each port, is validated against the schema the contract declares for it.
@@ -37,7 +37,6 @@ import { loadContract, judge } from '../contract/contract.mjs';
 import { fixtures } from './cases/fixtures.mjs';
 import { collect } from './cases/index.mjs';
 import { pickBases, generate } from './cases/generated.mjs';
-import { readKnown, verdict } from './cases/known.mjs';
 import { rustDispatch, goDispatch } from './surface.mjs';
 import { recorder } from './results.mjs';
 
@@ -76,8 +75,7 @@ const only = process.argv.includes('--only') ? process.argv[process.argv.indexOf
 let bad = 0;
 let ran = 0;
 let held = 0; // answers validated against the contract's schemas, both ports counted
-let offContract = 0; // of those, the answers off the contract, excused or not
-let offExcused = 0; // …and of THOSE, the answers of a known divergence
+let offContract = 0; // of those, the answers off the contract
 // Which functions were compared whole on an answer that SUCCEEDED. A refusal compared whole proves
 // only that both ports refuse alike; it says nothing about the members of the answer a caller
 // actually uses, and that is where `card_decode` lost its entire `leaf`.
@@ -106,15 +104,6 @@ for (const { id } of made.cases) if (handIds.has(id)) problems.push(`the case id
 for (const [id, want] of made.expected) expected.set(id, { want, file: 'generated' });
 const cases = [...written, ...made.cases];
 
-// ── the known divergences ───────────────────────────────────────────────────────────────────────
-// js/cases/known-divergences.json (js/cases/known.mjs says how it is read): the cases that fail today,
-// each with the finding that will close it. A case that fails exactly as its entry says is excused;
-// any other failure, an entry for a case that passes, and an entry for a case nobody has, fail the run.
-const known = readKnown(JSON.parse(readFileSync(new URL('./cases/known-divergences.json', import.meta.url), 'utf8')));
-problems.push(...known.problems);
-const allIds = new Set(cases.map(({ id }) => id));
-for (const id of known.entries.keys()) if (!allIds.has(id)) problems.push(`js/cases/known-divergences.json has an entry for ${JSON.stringify(id)}, and no case has that id`);
-const excused = []; // [{ id, fn, findings, fails }]
 // The error codes each function was seen to fail with in BOTH ports, in a case the two answered
 // alike: what the failure side of the coverage gate is judged on (below).
 const comparedCodes = new Map();
@@ -137,7 +126,7 @@ for (const c of cases) {
   const [raw, rawGo] = ask(c);
   const ms = performance.now() - t0; // the two ports' answers, or nothing where a base already had them
   const fails = [];
-  const said = []; // what is printed for a failure nobody excused
+  const said = []; // what is printed for a failure
   for (const [port, got] of [['wasm', raw], ['go', rawGo]]) {
     if (got?.threw) { fails.push(`${port} threw`); said.push(`  THREW  ${id}  (${port}): ${got.threw}`); continue; }
     held++;
@@ -168,9 +157,7 @@ for (const c of cases) {
       said.push(`  DIFFER  ${id}`, `    wasm ${JSON.stringify(a)}`, `    go   ${JSON.stringify(b)}`);
     }
   }
-  const entry = known.entries.get(id);
-  const v = verdict(entry, fails);
-  if (v === 'pass') {
+  if (!fails.length) {
     if ((how === '*' || typeof how === 'function') && succeeded(raw)) provenWhole.add(fn);
     if (raw?.error && raw.error === rawGo?.error) {
       if (!comparedCodes.has(fn)) comparedCodes.set(fn, new Set());
@@ -178,19 +165,10 @@ for (const c of cases) {
     }
     if (verbose) console.log(`  agree   ${id}`);
     results.add(id, 'PASS', { ms });
-  } else if (v === 'known') {
-    offExcused += fails.filter((k) => k.endsWith('off the contract')).length;
-    excused.push({ id, fn, findings: entry.findings, fails });
-    if (verbose) console.log(`  known   ${id}  (${entry.findings.join(', ')}: ${fails.join(', ')})`);
-    results.add(id, 'PASS', { reason: `a known divergence, until ${entry.findings.join(', ')} is fixed: ${fails.join(', ')}`, ms });
   } else {
     bad++;
-    const why = {
-      new: `fails (${fails.join(', ')})`,
-      changed: `fails (${fails.join(', ')}), and js/cases/known-divergences.json says it fails as ${[...(entry?.fails ?? [])].join(', ')}: re-read the answers, then correct the entry`,
-      stale: `passes, and js/cases/known-divergences.json still excuses it (${entry?.findings.join(', ')}): delete the entry`,
-    }[v];
-    console.log(`  ${v === 'stale' ? 'NO LONGER DIVERGES' : v === 'changed' ? 'NOT AS ITS ENTRY SAYS' : 'FAILS'}  ${id}: ${why}`);
+    const why = `fails (${fails.join(', ')})`;
+    console.log(`  FAILS  ${id}: ${why}`);
     for (const line of said) console.log(line);
     results.add(id, 'FAIL', { reason: why, ms });
   }
@@ -218,8 +196,8 @@ for (const c of cases) {
 //      produced, today, by a case below.
 //
 // 1, and the collection's own problems (an id used twice, a case filed under the wrong section, an
-// expectation for an id no case has, a base or a known divergence that names nothing), fail a
-// filtered run too; 2, 3 and 4 cannot be judged on one.
+// expectation for an id no case has, a base that names nothing), fail a filtered run too; 2, 3 and 4
+// cannot be judged on one.
 const source = (f) => readFileSync(new URL(f, import.meta.url), 'utf8');
 const surfaceOf = (read, f) => { try { return read(source(f)); } catch (e) { problems.push(`${f}: ${e.message}`); return new Set(); } };
 const rustNames = surfaceOf(rustDispatch, '../crates/pact-identity/src/api.rs');
@@ -268,22 +246,19 @@ results.write();
 // `--manifest <path>` writes what was just compared, so the record of these checks is generated
 // from the run rather than transcribed from it. It is written ONLY when every case agreed and the
 // gate is satisfied, on an unfiltered run, so a manifest describes checks that actually held: a file
-// claiming 270 passing cases cannot be produced by a run in which they did not. A known divergence
-// did NOT agree: it is listed apart, with the finding it waits on, and never among the cases.
+// claiming 270 passing cases cannot be produced by a run in which they did not.
 const manifestAt = process.argv[process.argv.indexOf('--manifest') + 1];
 const agreed = bad === 0 && failing.length === 0;
 if (process.argv.includes('--manifest') && manifestAt && !only && agreed) {
-  const waiting = new Set(excused.map(({ id }) => id));
   const byFn = new Map();
   for (const { id, fn } of cases) {
-    if (waiting.has(id)) continue;
     if (!byFn.has(fn)) byFn.set(fn, []);
     byFn.get(fn).push(id);
   }
   const { writeFileSync } = await import('node:fs');
   writeFileSync(manifestAt, JSON.stringify({
     generated_by: 'js/parity.mjs --manifest',
-    cases: cases.length - excused.length,
+    cases: cases.length,
     generated: made.cases.length,
     functions: surface.size,
     compared_whole: [...surface].filter((f) => whole.has(f)).length,
@@ -294,21 +269,18 @@ if (process.argv.includes('--manifest') && manifestAt && !only && agreed) {
       methods: contractNames.size,
       answers_validated: held,
       off_contract: offContract,
-      off_contract_known: offExcused,
       declared_error_codes: declared.length,
       codes_never_produced: unseen,
     },
     by_function: [...byFn.entries()].sort(([a], [b]) => (a < b ? -1 : 1))
       .map(([fn, ids]) => ({ fn, in_surface: surface.has(fn), compared_whole: whole.has(fn), cases: ids })),
-    known_divergences: excused.map(({ id, findings, fails }) => ({ id, findings, fails })),
   }, null, 2) + '\n');
 }
 
 const total = only ? ran : cases.length;
 const wholeInSurface = [...surface].filter((f) => whole.has(f)).length;
-console.log(`\n${total - bad - excused.length}/${total} boundary answers agree between the ports${only ? ` (filtered by ${JSON.stringify(only)})` : `; ${surface.size} functions guarded, ${wholeInSurface} of them compared whole`} (${made.cases.length} of the cases generated from the contract)`);
-console.log(`${excused.length} known divergences, each as js/cases/known-divergences.json says, waiting on the finding it names; ${bad} failures besides`);
-console.log(`${held - offContract}/${held} answers hold to contract/contract.json (spec ${contract.spec}, ${contractNames.size} functions, both ports; ${offExcused} of the ${offContract} that do not are known divergences)${only ? '' : `; ${declared.length - unseen.length}/${declared.length} declared error codes were produced by both ports in a case they answered alike`}`);
+console.log(`\n${total - bad}/${total} boundary answers agree between the ports${only ? ` (filtered by ${JSON.stringify(only)})` : `; ${surface.size} functions guarded, ${wholeInSurface} of them compared whole`} (${made.cases.length} of the cases generated from the contract)`);
+console.log(`${held - offContract}/${held} answers hold to contract/contract.json (spec ${contract.spec}, ${contractNames.size} functions, both ports)${only ? '' : `; ${declared.length - unseen.length}/${declared.length} declared error codes were produced by both ports in a case they answered alike`}`);
 // `bad` is a COUNT, and process.exit truncates mod 256: with 276 cases, exactly 256 disagreements
 // would have exited 0.
 process.exit(bad > 0 || failing.length ? 1 : 0);

@@ -15,14 +15,15 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   (held to CONTRACT §0's `<name> is required`), each optional string `""`, each optional member of
   the wrong type, an undeclared member, and each required member absent beside each other member of
   the wrong type (read order), and each member that holds a key holding one outside the profile —
-  1108 cases today (1103 when written; the hostile object is now sent only to the 15 functions that
-  declare one of its members, and the key outside the profile came with cluster G), varied from one
-  named hand-written case per function that succeeds on both ports. 463 cases failed when they were
-  written (459 generated, and 4 written beside them), and none fails today; each was listed in `js/cases/known-divergences.json` with
-  the audit finding that closes it, and the run fails on any other failure, on an entry whose case
-  passes, and on an entry nobody has.
+  1149 cases at the last count (1103 when written; the hostile object is now sent only to the 17
+  functions that declare one of its members, the key outside the profile came with cluster G, and
+  the functions added since have their own), varied from one named hand-written case per function
+  that succeeds on both ports. 463 cases failed when they were written (459 generated, and 4 written
+  beside them). While they were fixed, each was listed with the audit finding that closed it and
+  excused only while it failed exactly as listed; every fix emptied the list, and the list and its
+  mechanism are gone: every case must pass.
 - The coverage gate fails when a declared error code is not produced by both ports in one case they
-  answered alike (S2, TC-1); all 118 are. It used to print the count and pass.
+  answered alike (S2, TC-1); all 127 are. It used to print the count and pass.
 - `js/cases/hostile.json` is the one hostile object: the generated cases send it to both ports, Go's
   `TestCallNeverPanics` reads it and now fails on an answer of `internal` (its `recover()` turned a
   panic into a JSON object, which the sweep accepted), and the core has the same sweep
