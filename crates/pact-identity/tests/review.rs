@@ -289,6 +289,41 @@ fn an_envelope_asking_to_be_remembered_for_a_year_is_refused() {
     assert_eq!(edge["result"]["code"], "ok", "{edge}");
 }
 
+// ── §13.1#1: `enc` is exactly the suite's Npk, under each suite, in both directions ──
+/// `sig` covers `protected ‖ enc ‖ ct` with nothing between them, so a byte moved across the enc/ct
+/// boundary leaves the signed bytes as they were: the forgery is signed, and the length is the one
+/// thing that refuses it. go/review_test.go's TestAnEncapsulatedKeyOfTheWrongLengthIsRefused is the Go
+/// port's twin, and js/parity.mjs holds both ports to it through `decide` and `open_result`.
+#[test]
+fn an_encapsulated_key_of_the_wrong_length_is_refused_under_each_suite() {
+    let alina = pair("ed25519", E_A);
+    for (alg, npk) in [("ed25519", 32), ("p256", 65)] {
+        let me = key(alg);
+        let sealed = call(
+            "seal_result",
+            json!({
+                "recipient_spki": me["spki"], "sender_pkcs8": alina.leaf_key["pkcs8"], "form": "chain",
+                "sender_chain": [b64u(&alina.leaf), b64u(&alina.root)], "result": { "ok": true }, "msg_id": "r-1", "ts": now_s(),
+            }),
+        );
+        let (enc, ct) = (from_b64u(sealed["enc"].as_str().unwrap()), from_b64u(sealed["ct"].as_str().unwrap()));
+        assert_eq!(enc.len(), npk, "{alg}");
+        let open = |enc: &[u8], ct: &[u8]| {
+            let envelope = json!({ "protected": sealed["protected"], "enc": b64u(enc), "ct": b64u(ct), "sig": sealed["sig"] });
+            call(
+                "open_result",
+                json!({ "envelope": envelope, "my_pkcs8": me["pkcs8"], "my_spki": me["spki"], "msg_id": "r-1", "now": NOW_RFC, "pins": [] }),
+            )
+        };
+        assert_eq!(open(&enc, &ct)["ok"], true, "{alg}: the envelope as sealed opens, so the harness is sound");
+        let short = open(&enc[..npk - 1], &[&enc[npk - 1..], &ct[..]].concat());
+        let long = open(&[&enc[..], &ct[..1]].concat(), &ct[1..]);
+        for (what, got) in [("one byte short", short), ("one byte long", long)] {
+            assert_eq!(got, json!({ "error": "envelope_invalid", "why": "encapsulated key is not the suite's length" }), "{alg}, {what}");
+        }
+    }
+}
+
 // ── MEDIUM 3: the address guard takes the normal form first ──
 #[test]
 fn the_address_guard_refuses_every_other_spelling_of_loopback() {

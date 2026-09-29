@@ -1,9 +1,9 @@
 // §5 of the contract: envelopes — the suite, HPKE, sealing and opening, following a renewal, and the
 // receiving decision.
-import { seed, b64url } from '../../../pact-protocol/vectors/lib/keys.mjs';
+import { seed, b64url, pkcs8Of, spkiOf, fingerprint } from '../../../pact-protocol/vectors/lib/keys.mjs';
 import { buildLeaf } from '../../../pact-protocol/vectors/lib/x509.mjs';
 import { sealDeterministic } from '../../../pact-protocol/vectors/lib/hpke.mjs';
-import { ENDPOINTS } from '../cast.mjs';
+import { ENDPOINTS, bharat, BORN, DIES } from '../cast.mjs';
 
 export default function envelopes({ add, expect }, f) {
   const { now, at, ENDPOINT, rootKey, hostKey, rootDer, leafDer, rootPkcs8, hostPkcs8, rootSpki, hostSpki, p256Spki, rsaSpki, rootFp, hostFp } = f;
@@ -226,4 +226,40 @@ export default function envelopes({ add, expect }, f) {
     add(control, 'decide', { now, envelope: seal(form, chainLeaf, 'tools/call', { name: 'send_message' }), node: pendingOut });
     expect(control, { code: 'pending_approval' });
   }
+
+  // TC-3 — §13.1#1: `enc` is exactly the suite's Npk (65 bytes for PACT-SEAL-P256, 32 for
+  // PACT-SEAL-X25519). `sig` covers protected ‖ enc ‖ ct with nothing between them, so a byte moved
+  // across the enc/ct boundary leaves the signed bytes as they were: the forgery is signed, and the
+  // one thing that refuses it is the length. One byte short and one byte long, under each suite, on
+  // both doors a peer's envelope reaches: `decide` (a request) and `open_result` (a result). Only the
+  // P-256 request had a holder, the seed's intrusion scenario through `decide`.
+  const LENGTH = { code: 'envelope_invalid', why: "encapsulated key is not the suite's length" };
+  const moved = (e, by) => {
+    const enc = Buffer.from(e.enc, 'base64url'), ct = Buffer.from(e.ct, 'base64url');
+    return by < 0
+      ? { ...e, enc: b64url(enc.subarray(0, enc.length - 1)), ct: b64url(Buffer.concat([enc.subarray(enc.length - 1), ct])) }
+      : { ...e, enc: b64url(Buffer.concat([enc, ct.subarray(0, 1)])), ct: b64url(ct.subarray(1)) };
+  };
+  // Bharat's host holds a P-256 leaf, so what is sealed to it is sealed under PACT-SEAL-P256.
+  const bharatLeaf = buildLeaf({ cn: bharat.cn, rootCn: bharat.cn, root: bharat.root, hostKey: bharat.host, endpoint: ENDPOINTS.bharat, notBefore: BORN, notAfter: DIES, label: 'parity/bharat-leaf' });
+  const bharatNode = {
+    ...node, endpoint: ENDPOINTS.bharat, chain: [b64url(bharatLeaf), f.p256RootDer],
+    keys: [{ kid: fingerprint(bharat.host.pub), leaf: b64url(bharatLeaf), pkcs8: b64url(pkcs8Of(bharat.host.priv)), current: true }],
+  };
+  const bharatSpki = b64url(spkiOf(bharat.host.pub)), bharatPkcs8 = b64url(pkcs8Of(bharat.host.priv));
+  for (const [suite, recipient, toResult] of [
+    ['PACT-SEAL-X25519', { envelope: sealed, node }, { envelope: chainForm, args: {} }],
+    ['PACT-SEAL-P256', { envelope: request({ params: { name: 'send_message' }, msgId: 'p-npk', recipientLeaf: bharatLeaf }), node: bharatNode },
+      { envelope: answerTo({ recipient_spki: bharatSpki }), args: { my_pkcs8: bharatPkcs8, my_spki: bharatSpki } }],
+  ]) {
+    for (const [by, what] of [[-1, 'one byte short'], [1, 'one byte long']]) {
+      const onDecide = `decide on a ${suite} envelope whose encapsulated key is ${what}`;
+      add(onDecide, 'decide', { now, envelope: moved(recipient.envelope, by), node: recipient.node });
+      expect(onDecide, LENGTH);
+      const onOpen = `open_result on a ${suite} answer whose encapsulated key is ${what}`;
+      add(onOpen, 'open_result', open(moved(toResult.envelope, by), toResult.args));
+      expect(onOpen, { error: LENGTH.code, why: LENGTH.why });
+    }
+  }
+
 }

@@ -177,6 +177,61 @@ func TestAddressGuardRefusesEverySpellingOfLoopback(t *testing.T) {
 	}
 }
 
+// §13.1#1: `enc` is exactly the suite's Npk, under each suite, in both directions. `sig` covers
+// protected ‖ enc ‖ ct with nothing between them, so a byte moved across the enc/ct boundary leaves
+// the signed bytes as they were: the forgery is signed, and the length is the one thing that refuses
+// it. crates/pact-identity/tests/review.rs's an_encapsulated_key_of_the_wrong_length_is_refused_under_each_suite
+// is the core's twin, and js/parity.mjs holds both ports to it through decide and open_result.
+func TestAnEncapsulatedKeyOfTheWrongLengthIsRefused(t *testing.T) {
+	alina := reviewIdentity(t, "ed25519", reviewEndpoint)
+	chain := []string{B64url(alina.leaf), B64url(alina.root)}
+	for _, c := range []struct {
+		alg string
+		npk int
+	}{{"ed25519", 32}, {"p256", 65}} {
+		me, _ := GenerateKey(c.alg)
+		pkcs8, err := me.PKCS8()
+		if err != nil {
+			t.Fatal(err)
+		}
+		mine := map[string]any{"my_pkcs8": B64url(pkcs8), "my_spki": B64url(me.Public().SPKI), "msg_id": "r-1", "now": "2026-09-13T12:00:00Z", "pins": []any{}}
+		var sealed Envelope
+		leafPKCS8, _ := alina.leafKey.PKCS8()
+		out := Call("seal_result", mustJSON(map[string]any{
+			"recipient_spki": B64url(me.Public().SPKI), "sender_pkcs8": B64url(leafPKCS8), "form": "chain", "sender_chain": chain,
+			"result": map[string]any{"ok": true}, "msg_id": "r-1", "ts": mustTime(t, "2026-09-13T12:00:00Z").Unix(),
+		}))
+		if err := json.Unmarshal(out, &sealed); err != nil {
+			t.Fatalf("%s: %s", c.alg, out)
+		}
+		enc, _ := wireB64url(sealed.Enc)
+		ct, _ := wireB64url(sealed.Ct)
+		if len(enc) != c.npk {
+			t.Fatalf("%s: enc is %d bytes", c.alg, len(enc))
+		}
+		open := func(enc, ct []byte) string {
+			args := map[string]any{"envelope": Envelope{Protected: sealed.Protected, Enc: B64url(enc), Ct: B64url(ct), Sig: sealed.Sig}}
+			for k, v := range mine {
+				args[k] = v
+			}
+			return string(Call("open_result", mustJSON(args)))
+		}
+		var opened struct {
+			OK bool `json:"ok"`
+		}
+		if got := open(enc, ct); json.Unmarshal([]byte(got), &opened) != nil || !opened.OK {
+			t.Fatalf("%s: the envelope as sealed does not open, so the harness is not sound: %s", c.alg, got)
+		}
+		short := open(enc[:c.npk-1], append(append([]byte{}, enc[c.npk-1:]...), ct...))
+		long := open(append(append([]byte{}, enc...), ct[0]), ct[1:])
+		for what, got := range map[string]string{"one byte short": short, "one byte long": long} {
+			if got != `{"error":"envelope_invalid","why":"encapsulated key is not the suite's length"}` {
+				t.Errorf("%s, %s: %s", c.alg, what, got)
+			}
+		}
+	}
+}
+
 // LOW 10/11: a small-order Ed25519 point is not a key, and an SPKI's BIT STRING has no unused bits.
 func TestSmallOrderPointsAndSPKIBits(t *testing.T) {
 	k, _ := GenerateKey("ed25519")
@@ -404,8 +459,9 @@ func TestNumbersAsECMAScriptPrintsThem(t *testing.T) {
 
 // A four-octet DER length reaches 2^32-1. Folded into a 32-bit `int` it wrapped negative, `at+l`
 // stayed inside the buffer, and the slice panicked — from six bytes of anybody's certificate. This
-// runs on any word size; the 32-bit one is where the old reader fell over, and it is cross-compiled
-// and run under linux/386 to show so (see the review-findings plan, B8).
+// runs on any word size. The 32-bit one is where the old reader fell over, and the test was
+// cross-compiled for linux/386 and run under Docker once, by hand, to show so (pact-gateway's
+// docs/release/review-findings-2026-09-21-plan.md, B8); no gate runs it on 32 bits.
 func TestAFourOctetLengthIsRefusedOnAnyWordSize(t *testing.T) {
 	for _, in := range [][]byte{
 		{0x30, 0x84, 0xFF, 0xFF, 0xFF, 0xFF},

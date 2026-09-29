@@ -32,6 +32,17 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   `go/constants_test.go`, `review_test.go`). Parity cases sit at the edges they read: the tombstone
   and claim windows a second inside and exactly at the end (C13), and the most passes and lanes, one
   lane more and one KiB less than `Kdf` allows (C12).
+- §13.1#1 (`enc` is exactly the suite's Npk) has holders that build an `enc`: parity cases one byte
+  short and one byte long under both suites, through `decide` and `open_result` (a byte moved across
+  the enc/ct boundary, so the forgery is signed), and a test in each port (TC-3). It cited a Go test
+  about small-order Ed25519 points. 13.3#2 cites the Go twin of its Rust test and says what the
+  library holds of it (TC-7).
+- `js/musts.mjs` prints the MUSTs held by one port's tests alone and fails one that says neither why
+  nor what it leaves unheld; a `gap` names that part, and is printed and counted (TC-8). §2.2's
+  software path is a named gap: `wallet_issue` checks none of the three conditions in either port,
+  and returns a leaf that fails chain rule 3 for a vault entry holding another key (measured). 2.2#1
+  and 2.2#4 no longer cite Go tests that do not test them, and 2.2#3 no longer says the library
+  checks something in the challenge's place.
 - **JS loader:** `call(name, null)` hands `null` to the core, which answers `args is a JSON object`
   as the Go port does; it used to be made `{}` (`js/index.mjs`, `js/worker.mjs`). Only `args` left
   out is `{}`. The parity case `args that are null` sends `null` for the first time (TC-2).
