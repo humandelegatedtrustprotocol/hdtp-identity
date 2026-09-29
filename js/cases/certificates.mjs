@@ -1,7 +1,7 @@
 // §2 of the contract: certificates — build, assemble, parse, the profile, chains, and the address rules.
 import { b64url } from '../../../pact-protocol/vectors/lib/keys.mjs';
 import { buildRoot } from '../../../pact-protocol/vectors/lib/x509.mjs';
-import { ecdsaTwin, ecdsaIsLowS, read as derRead, children as derChildren } from '../../../pact-protocol/vectors/lib/der.mjs';
+import { ecdsaTwin, ecdsaIsLowS, read as derRead, children as derChildren, seq, tlv } from '../../../pact-protocol/vectors/lib/der.mjs';
 import { signDetached } from '../../../pact-protocol/vectors/lib/hpke.mjs';
 import { bharat, BORN } from '../cast.mjs';
 
@@ -107,6 +107,43 @@ export default function certificates({ add, expect }, f) {
       const root = b64url(buildRoot({ cn: 'Alina Rao', key: rootKey, notBefore: BORN, label: 'parity/root', basicConstraints: bc }));
       add(`validate_chain under a root whose basicConstraints is ${what}`, 'validate_chain', { chain: [leafDer, root], now });
       add(`parse_certificate of a root whose basicConstraints is ${what}`, 'parse_certificate', { der: root });
+    }
+  }
+  // R33: certificates the three readers answered three ways. An empty keyUsage BIT STRING (`03 00`, no
+  // initial octet, which X.690 §8.6.2 requires) was a keyUsage of no bits to the core and the seed and
+  // refused by the Go port; an empty [3] was `not a v3 certificate with extensions` to the core and
+  // `certificate shape` to the Go port (the seed threw a TypeError); and the two ports read a
+  // certificate's fields in different orders, so one with two faults was named for different ones.
+  // Built by hand from the leaf, which parse_certificate does not verify the signature of.
+  {
+    const parseFails = (why) => ({ error: 'parse', why });
+    const [tbs, alg, sig] = derChildren(derRead(Buffer.from(leafDer, 'base64url')));
+    const fields = derChildren(tbs).map((x) => x.raw);
+    const [notBefore, notAfter] = derChildren(derChildren(tbs)[4]).map((x) => x.raw);
+    const [algOid] = derChildren(alg).map((x) => x.raw);
+    const NULL = Buffer.from([0x05, 0x00]);
+    const rebuilt = (over, outer = alg.raw) => b64url(seq(seq(...fields.map((x, i) => over[i] ?? x)), outer, sig.raw));
+    // keyUsage, critical: the extension with a padded OID (2.5.29.15 as 55 80 1d 0f) and a criticality
+    // spelled 0x01, both faults; the core judges the criticality first.
+    const [extensions] = derChildren(derChildren(tbs)[7]);
+    const withBadKeyUsage = derChildren(extensions).map((e) => {
+      const [id, , value] = derChildren(e);
+      return id.content.equals(Buffer.from([0x55, 0x1d, 0x0f])) ? seq(tlv(0x06, Buffer.from([0x55, 0x80, 0x1d, 0x0f])), tlv(0x01, Buffer.from([0x01])), value.raw) : e.raw;
+    });
+    for (const [what, der, want] of [
+      ['a keyUsage BIT STRING with no initial octet', alinaLeaf({ label: 'parity/r33', misencode: { keyUsage: [] } }), parseFails('BIT STRING not in the DER form')],
+      ['an extensions wrapper with nothing in it', rebuilt({ 7: tlv(0xa3, Buffer.alloc(0)) }), parseFails('not a v3 certificate with extensions')],
+      ['three validity times', rebuilt({ 4: seq(notBefore, notAfter, notAfter) }), parseFails('time not in the DER form')],
+      ['three validity times, and a NULL after the outer algorithm', rebuilt({ 4: seq(notBefore, notAfter, notAfter) }, seq(algOid, NULL)), parseFails('time not in the DER form')],
+      ['a NULL after the outer algorithm', rebuilt({}, seq(algOid, NULL)), parseFails('certificate shape')],
+      ['a keyUsage whose OID is padded and whose criticality is spelled 0x01', rebuilt({ 7: tlv(0xa3, seq(...withBadKeyUsage)) }), parseFails('BOOLEAN not in the DER form')],
+      // The controls: a keyUsage of no bits written with its initial octet (`03 01 00`) reads, and the
+      // leaf rebuilt with nothing changed reads as the leaf.
+      ['a keyUsage of no bits, with its initial octet', alinaLeaf({ label: 'parity/r33', misencode: { keyUsage: [0] } }), { key_usage: [] }],
+      ['nothing changed (the control)', rebuilt({}), { spki: hostSpki }],
+    ]) {
+      add(`parse_certificate of a leaf with ${what}`, 'parse_certificate', { der });
+      expect(`parse_certificate of a leaf with ${what}`, want);
     }
   }
   // A validity field that is not a date, which one port used to read as 2 March.

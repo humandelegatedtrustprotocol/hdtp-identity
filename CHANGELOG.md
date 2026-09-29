@@ -274,6 +274,14 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   rest. A root key that does not read is refused in its reader's class (`parse`; `unsupported` for a
   key outside the profile), where the Go port said `bad_request` `the root key does not parse`. The
   CLI reads a record through the same `check_record`, so a record it opens is held the same way.
+- **A certificate is read in one order and refused in one set of words** (R33): a `keyUsage` BIT
+  STRING with no initial octet (`03 00`, which X.690 §8.6.2 says is no BIT STRING) is refused by the
+  core as the Go port refused it (the core read it as a keyUsage of no bits); an `[3]` with nothing in
+  it is `not a v3 certificate with extensions` in both (the Go port said `certificate shape`); the Go
+  port reads the fields in the core's order (the validity's count before the outer algorithm, the
+  key before the names and the times, an extension's criticality before its OID) and keeps each
+  reader's own error where it answered `certificate shape` or `time not in the DER form` for a
+  SEQUENCE whose contents did not read. The seed refuses the three alike (pact-protocol PR #10).
 - Removed (cluster I): Go's `KDF.UnmarshalJSON`. A Go caller that decodes a vault document into
   `Vault` with encoding/json gets encoding/json's reading of `kdf`; the port reads one with
   `VaultOpenDoc`.

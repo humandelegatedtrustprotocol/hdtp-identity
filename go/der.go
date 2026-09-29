@@ -229,11 +229,14 @@ func derOidMinimal(n derNode) bool {
 // of one set is a second encoding. Not for the signature or the public key, where `unused` is 0 and
 // every bit is carried.
 func derNamedBitsOK(content []byte) bool {
-	unused := 0
-	if len(content) > 0 {
-		unused = int(content[0])
+	// The initial octet is required (X.690 §8.6.2), even for no bits at all (`03 01 00`): `03 00` is no
+	// BIT STRING. The rule was this port's call site's alone; the core and the seed took `03 00` as a
+	// keyUsage of no bits (R33).
+	if len(content) == 0 {
+		return false
 	}
-	bits := content[min(1, len(content)):]
+	unused := int(content[0])
+	bits := content[1:]
 	if unused > 7 {
 		return false
 	}

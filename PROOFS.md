@@ -8,9 +8,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 case can be listed as proven that did not pass. The cases that fail today are listed apart, at the
 end, each with the finding it waits on.
 
-Specification: **2.2.4**. **88** normative sentences, **2284** cross-port parity cases over **50** guarded functions, and **1** known divergences that fail today and are listed apart, at the end.
+Specification: **2.2.4**. **88** normative sentences, **2292** cross-port parity cases over **50** guarded functions, and **1** known divergences that fail today and are listed apart, at the end.
 
-Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **4570** answers, of which **1** do not hold to the shape it declares — **1** of them in a known divergence. Of **118** declared error codes, **118** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **4586** answers, of which **1** do not hold to the shape it declares — **1** of them in a known divergence. Of **118** declared error codes, **118** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 88 normative sentences of the specification
 
@@ -203,7 +203,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 2284 cross-port parity cases
+## The 2292 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -211,7 +211,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **2284** cases (**1108** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
+At the run that generated this file: **2292** cases (**1108** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
 
 ### `address_guard` — 50 cases · whole on success
 
@@ -1912,7 +1912,7 @@ At the run that generated this file: **2284** cases (**1108** of the run's cases
 - generated · open_result · now absent, expected_root 7
 - generated · open_result · now absent, expected_endpoint 7
 
-### `parse_certificate` — 29 cases · whole on success
+### `parse_certificate` — 37 cases · whole on success
 
 - parse_certificate of a root
 - parse_certificate of a leaf
@@ -1928,6 +1928,14 @@ At the run that generated this file: **2284** cases (**1108** of the run's cases
 - parse_certificate of a leaf with a basicConstraints holding only an INTEGER
 - parse_certificate of a root whose basicConstraints is TRUE, 5, 0
 - parse_certificate of a root whose basicConstraints is a pathLenConstraint of 128
+- parse_certificate of a leaf with a keyUsage BIT STRING with no initial octet
+- parse_certificate of a leaf with an extensions wrapper with nothing in it
+- parse_certificate of a leaf with three validity times
+- parse_certificate of a leaf with three validity times, and a NULL after the outer algorithm
+- parse_certificate of a leaf with a NULL after the outer algorithm
+- parse_certificate of a leaf with a keyUsage whose OID is padded and whose criticality is spelled 0x01
+- parse_certificate of a leaf with a keyUsage of no bits, with its initial octet
+- parse_certificate of a leaf with nothing changed (the control)
 - parse_certificate of a leaf with a 129-bit OID arc
 - parse_certificate with nothing to work from
 - parse_certificate with der as null
