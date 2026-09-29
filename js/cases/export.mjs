@@ -63,6 +63,8 @@ export default function exportCases({ add, expect }, f) {
   ];
   const readArgs = { directory, manifest, contacts_csv: written.contacts_csv, threads_csv: written.threads_csv, owner, now };
   add('export_read: what export_write wrote', 'export_read', readArgs);
+  // `export_read` declares `parse`, and nothing produced it until the coverage gate asked (TC-1).
+  add('export_read at an instant that does not read', 'export_read', { ...readArgs, now: 'nope' });
   const read = wasm.call('export_read', readArgs);
   const names = { threads: read.threads.map((t) => t.id), contacts: read.contacts.map((c) => c.root), media: read.media.map((m) => m.hash) };
   add('export_read_messages: what export_write_messages wrote', 'export_read_messages', { lines, ...names });

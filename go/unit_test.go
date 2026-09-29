@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"math/big"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -363,8 +364,8 @@ func TestSealAndOpenResult(t *testing.T) {
 	}
 }
 
-// Arguments that are not an object, including the literal `null`, are one answer in both ports.
-// `js/parity.mjs` cannot reach this: its shim turns a null into `{}` before either port sees it.
+// Arguments that are not an object, including the literal `null`, are one answer in both ports;
+// js/parity.mjs compares the two (js/cases/dispatcher.mjs), and this is the port's own record.
 func TestArgsMustBeAnObject(t *testing.T) {
 	for _, args := range []string{`null`, `[]`, `3`, `"x"`, `true`} {
 		if out := Call("key_info", json.RawMessage(args)); !bytes.Contains(out, []byte("args is a JSON object")) {
@@ -377,13 +378,24 @@ func TestArgsMustBeAnObject(t *testing.T) {
 	}
 }
 
+// Every function, with nothing, an empty object, a list and the hostile object. Call recovers a panic
+// into `{"error":"internal"}`, which is a JSON object, so a sweep that only asked for an object could
+// not see one (TC-14): no input known reaches `internal`, and an answer carrying it fails here. The
+// hostile object is js/cases/hostile.json, which js/parity.mjs sends to both ports as well.
 func TestCallNeverPanics(t *testing.T) {
+	hostile, err := os.ReadFile("../js/cases/hostile.json")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, name := range Functions() {
-		for _, args := range []string{``, `{}`, `[]`, `{"der":"!!","chain":["x"],"vcard":1,"now":"nope","envelope":{"protected":"e30"},"node":{}}`} {
+		for _, args := range []string{``, `{}`, `[]`, string(bytes.TrimSpace(hostile))} {
 			out := Call(name, json.RawMessage(args))
 			var v map[string]any
 			if err := json.Unmarshal(out, &v); err != nil {
 				t.Errorf("%s(%s): not a JSON object: %s", name, args, out)
+			}
+			if v["error"] == "internal" {
+				t.Errorf("%s(%s): a panic, recovered: %s", name, args, out)
 			}
 		}
 	}

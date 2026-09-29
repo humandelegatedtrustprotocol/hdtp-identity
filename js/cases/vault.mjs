@@ -55,6 +55,8 @@ export default function vault({ add, expect }, f) {
   add('wallet_issue without a record', 'wallet_issue', { vault_plaintext: held, root_fingerprint: rootFp, csr, now });
   add('wallet_issue for a root the vault does not hold', 'wallet_issue', { vault_plaintext: held, record_plaintext: record, root_fingerprint: 'sha256:' + 'A'.repeat(43), csr, now });
   add('wallet_issue of the root\'s own key', 'wallet_issue', { vault_plaintext: held, record_plaintext: record, root_fingerprint: rootFp, csr: rootCsr, now });
+  // A request whose DER is one short SEQUENCE: csr_check's own `parse`, kept or not (TC-1, F18).
+  add('wallet_issue of a request that is a truncated SEQUENCE', 'wallet_issue', { vault_plaintext: held, record_plaintext: record, root_fingerprint: rootFp, csr: b64url(new Uint8Array([0x30, 0x03, 0x02, 0x01])), now });
   const moved = { ...record, ledger: [{ root: rootFp, endpoint: 'https://elsewhere.example/mcp', not_before: '2026-09-10T00:00:00Z', not_after: '2027-09-10T00:00:00Z', issued_at: '2026-09-10T00:00:00Z' }] };
   add('wallet_issue for a second address', 'wallet_issue', { vault_plaintext: held, record_plaintext: moved, root_fingerprint: rootFp, csr, now });
   add('wallet_issue as a move', 'wallet_issue', { vault_plaintext: held, record_plaintext: moved, root_fingerprint: rootFp, csr, now, move: true }, f.withoutSerial('der'));

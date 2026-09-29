@@ -21,9 +21,16 @@ export default function csr({ add }, f) {
   add('issue_from_csr over 398 days', 'issue_from_csr', { csr: request, root_cn: 'A', root_pkcs8: rootPkcs8, now, valid_days: 400 });
   add('issue_from_csr with a negative validity', 'issue_from_csr', { csr: request, root_cn: 'A', root_pkcs8: rootPkcs8, now, valid_days: -1 });
   add('issue_from_csr of a request that is not one', 'issue_from_csr', { csr: b64url(new Uint8Array(8)), root_cn: 'A', root_pkcs8: rootPkcs8, now });
+  // A request whose DER is one short SEQUENCE: csr_check's own `parse`, kept or not (TC-1, R27).
+  const truncated = b64url(new Uint8Array([0x30, 0x03, 0x02, 0x01]));
+  add('issue_from_csr of a request that is a truncated SEQUENCE', 'issue_from_csr', { csr: truncated, root_cn: 'A', root_pkcs8: rootPkcs8, now });
+  add('issue_tbs_from_csr of a request that is a truncated SEQUENCE', 'issue_tbs_from_csr', { csr: truncated, root_cn: 'A', root_spki: rootSpki, now });
   add('issue_from_csr refusing the root\'s own key', 'issue_from_csr', { csr: rootCsr, root_cn: 'A', root_pkcs8: rootPkcs8, root_spkis: [rootSpki], now });
   add('issue_tbs_from_csr', 'issue_tbs_from_csr', { csr: request, root_cn: 'A', root_spki: rootSpki, now }, (a) => (a?.tbs ? { ...a, tbs: '<a tbs, whose serial is random>' } : a));
   add('issue_from_csr', 'issue_from_csr', { csr: request, root_cn: 'Alina Rao', root_pkcs8: rootPkcs8, now }, f.withoutSerial('der'));
+  // A request made and checked with every member given: the calls the generated cases vary (BASES).
+  add('csr_new', 'csr_new', { cn: 'Alina Rao', host_pkcs8: hostPkcs8, endpoint: ENDPOINT, dns_name: 'agent.alina.example' });
+  add('csr_check', 'csr_check', { der: request, root_spkis: [rootSpki] });
 
   // §9's root-key refusal reaches a root given as its key id, which is the form a wallet holding
   // fingerprints has. One port matched only the SubjectPublicKeyInfo, so the other refusal never fired.
