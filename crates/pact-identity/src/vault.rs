@@ -29,6 +29,10 @@ const RECORD_MEMBERS: &[&str] = &["v", "roots", "ledger", "contacts", "passkey",
 /// Held here, where the rules read it, and not at `seal`/`open`: those carry the documents a live
 /// wallet already keeps, and a stricter open would lock a person out of one.
 pub fn check_file(vault: &Value) -> Result<()> {
+    // Absent or null is `<name> is required`, as CONTRACT §0 has every absent member (S1-2).
+    if vault.is_null() {
+        return err("bad_request", "vault_plaintext is required");
+    }
     let Some(doc) = vault.as_object() else { return err("bad_request", "vault_plaintext is required: the root lives there") };
     if doc.contains_key("ledger") || doc.contains_key("contacts") {
         return err("bad_request", "a vault holds the root and nothing else: its ledger and contacts belong in the record");
@@ -48,6 +52,9 @@ pub fn check_file(vault: &Value) -> Result<()> {
 /// an entry would hide from that filter. The CLI's card path, which reads the ledger itself, calls
 /// this too.
 pub fn check_record(record: &Value) -> Result<()> {
+    if record.is_null() {
+        return err("bad_request", "record_plaintext is required");
+    }
     let Some(doc) = record.as_object() else { return err("bad_request", "record_plaintext is required: the ledger lives there") };
     if plaintext_v(record) != Some(PLAINTEXT_V) {
         return err("bad_request", GENERATION);
@@ -396,8 +403,9 @@ mod tests {
             wallet_issue(&old, &record, &fp, &req, now, 365, false).unwrap_err().why,
             "a vault holds the root and nothing else: its ledger and contacts belong in the record"
         );
+        assert_eq!(wallet_issue(&plaintext, &Value::Null, &fp, &req, now, 365, false).unwrap_err().why, "record_plaintext is required");
         assert_eq!(
-            wallet_issue(&plaintext, &Value::Null, &fp, &req, now, 365, false).unwrap_err().why,
+            wallet_issue(&plaintext, &json!("x"), &fp, &req, now, 365, false).unwrap_err().why,
             "record_plaintext is required: the ledger lives there"
         );
         let leaf = from_b64u(out["der"].as_str().unwrap()).unwrap();

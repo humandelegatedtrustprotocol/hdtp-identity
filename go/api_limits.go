@@ -221,6 +221,10 @@ func callLimitsDecide(a args) json.RawMessage {
 	if err != nil {
 		return failErr(codeArgs, err)
 	}
+	// Absent or null is `now is required`, as CONTRACT §0 has every absent member (S1-2).
+	if a.present("now") == nil {
+		return fail(codeArgs, "now is required")
+	}
 	now, isWhole := limitsWhole(a.value("now"))
 	if !isWhole {
 		return fail(codeArgs, "now is a time in milliseconds")

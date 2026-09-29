@@ -99,6 +99,10 @@ func callExportReadEnd(a args) json.RawMessage {
 		return fail(codeArgs, "messages_sha256 is a lowercase hex sha256 or null")
 	}
 	e := exportEnd{messagesSHA256: sha}
+	// Absent, it was 0 lines, and the file was refused for its count instead (S1-3).
+	if a.present("lines") == nil {
+		return fail(codeArgs, "lines is required")
+	}
 	if e.lines, err = a.count("lines"); err != nil {
 		return failErr(codeArgs, err)
 	}

@@ -6,10 +6,7 @@
     "`fails` is how the case fails, as js/parity.mjs names it: `differ` (the two ports answer differently), `<port> off the contract` (an answer contract/contract.json does not allow), `<port> not as expected` (an answer other than the one the spec or CONTRACT §0 fixes for it; a case that misses it is not compared besides).",
     "S1-<n> are divergences the generated cases found that the audit did not file; `new_findings` says what each is."
   ],
-  "new_findings": {
-    "S1-2": "The contract contradicts itself, and both ports answer as its notes do: §0 says an absent member answers '<name> is required', while wallet_issue's note fixes 'vault_plaintext is required: the root lives there' and 'record_plaintext is required: the ledger lives there', and limits_decide's note fixes 'now is a time in milliseconds' for an absent `now`. Reconcile the contract; the ports follow.",
-    "S1-3": "export_read_end reads an absent or null `lines` as 0 in both ports (and so answers the count refusal 'manifest.json: counts: messages is 3, and messages.jsonl holds 0 lines'): a zero value, where §0 says 'lines is required'."
-  },
+  "new_findings": {},
   "cases": {
     "a function nobody defines, with args that are a list": { "findings": ["R34"], "fails": ["wasm off the contract","differ"] },
     "generated · address_guard · guest \"yes\"": { "findings": ["F5","R02"], "fails": ["wasm off the contract","differ"] },
@@ -29,8 +26,6 @@
     "generated · card_encode · extra \"x\"": { "findings": ["T21"], "fails": ["wasm off the contract","differ"] },
     "generated · card_encode · seal 7": { "findings": ["F5","R02"], "fails": ["wasm off the contract","differ"] },
     "generated · csr_new · dns_name 7": { "findings": ["F5","R02"], "fails": ["wasm off the contract","differ"] },
-    "generated · export_read_end · lines absent": { "findings": ["S1-3"], "fails": ["wasm not as expected","go not as expected"] },
-    "generated · export_read_end · lines null": { "findings": ["S1-3"], "fails": ["wasm not as expected","go not as expected"] },
     "generated · hpke_open · aad 7": { "findings": ["F5","R02"], "fails": ["differ"] },
     "generated · hpke_open · ct absent, aad 7": { "findings": ["F5"], "fails": ["differ"] },
     "generated · hpke_open · enc absent, aad 7": { "findings": ["F5"], "fails": ["differ"] },
@@ -46,8 +41,6 @@
     "generated · leaf_tbs · not_before absent, serial 7": { "findings": ["F5"], "fails": ["differ"] },
     "generated · leaf_tbs · root_cn absent, serial 7": { "findings": ["F5"], "fails": ["differ"] },
     "generated · leaf_tbs · serial 7": { "findings": ["F5","R02"], "fails": ["wasm off the contract","differ"] },
-    "generated · limits_decide · now absent": { "findings": ["S1-2"], "fails": ["wasm not as expected","go not as expected"] },
-    "generated · limits_decide · now null": { "findings": ["S1-2"], "fails": ["wasm not as expected","go not as expected"] },
     "generated · open_result · expected_endpoint 7": { "findings": ["F5","R02"], "fails": ["wasm off the contract","differ"] },
     "generated · open_result · expected_root 7": { "findings": ["F5","R02"], "fails": ["wasm off the contract","differ"] },
     "generated · root_tbs · serial 7": { "findings": ["F5","R02"], "fails": ["wasm off the contract","differ"] },
@@ -72,12 +65,8 @@
     "generated · vault_seal · salt \"\"": { "findings": ["R29","C6"], "fails": ["differ"] },
     "generated · vault_seal · salt 7": { "findings": ["F17"], "fails": ["wasm off the contract","go off the contract","differ"] },
     "generated · wallet_issue · move \"yes\"": { "findings": ["F5","R02"], "fails": ["wasm off the contract","differ"] },
-    "generated · wallet_issue · record_plaintext absent": { "findings": ["S1-2"], "fails": ["wasm not as expected","go not as expected"] },
     "generated · wallet_issue · record_plaintext absent, move \"yes\"": { "findings": ["F5"], "fails": ["differ"] },
-    "generated · wallet_issue · record_plaintext null": { "findings": ["S1-2"], "fails": ["wasm not as expected","go not as expected"] },
-    "generated · wallet_issue · vault_plaintext absent": { "findings": ["S1-2"], "fails": ["wasm not as expected","go not as expected"] },
     "generated · wallet_issue · vault_plaintext absent, move \"yes\"": { "findings": ["F5"], "fails": ["differ"] },
-    "generated · wallet_issue · vault_plaintext null": { "findings": ["S1-2"], "fails": ["wasm not as expected","go not as expected"] },
     "wallet_issue of a request that is a truncated SEQUENCE": { "findings": ["F18","R31"], "fails": ["differ"] }
   }
 }
