@@ -400,17 +400,16 @@ fn decide_on_the_vector_envelopes() {
     let wire = |e: &Value| json!({ "protected": e["protected"], "enc": e["enc"], "ct": e["ct"], "sig": e["sig"] });
 
     // A stranger with a chain calling send_message: the guest binding refuses it.
-    let input: DecideInput =
-        serde_json::from_value(json!({ "now": NOW, "envelope": wire(full), "node": node_for(&v, &der, "leaf_b", "root_b", vec![]) }))
-            .unwrap();
+    let input =
+        DecideInput::read(&json!({ "now": NOW, "envelope": wire(full), "node": node_for(&v, &der, "leaf_b", "root_b", vec![]) })).unwrap();
     let out = envelope::decide(&input).unwrap();
     assert_eq!(out.result["code"], "envelope_invalid");
     assert_eq!(out.result["why"], "guest may only redeem or request");
     assert!(out.effects.is_empty());
 
     // The same envelope from a pinned contact is a contact-tier call, with the message id recorded.
-    let input: DecideInput = serde_json::from_value(
-        json!({ "now": NOW, "envelope": wire(full), "node": node_for(&v, &der, "leaf_b", "root_b", vec![pin_a.clone()]) }),
+    let input = DecideInput::read(
+        &json!({ "now": NOW, "envelope": wire(full), "node": node_for(&v, &der, "leaf_b", "root_b", vec![pin_a.clone()]) }),
     )
     .unwrap();
     let out = envelope::decide(&input).unwrap();
@@ -424,12 +423,11 @@ fn decide_on_the_vector_envelopes() {
     assert_eq!(out.effects, vec![json!({ "op": "seen", "msg_id": "vec-v2-alina-to-bharat" })]);
 
     // The small form: chain_required for a stranger, contact for a pinned leaf.
-    let input: DecideInput =
-        serde_json::from_value(json!({ "now": NOW, "envelope": wire(small), "node": node_for(&v, &der, "leaf_b", "root_b", vec![]) }))
-            .unwrap();
+    let input =
+        DecideInput::read(&json!({ "now": NOW, "envelope": wire(small), "node": node_for(&v, &der, "leaf_b", "root_b", vec![]) })).unwrap();
     assert_eq!(envelope::decide(&input).unwrap().result, json!({ "code": "chain_required" }));
-    let input: DecideInput = serde_json::from_value(
-        json!({ "now": NOW, "envelope": wire(small), "node": node_for(&v, &der, "leaf_b", "root_b", vec![pin_a.clone()]) }),
+    let input = DecideInput::read(
+        &json!({ "now": NOW, "envelope": wire(small), "node": node_for(&v, &der, "leaf_b", "root_b", vec![pin_a.clone()]) }),
     )
     .unwrap();
     let out = envelope::decide(&input).unwrap();
@@ -439,7 +437,7 @@ fn decide_on_the_vector_envelopes() {
     // A replay is acknowledged, not re-executed.
     let mut node = node_for(&v, &der, "leaf_b", "root_b", vec![pin_a.clone()]);
     node["seen"] = json!(["vec-v2-alina-to-bharat"]);
-    let input: DecideInput = serde_json::from_value(json!({ "now": NOW, "envelope": wire(full), "node": node })).unwrap();
+    let input = DecideInput::read(&json!({ "now": NOW, "envelope": wire(full), "node": node })).unwrap();
     assert_eq!(envelope::decide(&input).unwrap().result, json!({ "code": "ok", "replayed": true }));
 
     // The same through the boundary.
