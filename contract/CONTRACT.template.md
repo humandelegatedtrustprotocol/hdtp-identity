@@ -231,7 +231,7 @@ Output:
   "result": {"code": "ok", "tier": "contact" | "pending" | "guest" | "pending_new_address",
              "root": "sha256:…", "endpoint": "https://…", "method": "tools/call", "tool": "send_message",
              "params": {…}, "form": "chain" | "leaf", "leaf": "<leaf der the signature verified under>",
-             "replayed"?: true, "why"?: "…",
+             "replayed"?: true, "why"?: "unknown root" | "blocked" | "superseded leaf", "demote"?: false | true,
              "address_claim"?: "sha256:…", "forced"?: "tombstone", "decision"?: "ask"},
   "effects": [
     {"op": "seen", "msg_id": "…"},
@@ -263,7 +263,10 @@ within 30 days with a newer leaf → `pending_new_address` forced `ask`, else gu
 method is `tools/call`, the tool `redeem_invite` or `request_contact`, `params.arguments.card`
 decodes, its certificate byte-equals the chain's leaf, the endpoint is not this node's own
 (`guest endpoint is this node's own address`, §14.5), `address_claim` names a pin at that endpoint
-or a former endpoint within 30 days; root pinned and blocked → guest; superseded → guest; conflict →
+or a former endpoint within 30 days; root pinned and blocked → guest; superseded → guest (a guest's
+answer carries `why`, one of `unknown root`, `blocked` and `superseded leaf`, and `demote`, true for
+the last two: a pin for the root stands and the caller is a guest anyway, so a host resolves it to no
+contact row — the host reads `demote`, never the words); conflict →
 `envelope_invalid`; another endpoint → `ask` pending or `auto` re-pin with the former endpoint recorded
 and a `new_address` event; newer at the pinned endpoint → `pin_update` and a `renewal` event; then
 `pending_out` allows `tools/list` and `contact_accepted`/`contact_rejected` at tier `pending` (a listing

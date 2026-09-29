@@ -221,6 +221,22 @@ export default function envelopes({ add, expect }, f) {
   add('decide on a stranger at an endpoint another root left exactly at the end of the claim window', 'decide', claimed(CLAIM));
   expect('decide on a stranger at an endpoint another root left exactly at the end of the claim window', { code: 'ok', address_claim: null });
 
+  // CW-11 — why a caller proven by a chain is a guest, and whether a pin stands behind it. The node
+  // demoted a caller by matching the words of `why` ('blocked', 'superseded leaf') and the cloud
+  // re-derived the same fact from its rows; the core answers it as a member, `demote`, and `why` is
+  // one of the three words contract/contract.json's GuestWhy fixes. No case reached `blocked` or
+  // `superseded leaf` before these, so a rewording of either would have gone unseen.
+  const elsewhere = { ...node, endpoint: 'https://bharat.example/mcp' };
+  const pinnedNewer = b64url(buildLeaf({ cn: 'Alina Rao', rootCn: 'Alina Rao', root: rootKey, hostKey, endpoint: ENDPOINT, notBefore: new Date('2026-09-10T00:00:00Z'), notAfter: new Date('2027-09-10T00:00:00Z'), label: 'parity/cw11/newer' }));
+  for (const [why, pins, demote] of [
+    ['unknown root', [], false],
+    ['blocked', [{ ...pinned[0], state: 'blocked' }], true],
+    ['superseded leaf', [{ ...pinned[0], leaf: pinnedNewer }], true],
+  ]) {
+    add(`decide on a caller proven by a chain who is a guest: ${why}`, 'decide', { now, envelope: asking, node: { ...elsewhere, pins } });
+    expect(`decide on a caller proven by a chain who is a guest: ${why}`, { code: 'ok', tier: 'guest', why, demote, address_claim: null });
+  }
+
   // B4 — follow_renewed.
   add('follow_renewed on an answer that is some other code', 'follow_renewed', follow({ code: 'something_else' }));
   add('follow_renewed on a certificate_renewed answer with no data at all', 'follow_renewed', follow({ code: 'certificate_renewed' }));

@@ -269,14 +269,18 @@
       "additionalProperties": false,
       "description": "What the host knows, handed to `decide` whole. Every list absent is empty; `accept_new_hosts` absent is `auto`, and anything but `auto` or `ask` is refused (`node.accept_new_hosts is auto or ask`). Read member by member in this order, a held key as `kid`, `leaf`, `pkcs8`, `current`, a pin as `root`, `endpoint`, `leaf`, `state`, `leaf_fingerprint`, a tombstone as `root`, `leaf`, `at`, a former endpoint as `root`, `endpoint`, `at`: a member absent, null or of the wrong type where one is required is `bad_request` naming it by its path (`node.endpoint is required`, `node.keys[0].kid is required`, `node.seen[1] is required`). A pin's `state` is read as a string and not held to its enum."
     },
+    "GuestWhy": {
+      "description": "Why a caller proven by a chain is a guest: its root is not pinned (`unknown root`), its pin is blocked (`blocked`), or the leaf it signed with is older than the pinned one (`superseded leaf`, §14.3). The words are the seed's `receive()`'s.",
+      "enum": ["unknown root", "blocked", "superseded leaf"]
+    },
     "Decision": {
-      "description": "What `decide` decided. `code` says which shape this is.",
+      "description": "What `decide` decided. `code` says which shape this is, and for `ok`, `tier`: a guest is answered with the reason it is one and whether a pin stands behind it.",
       "oneOf": [
         {
           "type": "object",
           "properties": {
             "code": { "const": "ok" },
-            "tier": { "enum": ["contact", "pending", "guest", "pending_new_address"] },
+            "tier": { "enum": ["contact", "pending", "pending_new_address"] },
             "root": { "$ref": "#/$defs/Fingerprint" },
             "endpoint": { "type": "string" },
             "method": { "enum": ["tools/call", "tools/list"] },
@@ -284,12 +288,29 @@
             "params": true,
             "form": { "$ref": "#/$defs/Form" },
             "leaf": { "$ref": "#/$defs/CertDer" },
-            "why": { "type": "string" },
-            "address_claim": { "anyOf": [{ "$ref": "#/$defs/Fingerprint" }, { "type": "null" }] },
             "forced": { "const": "tombstone" },
             "decision": { "const": "ask" }
           },
           "required": ["code", "tier", "root", "endpoint", "method", "tool", "params", "form", "leaf"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "code": { "const": "ok" },
+            "tier": { "const": "guest" },
+            "root": { "$ref": "#/$defs/Fingerprint" },
+            "endpoint": { "type": "string" },
+            "method": { "const": "tools/call" },
+            "tool": { "enum": ["redeem_invite", "request_contact"] },
+            "params": true,
+            "form": { "const": "chain" },
+            "leaf": { "$ref": "#/$defs/CertDer" },
+            "why": { "$ref": "#/$defs/GuestWhy" },
+            "demote": { "type": "boolean", "description": "True exactly when a pin for `root` stands in the node state and the caller is served as a guest anyway (`why` `blocked` or `superseded leaf`): nothing the call does is the contact's, and a host resolves the caller to no contact row. A host reads this member, never the words of `why`." },
+            "address_claim": { "anyOf": [{ "$ref": "#/$defs/Fingerprint" }, { "type": "null" }] }
+          },
+          "required": ["code", "tier", "root", "endpoint", "method", "tool", "params", "form", "leaf", "why", "demote", "address_claim"],
           "additionalProperties": false
         },
         {

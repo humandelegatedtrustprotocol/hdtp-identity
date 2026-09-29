@@ -1,6 +1,6 @@
 // §2 of the contract: certificates — build, assemble, parse, the profile, chains, and the address rules.
 import { b64url } from '../../../pact-protocol/vectors/lib/keys.mjs';
-import { buildRoot } from '../../../pact-protocol/vectors/lib/x509.mjs';
+import { buildRoot, parse as seedParse, profileError as seedProfileError } from '../../../pact-protocol/vectors/lib/x509.mjs';
 import { ecdsaTwin, ecdsaIsLowS, read as derRead, children as derChildren, seq, tlv } from '../../../pact-protocol/vectors/lib/der.mjs';
 import { signDetached } from '../../../pact-protocol/vectors/lib/hpke.mjs';
 import { bharat, BORN } from '../cast.mjs';
@@ -318,4 +318,21 @@ export default function certificates({ add, expect }, f) {
   expect('validate_chain of a leaf whose Ed25519 key is not a point', { ok: false, rule: 1, reason: 'Ed25519 key is not a point' });
   add('parse_certificate of a leaf whose Ed25519 key is not a point', 'parse_certificate', { der: notAPointLeaf });
   expect('parse_certificate of a leaf whose Ed25519 key is not a point', { error: 'parse', why: 'Ed25519 key is not a point' });
+
+  // A CA certificate is judged as a root only when it is also self-issued, and otherwise as a leaf
+  // (contract/contract.json `Certificate`): the Go port judged every CA as a root, so a CA-flagged
+  // leaf under another name was 'root extensions are not exactly the profile' there and 'leaf
+  // basicConstraints' in the core (T17). Built by the seed, whose `buildLeaf` still takes the CA
+  // flag no port's boundary does; the verdict expected is the seed's own judge, under the contract's
+  // rule, so it is neither port's answer. Both sides of the rule: another name, and its own.
+  for (const [what, o] of [
+    ['whose issuer is not its subject', { cn: 'Alina Rao (host)', cA: true, label: 'parity/ca-leaf' }],
+    ['whose issuer is its subject', { cA: true, label: 'parity/ca-leaf-self' }],
+  ]) {
+    const der = alinaLeaf(o);
+    const c = seedParse(Buffer.from(der, 'base64url'));
+    const as = c.issuer === c.subject && c.ca ? 'root' : 'leaf';
+    add(`parse_certificate of a CA certificate ${what}`, 'parse_certificate', { der });
+    expect(`parse_certificate of a CA certificate ${what}`, { kind: 'other', ca: true, profile_error: seedProfileError(c, as) });
+  }
 }

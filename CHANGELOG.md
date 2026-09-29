@@ -288,6 +288,16 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 - **JS loader:** `call(name, null)` hands `null` to the core, which answers `args is a JSON object`
   as the Go port does; it used to be made `{}` (`js/index.mjs`, `js/worker.mjs`). Only `args` left
   out is `{}`. The parity case `args that are null` sends `null` for the first time (TC-2).
+- **A guest's answer says whether a pin stands behind it** (CW-11): `decide`'s guest answer carries
+  `demote`, true when the root is pinned and the caller is a guest anyway (the pin is blocked, or the
+  leaf is older than the pinned one), and its `why` is one of `unknown root`, `blocked` and
+  `superseded leaf` (`GuestWhy` in the contract). The node demoted a caller by matching those words
+  and the cloud re-derived the fact from its rows; both can read the member. The contract gives the
+  guest answer its own shape (`method` `tools/call`, a guest tool, `form` `chain`, and `why`,
+  `demote` and `address_claim` always present) and the other `ok` answers none of the three.
+- `parse_certificate` judges a certificate that is neither a root nor a leaf as a root only when it is
+  a CA and self-issued, as the contract says and the core did; the Go port judged every CA as a root,
+  so a CA-flagged leaf under another name got a root's refusal there and a leaf's in the core (T17).
 
 ## 0.4.1 — 2026-09-28
 
