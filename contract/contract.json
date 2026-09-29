@@ -1644,7 +1644,7 @@
         "required": ["result", "effects"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "parse"],
+      "errors": ["bad_request", "parse", "unsupported"],
       "notes": "§5.1 below."
     },
     "vault_seal": {

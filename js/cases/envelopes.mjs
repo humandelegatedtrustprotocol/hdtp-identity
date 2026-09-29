@@ -496,4 +496,19 @@ export default function envelopes({ add, expect }, f) {
   const craftedNode = { ...node, chain: [b64url(craftedLeaf), rootDer], keys: [{ kid: fingerprint(craftedPub), leaf: b64url(craftedLeaf), pkcs8: f.p256Pkcs8, current: true }] };
   add('decide on a call sealed to the empty seed\'s key, held beside a P-256 key', 'decide', { now, envelope: toCrafted, node: craftedNode });
   expect('decide on a call sealed to the empty seed\'s key, held beside a P-256 key', { code: 'envelope_invalid', why: 'does not open' });
+
+  // A held or pinned leaf carrying a key outside the profile, inside the node state and the pins: the
+  // key is refused where it is read, `unsupported`, as at the top level. The Go port read the leaf and
+  // made its error `parse` (R12, T2). What a held PKCS #8 key or a chain-form pin that does not read is
+  // answered is R23's and T10's (cluster H), not this.
+  const heldKey = node.keys[0];
+  for (const [kind, { oid }] of Object.entries(f.foreign)) {
+    const leaf = f.foreignLeaf(kind), refused = { error: 'unsupported', why: `unsupported key type ${oid}` };
+    add(`decide with a held leaf holding a key outside the profile: ${kind}`, 'decide', { now, envelope: sealed, node: { ...node, keys: [{ ...heldKey, leaf }] } });
+    expect(`decide with a held leaf holding a key outside the profile: ${kind}`, refused);
+    add(`decide with a pinned leaf holding a key outside the profile: ${kind}`, 'decide', { now, envelope: sealed, node: { ...node, pins: [{ ...pinned[0], leaf }] } });
+    expect(`decide with a pinned leaf holding a key outside the profile: ${kind}`, refused);
+    add(`open_result in the leaf form, with a pin holding a key outside the profile: ${kind}`, 'open_result', open(leafForm, { pins: [{ root: rootFp, endpoint: ENDPOINT, leaf, state: 'active' }] }));
+    expect(`open_result in the leaf form, with a pin holding a key outside the profile: ${kind}`, refused);
+  }
 }
