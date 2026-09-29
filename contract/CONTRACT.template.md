@@ -64,6 +64,14 @@ the tables is `contract/CONTRACT.template.md` and is written by hand.
   `{"error": "bad_request", "why": "args: a string holds half of a UTF-16 surrogate pair"}` from
   every function, before the arguments are read: one JSON parser refuses such text and another reads
   it as U+FFFD, and a port must not answer by its parser's choice.
+- **So is what one JSON parser refuses and another reads**, next: a number that is infinite as a
+  double (`1e400`) answers `{"error": "bad_request", "why": "args: a number is outside the range of a
+  double"}`, and arrays and objects nested more than 127 deep, the arguments object counted, `args:
+  nested more than 127 deep` — whichever comes first in the text. JSON that travels as text — an
+  envelope's header and body, a manifest, a line of `messages.jsonl`, a vault's plaintext — holding
+  either is text that is not JSON, answered as each function answers that. RFC 8785, in which a
+  header is written, has no infinite number. Arguments that do not parse at all answer `args is a
+  JSON object`.
 - **`version` is the one exception.** It describes the port, not a rule, so its answer differs and
   nothing compares it.
 

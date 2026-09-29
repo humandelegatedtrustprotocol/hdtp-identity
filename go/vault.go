@@ -360,8 +360,10 @@ func VaultOpenDoc(passphrase string, doc map[string]any) ([]byte, error) {
 	if err != nil {
 		return nil, errVault
 	}
-	// A plaintext that is not JSON is damage, as the Rust core has it — not an earlier wallet's.
-	if !json.Valid(pt) {
+	// A plaintext that is not JSON is damage, as the Rust core has it — not an earlier wallet's. JSON
+	// is what the core's parser reads: one holding a number infinite as a double, or nested past its
+	// limit, is damage there too.
+	if !json.Valid(pt) || jsonLimit(pt) != "" {
 		return nil, errVault
 	}
 	if plaintextV(pt) != PlaintextV {

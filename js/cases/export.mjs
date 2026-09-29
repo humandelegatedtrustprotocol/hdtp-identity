@@ -123,6 +123,21 @@ export default function exportCases({ add, expect }, f) {
   add('export_read_messages: a line with a lone low surrogate escape', 'export_read_messages', { lines: [lineWith('a\\udc00b')], ...lineNames });
   expect('export_read_messages: a line with a lone low surrogate escape', { error: 'bad_request', why: 'messages.jsonl: line 1: not a JSON object' });
   add('export_read_messages: a line with a surrogate pair', 'export_read_messages', { lines: [lineWith('\\ud83d\\ude00 \\\\ud800')], ...lineNames });
+  // And what serde refuses and encoding/json read (R40, S3-2): a number infinite as a double, and
+  // containers nested more than 127 deep. The Go port read the manifest and named a member; it is not
+  // JSON to either port now. 127 deep reads, and is refused for what it holds.
+  const nested = (n) => '['.repeat(n) + '1' + ']'.repeat(n);
+  const notJSON = { error: 'bad_request', why: 'manifest.json: not a JSON object' };
+  add('export_read_end: a manifest with a count past the largest double', 'export_read_end', end(manifestWith('x').replace('"messages":0', '"messages":1e400')));
+  expect('export_read_end: a manifest with a count past the largest double', notJSON);
+  add('export_read_end: a manifest nested 128 deep', 'export_read_end', end(manifestWith('x').replace('"tool":"t"', `"tool":${nested(127)}`)));
+  expect('export_read_end: a manifest nested 128 deep', notJSON);
+  add('export_read_end: a manifest nested 127 deep', 'export_read_end', end(manifestWith('x').replace('"tool":"t"', `"tool":${nested(126)}`)));
+  const lineNotJSON = { error: 'bad_request', why: 'messages.jsonl: line 1: not a JSON object' };
+  add('export_read_messages: a line with a number past the largest double', 'export_read_messages', { lines: [lineWith('x').replace('"attachments":[]', '"attachments":[1e400]')], ...lineNames });
+  expect('export_read_messages: a line with a number past the largest double', lineNotJSON);
+  add('export_read_messages: a line nested 128 deep', 'export_read_messages', { lines: [lineWith('x').replace('"attachments":[]', `"attachments":${nested(127)}`)], ...lineNames });
+  expect('export_read_messages: a line nested 128 deep', lineNotJSON);
 
   // export_read_end reads its lists straight from the argument text (0.3.2): every shape a list can
   // take, answered as the parsed arguments were.
