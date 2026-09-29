@@ -22,6 +22,11 @@ func answer(line []byte) []byte {
 	if err := json.Unmarshal(line, &r); err != nil {
 		return []byte(`{"error":"parse","why":"request is not {\"fn\", \"args\"}"}`)
 	}
+	// A request with no `args` means none, `{}`, as the JS loader sends it; Call itself refuses
+	// arguments with no text, as the core's `call` does.
+	if r.Args == nil {
+		r.Args = json.RawMessage(`{}`)
+	}
 	return pact.Call(r.Fn, r.Args)
 }
 

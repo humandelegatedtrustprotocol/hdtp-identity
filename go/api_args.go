@@ -19,13 +19,12 @@ import (
 
 type args map[string]json.RawMessage
 
-// readArgs is the arguments `Call` was handed, as an object: none at all is `{}`.
+// readArgs is the arguments `Call` was handed, as an object (Call has refused anything that does not
+// begin as one).
 func readArgs(raw json.RawMessage) (args, json.RawMessage) {
 	a := args{}
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &a); err != nil {
-			return nil, fail(codeArgs, "args is a JSON object")
-		}
+	if err := json.Unmarshal(raw, &a); err != nil {
+		return nil, fail(codeArgs, "args is a JSON object")
 	}
 	return a, nil
 }
