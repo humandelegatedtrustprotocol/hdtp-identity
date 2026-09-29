@@ -10,7 +10,7 @@
     "how": "sh js/reproduce.sh"
   },
   "source": {
-    "inputs_sha256": "c6085a4d35a0aa402a9f54f9f68be529e05506a9c215411c813eefa7c209a378",
+    "inputs_sha256": "c06d85f4fe60fbbb769e80451dc305b287e1ec32155707a9e0e44f67aaf57612",
     "files": 53,
     "paths": [
       "crates/pact-identity",
@@ -43,8 +43,8 @@
       "bytes": 13413
     },
     "pkg-web/pact_identity_wasm_bg.wasm": {
-      "sha256": "5f92cb75e102a370e9e257aeb9cec43660fa043c98169bd531113b722e269615",
-      "bytes": 837231
+      "sha256": "afe7a5710ee5c2a077ef1439796a74c2982290a5c50640e375f5a20d7862fb3a",
+      "bytes": 840750
     },
     "pkg-web/pact_identity_wasm_bg.wasm.d.ts": {
       "sha256": "73433108b7f9e722ba01bba916f3b5a2294d42ce7ab53ae1fa7630186df89bf2",
@@ -67,8 +67,8 @@
       "bytes": 10102
     },
     "pkg-node/pact_identity_wasm_bg.wasm": {
-      "sha256": "5f92cb75e102a370e9e257aeb9cec43660fa043c98169bd531113b722e269615",
-      "bytes": 837231
+      "sha256": "afe7a5710ee5c2a077ef1439796a74c2982290a5c50640e375f5a20d7862fb3a",
+      "bytes": 840750
     },
     "pkg-node/pact_identity_wasm_bg.wasm.d.ts": {
       "sha256": "73433108b7f9e722ba01bba916f3b5a2294d42ce7ab53ae1fa7630186df89bf2",
