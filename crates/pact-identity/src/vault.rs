@@ -396,6 +396,32 @@ pub fn open(passphrase: &str, vault: &Value) -> Result<Value> {
 /// Two documents, as §9 keeps them: the `vault` is the root and nothing else, and the `record`
 /// holds the ledger this reads and the entry this answers is appended to. A vault carrying a
 /// ledger or contacts was written by an earlier wallet and is refused, not read around.
+/// SPEC §2.2's challenge: `PACT root proof v1` and a newline, before 32 random bytes, so that proving
+/// possession of the root key can never be made to sign a certificate.
+const ROOT_PROOF: &[u8] = b"PACT root proof v1\n";
+
+/// SPEC §2.2, before any certificate is issued: the vault's root key is the root the identity is known
+/// by; the root certificate parses and is that key's; and the key signs a challenge that verifies under
+/// the certificate's key. `wallet_issue` signed with whatever key sat beside the fingerprint, and a vault
+/// entry holding another key's PKCS #8 got a leaf that failed chain rule 3, in both ports (TC-8).
+/// Answers the root certificate, for the chain the wallet validates before it returns one.
+fn prove_root(root: &Value, key: &PrivateKey, fingerprint: &str) -> Result<crate::x509::Cert> {
+    let public = key.public();
+    if public.fingerprint() != fingerprint {
+        return err("bad_request", "the vault's root key is not the root it is filed under");
+    }
+    let cert = crate::x509::parse(&from_b64u(root.get("cert").and_then(|c| c.as_str()).unwrap_or(""))?)?;
+    if cert.spki != public.spki() {
+        return err("bad_request", "the vault's root certificate is not its key's");
+    }
+    let mut challenge = ROOT_PROOF.to_vec();
+    challenge.extend_from_slice(&crate::util::random(32)?);
+    if !cert.public_key.verify(&challenge, &key.sign(&challenge)) {
+        return err("bad_request", "the vault's root key does not sign for its certificate");
+    }
+    Ok(cert)
+}
+
 pub fn wallet_issue(
     vault: &Value,
     record: &Value,
@@ -432,6 +458,7 @@ pub fn wallet_issue(
         return err("bad_request", "this root is held on a card: wallet_issue signs only with a key the vault holds");
     };
     let root_key = PrivateKey::from_pkcs8(&Zeroizing::new(from_b64u(pkcs8)?))?;
+    let root_cert = prove_root(root, &root_key, root_fingerprint)?;
     let root_cn = root.get("cn").and_then(|c| c.as_str()).unwrap_or("");
     let request = csr::check(csr_der, &root_spkis)?;
     // The ledger's rules, in the one place they are written (ledger.rs): the record was read whole
@@ -450,6 +477,13 @@ pub fn wallet_issue(
     }
     let previous = facts.previous_not_before;
     let issued = csr::issue(&request, root_cn, &root_key, now, previous, valid_days)?;
+    // §2.2: a chain the wallet assembled is validated against the expected root and endpoint before it
+    // is returned — a chain that fails is the wallet's defect, and returned it would be the host's to find.
+    if let crate::x509::ChainResult::Refused { rule, reason } =
+        crate::x509::validate_chain(&[issued.der.clone(), root_cert.der.clone()], now, Some(root_fingerprint), Some(&request.endpoint))
+    {
+        return err("bad_request", format!("the chain it issued does not validate: chain rule {rule}: {reason}"));
+    }
     // The endpoint and the dates: what every rule above reads. Never the leaf, which is the host's
     // to serve and grants nothing (SPEC §9).
     let entry = json!({
@@ -565,6 +599,55 @@ mod tests {
         assert_eq!(e.why, "this vault was written by an earlier wallet and is not opened: there is no conversion");
         // The control: a wrong passphrase on that same document is still the one message.
         assert_eq!(open("wrong", &old).unwrap_err().why, "the passphrase is wrong or the vault is damaged");
+    }
+
+    /// SPEC §2.2 on the software path (TC-8): `wallet_issue` signs only with a key that is the root the
+    /// identity is known by, whose certificate is that key's and signs a challenge under it, and
+    /// returns only a chain that validates to that root at the endpoint. It signed with whatever key sat
+    /// beside the fingerprint, and a leaf that failed chain rule 3 came back.
+    #[test]
+    fn a_vault_root_proves_itself_before_it_signs() {
+        let root = PrivateKey::from_seed(Alg::Ed25519, &seed("vault/root")).unwrap();
+        let other = PrivateKey::from_seed(Alg::Ed25519, &seed("vault/other")).unwrap();
+        let now = 1_789_214_400;
+        let cert = x509::build_root("Alina Rao", &root, now, &x509::serial_of("vault/root")).unwrap();
+        let other_cert = x509::build_root("Mallory", &other, now, &x509::serial_of("vault/other")).unwrap();
+        let fp = root.public().fingerprint();
+        let endpoint = "https://agent.alina.example/mcp";
+        // A certificate of the root's own key that is no root: a leaf, under the root.
+        let (issuer, subject) = (root.public(), root.public());
+        let no_root = x509::build_leaf(
+            &x509::LeafSpec {
+                cn: "Alina Rao",
+                root_cn: "Alina Rao",
+                issuer: &issuer,
+                host_key: &subject,
+                uris: vec![endpoint.into()],
+                dns_name: None,
+                not_before: now - 3600,
+                not_after: now + 86_400,
+                serial: x509::serial_of("vault/no-root"),
+                ca: false,
+                usage: None,
+                aki: None,
+            },
+            &root,
+        )
+        .unwrap();
+        let vault = |key: &PrivateKey, cert: &[u8]| json!({"v": 2, "roots": [{"fingerprint": fp, "cn": "Alina Rao", "pkcs8": b64u(&key.to_pkcs8()), "cert": b64u(cert), "created": format_rfc3339(now)}]});
+        let record = json!({"v": 2, "ledger": [], "contacts": []});
+        let host = PrivateKey::from_seed(Alg::Ed25519, &seed("vault/host")).unwrap();
+        let req = csr::csr_new("Alina Rao", &host, endpoint, None).unwrap();
+        let issue = |v: &Value| wallet_issue(v, &record, &fp, &req, now, 365, false);
+        assert_eq!(issue(&vault(&other, &cert)).unwrap_err().why, "the vault's root key is not the root it is filed under");
+        assert_eq!(issue(&vault(&root, &other_cert)).unwrap_err().why, "the vault's root certificate is not its key's");
+        let refused = issue(&vault(&root, &no_root)).unwrap_err();
+        assert!(refused.why.starts_with("the chain it issued does not validate: chain rule "), "{}", refused.why);
+        assert_eq!(ROOT_PROOF, b"PACT root proof v1\n");
+        // The control: the root, its certificate, and a chain that validates to it at the endpoint.
+        let out = issue(&vault(&root, &cert)).unwrap();
+        let leaf = from_b64u(out["der"].as_str().unwrap()).unwrap();
+        assert!(matches!(x509::validate_chain(&[leaf, cert], now, Some(&fp), Some(endpoint)), x509::ChainResult::Ok(_)));
     }
 
     #[test]

@@ -44,10 +44,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   library holds of it (TC-7).
 - `js/musts.mjs` prints the MUSTs held by one port's tests alone and fails one that says neither why
   nor what it leaves unheld; a `gap` names that part, and is printed and counted (TC-8). §2.2's
-  software path is a named gap: `wallet_issue` checks none of the three conditions in either port,
-  and returns a leaf that fails chain rule 3 for a vault entry holding another key (measured). 2.2#1
-  and 2.2#4 no longer cite Go tests that do not test them, and 2.2#3 no longer says the library
-  checks something in the challenge's place.
+  software path was a named gap until `wallet_issue` checked it (below). 2.2#1 and 2.2#4 no longer
+  cite Go tests that do not test them.
 - The four Appendix B readers here (`js/seed.mjs`, the CLI's `pact vectors check`, the core's
   vector tests, the Go port's) are held to one list of cases, `js/appendix-b-reader.json`, refusals
   word for word (TC-12). The core tests' reader found the end marker from the start of the file and
@@ -355,6 +353,19 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   and `open_result` case answered byte for byte as before the change). The answer is `decide`'s less
   what is the call's; its effects are the pin's moves (`PinEffect`, the contract's `Effect` less
   `seen`). Typed: `envelope::decide_chain` (Rust), `DecideChain` (Go).
+- **`wallet_issue` proves the root before it signs** (SPEC §2.2; TC-8's behaviour half), in both
+  ports: the vault's root key is the root it is filed under (`the vault's root key is not the root it
+  is filed under`); the entry's certificate reads and holds that key (`the vault's root certificate is
+  not its key's`); the key signs `PACT root proof v1`, a newline and 32 random bytes, verified under
+  the certificate's key; and the chain of the leaf and that certificate is validated against the root
+  and the endpoint before it is answered (`the chain it issued does not validate: …`). Both ports
+  signed with whatever key sat beside the fingerprint, and a vault entry holding another key's PKCS #8
+  got a leaf that failed chain rule 3. MUSTs 2.2#1, #2 and #4 are held on the software path, by a
+  test in each port.
+- **`null` is absent in a sealed body's members too** (CONTRACT §0): `seal_request`'s `params: null`
+  is `{}`, and `seal_result`'s `result: null` or `error: null` is no result or no error — alone, it is
+  refused (`a result carries exactly one of result and error`); beside the other, the other is sealed.
+  Both ports sealed a `null` as present.
 
 ## 0.4.1 — 2026-09-28
 

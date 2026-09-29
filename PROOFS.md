@@ -8,9 +8,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 case can be listed as proven that did not pass. The cases that fail today are listed apart, at the
 end, each with the finding it waits on.
 
-Specification: **2.2.4**. **88** normative sentences, **2457** cross-port parity cases over **54** guarded functions, and **0** known divergences that fail today and are listed apart, at the end.
+Specification: **2.2.4**. **88** normative sentences, **2465** cross-port parity cases over **54** guarded functions, and **0** known divergences that fail today and are listed apart, at the end.
 
-Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 2.2.4): **4914** answers, of which **0** do not hold to the shape it declares — **0** of them in a known divergence. Of **127** declared error codes, **127** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 2.2.4): **4930** answers, of which **0** do not hold to the shape it declares — **0** of them in a known divergence. Of **127** declared error codes, **127** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 88 normative sentences of the specification
 
@@ -40,10 +40,10 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 
 | # | The sentence | Held by |
 |---|---|---|
-| `2.2#1` | Before issuing any certificate, a wallet MUST establish that the root it is about to sign with is the root the identity already has. | `rust:a_vault_entry_that_disagrees_with_its_own_certificate_signs_nothing` — *and a named gap: a part nothing holds (js/musts.json)* |
-| `2.2#2` | A wallet MUST refuse to sign unless all three hold: | `rust:a_card_whose_certificate_and_key_disagree_gets_no_leaf`, `rust:another_card_signs_nothing_for_this_identity`, `rust:a_card_that_swaps_its_key_after_the_check_signs_nothing_that_is_kept` — *and a named gap: a part nothing holds (js/musts.json)* |
+| `2.2#1` | Before issuing any certificate, a wallet MUST establish that the root it is about to sign with is the root the identity already has. | `rust:a_vault_entry_that_disagrees_with_its_own_certificate_signs_nothing`, `rust:a_vault_root_proves_itself_before_it_signs`, `go:TestWalletIssueProvesTheRootBeforeItSigns` |
+| `2.2#2` | A wallet MUST refuse to sign unless all three hold: | `rust:a_card_whose_certificate_and_key_disagree_gets_no_leaf`, `rust:another_card_signs_nothing_for_this_identity`, `rust:a_card_that_swaps_its_key_after_the_check_signs_nothing_that_is_kept`, `rust:a_vault_root_proves_itself_before_it_signs`, `go:TestWalletIssueProvesTheRootBeforeItSigns` |
 | `2.2#3` | The challenge MUST be domain-separated from certificate bytes — the ASCII `PACT root proof v1` followed by a newline and at least 32 random bytes — so that proving possession can never be made to sign a certificate. | *wallet, by declaration* |
-| `2.2#4` | A wallet MUST validate a chain it has assembled (§14.2) against the expected root and endpoint before returning it. | `rust:a_leaf_the_card_signed_validates_to_that_root_at_its_endpoint` — *and a named gap: a part nothing holds (js/musts.json)* |
+| `2.2#4` | A wallet MUST validate a chain it has assembled (§14.2) against the expected root and endpoint before returning it. | `rust:a_leaf_the_card_signed_validates_to_that_root_at_its_endpoint`, `rust:a_vault_root_proves_itself_before_it_signs`, `go:TestWalletIssueProvesTheRootBeforeItSigns` |
 | `2.2#5` | **A root certificate is issued once.** A wallet MUST NOT rebuild a root certificate for an identity that already has one. | `rust:a_root_the_card_signed_is_a_root` |
 
 ### 3. Contact cards (vCard)
@@ -203,7 +203,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 2457 cross-port parity cases
+## The 2465 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -211,7 +211,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **2457** cases (**1149** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **54** of **54** functions compared whole on success.
+At the run that generated this file: **2465** cases (**1149** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **54** of **54** functions compared whole on success.
 
 ### `address_guard` — 50 cases · whole on success
 
@@ -2213,7 +2213,7 @@ At the run that generated this file: **2457** cases (**1149** of the run's cases
 - generated · root_tbs · not_before absent, spki 7
 - generated · root_tbs · not_before absent, serial 7
 
-### `seal_request` — 81 cases · whole on success
+### `seal_request` — 82 cases · whole on success
 
 - seal_request with no recipient
 - seal_request with a form nobody has
@@ -2229,6 +2229,7 @@ At the run that generated this file: **2457** cases (**1149** of the run's cases
 - seal_request with an empty method and an empty cty
 - seal_request with ts -0
 - seal_request with exp -0
+- seal_request with params null
 - seal_request with neither msg_id nor sender_chain
 - seal_request with nothing to work from
 - seal_request in the chain form with no sender_chain
@@ -2297,11 +2298,14 @@ At the run that generated this file: **2457** cases (**1149** of the run's cases
 - generated · seal_request · ts absent, method 7
 - generated · seal_request · ts absent, cty 7
 
-### `seal_result` — 60 cases · whole on success
+### `seal_result` — 63 cases · whole on success
 
 - seal_result
 - seal_result with no recipient
 - seal_result with neither a result nor an error
+- seal_result with a result that is null
+- seal_result with a null result beside an error
+- seal_result with a null error beside a result
 - seal_result with ts 0 and exp 0
 - seal_result with a chain of one and neither a result nor an error
 - seal_result with a chain and neither a result nor an error
@@ -2720,7 +2724,7 @@ At the run that generated this file: **2457** cases (**1149** of the run's cases
 - version with a number past the largest double before containers nested 129 deep
 - version with containers nested 129 deep before a number past the largest double
 
-### `wallet_issue` — 115 cases · whole on success
+### `wallet_issue` — 119 cases · whole on success
 
 - wallet_issue
 - wallet_issue from a vault that carries a ledger
@@ -2731,6 +2735,10 @@ At the run that generated this file: **2457** cases (**1149** of the run's cases
 - wallet_issue for a second address
 - wallet_issue as a move
 - wallet_issue with an empty vault
+- wallet_issue from a vault entry holding another key than its fingerprint names
+- wallet_issue from a vault entry whose certificate is another root's
+- wallet_issue from a vault entry whose certificate does not read
+- wallet_issue from a vault entry whose certificate is its key's and is no root
 - wallet_issue with no root_fingerprint
 - wallet_issue with a root_fingerprint that is not a string
 - wallet_issue with no csr

@@ -4,6 +4,7 @@ package pactidentity
 // to a key, AES-256-GCM over the plaintext, the document's own header as AAD.
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -657,6 +658,44 @@ type WalletIssued struct {
 // unless the caller says this is a move, and notBefore monotonic over the ledger. Two documents, as
 // §9 keeps them: the vault is the root and nothing else, and the record holds the ledger this
 // reads and the entry this answers is appended to.
+// rootProof is SPEC §2.2's challenge: `PACT root proof v1` and a newline, before 32 random bytes, so
+// that proving possession of the root key can never be made to sign a certificate.
+const rootProof = "PACT root proof v1\n"
+
+// proveRoot is SPEC §2.2, before any certificate is issued: the vault's root key is the root the
+// identity is known by; the root certificate parses and is that key's; and the key signs a challenge
+// that verifies under the certificate's key. WalletIssue signed with whatever key sat beside the
+// fingerprint, and a vault entry holding another key's PKCS #8 got a leaf that failed chain rule 3, in
+// both ports (TC-8). Answers the root certificate, for the chain WalletIssue validates before it
+// returns one. As the core's prove_root, in its words.
+func proveRoot(root *VaultRoot, key *PrivateKey, fingerprint string) (*Cert, error) {
+	pub := key.Public()
+	if Fingerprint(pub.SPKI) != fingerprint {
+		return nil, errArg("the vault's root key is not the root it is filed under")
+	}
+	der, err := DecodeB64url(root.Cert)
+	if err != nil {
+		return nil, err
+	}
+	cert, err := Parse(der)
+	if err != nil {
+		return nil, classed(err)
+	}
+	if !bytes.Equal(cert.SPKI, pub.SPKI) {
+		return nil, errArg("the vault's root certificate is not its key's")
+	}
+	challenge := make([]byte, len(rootProof)+32)
+	copy(challenge, rootProof)
+	if _, err := rand.Read(challenge[len(rootProof):]); err != nil {
+		return nil, err
+	}
+	sig, err := SignDetached(key, challenge)
+	if err != nil || !VerifyDetached(cert.PublicKey, challenge, sig) {
+		return nil, errArg("the vault's root key does not sign for its certificate")
+	}
+	return cert, nil
+}
+
 func WalletIssue(plain VaultPlaintext, record RecordPlaintext, rootFingerprint string, csr []byte, now time.Time, validDays int, move bool) (*WalletIssued, error) {
 	var root *VaultRoot
 	rootSPKIs := make([][]byte, 0, len(plain.Roots))
@@ -696,6 +735,10 @@ func WalletIssue(plain VaultPlaintext, record RecordPlaintext, rootFingerprint s
 	if err != nil {
 		return nil, classed(err)
 	}
+	rootCert, err := proveRoot(root, rootKey, rootFingerprint)
+	if err != nil {
+		return nil, err
+	}
 	info := CSRCheck(csr, rootSPKIs)
 	if !info.OK {
 		// With its class, as the core's `csr::check` propagates it: a key outside the profile is
@@ -715,6 +758,12 @@ func WalletIssue(plain VaultPlaintext, record RecordPlaintext, rootFingerprint s
 	issued, err := IssueFromCSR(csr, IssueOpts{RootCN: root.CN, RootKey: rootKey, RootSPKIs: rootSPKIs, Now: now, PreviousNotBefore: previous, ValidDays: validDays})
 	if err != nil {
 		return nil, err
+	}
+	// §2.2: a chain the wallet assembled is validated against the expected root and endpoint before it
+	// is returned — a chain that fails is the wallet's defect, and returned it would be the host's to find.
+	vr := ValidateChain([][]byte{issued.DER, rootCert.DER}, ChainOpts{Now: now, ExpectedRoot: rootFingerprint, ExpectedEndpoint: issued.Endpoint, rootGiven: true, endpointGiven: true})
+	if !vr.OK {
+		return nil, errArg(fmt.Sprintf("the chain it issued does not validate: chain rule %d: %s", vr.Rule, vr.Reason))
 	}
 	out := &WalletIssued{DER: issued.DER, NewHost: newHost, Entry: LedgerEntry{
 		Root: rootFingerprint, Endpoint: issued.Endpoint,

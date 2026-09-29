@@ -115,8 +115,9 @@ func callSealRequest(a args) json.RawMessage {
 		if method != nil {
 			o.Method = *method
 		}
-		// `params` absent is {} (the contract's note); present, it is sealed as given.
-		o.Params = a["params"]
+		// `params` absent or null is {} (the contract's note; CONTRACT §0: null is absent); present, it is
+		// sealed as given.
+		o.Params = a.present("params")
 		if o.Params == nil {
 			o.Params = json.RawMessage(`{}`)
 		}
@@ -148,8 +149,9 @@ func callSealResult(a args) json.RawMessage {
 		return failAs("parse", err)
 	}
 	o, err := sealArgs(a, pub, func(o *SealOpts) error {
-		// Present is present: `null` too is a result, as the core reads it.
-		o.Result, o.Error = a["result"], a["error"]
+		// Null is absent (CONTRACT §0): a null result alone is no result, and beside an error it is not a
+		// second one. Both ports sealed it as present.
+		o.Result, o.Error = a.present("result"), a.present("error")
 		return nil
 	}, nil)
 	if err != nil {
