@@ -444,7 +444,14 @@ export default function envelopes({ add, expect }, f) {
   // `ok` and reads -0 as 0, which pact-protocol PR #10 changes.
   const headerHolding = (member, text) => (t) => t.replace(member === 'ts' ? `"ts":${at(now)}` : `"exp":${at(now) + 600}`, `"${member}":${text}`);
   const typesRefused = { code: 'envelope_invalid', why: 'header member types' };
-  for (const [what, member, text] of [['a ts of -0', 'ts', '-0'], ['an exp of -0', 'exp', '-0'], ['a ts written with a fraction', 'ts', `${at(now)}.0`]]) {
+  // With them, the other spellings the seed now judges on their text (pact-protocol PR #10): an exponent
+  // and a number past 64 bits are no integer; past 2^53 and within 64 bits is one, judged by its time.
+  add('decide on an envelope whose header holds a ts past 2^53 and within 64 bits', 'decide', { now, envelope: callText('p-s3-1-big', '{}', { header: headerHolding('ts', '9223372036854775807') }), node: pinnedNode });
+  expect('decide on an envelope whose header holds a ts past 2^53 and within 64 bits', { code: 'envelope_invalid', why: 'outside the time window' });
+  for (const [what, member, text] of [
+    ['a ts of -0', 'ts', '-0'], ['an exp of -0', 'exp', '-0'], ['a ts written with a fraction', 'ts', `${at(now)}.0`],
+    ['a ts written with an exponent', 'ts', `${at(now) / 1e8}e8`], ['a ts past 64 bits', 'ts', '9223372036854775808'],
+  ]) {
     add(`decide on an envelope whose header holds ${what}`, 'decide', { now, envelope: callText(`p-s3-1-${member}`, '{}', { header: headerHolding(member, text) }), node: pinnedNode });
     expect(`decide on an envelope whose header holds ${what}`, typesRefused);
     const answer = sealText({ to: callerKey.pub, cty: 'application/pact-result+json', msgId: 'r-1', body: `{"result":{},"chain":${chainText}}`, header: headerHolding(member, text) });

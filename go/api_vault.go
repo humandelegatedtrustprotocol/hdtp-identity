@@ -126,16 +126,7 @@ func callWalletIssue(a args) json.RawMessage {
 	}
 	// A record with no `ledger` has no entry to read, and one with an empty ledger has read all of
 	// them: nil and empty stay apart, as the typed decode kept them.
-	var ledger []LedgerEntry
-	entries, has := record["ledger"].([]any)
-	if has {
-		ledger = make([]LedgerEntry, 0, len(entries))
-	}
-	for _, e := range entries {
-		o := e.(map[string]any)
-		text := func(k string) string { s, _ := o[k].(string); return s }
-		ledger = append(ledger, LedgerEntry{Root: text("root"), Endpoint: text("endpoint"), NotBefore: text("not_before"), NotAfter: text("not_after"), IssuedAt: text("issued_at"), Origin: text("origin")})
-	}
+	ledger := ledgerEntriesOf(record["ledger"])
 	issued, err := WalletIssue(vault, RecordPlaintext{V: PlaintextV, Ledger: ledger}, fingerprint, csr, now, days, moving)
 	if err != nil {
 		return failAs("bad_request", err)
