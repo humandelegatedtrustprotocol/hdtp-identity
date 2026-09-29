@@ -65,6 +65,9 @@ func headerJSON(suite, kid, msgID string, ts, exp int64, cty string) []byte {
 func proofMember(o SealOpts, signer *Signer) ([]byte, error) {
 	switch o.Form {
 	case "chain":
+		if o.SenderChain == nil {
+			return nil, errArg("the chain form needs sender_chain")
+		}
 		if len(o.SenderChain) != 2 {
 			return nil, errArg("sender_chain must be the leaf and the root")
 		}
@@ -119,8 +122,29 @@ func SealRequest(o SealOpts) (*Envelope, error) {
 	return sealRequest(o)
 }
 
+// headerIntMax is the largest integer a header carries as itself: 2^53 - 1, the core's
+// HEADER_INT_MAX. RFC 8785 writes a number as the double it is, so a TS of 9007199254740993 was
+// sealed as itself here, where Canonical wrote an int64 exactly, and as 9007199254740992 by the core.
+const headerIntMax = 1<<53 - 1
+
+// headerTimes holds a header's TS and Exp to the integers it carries as themselves, TS first, as the
+// core's header_times does: the one that is not is named.
+func headerTimes(ts, exp int64) error {
+	carried := func(n int64) bool { return n >= -headerIntMax && n <= headerIntMax }
+	if !carried(ts) {
+		return errArg("ts is an integer from -(2^53 - 1) to 2^53 - 1")
+	}
+	if !carried(exp) {
+		return errArg("exp is an integer from -(2^53 - 1) to 2^53 - 1")
+	}
+	return nil
+}
+
 // sealRequest seals exactly what it is given.
 func sealRequest(o SealOpts) (*Envelope, error) {
+	if err := headerTimes(o.TS, o.Exp); err != nil {
+		return nil, err
+	}
 	params, err := compactJSON(o.Params)
 	if err != nil {
 		return nil, errors.New("params is not JSON")
@@ -154,6 +178,9 @@ func SealResult(o SealOpts) (*Envelope, error) {
 // core's seal_result judges them: a chain of one beside no result was named for the result here and
 // for the chain there (R19).
 func sealResult(o SealOpts) (*Envelope, error) {
+	if err := headerTimes(o.TS, o.Exp); err != nil {
+		return nil, err
+	}
 	o.Cty = CtyResult
 	if err := needPrivate(o.Sender, "the sender's key"); err != nil {
 		return nil, err

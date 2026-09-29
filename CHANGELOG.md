@@ -367,6 +367,16 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   is `{}`, and `seal_result`'s `result: null` or `error: null` is no result or no error — alone, it is
   refused (`a result carries exactly one of result and error`); beside the other, the other is sealed.
   Both ports sealed a `null` as present.
+- **A header's `ts` and `exp` are integers it carries as themselves** (a lead of the port-parity
+  verification, 2026-09-30): from −(2^53 − 1) to 2^53 − 1, `ts` first, then `exp` with its default
+  (`ts + 600`), in `seal_request` and `seal_result`, in the seal itself so the typed APIs hold it
+  too: `bad_request` `<ts|exp> is an integer from -(2^53 - 1) to 2^53 - 1`. RFC 8785 writes a number
+  as the double it is, so the core sealed a `ts` of 2^53 + 1 as 2^53, and the Go port, whose
+  `Canonical` wrote an int64's digits, as 2^53 + 1: two headers for one call, and the core's not the
+  one asked for. A `ts` of the largest i64 with no `exp` overflowed computing the default (a panic
+  in a debug build). Go's `Canonical` now writes an `int` or `int64` as the double it is, as it
+  writes every other number. The Go port named a chain form with no `sender_chain` in its adapter,
+  before the seal; it is named in the seal now, after the header's times, as the core names it.
 
 ## 0.4.1 — 2026-09-28
 
