@@ -576,9 +576,11 @@ mod tests {
     /// wasm32 does not compile at all, and where `panic = "abort"` makes unwinding impossible anyway.
     /// So the guarantee rests on no panic EXISTING, and these are the three inputs that produced one
     /// (or would have): six bytes of DER whose 4-octet length wrapped a 32-bit `usize`; a vault header
-    /// whose Argon2id parameters were unbounded; and a `ts` that wrapped the skew window. Each is
-    /// refused here before any allocation or derivation, which is why asserting the catastrophic
-    /// numbers costs nothing.
+    /// whose Argon2id parameters were unbounded; and a `ts` that wrapped the skew window. The first two
+    /// are refused here, through the boundary, before any allocation or derivation, which is why
+    /// asserting the catastrophic numbers costs nothing. The third reaches `timing` only through a
+    /// sealed envelope a node holds the key to, so envelope.rs's
+    /// `timing_cannot_be_wrapped_and_keeps_both_refusals` holds it where the arithmetic is.
     #[test]
     fn the_inputs_that_panicked_or_ran_away_are_refused_by_name() {
         // `30 84 FF FF FF FF`: on wasm32 this trapped with `RuntimeError: unreachable`.
@@ -616,11 +618,5 @@ END:VCARD
             let out: Value = serde_json::from_str(&call("vault_open", &doc)).unwrap();
             assert_eq!(out["error"], "vault", "vault_open with {kdf} answered {out}");
         }
-        // A `ts` of `i64::MIN + now`: `(now - ts).abs()` wrapped to `i64::MIN`, which is <= 300, so the
-        // skew window and the thirty-day cap both passed. `decide` needs a whole node to reach, so the
-        // band is asserted through the function that reads the same header members.
-        let out: Value =
-            serde_json::from_str(&call("decide", r#"{"now":0,"envelope":{"protected":"","enc":"","ct":"","sig":""}}"#)).unwrap();
-        assert!(out.get("error").is_some() || out["result"]["code"] == "envelope_invalid", "decide answered {out}");
     }
 }
