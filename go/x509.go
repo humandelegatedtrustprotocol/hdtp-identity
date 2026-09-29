@@ -366,23 +366,34 @@ func Parse(der []byte) (*Cert, error) {
 	if !derIntMinimal(f[1].content) {
 		return nil, errors.New("INTEGER not minimal")
 	}
+	// In the core's order, each reader's own error kept, so a certificate with two faults is named for
+	// the same one by both ports (R33): the validity's count, the outer algorithm's shape and its
+	// equality with the inner one, the key, the signature algorithm, the names, then the times. This
+	// read the times and the names before the key, and the algorithm before the validity, and answered
+	// `certificate shape` or `time not in the DER form` for a SEQUENCE whose contents did not read.
+	validity, err := derChildren(f[4])
+	if err != nil {
+		return nil, err
+	}
+	if len(validity) != 2 {
+		return nil, errors.New("time not in the DER form")
+	}
 	algParts, err := derChildren(alg)
-	if err != nil || len(algParts) != 1 || algParts[0].tag != 0x06 {
+	if err != nil {
+		return nil, err
+	}
+	if len(algParts) != 1 || algParts[0].tag != 0x06 {
 		return nil, errors.New("certificate shape")
 	}
 	// RFC 5280 §4.1.1.2: the algorithm inside the TBS and the one outside are the same field twice.
 	if !bytes.Equal(f[2].raw, alg.raw) {
 		return nil, errors.New("signature algorithm inside and outside differ")
 	}
-	validity, err := derChildren(f[4])
-	if err != nil || len(validity) != 2 {
-		return nil, errors.New("time not in the DER form")
-	}
-	notBefore, err := readTime(validity[0])
+	pub, err := ParseSPKI(f[6].raw)
 	if err != nil {
 		return nil, err
 	}
-	notAfter, err := readTime(validity[1])
+	sigAlgOid, err := readOidStrict(algParts[0])
 	if err != nil {
 		return nil, err
 	}
@@ -394,11 +405,11 @@ func Parse(der []byte) (*Cert, error) {
 	if err != nil {
 		return nil, err
 	}
-	pub, err := ParseSPKI(f[6].raw)
+	notBefore, err := readTime(validity[0])
 	if err != nil {
 		return nil, err
 	}
-	sigAlgOid, err := readOidStrict(algParts[0])
+	notAfter, err := readTime(validity[1])
 	if err != nil {
 		return nil, err
 	}
@@ -408,9 +419,14 @@ func Parse(der []byte) (*Cert, error) {
 		NotBefore: notBefore, NotAfter: notAfter, TimeTags: [2]byte{validity[0].tag, validity[1].tag},
 		SPKI: f[6].raw, PublicKey: pub, KeyID: sha256Sum(f[6].raw),
 	}
+	// An [3] with nothing in it holds no extensions: the core's words, where this said `certificate
+	// shape` (R33).
 	extWrap, err := derChildren(f[7])
-	if err != nil || len(extWrap) < 1 {
-		return nil, errors.New("certificate shape")
+	if err != nil {
+		return nil, err
+	}
+	if len(extWrap) < 1 {
+		return nil, errors.New("not a v3 certificate with extensions")
 	}
 	exts, err := derChildren(extWrap[0])
 	if err != nil {
@@ -427,9 +443,8 @@ func Parse(der []byte) (*Cert, error) {
 		if len(parts) < 2 || len(parts) > 3 || parts[0].tag != 0x06 || parts[len(parts)-1].tag != 0x04 {
 			return nil, errors.New("certificate shape")
 		}
-		if !derOidMinimal(parts[0]) {
-			return nil, errors.New("OID not in the DER form")
-		}
+		// The criticality before the OID, as the core reads them: this judged the OID first, so an
+		// extension with both faults was named for the other one (R33).
 		critical := false
 		if len(parts) == 3 {
 			if !derBoolTrue(parts[1]) {
@@ -500,7 +515,7 @@ func Parse(der []byte) (*Cert, error) {
 		case OIDKeyUsage:
 			// BIT STRING: the first byte says how many trailing bits of the last byte are unused;
 			// every named bit of every byte counts, so a second byte (decipherOnly) is seen.
-			if len(value.content) < 1 || !derNamedBitsOK(value.content) {
+			if !derNamedBitsOK(value.content) {
 				return nil, errors.New("BIT STRING not in the DER form")
 			}
 			unused := int(value.content[0])
