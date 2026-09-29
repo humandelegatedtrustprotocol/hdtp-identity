@@ -430,8 +430,9 @@ func TestArgsMustBeAnObject(t *testing.T) {
 			t.Errorf("key_info(%s): %s", args, out)
 		}
 	}
-	// An absent `args` is not the same thing, and still reaches the function.
-	if out := Call("key_info", nil); !bytes.Contains(out, []byte("spki is required")) {
+	// No text at all is not an object either, as the core's `call` answers "" (js/boundary-text.json
+	// holds both ports to it); it was `{}` here. The line adapter sends `{}` for a request with none.
+	if out := Call("key_info", nil); !bytes.Contains(out, []byte("args is a JSON object")) {
 		t.Errorf("key_info with no args: %s", out)
 	}
 }
