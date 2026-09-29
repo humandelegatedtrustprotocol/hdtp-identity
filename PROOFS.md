@@ -8,9 +8,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 case can be listed as proven that did not pass. The cases that fail today are listed apart, at the
 end, each with the finding it waits on.
 
-Specification: **2.2.4**. **88** normative sentences, **2345** cross-port parity cases over **51** guarded functions, and **0** known divergences that fail today and are listed apart, at the end.
+Specification: **2.2.4**. **88** normative sentences, **2373** cross-port parity cases over **52** guarded functions, and **0** known divergences that fail today and are listed apart, at the end.
 
-Every answer of both ports is validated against `contract/contract.json` (**52** functions, spec 2.2.4): **4690** answers, of which **0** do not hold to the shape it declares — **0** of them in a known divergence. Of **119** declared error codes, **119** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**53** functions, spec 2.2.4): **4746** answers, of which **0** do not hold to the shape it declares — **0** of them in a known divergence. Of **121** declared error codes, **121** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 88 normative sentences of the specification
 
@@ -203,7 +203,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 2345 cross-port parity cases
+## The 2373 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -211,7 +211,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **2345** cases (**1116** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **51** of **51** functions compared whole on success.
+At the run that generated this file: **2373** cases (**1120** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **52** of **52** functions compared whole on success.
 
 ### `address_guard` — 50 cases · whole on success
 
@@ -1844,6 +1844,37 @@ At the run that generated this file: **2345** cases (**1116** of the run's cases
 - generated · limits_rules_check · rules absent
 - generated · limits_rules_check · rules null
 - generated · limits_rules_check · an undeclared member
+
+### `media_holds_private_key` — 28 cases · whole on success
+
+- media_holds_private_key: PKCS #8 of an Ed25519 key, in DER
+- media_holds_private_key: PKCS #8 of a P-256 key, in DER
+- media_holds_private_key: SEC1, in DER
+- media_holds_private_key: PKCS #8 whose length is written in two octets where one would do (81)
+- media_holds_private_key: PKCS #8 whose length is written in three octets (82 00)
+- media_holds_private_key: PKCS #8 whose length is written in four length octets (84 00 00 00)
+- media_holds_private_key: PKCS #8 whose length is written in five length octets
+- media_holds_private_key: PKCS #8 whose length is indefinite
+- media_holds_private_key: PKCS #8 with a byte after it
+- media_holds_private_key: DER that is no key
+- media_holds_private_key: a certificate, in DER
+- media_holds_private_key: a document
+- media_holds_private_key: PKCS #8 in PEM
+- media_holds_private_key: SEC1 in PEM
+- media_holds_private_key: a certificate in PEM
+- media_holds_private_key: PKCS #8 as one base64url word
+- media_holds_private_key: PKCS #8 as one base64 word, padded
+- media_holds_private_key: PKCS #8 as a base64url word whose last character has a spare bit set
+- media_holds_private_key: PKCS #8 as a base64 word whose last character has a spare bit set, padded
+- media_holds_private_key: PKCS #8 as a word in the middle of a line
+- media_holds_private_key: PKCS #8 as a word broken by a line break
+- media_holds_private_key: a word of the base64 alphabet that begins with M and decodes to no key
+- media_holds_private_key of no bytes
+- media_holds_private_key of bytes that are not base64url
+- generated · media_holds_private_key · {}
+- generated · media_holds_private_key · bytes absent
+- generated · media_holds_private_key · bytes null
+- generated · media_holds_private_key · an undeclared member
 
 ### `no_such_function` — 5 cases · not a dispatched function
 

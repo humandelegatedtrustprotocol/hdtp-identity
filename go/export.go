@@ -12,6 +12,7 @@ package pactidentity
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -130,17 +131,81 @@ func isBase64Text(s string) bool {
 	return true
 }
 
-// isPrivateKeyDER is PKCS #8 or SEC1 by shape, whatever the algorithm.
+// Key material (SPEC §9.2: an importer MUST refuse anything "that decodes as a private key") is read
+// LENIENTLY, on purpose, where every other reader here is strict: what a lenient decoder reads as a key
+// is key material. This port read a base64 word with a spare bit set in its last character, and a
+// PKCS #8 whose length is written in a longer form than it needs (`81 2e`), as no key; the cloud's copy
+// of the check and OpenSSL read both as the key (CW-07, R38). So a word forgives its padding, either
+// alphabet and its spare bits, and a length may take any definite form of up to four octets, as the
+// core's export/mod.rs reads them. js/key-material.json is the list both ports' tests and the parity
+// cases read. TO REVERSE (a reading the owner may change): looseRead back to derRead and looseB64 back
+// to DecodeB64url, here and in the core.
+
+// looseNode is a DER-shaped element read for detection.
+type looseNode struct {
+	tag     byte
+	content []byte
+	end     int
+}
+
+// looseRead reads a tag and a definite length in the short form or a long form of one to four octets,
+// minimal or not.
+func looseRead(b []byte, at int) (looseNode, bool) {
+	if at+2 > len(b) {
+		return looseNode{}, false
+	}
+	tag, first := b[at], int(b[at+1])
+	length, start := first, at+2
+	if first&0x80 != 0 {
+		n := first & 0x7f
+		if n == 0 || n > 4 || at+2+n > len(b) {
+			return looseNode{}, false
+		}
+		length = 0
+		for _, o := range b[at+2 : at+2+n] {
+			length = length<<8 | int(o)
+		}
+		start = at + 2 + n
+	}
+	// Four octets wrap a 32-bit int negative: a length that is not one is no element.
+	if length < 0 || length > len(b)-start {
+		return looseNode{}, false
+	}
+	return looseNode{tag: tag, content: b[start : start+length], end: start + length}, true
+}
+
+func looseChildren(content []byte) ([]looseNode, bool) {
+	var out []looseNode
+	for at := 0; at < len(content); {
+		c, ok := looseRead(content, at)
+		if !ok {
+			return nil, false
+		}
+		out = append(out, c)
+		at = c.end
+	}
+	return out, true
+}
+
+// looseB64 decodes a word as base64 or base64url for detection: its padding, either alphabet and a last
+// character with a spare bit set are forgiven, as a lenient decoder forgives them. RawURLEncoding
+// without Strict() allows the spare bits; a word holds no \r or \n, which it would also skip.
+func looseB64(w string) ([]byte, bool) {
+	b, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(strings.NewReplacer("+", "-", "/", "_").Replace(w), "="))
+	return b, err == nil
+}
+
+// isPrivateKeyDER is PKCS #8 or SEC1 by shape, whatever the algorithm, read by looseRead.
 func isPrivateKeyDER(b []byte) bool {
-	node, err := derRead(b, 0)
-	if err != nil || node.tag != 0x30 || node.end != len(b) {
+	node, ok := looseRead(b, 0)
+	if !ok || node.tag != 0x30 || node.end != len(b) {
 		return false
 	}
-	f, err := derChildren(node)
-	if err != nil {
+	f, ok := looseChildren(node.content)
+	if !ok {
 		return false
 	}
-	version := func(n derNode, allowed ...byte) bool {
+	version := func(n looseNode, allowed ...byte) bool {
 		if n.tag != 0x02 || len(n.content) != 1 {
 			return false
 		}
@@ -153,8 +218,8 @@ func isPrivateKeyDER(b []byte) bool {
 	}
 	pkcs8 := false
 	if len(f) >= 3 && version(f[0], 0, 1) && f[1].tag == 0x30 && f[2].tag == 0x04 {
-		alg, err := derChildren(f[1])
-		pkcs8 = err == nil && len(alg) > 0 && alg[0].tag == 0x06
+		alg, ok := looseChildren(f[1].content)
+		pkcs8 = ok && len(alg) > 0 && alg[0].tag == 0x06
 	}
 	sec1 := len(f) >= 2 && len(f) <= 4 && version(f[0], 1) && f[1].tag == 0x04
 	if sec1 {
@@ -187,7 +252,7 @@ func holdsPrivateKey(text string) bool {
 			end++
 		}
 		if w := text[start:end]; len(w) > 0 && w[0] == 'M' && isBase64Text(w) {
-			if der, err := DecodeB64url(w); err == nil && isPrivateKeyDER(der) {
+			if der, ok := looseB64(w); ok && isPrivateKeyDER(der) {
 				return true
 			}
 		}

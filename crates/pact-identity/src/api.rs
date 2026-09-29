@@ -284,6 +284,7 @@ fn dispatch(name: &str, a: &Value) -> Result<Answer> {
         "export_manifest" => export::export_manifest(a)?,
         "export_merge" => export::export_merge(a)?,
         "book_rows" => export::book_rows(a)?,
+        "media_holds_private_key" => export::media_holds_private_key(a)?,
         // §6.1 ledger
         "ledger_check" => ledger::ledger_check(a)?,
         // §6.3 limits
@@ -360,6 +361,7 @@ fn declared(name: &str) -> Option<&'static [&'static str]> {
         "export_manifest" => &["partial", "hashes", "messages"],
         "export_merge" => &["held", "rows"],
         "book_rows" => &["contacts", "exported_at"],
+        "media_holds_private_key" => &["bytes"],
         "ledger_check" => &["ledger", "root", "endpoint", "now", "move"],
         "limits_rules_check" => &["rules"],
         "limits_decide" => &["rules", "charge", "now", "state"],

@@ -284,4 +284,21 @@ export default function exportCases({ add, expect }, f) {
   readerCases({ add, expect }, f);
   // One instant grammar in the export (SPEC 2.2.2): js/cases/export-instants.mjs.
   exportInstants({ add, expect });
+
+  // media_holds_private_key: SPEC §9.2's key material over a media file, from js/key-material.json, the
+  // list both ports' own tests read (CW-07, R38). Each case is compared whole and held to the list's
+  // answer; the lenient spellings (a spare bit, a length in a longer form) are the ones the cloud's copy
+  // read as a key and the ports did not.
+  const material = JSON.parse(readFileSync(new URL('../key-material.json', import.meta.url), 'utf8'));
+  for (const c of material.cases) {
+    const bytes = c.hex !== undefined ? Buffer.from(c.hex, 'hex') : Buffer.from(c.text, 'utf8');
+    add(`media_holds_private_key: ${c.what}`, 'media_holds_private_key', { bytes: bytes.toString('base64url') });
+    expect(`media_holds_private_key: ${c.what}`, { holds_private_key: c.holds });
+  }
+  add('media_holds_private_key of no bytes', 'media_holds_private_key', { bytes: '' });
+  expect('media_holds_private_key of no bytes', { holds_private_key: false });
+  // The argument is read strictly, as every argument's bytes are (CONTRACT §0): only the file's
+  // contents are read leniently.
+  add('media_holds_private_key of bytes that are not base64url', 'media_holds_private_key', { bytes: 'a b' });
+  expect('media_holds_private_key of bytes that are not base64url', { error: 'parse', why: 'not base64url' });
 }

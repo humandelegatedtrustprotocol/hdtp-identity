@@ -237,6 +237,18 @@ func callExportMerge(a args) json.RawMessage {
 	return ok(map[string]any{"write": write, "keep": keep, "conflicts": conflicts})
 }
 
+// callMediaHoldsPrivateKey answers whether a media file's bytes are key material (SPEC §9.2), as
+// ReadExportZip judges a media file: the check a host makes on the files it streams, which the core
+// never sees. The cloud kept a third copy in TypeScript that read spellings the ports did not (CW-07,
+// R38).
+func callMediaHoldsPrivateKey(a args) json.RawMessage {
+	b, err := a.bytes("bytes")
+	if err != nil {
+		return failAs("parse", err)
+	}
+	return ok(map[string]any{"holds_private_key": mediaHoldsPrivateKey(b)})
+}
+
 func callBookRows(a args) json.RawMessage {
 	contacts, err := a.list("contacts")
 	if err != nil {
