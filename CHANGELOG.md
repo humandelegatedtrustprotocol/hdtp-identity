@@ -179,7 +179,9 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   refused it and refused a request carrying one for its signature. Sixteen functions that answered
   `unsupported` without declaring it, in one port or both, declare it: the certificate builders and
   readers, the request functions, `hpke_seal` and `hpke_open`, `seal_request` and `seal_result`,
-  `open_result` and `wallet_issue`. The parity gate puts such a key into every member that holds one.
+  `open_result` and `wallet_issue`; `decide` too, whose node state's held and pinned leaves are read the
+  same way (the Go port made their error `parse`), as are `open_result`'s pins in the leaf form. The
+  parity gate puts such a key into every top-level member that holds one.
 - An Ed25519 key whose 32 bytes decode to no point is `parse` `Ed25519 key is not a point` in the Go
   port and the seed, as the core answers (S4-1, found here): both read it as a key, so a leaf
   carrying one validated there and was refused at chain rule 1 by the core. A point of small order is
@@ -208,11 +210,18 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   `LeafTBS`, `CSRNew`, `IssueFromCSR`, `IssueTBSFromCSR`, `SealRequest`, `SealResult`, `OpenResult`,
   `Seal`, `Open`, `SignDetached`, `AlgorithmOf`, `SuiteForKey` — refuses a nil key, the zero value, or a
   key given an `Alg` by hand without its material, before reading a field of it: `bad_request`, `<who>
-  is required` (`the root's key is required`, `the recipient's public key is required`). Each of these
-  panicked, and `PrivateKey{}.PKCS8()` wrote a P-256 key with an empty scalar and no error; it refuses
-  now. `PrivateKey.Public()` and `.Signer()`, which have no error to answer with, answer nil for such a
-  key; `Signer.Sign` on a nil or empty signer refuses, and `VerifyDetached` with such a key is false.
-  `AlgorithmOf(nil)` is `the key is required` (it said `unsupported key type`).
+  is required` (`the root's key is required`, `the recipient's public key is required`). Measured
+  before, per entry point: a nil key panicked in `BuildRoot`, `BuildLeaf`, `RootTBS`, `LeafTBS`,
+  `CSRNew`, `IssueFromCSR`, `IssueTBSFromCSR`, `Seal`, `SignDetached`, `VerifyDetached`, `PKCS8`,
+  `Public` and `Signer`, and each options struct but `SealOpts` and `OpenOpts` panicked at its zero
+  value; a zero-value or `Alg`-only private key panicked in the builders, `CSRNew`, `SignDetached`,
+  `Public`, `Signer`, and as the sender of `SealRequest` and `SealResult`. The rest answered as if a
+  key were there: `RootTBS`, `LeafTBS`, `BuildLeaf` and `IssueTBSFromCSR` built around a zero-value
+  public key's empty SubjectPublicKeyInfo, `PKCS8()` wrote a key with an empty scalar, `AlgorithmOf`
+  and `SuiteForKey` named an `Alg` with no key behind it, and `Open` and `OpenResult` answered for the
+  envelope. `PrivateKey.Public()` and `.Signer()`, which have no error to answer with, answer nil for
+  such a key; `Signer.Sign` on a nil or empty signer refuses, and `VerifyDetached` with such a key is
+  false. `AlgorithmOf(nil)` is `the key is required` (it said `unsupported key type`).
 - **JS loader:** `call(name, null)` hands `null` to the core, which answers `args is a JSON object`
   as the Go port does; it used to be made `{}` (`js/index.mjs`, `js/worker.mjs`). Only `args` left
   out is `{}`. The parity case `args that are null` sends `null` for the first time (TC-2).

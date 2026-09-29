@@ -8,9 +8,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 case can be listed as proven that did not pass. The cases that fail today are listed apart, at the
 end, each with the finding it waits on.
 
-Specification: **2.2.4**. **88** normative sentences, **2154** cross-port parity cases over **50** guarded functions, and **3** known divergences that fail today and are listed apart, at the end.
+Specification: **2.2.4**. **88** normative sentences, **2166** cross-port parity cases over **50** guarded functions, and **3** known divergences that fail today and are listed apart, at the end.
 
-Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **4314** answers, of which **2** do not hold to the shape it declares — **2** of them in a known divergence. Of **117** declared error codes, **117** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **4338** answers, of which **2** do not hold to the shape it declares — **2** of them in a known divergence. Of **118** declared error codes, **118** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 88 normative sentences of the specification
 
@@ -203,7 +203,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 2154 cross-port parity cases
+## The 2166 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -211,7 +211,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **2154** cases (**1108** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
+At the run that generated this file: **2166** cases (**1108** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
 
 ### `address_guard` — 50 cases · whole on success
 
@@ -599,7 +599,7 @@ At the run that generated this file: **2154** cases (**1108** of the run's cases
 - generated · csr_new · endpoint absent, host_pkcs8 7
 - generated · csr_new · endpoint absent, dns_name 7
 
-### `decide` — 90 cases · whole on success
+### `decide` — 98 cases · whole on success
 
 - decide on an envelope from a pinned contact
 - decide on a pinned contact's call that names no tool
@@ -676,6 +676,14 @@ At the run that generated this file: **2154** cases (**1108** of the run's cases
 - decide on an envelope with a body nested 127 deep
 - decide on an envelope whose header holds a ts past the largest double
 - decide on a call sealed to the empty seed's key, held beside a P-256 key
+- decide with a held leaf holding a key outside the profile: rsa
+- decide with a pinned leaf holding a key outside the profile: rsa
+- decide with a held leaf holding a key outside the profile: P-384
+- decide with a pinned leaf holding a key outside the profile: P-384
+- decide with a held leaf holding a key outside the profile: X25519
+- decide with a pinned leaf holding a key outside the profile: X25519
+- decide with a held leaf holding a key outside the profile: Ed25519 with a NULL
+- decide with a pinned leaf holding a key outside the profile: Ed25519 with a NULL
 - generated · decide · {}
 - generated · decide · the hostile object
 - generated · decide · now absent
@@ -1775,7 +1783,7 @@ At the run that generated this file: **2154** cases (**1108** of the run's cases
 
 - a function nobody defines
 
-### `open_result` — 88 cases · whole on success
+### `open_result` — 92 cases · whole on success
 
 - open_result of a request envelope
 - open_result with nothing to work from
@@ -1810,6 +1818,10 @@ At the run that generated this file: **2154** cases (**1108** of the run's cases
 - open_result in the chain form with an expected_root that is empty
 - open_result on an answer whose result holds a number past the largest double
 - open_result on an answer whose result holds the largest double
+- open_result in the leaf form, with a pin holding a key outside the profile: rsa
+- open_result in the leaf form, with a pin holding a key outside the profile: P-384
+- open_result in the leaf form, with a pin holding a key outside the profile: X25519
+- open_result in the leaf form, with a pin holding a key outside the profile: Ed25519 with a NULL
 - generated · open_result · {}
 - generated · open_result · the hostile object
 - generated · open_result · envelope absent

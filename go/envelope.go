@@ -217,7 +217,7 @@ func pinHolding(pins []Pin, named string) (*Pin, *Cert, error) {
 		}
 		leaf, err := Parse(leafDER)
 		if err != nil {
-			return nil, nil, parseError{err.Error()}
+			return nil, nil, classed(err)
 		}
 		actual := Fingerprint(leaf.SPKI)
 		if p.LeafFingerprint != "" && actual != named {
@@ -344,12 +344,18 @@ func Decide(now time.Time, env Envelope, node NodeState) (Decision, error) {
 // unreadableState records the first piece of host state that would not read, in the words the core
 // uses for the same bytes (CONTRACT §0: both are `parse`).
 func unreadableState(into *error, err error) Decision {
-	var p parseError
-	if !errors.As(err, &p) {
-		err = parseError{err.Error()}
-	}
-	*into = err
+	*into = classed(err)
 	return Decision{}
+}
+
+// classed is a reader's error with the class it was given, and `parse` where it names none: a held leaf
+// or a pinned one carrying a key outside the profile is `unsupported`, as the core propagates its
+// reader's error, where this made every such error `parse`.
+func classed(err error) error {
+	if codeFor(err, "") == "" {
+		return parseError{err.Error()}
+	}
+	return err
 }
 
 func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Decision {
