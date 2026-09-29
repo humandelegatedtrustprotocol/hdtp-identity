@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"sort"
 	"time"
@@ -29,50 +30,96 @@ type KDF struct {
 // DefaultKDF is 64 MiB, three passes, one lane.
 var DefaultKDF = KDF{Name: "argon2id", MKiB: 65536, T: 3, P: 1}
 
-// UnmarshalJSON fills in what a `kdf` member leaves out. Every member of it is optional: a caller
-// who writes `{"m_kib": 8192, "t": 1, "p": 1}` — which is what a test or a small device writes — is
-// naming argon2id with those parameters, as the Rust core reads it. This port required the name and
-// refused the document as "not a pact-vault/1 document", which is a refusal about the wrong thing.
-func (k *KDF) UnmarshalJSON(p []byte) error {
-	// Wider than the fields, then bounded — so a value that does not fit is a KDF refusal and not a
-	// JSON one. Decoding straight into `uint32` made `m_kib: 4294967304` a parse error
-	// ("kdf does not read") where the Rust core says "kdf parameters out of range": the same document,
-	// two different answers, which CONTRACT section 0 forbids.
-	raw := struct {
-		Name *string `json:"name"`
-		MKiB *uint64 `json:"m_kib"`
-		T    *uint64 `json:"t"`
-		P    *uint64 `json:"p"`
-	}{}
-	if err := json.Unmarshal(p, &raw); err != nil {
-		return parseError{"kdf does not read"}
+// readKDF is the one reader of a KDF, for a document's and for a caller's (S5; CONTRACT §6), as the
+// Rust core's Kdf::read is. A document's `Kdf` names all four members; a caller's `KdfArgs` may leave
+// any out, and it takes the default. `name` is `argon2id`, and anything else — another name, one that
+// is not a string, or, in a document, none — is `unknown kdf`. Each parameter is a whole number
+// written as one that fits in 32 bits, and inside its range; anything else, a parameter a document
+// lacks included, is `kdf parameters out of range`, and nothing is narrowed before it is bounded.
+//
+// It replaces two: KDF.UnmarshalJSON, which read a caller's `kdf` before the passphrase and the
+// plaintext and answered `parse` `kdf does not read` for a number of the wrong spelling, and matched
+// member names in any case (`M_KIB` was `m_kib`); and VaultOpenDoc's own read of a document's, which
+// read a `kdf` with no `name` as unknown where the core opened it under the default (R28, C4, T12, F17).
+func readKDF(o map[string]any, document bool) (KDF, error) {
+	name, present := o["name"]
+	switch {
+	case name == "argon2id":
+	case !document && (!present || name == nil):
+	default:
+		return KDF{}, vaultError{"unknown kdf"}
 	}
-	*k = DefaultKDF
-	if raw.Name != nil {
-		if *raw.Name != "argon2id" {
-			return vaultError{"unknown kdf"}
+	outOfRange := vaultError{"kdf parameters out of range"}
+	param := func(k string, dflt uint32) (uint32, error) {
+		v, present := o[k]
+		if !document && (!present || v == nil) {
+			return dflt, nil
 		}
-		k.Name = *raw.Name
+		if !present {
+			return 0, outOfRange
+		}
+		n, whole := kdfNumber(v)
+		if !whole || n > math.MaxUint32 {
+			return 0, outOfRange
+		}
+		return uint32(n), nil
 	}
-	if raw.MKiB != nil {
-		if *raw.MKiB > math.MaxUint32 {
-			return vaultError{"kdf parameters out of range"}
-		}
-		k.MKiB = uint32(*raw.MKiB)
+	m, err := param("m_kib", DefaultKDF.MKiB)
+	if err != nil {
+		return KDF{}, err
 	}
-	if raw.T != nil {
-		if *raw.T > math.MaxUint32 {
-			return vaultError{"kdf parameters out of range"}
-		}
-		k.T = uint32(*raw.T)
+	t, err := param("t", DefaultKDF.T)
+	if err != nil {
+		return KDF{}, err
 	}
-	if raw.P != nil {
-		if *raw.P > math.MaxUint8 {
-			return vaultError{"kdf parameters out of range"}
-		}
-		k.P = uint8(*raw.P)
+	p, err := param("p", uint32(DefaultKDF.P))
+	if err != nil {
+		return KDF{}, err
+	}
+	if err := kdfInRange(m, t, p); err != nil {
+		return KDF{}, err
+	}
+	// Members by their exact names, and no others (`Kdf`, `KdfArgs`: additionalProperties false).
+	if k := stranger(o, []string{"name", "m_kib", "t", "p"}); k != "" {
+		return KDF{}, vaultError{"kdf holds name, m_kib, t and p, and nothing else: " + k}
+	}
+	return KDF{Name: "argon2id", MKiB: m, T: t, P: uint8(p)}, nil
+}
+
+// kdfInRange is the range every derivation is held to, at both ends and on both paths.
+func kdfInRange(m, t, p uint32) error {
+	if m < minMKiB || m > maxMKiB || t < 1 || t > maxT || p < 1 || p > uint32(maxP) {
+		return vaultError{"kdf parameters out of range"}
 	}
 	return nil
+}
+
+// kdfFromArgs is vault_seal's `kdf` argument: absent or null is the default, an object is read by the
+// one reader, and anything else is `kdf is required` (CONTRACT §0: a member of the wrong type is
+// refused in the words its absence gets, and never read as absent).
+func kdfFromArgs(v any, present bool) (*KDF, error) {
+	if !present || v == nil {
+		return nil, nil
+	}
+	o, isObject := v.(map[string]any)
+	if !isObject {
+		return nil, errArg("kdf is required")
+	}
+	k, err := readKDF(o, false)
+	if err != nil {
+		return nil, err
+	}
+	return &k, nil
+}
+
+// kdfOfDocument is a document's `kdf`: an object with all four members. One that is not an object
+// names no KDF.
+func kdfOfDocument(v any) (KDF, error) {
+	o, isObject := v.(map[string]any)
+	if !isObject {
+		return KDF{}, vaultError{"unknown kdf"}
+	}
+	return readKDF(o, true)
 }
 
 // vaultError is a refusal about the vault itself, answered as `vault` at the boundary.
@@ -118,26 +165,22 @@ const (
 	maxP    uint8  = 16
 )
 
-func vaultKey(passphrase string, v Vault) ([]byte, error) {
-	if v.Format != VaultFormat {
-		return nil, errors.New("not a pact-vault/1 document")
+// minSalt is the shortest salt either end takes, in bytes: contract/contract.json's `VaultSaltMin`,
+// which constants_test.go holds this to (and vault.rs's tests the core's). x/crypto's argon2 takes a
+// salt of any length; this port refused one under 8 bytes as `not a pact-vault/1 document`, and the
+// core passed Argon2id's own words (`salt is too short`) into `why` (R29, C6).
+const minSalt = 8
+
+// deriveKey is Argon2id after the one range and the salt floor, as the core's `derive` is: no
+// caller, typed or JSON, sealing or opening, reaches it with parameters the other end refuses.
+func deriveKey(passphrase string, salt []byte, kdf KDF) ([]byte, error) {
+	if err := kdfInRange(kdf.MKiB, kdf.T, uint32(kdf.P)); err != nil {
+		return nil, err
 	}
-	// Named separately, because the Rust core names it separately: a document whose kdf is not
-	// argon2id answered "not a pact-vault/1 document" here and "unknown kdf" there.
-	if v.KDF.Name != "argon2id" {
-		return nil, vaultError{"unknown kdf"}
+	if len(salt) < minSalt {
+		return nil, vaultError{"salt is at least 8 bytes"}
 	}
-	if v.KDF.MKiB < minMKiB || v.KDF.MKiB > maxMKiB || v.KDF.T < 1 || v.KDF.T > maxT || v.KDF.P < 1 || v.KDF.P > maxP {
-		return nil, vaultError{"kdf parameters out of range"}
-	}
-	salt, err := DecodeB64url(v.Salt)
-	if err != nil {
-		return nil, errVault
-	}
-	if len(salt) < 8 {
-		return nil, errors.New("not a pact-vault/1 document")
-	}
-	return argon2.IDKey([]byte(passphrase), salt, v.KDF.T, v.KDF.MKiB, v.KDF.P, 32), nil
+	return argon2.IDKey([]byte(passphrase), salt, kdf.T, kdf.MKiB, kdf.P, 32), nil
 }
 
 // PlaintextV is the generation both documents carry: the file (the root and nothing else) and
@@ -194,56 +237,224 @@ func stranger[V any](doc map[string]V, allowed []string) string {
 // same order and the same words. Held where the rules read it, not at seal and open, which carry the
 // documents a live wallet already keeps.
 func CheckFile(raw json.RawMessage) error {
+	_, err := fileOf(raw)
+	return err
+}
+
+// fileOf is CheckFile, answering the document it read.
+func fileOf(raw json.RawMessage) (map[string]any, error) {
 	// Absent or null is `<name> is required`, as CONTRACT §0 has every absent member (S1-2).
 	if len(raw) == 0 || string(raw) == "null" {
-		return errArg("vault_plaintext is required")
+		return nil, errArg("vault_plaintext is required")
 	}
 	v, err := decodeJSON(raw)
 	doc, isDoc := v.(map[string]any)
-	if len(raw) == 0 || err != nil || !isDoc {
-		return errors.New("vault_plaintext is required: the root lives there")
+	if err != nil || !isDoc {
+		return nil, errors.New("vault_plaintext is required: the root lives there")
 	}
 	_, ledger := doc["ledger"]
 	_, contacts := doc["contacts"]
 	if ledger || contacts {
-		return errors.New("a vault holds the root and nothing else: its ledger and contacts belong in the record")
+		return nil, errors.New("a vault holds the root and nothing else: its ledger and contacts belong in the record")
 	}
 	if plaintextV(raw) != PlaintextV {
-		return errors.New(generationWhy)
+		return nil, errors.New(generationWhy)
 	}
 	if k := stranger(doc, fileMembers); k != "" {
-		return errors.New("vault_plaintext holds v, roots, prf and passkey, and nothing else: " + k)
+		return nil, errors.New("vault_plaintext holds v, roots, prf and passkey, and nothing else: " + k)
+	}
+	// Then each member, as CONTRACT §6 types it, in the order VaultPlaintext lists them. This port
+	// decoded the documents into typed structs, so a member of the wrong type anywhere in them was
+	// `arguments do not read`, where the core read it as absent, skipped it, or carried it (F18, R31).
+	roots, has := doc["roots"]
+	if err := readRoots(roots, has, "vault", true); err != nil {
+		return nil, err
+	}
+	if prf, has := doc["prf"]; has {
+		text, isText := prf.(string)
+		b, err := DecodeB64url(text)
+		if !isText || err != nil || len(b) != 32 {
+			return nil, errors.New("the vault's prf does not read")
+		}
+	}
+	passkey, has := doc["passkey"]
+	return doc, readPasskey(passkey, has, "vault")
+}
+
+var (
+	rootRequired = []string{"fingerprint", "cn", "cert", "created"}
+	rootMembers  = []string{"fingerprint", "cn", "alg", "cert", "created", "pkcs8", "holder", "rebound_at"}
+)
+
+// readRoots is a document's `roots`, each entry read as CONTRACT §6's VaultRoot, as the core's
+// read_roots reads them: a list, each entry an object whose `fingerprint` is a fingerprint, `cn` and
+// `cert` strings and `created` an instant, whose `alg`, `pkcs8`, `holder` and `rebound_at` are of
+// their types where present, and that holds nothing else. The first that does not read is named by
+// its index and member, as a ledger entry is. The file must have `roots`; the record may leave it out.
+func readRoots(roots any, present bool, whose string, required bool) error {
+	if !present && !required {
+		return nil
+	}
+	entries, isList := roots.([]any)
+	if !present || !isList {
+		return fmt.Errorf("the %s's roots is a list", whose)
+	}
+	for i, r := range entries {
+		o, isObject := r.(map[string]any)
+		if !isObject {
+			return fmt.Errorf("the %s's root %d does not read", whose, i)
+		}
+		unread := func(m string) error { return fmt.Errorf("the %s's root %d does not read: %s", whose, i, m) }
+		for _, m := range rootRequired {
+			text, isText := o[m].(string)
+			wrong := !isText
+			switch m {
+			case "fingerprint":
+				wrong = wrong || !IsFingerprint(text)
+			case "created":
+				_, reads := parseInstant(text)
+				wrong = wrong || !reads
+			}
+			if wrong {
+				return unread(m)
+			}
+		}
+		for _, c := range []struct {
+			m     string
+			reads func(any) bool
+		}{
+			{"alg", func(v any) bool { return v == "ed25519" || v == "p256" }},
+			{"pkcs8", func(v any) bool { _, isText := v.(string); return isText }},
+			{"holder", func(v any) bool { _, isObject := v.(map[string]any); return isObject }},
+			{"rebound_at", func(v any) bool { _, whole := asU64(v); return whole }},
+		} {
+			if v, has := o[c.m]; has && !c.reads(v) {
+				return unread(c.m)
+			}
+		}
+		if k := stranger(o, rootMembers); k != "" {
+			return unread(k)
+		}
 	}
 	return nil
+}
+
+var (
+	contactRequired = []string{"root", "endpoint"}
+	contactMembers  = []string{"root", "endpoint", "name", "leaf", "root_cert", "added"}
+)
+
+// readContacts is the record's `contacts`, each entry read as CONTRACT §6's VaultContact, as the
+// core's read_contacts reads them: a list, each entry an object whose `root` is a fingerprint and
+// `endpoint` a string, whose `name`, `leaf`, `root_cert` and `added` are strings where present, `added`
+// an instant, and that holds nothing else.
+func readContacts(contacts any) error {
+	entries, isList := contacts.([]any)
+	if !isList {
+		return errors.New("the record's contacts is a list")
+	}
+	for i, c := range entries {
+		o, isObject := c.(map[string]any)
+		if !isObject {
+			return fmt.Errorf("the record's contact %d does not read", i)
+		}
+		unread := func(m string) error { return fmt.Errorf("the record's contact %d does not read: %s", i, m) }
+		for _, m := range contactRequired {
+			text, isText := o[m].(string)
+			if !isText || (m == "root" && !IsFingerprint(text)) {
+				return unread(m)
+			}
+		}
+		for _, m := range []string{"name", "leaf", "root_cert", "added"} {
+			v, has := o[m]
+			if !has {
+				continue
+			}
+			text, isText := v.(string)
+			if _, reads := parseInstant(text); !isText || (m == "added" && !reads) {
+				return unread(m)
+			}
+		}
+		if k := stranger(o, contactMembers); k != "" {
+			return unread(k)
+		}
+	}
+	return nil
+}
+
+// readPasskey is `passkey`, where a document carries one: an object naming its credential and nothing
+// else.
+func readPasskey(passkey any, present bool, whose string) error {
+	if !present {
+		return nil
+	}
+	o, isObject := passkey.(map[string]any)
+	if isObject {
+		if _, isText := o["credential_id"].(string); isText && stranger(o, []string{"credential_id"}) == "" {
+			return nil
+		}
+	}
+	return fmt.Errorf("the %s's passkey does not read", whose)
 }
 
 // CheckRecord holds the record's plaintext to CONTRACT §6, every ledger entry included. An entry
 // that does not read is refused, never skipped: skipped, it could be the live leaf, and one live leaf
 // per identity would fail open. Every entry is read, not only one root's.
 func CheckRecord(raw json.RawMessage) error {
+	_, err := recordOf(raw)
+	return err
+}
+
+// recordOf is CheckRecord, answering the document it read.
+func recordOf(raw json.RawMessage) (map[string]any, error) {
 	if len(raw) == 0 || string(raw) == "null" {
-		return errArg("record_plaintext is required")
+		return nil, errArg("record_plaintext is required")
 	}
 	v, err := decodeJSON(raw)
 	doc, isDoc := v.(map[string]any)
-	if len(raw) == 0 || err != nil || !isDoc {
-		return errors.New("record_plaintext is required: the ledger lives there")
+	if err != nil || !isDoc {
+		return nil, errors.New("record_plaintext is required: the ledger lives there")
 	}
 	if plaintextV(raw) != PlaintextV {
-		return errors.New(generationWhy)
+		return nil, errors.New(generationWhy)
 	}
 	if k := stranger(doc, recordMembers); k != "" {
-		return errors.New("record_plaintext holds v, roots, ledger, contacts, passkey and backup_verified_at, and nothing else: " + k)
+		return nil, errors.New("record_plaintext holds v, roots, ledger, contacts, passkey and backup_verified_at, and nothing else: " + k)
 	}
-	ledger, has := doc["ledger"]
-	if !has {
-		return nil
+	// Then each member, in the order RecordPlaintext lists them.
+	roots, has := doc["roots"]
+	if err := readRoots(roots, has, "record", false); err != nil {
+		return nil, err
 	}
-	return ReadLedger(ledger)
+	if ledger, has := doc["ledger"]; has {
+		if err := ReadLedger(ledger); err != nil {
+			return nil, err
+		}
+	}
+	if contacts, has := doc["contacts"]; has {
+		if err := readContacts(contacts); err != nil {
+			return nil, err
+		}
+	}
+	passkey, has := doc["passkey"]
+	if err := readPasskey(passkey, has, "record"); err != nil {
+		return nil, err
+	}
+	if b, has := doc["backup_verified_at"]; has {
+		if _, whole := asU64(b); !whole {
+			return nil, errors.New("the record's backup_verified_at does not read")
+		}
+	}
+	return doc, nil
 }
 
 // VaultSeal encrypts plaintext under the passphrase. salt and nonce are drawn when nil (tests pass them).
+// An empty passphrase is refused, as the core's typed `seal` refuses it: only this port's JSON
+// boundary did (T19's mirror).
 func VaultSeal(passphrase string, plaintext []byte, kdf *KDF, salt, nonce []byte) (*Vault, error) {
+	if passphrase == "" {
+		return nil, errArg("empty passphrase")
+	}
 	if plaintextV(plaintext) != PlaintextV {
 		return nil, errors.New("a vault plaintext is v 2: the root, or the record")
 	}
@@ -272,11 +483,14 @@ func vaultSealAny(passphrase string, plaintext []byte, kdf *KDF, salt, nonce []b
 	if len(nonce) != 12 {
 		return nil, errors.New("nonce is 12 bytes")
 	}
-	v := Vault{Format: VaultFormat, KDF: *kdf, Salt: B64url(salt), Nonce: B64url(nonce)}
-	key, err := vaultKey(passphrase, v)
+	if kdf.Name != "argon2id" {
+		return nil, vaultError{"unknown kdf"}
+	}
+	key, err := deriveKey(passphrase, salt, *kdf)
 	if err != nil {
 		return nil, err
 	}
+	v := Vault{Format: VaultFormat, KDF: *kdf, Salt: B64url(salt), Nonce: B64url(nonce)}
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -304,40 +518,34 @@ func kdfNumber(v any) (uint64, bool) {
 }
 
 // VaultOpenDoc decrypts the document as received: the AAD is every member but ct, canonicalised,
-// so a member added after sealing — or one changed — fails to open, exactly as in the Rust core.
+// so a member added after sealing — or one changed — fails to open, exactly as in the Rust core. The
+// header is read first, in its members' order, as the core reads it: `format`, then `kdf` by the one
+// reader, then `salt`, `nonce` and `ct`, of which one that does not read is damage. This derived the
+// key before it read the nonce and ct, so a short salt beside a damaged nonce was named for the salt
+// here and was damage there.
 func VaultOpenDoc(passphrase string, doc map[string]any) ([]byte, error) {
-	var v Vault
-	v.Format, _ = doc["format"].(string)
-	v.Salt, _ = doc["salt"].(string)
-	v.Nonce, _ = doc["nonce"].(string)
-	v.Ct, _ = doc["ct"].(string)
-	if kdf, ok := doc["kdf"].(map[string]any); ok {
-		v.KDF.Name, _ = kdf["name"].(string)
-		// Each parameter a whole number written as one, as the core reads it (`as_u64`): `t` spelled
-		// 1.0 has the canonical header `t` 1 has, so this port opened such a document the core refuses,
-		// and an `m_kib` of 8192.5 was cut to 8192 and failed as a wrong passphrase (C5). A number
-		// wider than its field is out of range, not cut to fit.
-		for _, p := range []struct {
-			k     string
-			limit uint64
-			set   func(uint64)
-		}{
-			{"m_kib", math.MaxUint32, func(n uint64) { v.KDF.MKiB = uint32(n) }},
-			{"t", math.MaxUint32, func(n uint64) { v.KDF.T = uint32(n) }},
-			{"p", math.MaxUint8, func(n uint64) { v.KDF.P = uint8(n) }},
-		} {
-			x, present := kdf[p.k]
-			if !present || x == nil {
-				continue
-			}
-			n, whole := kdfNumber(x)
-			if !whole || n > p.limit {
-				return nil, vaultError{"kdf parameters out of range"}
-			}
-			p.set(n)
+	if format, _ := doc["format"].(string); format != VaultFormat {
+		return nil, vaultError{"not a pact-vault/1 document"}
+	}
+	kdf, err := kdfOfDocument(doc["kdf"])
+	if err != nil {
+		return nil, err
+	}
+	// Read strictly, as the core reads them: this port skipped a stray character in `ct`, so a
+	// document the core refuses as damaged opened here (C8). One that is absent or not a string is
+	// no bytes, as the core reads it.
+	var parts [3][]byte
+	for i, k := range []string{"salt", "nonce", "ct"} {
+		text, _ := doc[k].(string)
+		if parts[i], err = DecodeB64url(text); err != nil {
+			return nil, errVault
 		}
 	}
-	key, err := vaultKey(passphrase, v)
+	salt, nonce, ct := parts[0], parts[1], parts[2]
+	if len(nonce) != 12 {
+		return nil, errVault
+	}
+	key, err := deriveKey(passphrase, salt, kdf)
 	if err != nil {
 		return nil, err
 	}
@@ -348,16 +556,6 @@ func VaultOpenDoc(passphrase string, doc map[string]any) ([]byte, error) {
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
 		return nil, err
-	}
-	// Read strictly, as the core reads them: this port skipped a stray character in `ct`, so a
-	// document the core refuses as damaged opened here (C8).
-	nonce, err := DecodeB64url(v.Nonce)
-	if err != nil || len(nonce) != 12 {
-		return nil, errVault
-	}
-	ct, err := DecodeB64url(v.Ct)
-	if err != nil {
-		return nil, errVault
 	}
 	header := make(map[string]any, len(doc))
 	for k, val := range doc {
@@ -395,6 +593,9 @@ type VaultRoot struct {
 	// ReboundAt marks a root re-bound to a new credential after the first was lost (SPEC §9): the
 	// record then keeps this entry's key, and no other's.
 	ReboundAt int64 `json:"rebound_at,omitempty"`
+	// pkcs8Given is the JSON boundary's: a `pkcs8` member given as "" is a key that does not read,
+	// where the typed "" means none (a card-held root), as the core tells them apart.
+	pkcs8Given bool
 }
 
 // LedgerEntry is one leaf the wallet issued: the endpoint and the dates, which is what every rule
@@ -481,16 +682,19 @@ func WalletIssue(plain VaultPlaintext, record RecordPlaintext, rootFingerprint s
 	if root == nil {
 		return nil, errors.New("no such root in the vault")
 	}
-	if root.PKCS8 == "" {
+	if root.PKCS8 == "" && !root.pkcs8Given {
 		return nil, errors.New("this root is held on a card: wallet_issue signs only with a key the vault holds")
 	}
+	// A key that does not read is refused in its reader's class, as the core's `?` has it: `parse`,
+	// or `unsupported` for a key outside the profile. This said `bad_request` `the root key does not
+	// parse` for both (F18, R31).
 	rootDER, err := DecodeB64url(root.PKCS8)
 	if err != nil {
 		return nil, err
 	}
 	rootKey, err := ParsePKCS8(rootDER)
 	if err != nil {
-		return nil, errors.New("the root key does not parse")
+		return nil, classed(err)
 	}
 	info := CSRCheck(csr, rootSPKIs)
 	if !info.OK {

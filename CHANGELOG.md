@@ -18,11 +18,11 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   1108 cases today (1103 when written; the hostile object is now sent only to the 15 functions that
   declare one of its members, and the key outside the profile came with cluster G), varied from one
   named hand-written case per function that succeeds on both ports. 463 cases failed when they were
-  written (459 generated, and 4 written beside them), 3 fail today (2 generated, 1 written); each is listed in `js/cases/known-divergences.json` with
+  written (459 generated, and 4 written beside them), 1 fails today (written); each is listed in `js/cases/known-divergences.json` with
   the audit finding that closes it, and the run fails on any other failure, on an entry whose case
   passes, and on an entry nobody has.
 - The coverage gate fails when a declared error code is not produced by both ports in one case they
-  answered alike (S2, TC-1); all 117 are. It used to print the count and pass.
+  answered alike (S2, TC-1); all 118 are. It used to print the count and pass.
 - `js/cases/hostile.json` is the one hostile object: the generated cases send it to both ports, Go's
   `TestCallNeverPanics` reads it and now fails on an answer of `internal` (its `recover()` turned a
   panic into a JSON object, which the sweep accepted), and the core has the same sweep
@@ -245,6 +245,38 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   one newer than the chain, or one that did not read, refused an answer the first accepted.
 - **Removed public API** (cluster H): Go `FromB64url`, which could not fail. `DecodeB64url`, the
   strict reader the port's boundary used unexported, is exported in its place.
+- **One KDF reader in each port, shared by `vault_seal` and `vault_open`** (cluster I; S5, R28,
+  R30, T12, C4, C5, F17): never truncating, members by their exact names and no others (`kdf holds
+  name, m_kib, t and p, and nothing else: <member>`). A caller's `kdf` that is not an object is
+  `bad_request` `kdf is required` (the core sealed under the default; the Go port answered `parse`
+  `kdf does not read`, before the passphrase and the plaintext); a `name` that is not a string is
+  `unknown kdf` (the core read it as `argon2id`); a parameter of another type or spelling is
+  `kdf parameters out of range` (the Go port said `parse`). A document's `kdf` has all four members:
+  one with no `kdf`, a `kdf` that is not an object or has no `name` is `unknown kdf`, where the core
+  opened it under the default; a parameter it lacks is `kdf parameters out of range`, where the core
+  took the default and the Go port zero. A document that is not an object is `not a pact-vault/1
+  document` in both (the core said the passphrase was wrong). The Go port reads the header in the
+  core's order: `salt`, `nonce` and `ct` before the key is derived.
+- **The salt floor has one sentence, the ports' own** (R29, C6): `vault` `salt is at least 8
+  bytes`, at both ends, before Argon2id is asked; `contract/contract.json`'s new `VaultSaltMin` is
+  the number, held by a test in each port. The core answered Argon2id's `salt is too short`, the Go
+  port `not a pact-vault/1 document`. Argon2id's own errors, which no argument now reaches, are
+  `internal` in fixed words.
+- **Every derivation is held to the range** (T19): the core's typed `vault::seal` handed any `Kdf` to
+  Argon2id, so a typed caller could write a document both ports refuse; the Go port's typed
+  `VaultSeal` refuses an empty passphrase, as the core's does and only the Go boundary did.
+- **`wallet_issue` holds both documents to their schemas** (F18, R31): the vault's `roots` (a list,
+  each entry a `VaultRoot`: `the vault's root <i> does not read: <member>`), `prf` and `passkey`; the
+  record's `roots`, `contacts` (each a `VaultContact`), `passkey` and `backup_verified_at`, beside
+  the ledger it already held. The Go port decoded the documents into typed structs, so a member of
+  the wrong type anywhere was `arguments do not read`, and a `pkcs8` of `""` was a card-held root;
+  the core read a wrong type as absent, skipped an entry that was not an object, and carried the
+  rest. A root key that does not read is refused in its reader's class (`parse`; `unsupported` for a
+  key outside the profile), where the Go port said `bad_request` `the root key does not parse`. The
+  CLI reads a record through the same `check_record`, so a record it opens is held the same way.
+- Removed (cluster I): Go's `KDF.UnmarshalJSON`. A Go caller that decodes a vault document into
+  `Vault` with encoding/json gets encoding/json's reading of `kdf`; the port reads one with
+  `VaultOpenDoc`.
 - **JS loader:** `call(name, null)` hands `null` to the core, which answers `args is a JSON object`
   as the Go port does; it used to be made `{}` (`js/index.mjs`, `js/worker.mjs`). Only `args` left
   out is `{}`. The parity case `args that are null` sends `null` for the first time (TC-2).
