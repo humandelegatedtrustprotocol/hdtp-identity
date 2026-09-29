@@ -1,6 +1,7 @@
 // §4 of the contract: cards — encode one, decode one.
 import { b64url } from '../../../pact-protocol/vectors/lib/keys.mjs';
 import { encodeCard } from '../../../pact-protocol/vectors/lib/card.mjs';
+import { signDetached } from '../../../pact-protocol/vectors/lib/hpke.mjs';
 
 export default function cards({ add, expect }, f) {
   const { now, leafDer, card, twinLeaf, shortAki } = f;
@@ -96,4 +97,65 @@ export default function cards({ add, expect }, f) {
   add('card_decode of a card with an empty X-PACT-VERSION', 'card_decode', { vcard: card.replace('X-PACT-VERSION:2', 'X-PACT-VERSION:'), now });
   expect('card_decode of a card with an empty X-PACT-VERSION', { error: 'bad_request', why: 'no X-PACT-VERSION' });
   expect('card_decode of a 1.x card', { error: 'bad_request', why: 'version not implemented' });
+
+  // ── refresh_check: a peer's answer to get_card, judged against the host's pin (CW-08) ──────────────
+  //
+  // Both hosts made this decision themselves, in different orders and words; the node verified the
+  // card's signature with its own non-strict verifier. Every refusal in the order the contract's note
+  // lists them, the two answers that succeed (the leaf unchanged, and renewed), and every fault of the
+  // host's own arguments. The card and its signature are made by the seed; the chain is the cast's.
+  const { rootDer, rootFp, ENDPOINT, hostKey, hostSpki, olderLeaf, alinaLeaf, p256Leaf, p256RootDer } = f;
+  const sign = (text) => b64url(signDetached(hostKey.priv, Buffer.from(text, 'utf8')));
+  const signedCard = (der) => { const c = cardOf('Alina Rao', der); return { card: c, card_sig: sign(c) }; };
+  const pin = (leaf = leafDer) => ({ root: rootFp, endpoint: ENDPOINT, leaf });
+  const refresh = (answer, o = {}) => ({ pin: pin(), answer, now, ...o });
+  const good = { ...signedCard(leafDer), chain: [leafDer, rootDer] };
+  add('refresh_check: the pinned leaf, unchanged', 'refresh_check', refresh(good));
+  expect('refresh_check: the pinned leaf, unchanged', { ok: true, fn: 'Alina Rao', renewed: null, root_cert: rootDer });
+  add('refresh_check: a newer leaf than the pinned one', 'refresh_check', refresh(good, { pin: pin(olderLeaf) }));
+  expect('refresh_check: a newer leaf than the pinned one', { ok: true, renewed: { leaf: leafDer, spki: hostSpki } });
+  const pinnedNewer = alinaLeaf({ notBefore: new Date('2026-09-10T00:00:00Z'), label: 'parity/refresh/newer' });
+  const sameDay = alinaLeaf({ label: 'parity/refresh/same-day' });
+  const moved = alinaLeaf({ endpoint: 'https://alina.moved.example/mcp', label: 'parity/refresh/moved' });
+  const bharatLeaf = p256Leaf();
+  for (const [what, args, why] of [
+    ['an answer that is not an object', refresh('x'), 'the answer to get_card carries no signed card'],
+    ['an answer with no card', refresh({ ...good, card: undefined }), 'the answer to get_card carries no signed card'],
+    ['an answer whose card_sig is empty', refresh({ ...good, card_sig: '' }), 'the answer to get_card carries no signed card'],
+    ['an answer with no chain', refresh({ ...good, chain: undefined }), 'the answer carries 0 certificate(s); get_card answers with the chain, leaf then root (§6.1)'],
+    ['an answer whose chain is the leaf alone', refresh({ ...good, chain: [leafDer] }), 'the answer carries 1 certificate(s); get_card answers with the chain, leaf then root (§6.1)'],
+    ['an answer whose chain holds a number', refresh({ ...good, chain: [leafDer, 5] }), 'the answer carries 2 certificate(s); get_card answers with the chain, leaf then root (§6.1)'],
+    ['an answer whose chain member is not base64url', refresh({ ...good, chain: ['!!!', rootDer] }), 'a chain member is not base64url'],
+    ['a card that does not decode', refresh({ ...good, card: 'BEGIN:VCARD\r\nEND:VCARD\r\n' }), 'the card does not decode: no X-PACT-VERSION'],
+    ['a card of another root', refresh({ ...signedCard(bharatLeaf), chain: [bharatLeaf, p256RootDer] }), 'the card names another root, not the pinned one'],
+    ['a chain to another root', refresh({ ...good, chain: [bharatLeaf, p256RootDer] }), 'the chain it answered with fails rule 2: root is not the one expected'],
+    ['a chain at another endpoint', refresh({ ...signedCard(moved), chain: [moved, rootDer] }), 'the chain it answered with fails rule 5: endpoint differs from the one in question'],
+    // A pin's endpoint is compared as it is, "" too: a typed Go ChainOpts reads "" as not given.
+    ['a pin whose endpoint is empty', refresh(good, { pin: { ...pin(), endpoint: '' } }), 'the chain it answered with fails rule 5: endpoint differs from the one in question'],
+    ['a leaf older than the pinned one', refresh(good, { pin: pin(pinnedNewer) }), 'the leaf it answered with is superseded by the pinned one (§14.3)'],
+    ['a different leaf of the pinned one\'s date', refresh(good, { pin: pin(sameDay) }), 'two different leaves claim the same notBefore (§14.3)'],
+    ['a card that carries another leaf than the chain', refresh({ ...signedCard(olderLeaf), chain: [leafDer, rootDer] }), 'the card\'s certificate is not the leaf the chain proved'],
+    ['a card_sig that is not base64url', refresh({ ...good, card_sig: '!!!' }), 'the card signature is not base64url'],
+    ['a card_sig over other text', refresh({ ...good, card_sig: sign('other text') }), 'the card signature does not verify under the proven leaf key'],
+  ]) {
+    add(`refresh_check: ${what}`, 'refresh_check', args);
+    expect(`refresh_check: ${what}`, { ok: false, why });
+  }
+  for (const [what, args, want] of [
+    ['no pin', { answer: good, now }, { error: 'bad_request', why: 'pin is required' }],
+    ['a pin that is not an object', { pin: 'x', answer: good, now }, { error: 'bad_request', why: 'pin is required' }],
+    ['a pin with no root', { pin: { endpoint: ENDPOINT, leaf: leafDer }, answer: good, now }, { error: 'bad_request', why: 'pin.root is required' }],
+    ['a pin with no endpoint', { pin: { root: rootFp, leaf: leafDer }, answer: good, now }, { error: 'bad_request', why: 'pin.endpoint is required' }],
+    ['a pin with no leaf', { pin: { root: rootFp, endpoint: ENDPOINT }, answer: good, now }, { error: 'bad_request', why: 'pin.leaf is required' }],
+    ['a pinned leaf that is a number', { pin: pin(7), answer: good, now }, { error: 'parse', why: 'not base64url' }],
+    ['a pinned leaf that is not a certificate', { pin: pin('AAAA'), answer: good, now }, { error: 'parse' }],
+    // The pin's leaf is read before the answer, in its reader's class: a key outside the profile is
+    // `unsupported`, whatever the peer sent.
+    ['a pinned leaf holding a key outside the profile', { pin: pin(f.foreignLeaf('Ed25519 with a NULL')), answer: good, now }, { error: 'unsupported' }],
+    ['no answer', { pin: pin(), now }, { error: 'bad_request', why: 'answer is required' }],
+    ['no now', { pin: pin(), answer: good }, { error: 'bad_request', why: 'now is required' }],
+  ]) {
+    add(`refresh_check with ${what}`, 'refresh_check', args);
+    expect(`refresh_check with ${what}`, want);
+  }
 }

@@ -339,6 +339,14 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   (a message leaves with its file) where the node and the CLI passed it. `js/key-material.json` is
   the one list of cases. Every other reader stays strict: an argument's bytes are still base64url by
   CONTRACT §0's rule.
+- **`refresh_check`, a contract function** (CW-08): what a peer's answer to `get_card` proves about a
+  pinned contact — the card, its signature and the chain, judged against the host's pin — and what the
+  pin should become (`renewed`, and the pinned root's certificate). The node's `verifyRefreshedCard`
+  and the cloud's ran the same checks in different orders, refused in different words, and the node
+  verified the card signature with its own verifier. One order and one set of words now, the cloud's
+  where the two differed; the answer is read as it was sent (anything wrong with it is `ok: false`),
+  the pin is the host's (a fault is an error of the call). Typed: `refresh::check` (Rust),
+  `RefreshCheck` (Go).
 
 ## 0.4.1 — 2026-09-28
 

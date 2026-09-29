@@ -236,8 +236,9 @@ var functions = map[string]function{
 	"signing_request_check": {[]string{"request", "origin", "now", "root_spkis"}, callSigningRequestCheck},
 
 	// Cards: api_cards.go
-	"card_encode": {[]string{"fn", "cert", "seal", "extra"}, callCardEncode},
-	"card_decode": {[]string{"vcard", "now"}, callCardDecode},
+	"card_encode":   {[]string{"fn", "cert", "seal", "extra"}, callCardEncode},
+	"card_decode":   {[]string{"vcard", "now"}, callCardDecode},
+	"refresh_check": {[]string{"pin", "answer", "now"}, callRefreshCheck},
 
 	// Envelopes: api_envelopes.go
 	"suite_for":      {[]string{"spki"}, callSuiteFor},
