@@ -20,12 +20,9 @@ pub(super) fn vault_seal(a: &Value) -> Result<Value> {
             return err("bad_request", "plaintext is required");
         };
         vault::check_sealable(passphrase, plaintext)?;
-        // ONE parser, shared with `vault_open`, so the bounds cannot diverge between sealing and
+        // ONE reader, shared with `vault_open`, so the bounds cannot diverge between sealing and
         // opening and `name` is checked on both.
-        let kdf = match a.get("kdf") {
-            None | Some(Value::Null) => None,
-            Some(_) => Some(vault::kdf_from_args(a.get("kdf"))?),
-        };
+        let kdf = vault::kdf_from_args(a.get("kdf"))?;
         json!({ "vault": vault::seal(passphrase, plaintext, kdf, opt_bytes(a, "salt")?, opt_bytes(a, "nonce")?)? })
     })
 }

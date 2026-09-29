@@ -107,3 +107,50 @@ func TestTheContractsKDFBoundsAndDefaultAreThePorts(t *testing.T) {
 		}
 	}
 }
+
+// contract/contract.json's VaultSaltMin is this port's floor (and vault.rs's test holds the core's to
+// it): a salt one byte shorter is refused in the words both ports use, before Argon2id is asked for
+// anything, and one of that length is taken — at both ends, typed and through the boundary.
+func TestTheContractsSaltFloorIsThePorts(t *testing.T) {
+	var def struct {
+		Const int `json:"const"`
+	}
+	if err := json.Unmarshal(contractDefs(t)["VaultSaltMin"], &def); err != nil {
+		t.Fatal(err)
+	}
+	if def.Const != minSalt {
+		t.Fatalf("contract/contract.json's VaultSaltMin is %d and minSalt is %d", def.Const, minSalt)
+	}
+	kdf := &KDF{Name: "argon2id", MKiB: minMKiB, T: 1, P: 1}
+	if _, err := VaultSeal("x", []byte(`{"v":2}`), kdf, make([]byte, minSalt-1), nil); err == nil || err.Error() != "salt is at least 8 bytes" || codeFor(err, "") != "vault" {
+		t.Errorf("a salt of %d bytes: %v", minSalt-1, err)
+	}
+	sealed, err := VaultSeal("x", []byte(`{"v":2}`), kdf, make([]byte, minSalt), nil)
+	if err != nil {
+		t.Fatalf("a salt of %d bytes: %v", minSalt, err)
+	}
+	doc := vaultDoc(*sealed)
+	doc["ct"] = sealed.Ct
+	if _, err := VaultOpenDoc("x", doc); err != nil {
+		t.Errorf("opening what a salt of %d bytes sealed: %v", minSalt, err)
+	}
+	doc["salt"] = B64url(make([]byte, minSalt-1))
+	if _, err := VaultOpenDoc("x", doc); err == nil || err.Error() != "salt is at least 8 bytes" {
+		t.Errorf("opening a document whose salt is %d bytes: %v", minSalt-1, err)
+	}
+}
+
+// The typed VaultSeal is held to what the core's typed seal is: an empty passphrase is refused, as
+// only this port's boundary refused it, and a KDF out of range is refused before a key is derived
+// (T19's mirror; the core's own test is vault.rs's a_typed_seal_is_held_to_the_range).
+func TestTheTypedSealRefusesWhatTheCoresDoes(t *testing.T) {
+	kdf := &KDF{Name: "argon2id", MKiB: minMKiB, T: 1, P: 1}
+	if _, err := VaultSeal("", []byte(`{"v":2}`), kdf, nil, nil); err == nil || err.Error() != "empty passphrase" || codeFor(err, "") != codeArgs {
+		t.Errorf("an empty passphrase: %v", err)
+	}
+	for _, k := range []KDF{{Name: "argon2id", MKiB: 64, T: 1, P: 1}, {Name: "argon2id", MKiB: minMKiB, T: maxT + 1, P: 1}, {Name: "argon2id", MKiB: minMKiB, T: 1, P: 0}} {
+		if _, err := VaultSeal("x", []byte(`{"v":2}`), &k, nil, nil); err == nil || err.Error() != "kdf parameters out of range" {
+			t.Errorf("%+v: %v", k, err)
+		}
+	}
+}
