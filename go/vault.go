@@ -456,14 +456,21 @@ func VaultSeal(passphrase string, plaintext []byte, kdf *KDF, salt, nonce []byte
 	if passphrase == "" {
 		return nil, errArg("empty passphrase")
 	}
-	if plaintextV(plaintext) != PlaintextV {
+	// Written as a sealed plaintext is (inOrder), as the core's seal writes the value it is handed, so
+	// the two ports seal one document alike.
+	pt, err := inOrder(plaintext)
+	if err != nil {
+		return nil, parseError{"plaintext is not JSON"}
+	}
+	if plaintextV(pt) != PlaintextV {
 		return nil, errors.New("a vault plaintext is v 2: the root, or the record")
 	}
-	return vaultSealAny(passphrase, plaintext, kdf, salt, nonce)
+	return vaultSealAny(passphrase, pt, kdf, salt, nonce)
 }
 
-// vaultSealAny is the sealing itself, with no opinion about the plaintext: VaultSeal holds the
-// generation, and the test of VaultOpen's refusal needs a document VaultSeal would not write.
+// vaultSealAny is the sealing itself, with no opinion about the plaintext: VaultSeal writes it
+// (inOrder) and holds the generation, and the tests of VaultOpen's refusals need documents VaultSeal
+// would not write.
 func vaultSealAny(passphrase string, plaintext []byte, kdf *KDF, salt, nonce []byte) (*Vault, error) {
 	if kdf == nil {
 		k := DefaultKDF

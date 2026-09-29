@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"sort"
 	"strconv"
@@ -236,13 +237,107 @@ func jsonString(s string) string {
 	return b.String()
 }
 
-// compactJSON removes insignificant whitespace from a JSON document without re-escaping it.
-func compactJSON(raw []byte) ([]byte, error) {
-	var b bytes.Buffer
-	if err := json.Compact(&b, raw); err != nil {
+// inOrder writes a JSON value a caller handed in as it is sealed into a plaintext (params, result,
+// error, a vault's document), as the core's canonical::in_order writes it: numbers and strings as
+// RFC 8785 writes them, and members in the order they were written, a member written twice once,
+// where it first appeared, with the value it was given last — as serde_json's preserve_order map and
+// JSON.parse read it. Not sorted: Appendix B's plaintexts write `name` before `arguments`. This port
+// sealed the caller's text compacted, duplicates, escapes and `1.50` as written, where the core sealed
+// the value it had read: two plaintexts for one call.
+func inOrder(raw []byte) ([]byte, error) {
+	if why := jsonLimit(raw); why != "" {
+		return nil, errors.New(why)
+	}
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.UseNumber()
+	v, err := readInOrder(d)
+	if err != nil {
 		return nil, err
 	}
+	if _, err := d.Token(); err != io.EOF {
+		return nil, errors.New("trailing JSON")
+	}
+	var b bytes.Buffer
+	writeInOrder(&b, v)
 	return b.Bytes(), nil
+}
+
+// inOrderObject is an object as inOrder reads one: its member names in the order they first appeared,
+// and each one's last value.
+type inOrderObject struct {
+	names  []string
+	values map[string]any
+}
+
+func readInOrder(d *json.Decoder) (any, error) {
+	t, err := d.Token()
+	if err != nil {
+		return nil, err
+	}
+	delim, isDelim := t.(json.Delim)
+	if !isDelim {
+		return t, nil // json.Number, string, bool or nil
+	}
+	switch delim {
+	case '{':
+		o := &inOrderObject{values: map[string]any{}}
+		for d.More() {
+			k, err := d.Token()
+			if err != nil {
+				return nil, err
+			}
+			name, _ := k.(string)
+			v, err := readInOrder(d)
+			if err != nil {
+				return nil, err
+			}
+			if _, seen := o.values[name]; !seen {
+				o.names = append(o.names, name)
+			}
+			o.values[name] = v
+		}
+		_, err = d.Token()
+		return o, err
+	case '[':
+		list := []any{}
+		for d.More() {
+			v, err := readInOrder(d)
+			if err != nil {
+				return nil, err
+			}
+			list = append(list, v)
+		}
+		_, err = d.Token()
+		return list, err
+	}
+	return nil, errors.New("not JSON")
+}
+
+func writeInOrder(b *bytes.Buffer, v any) {
+	switch x := v.(type) {
+	case *inOrderObject:
+		b.WriteByte('{')
+		for i, k := range x.names {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			writeJSONString(b, k)
+			b.WriteByte(':')
+			writeInOrder(b, x.values[k])
+		}
+		b.WriteByte('}')
+	case []any:
+		b.WriteByte('[')
+		for i, e := range x {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			writeInOrder(b, e)
+		}
+		b.WriteByte(']')
+	default:
+		writeCanonical(b, x)
+	}
 }
 
 // sortedKeys joins an object's member names in code-point order with commas — the seed's

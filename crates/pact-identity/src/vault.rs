@@ -1,7 +1,7 @@
 //! The vault (SPEC §9; CONTRACT §6): two documents under Argon2id and AES-256-GCM with the
 //! document's header as AAD — the FILE, the root and nothing else, and the RECORD, the issued-leaf
 //! ledger and the contact book. Shared by the wallet page and the CLI.
-use crate::canonical::canonical;
+use crate::canonical::{canonical, in_order};
 use crate::csr;
 use crate::keys::PrivateKey;
 use crate::ledger::{self, is_fingerprint};
@@ -346,7 +346,8 @@ fn seal_any(passphrase: &str, plaintext: &Value, kdf: Option<Kdf>, salt: Option<
     let key = derive(passphrase, &salt, kdf)?;
     let h = header(kdf, &salt, &nonce);
     let aad = canonical(&Value::Object(h.clone()));
-    let pt = Zeroizing::new(serde_json::to_vec(plaintext).map_err(|_| Error::new("internal", crate::util::UNSERIALISABLE))?);
+    // Written as a sealed plaintext is (`canonical::in_order`), so the two ports seal one document alike.
+    let pt = Zeroizing::new(in_order(plaintext).into_bytes());
     let ct = aes_gcm::Aes256Gcm::new_from_slice(&key[..])
         .map_err(|_| Error::new("internal", "key length"))?
         .encrypt(nonce.as_slice().into(), Payload { msg: &pt, aad: aad.as_bytes() })

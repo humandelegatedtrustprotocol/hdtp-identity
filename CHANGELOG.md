@@ -377,6 +377,16 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   in a debug build). Go's `Canonical` now writes an `int` or `int64` as the double it is, as it
   writes every other number. The Go port named a chain form with no `sender_chain` in its adapter,
   before the seal; it is named in the seal now, after the header's times, as the core names it.
+- **A JSON value a caller hands in is sealed as the value it is** (a lead of the port-parity
+  verification, 2026-09-30): `seal_request`'s `params`, `seal_result`'s `result` and `error`, and
+  `vault_seal`'s document, in both ports and the typed APIs: numbers and strings as RFC 8785 writes
+  them, members in the order written, a member written twice once, where it first appeared, with its
+  last value (the core's `canonical::in_order`, Go's `inOrder`). The core sealed what serde_json wrote
+  (`1e2` as `100.0`, `-0` as `-0.0`, a 30-digit integer as `1.2345678901234568e+29`), and the Go port
+  the caller's text as written (`{"a":1,"a":2}`, `"\/"`, `1.50`): one call, two plaintexts, and one
+  vault document, two ciphertexts under one salt and nonce. What they seal now is what the seed seals
+  from `JSON.parse` of the same text, but where `JSON.parse` moves a member: it enumerates
+  integer-like names first, and the ports keep the order written.
 
 ## 0.4.1 — 2026-09-28
 

@@ -1,7 +1,7 @@
 //! Sealed envelopes (§13): sealing in both forms, the caller's side of a result, `certificate_renewed`
 //! on the caller's side, and `decide` — the receiving side of §13.3, §6.1, §5.3 and §14.4 as one pure
 //! function over state the host supplies. `envelope.mjs receive()` is its specification, line for line.
-use crate::canonical::canonical;
+use crate::canonical::{canonical, in_order};
 use crate::hpke::{self, suite_for, Suite};
 use crate::keys::{PrivateKey, PublicKey, Signer};
 use crate::util::{b64u, err, from_b64u, wire_b64u, Error, Result};
@@ -134,7 +134,7 @@ fn seal_body(
 ) -> Result<Wire> {
     let suite = suite_for(recipient);
     let aad = header(suite, &recipient.fingerprint(), msg_id, ts, exp, cty);
-    let plaintext = serde_json::to_vec(body).map_err(|_| Error::new("internal", crate::util::UNSERIALISABLE))?;
+    let plaintext = in_order(body).into_bytes();
     let (enc, ct) = hpke::seal(suite, recipient, INFO_V2, &aad, &plaintext, seed)?;
     let mut signed = aad.clone();
     signed.extend_from_slice(&enc);

@@ -125,6 +125,32 @@ export default function envelopes({ add, expect }, f) {
     add('seal_result with a ts of 2^53 - 1 and no exp', 'seal_result', { ...result, ts: MAX });
     expect('seal_result with a ts of 2^53 - 1 and no exp', out('exp'));
   }
+  // A JSON value the caller hands in is sealed as the value it is (canonical::in_order, Go inOrder):
+  // numbers and strings as RFC 8785 writes them, members in the order written, a member written twice
+  // once, where it first appeared, with its last value. The core sealed what serde_json wrote (`1e2`
+  // as `100.0`, `-0` as `-0.0`) and the Go port the caller's text as written, duplicates and escapes
+  // and all: two plaintexts for one call (a lead of the port-parity verification, 2026-09-30). A
+  // request is held to the envelope the seed seals from JSON.parse of the same text — JSON.stringify
+  // writes what the ports now write — except where JSON.parse would move a member: it enumerates
+  // integer-like names first, so that text is held to the two ports agreeing. Raw text throughout.
+  {
+    const base = { ...toMe, msg_id: 'p-13', ts: 1757000001, params: '@@' };
+    const answer = { recipient_spki: hostSpki, sender_pkcs8: hostPkcs8, sender_chain: [leafDer, rootDer], msg_id: 'p-14', ts: 1757000001, ephemeral_seed: eph(7) };
+    for (const [what, text, seedReads] of [
+      ['a member written twice', '{"a":1,"a":2}', true],
+      ['a member written twice around another', '{"b":1,"a":2,"b":3}', true],
+      ['an integer past a double', '{"n":123456789012345678901234567890}', true],
+      ['escapes JSON.stringify does not write', '{"s":"\\u00e9\\/\\u0041"}', true],
+      ['numbers written as JSON.stringify does not write them', '{"x":1.50,"y":1e2,"z":-0,"w":1.0,"v":-0.0,"u":1E-7}', true],
+      ['members named by integers, out of order', '{"1":1,"b":2,"0":3}', false],
+      ['a list holding each of them', '[{"a":1,"a":[2.50]},"\\/",-0]', true],
+    ]) {
+      add(`seal_request whose params hold ${what}`, 'seal_request', RawArgs.edit(base, '"params":"@@"', `"params":${text}`));
+      if (seedReads) expect(`seal_request whose params hold ${what}`, seeded({ msgId: 'p-13', ts: 1757000001, params: JSON.parse(text) }));
+      add(`seal_result whose result holds ${what}`, 'seal_result', RawArgs.edit({ ...answer, result: '@@' }, '"result":"@@"', `"result":${text}`));
+      add(`seal_result whose error holds ${what}`, 'seal_result', RawArgs.edit({ ...answer, error: '@@' }, '"error":"@@"', `"error":${text}`));
+    }
+  }
   // The JSON literal null is absent (CONTRACT §0), for the members sealed into the body too: both ports
   // sealed `params: null`, `result: null` and `error: null` as present, so a null params was not the
   // contract's `{}`, a null result alone was sealed, and a null result beside an error was refused as
