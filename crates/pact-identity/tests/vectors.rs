@@ -28,21 +28,43 @@ fn spec() -> String {
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
-/// The JSON blocks of Appendix B.
-fn appendix_b_blocks() -> Vec<Value> {
-    let s = spec();
-    let start = s.find("## Appendix B").expect("Appendix B");
-    let end = s.find("*End of PACT").expect("the end marker");
-    let b = &s[start..end];
+/// The JSON blocks of a document's Appendix B: everything fenced as ```json between the heading
+/// `## Appendix B` and the first `*End of PACT` after it. Both markers must be there, every fence
+/// must close and every block must be JSON — held to js/appendix-b-reader.json's cases, as the other
+/// three readers are. (It found the end marker from the start of the file, so a marker quoted before
+/// the heading sliced nothing, and it had no test.)
+fn appendix_b(spec: &str) -> Result<Vec<Value>, String> {
+    let start = spec.find("## Appendix B").ok_or("the document has no Appendix B")?;
+    let end = spec[start..].find("*End of PACT").map(|i| start + i).ok_or("Appendix B has no end marker (*End of PACT)")?;
     let mut out = Vec::new();
-    let mut rest = b;
+    let mut rest = &spec[start..end];
     while let Some(i) = rest.find("```json\n") {
         let after = &rest[i + 8..];
-        let j = after.find("\n```").expect("fence");
-        out.push(serde_json::from_str(&after[..j]).expect("json block"));
+        let j = after.find("\n```").ok_or("an unterminated json fence in Appendix B")?;
+        let n = out.len() + 1;
+        out.push(serde_json::from_str(&after[..j]).map_err(|_| format!("Appendix B block {n} is not JSON"))?);
         rest = &after[j + 4..];
     }
-    out
+    Ok(out)
+}
+
+fn appendix_b_blocks() -> Vec<Value> {
+    appendix_b(&spec()).unwrap()
+}
+
+#[test]
+fn appendix_b_is_read_as_the_shared_cases_say_refusals_word_for_word() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../js/appendix-b-reader.json");
+    let fixture: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let cases = fixture["cases"].as_array().unwrap();
+    assert!(cases.len() >= 10);
+    for c in cases {
+        let (name, doc) = (c["name"].as_str().unwrap(), c["doc"].as_str().unwrap());
+        match c["refused"].as_str() {
+            Some(why) => assert_eq!(appendix_b(doc).unwrap_err(), why, "{name}"),
+            None => assert_eq!(json!(appendix_b(doc).unwrap()), c["blocks"], "{name}"),
+        }
+    }
 }
 
 const NOW: &str = "2026-09-13T12:00:00Z";
