@@ -167,7 +167,7 @@ var (
 
 // stranger is the first member, in sorted order, that allowed does not name: sorted, so the two
 // ports name the same one whatever order their maps iterate in.
-func stranger(doc map[string]any, allowed []string) string {
+func stranger[V any](doc map[string]V, allowed []string) string {
 	var extra []string
 	for k := range doc {
 		found := false

@@ -42,6 +42,12 @@ the tables is `contract/CONTRACT.template.md` and is written by hand.
   required" in one port and as a truncated DER in the other. The JSON literal `null` counts as absent.
 - **The order a function reads its members is part of its answer.** When several required members are
   missing, the one named is the first the function needs, and both ports read them in the same order.
+- **A member a function does not declare is refused**, before any member is read: `{"error":
+  "bad_request", "why": "<fn> takes no member \"<m>\""}`, naming the first such member in sorted
+  order. A function declares the members its `params` list, and no others. This holds the arguments
+  object itself; the objects inside a member (an envelope, a node state, a pin) are read for the
+  members they need and not held to their schemas' `additionalProperties`, because a host's typed
+  port, which decodes them into fixed structs, cannot see a member it has no field for either.
 - **`why` is part of the answer.** Two ports refusing the same call in different words is a
   divergence, not a detail: it is what a person debugging reads, and what a caller's test asserts. No
   `why` may be a library's own error text — one port cannot reproduce another library's wording.
