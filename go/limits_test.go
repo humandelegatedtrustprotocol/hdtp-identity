@@ -138,3 +138,31 @@ func TestLimitsEveryRuleRefusesAndAFreshKeyGetsThrough(t *testing.T) {
 		t.Fatalf("at the cap: %+v", d)
 	}
 }
+
+// What the crate's types cannot hold, this port's refuse (T21): a rules map without a member is that
+// member's `is a number`, as a document without it is, and not a rule about a 0 nobody wrote; a
+// charge of a kind nobody has is refused, where it spent no bucket and was allowed. The control is the
+// same rules whole, and a kind that exists.
+func TestLimitsRefuseWhatTheCratesTypesCannotHold(t *testing.T) {
+	r := limitsTestRules()
+	if err := r.Check(); err != nil {
+		t.Fatalf("the whole rules: %v", err)
+	}
+	for _, name := range LimitsRuleMembers {
+		without := LimitsRules{}
+		for k, v := range r {
+			if k != name {
+				without[k] = v
+			}
+		}
+		if err := without.Check(); err == nil || err.Error() != name+" is a number" {
+			t.Errorf("rules without %s: %v", name, err)
+		}
+	}
+	if d := LimitsDecide(r, LimitsCharge{Kind: "everything"}, 0, LimitsMemoryStore{}); d.Allowed || d.Which != "charge.kind" || d.RetryAfter != nil {
+		t.Errorf("a charge of an unknown kind: %+v", d)
+	}
+	if d := LimitsDecide(r, LimitsCharge{Kind: "stranger_out"}, 0, LimitsMemoryStore{}); !d.Allowed {
+		t.Errorf("a charge of a known kind: %+v", d)
+	}
+}

@@ -186,8 +186,13 @@ func redirectAllowed(redirect string) (string, error) {
 }
 
 // SigningRequestCheck applies the checks to a decoded request (a JSON object's members), in the
-// order CONTRACT §3.1 writes them. A refusal names the first thing wrong.
+// order CONTRACT §3.1 writes them. A refusal names the first thing wrong. No request at all (nil) is
+// `request is required`, as the core's `check` answers a request that is not an object; it was
+// judged as an empty one here and named its first member, `csr is required` (T21).
 func SigningRequestCheck(request map[string]any, origin string, now time.Time, rootSPKIs [][]byte) (*SigningChecked, error) {
+	if request == nil {
+		return nil, refuseSigning("request is required")
+	}
 	var strangers []string
 	for k := range request {
 		known := false

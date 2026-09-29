@@ -70,7 +70,7 @@ func callLimitsRulesCheck(a args) json.RawMessage {
 	return ok(map[string]any{"ok": true})
 }
 
-const limitsKinds = "contact_in, guest_in, guest_total, contact_out, stranger_out, integration, pending_in"
+var limitsKinds = strings.Join(limitsChargeKinds, ", ")
 
 func limitsReadCharge(v any) (LimitsCharge, error) {
 	o, isObj := v.(map[string]any)
