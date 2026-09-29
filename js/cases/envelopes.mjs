@@ -52,6 +52,35 @@ export default function envelopes({ add, expect }, f) {
   add('seal_result with no recipient', 'seal_result', { sender_pkcs8: hostPkcs8, result: {}, msg_id: 'x', ts: 1, ephemeral_seed: eph(7) });
   add('seal_result with neither a result nor an error', 'seal_result', { recipient_spki: hostSpki, sender_pkcs8: hostPkcs8, msg_id: 'x', ts: 1, ephemeral_seed: eph(7) });
 
+  // ── a zero value is a value (cluster B of the port-parity audit) ────────────────────────────────
+  // Absent takes the contract's default (`params` {}, `method` tools/call, `cty` a call, `exp` ts+600);
+  // present, a member is sealed as given, 0 and "" included — as the core and the seed seal it. The Go
+  // port read `ts: 0` as absent, `exp: 0` as ts+600, `method: ""` and `cty: ""` as their defaults,
+  // and refused an absent `params` as not JSON (T7, F8, R17, R18, C2, F9). Each is held to the
+  // envelope the seed seals from the same members and the same ephemeral.
+  const toMe = { recipient_leaf: leafDer, sender_pkcs8: hostPkcs8, sender_chain: [leafDer, rootDer], ephemeral_seed: eph(7) };
+  const seeded = (o) => request({ params: {}, ephemeralSeed: Buffer.alloc(32, 7), ...o });
+  for (const [what, args, seedArgs] of [
+    ['no params', { msg_id: 'p-3', ts: at(now) }, { msgId: 'p-3' }],
+    ['exp 0', { params: {}, msg_id: 'p-4', ts: at(now), exp: 0 }, { msgId: 'p-4', exp: 0 }],
+    ['ts 0', { params: {}, msg_id: 'p-5', ts: 0 }, { msgId: 'p-5', ts: 0 }],
+    ['an empty method and an empty cty', { params: {}, method: '', cty: '', msg_id: 'p-6', ts: at(now) }, { msgId: 'p-6', method: '', cty: '' }],
+  ]) {
+    add(`seal_request with ${what}`, 'seal_request', { ...toMe, ...args });
+    expect(`seal_request with ${what}`, seeded(seedArgs));
+  }
+  // The seed seals no results, so these two are held to each other.
+  add('seal_result with ts 0 and exp 0', 'seal_result', { recipient_spki: hostSpki, sender_pkcs8: hostPkcs8, sender_chain: [leafDer, rootDer], result: { ok: true }, msg_id: 'p-7', ts: 0, exp: 0, ephemeral_seed: eph(7) });
+  // Two members missing: the one named is the first the core needs (F10, R19). The chain is judged
+  // when the proof member is made, after msg_id and ts; and before the result, whose absence the case
+  // above this block's could not reach, since it left the chain out too.
+  add('seal_request with neither msg_id nor sender_chain', 'seal_request', { recipient_leaf: leafDer, sender_pkcs8: hostPkcs8, ts: 1, ephemeral_seed: eph(7) });
+  expect('seal_request with neither msg_id nor sender_chain', { error: 'bad_request', why: 'msg_id is required' });
+  add('seal_result with a chain of one and neither a result nor an error', 'seal_result', { recipient_spki: hostSpki, sender_pkcs8: hostPkcs8, sender_chain: [leafDer], msg_id: 'x', ts: 1, ephemeral_seed: eph(7) });
+  expect('seal_result with a chain of one and neither a result nor an error', { error: 'bad_request', why: 'sender_chain must be the leaf and the root' });
+  add('seal_result with a chain and neither a result nor an error', 'seal_result', { recipient_spki: hostSpki, sender_pkcs8: hostPkcs8, sender_chain: [leafDer, rootDer], msg_id: 'x', ts: 1, ephemeral_seed: eph(7) });
+  expect('seal_result with a chain and neither a result nor an error', { error: 'bad_request', why: 'a result carries exactly one of result and error' });
+
   // Every member that is absent rather than empty. A sealed answer carries a fresh ephemeral, so the
   // two seal_ functions are compared on the members that do not move.
   for (const [fn, args] of [
