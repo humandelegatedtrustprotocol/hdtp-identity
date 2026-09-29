@@ -2,8 +2,9 @@
 //
 // A fresh key for every kind of charge (the controls that must get through), every rule refusing
 // once its bucket is empty, the pending cap, a clock that went back, a stored aggregate over a burst
-// that shrank, and every argument that does not read. The sequences that hold the decision to the
-// cloud's TypeScript are js/cases/limits-vectors.json, replayed by js/limits.test.mjs.
+// that shrank, and every argument that does not read. The sequences that hold the decision to what the
+// cloud's TypeScript decided are js/cases/limits-vectors.json, a fixed record of it, replayed by
+// js/limits.test.mjs.
 import { RawArgs } from '../port.mjs';
 
 export default function limits({ add, expect }) {
