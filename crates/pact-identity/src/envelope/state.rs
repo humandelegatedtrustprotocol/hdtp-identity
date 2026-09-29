@@ -147,11 +147,23 @@ impl Wire {
     }
 }
 
+/// A root the host holds — a pin's, a tombstone's, a former endpoint's — is a fingerprint (the
+/// contract's `Fingerprint`): one that is not is the host's damaged state, refused by its path. Read
+/// as a string, it was a root nothing matched, and a pin or a former endpoint whose root was `abc`
+/// came back as the answer's `address_claim: "abc"`, which the contract types as a fingerprint.
+fn root(o: &Map<String, Value>, path: &str) -> Result<String> {
+    let root = text(o, "root", path)?;
+    if !crate::ledger::is_fingerprint(&root) {
+        return err("bad_request", format!("{path}.root is not a fingerprint"));
+    }
+    Ok(root)
+}
+
 /// A pin, `open_result`'s or a node's: root, endpoint and leaf; `state` absent is `active`.
 fn pin_of(v: &Value, path: &str) -> Result<Pin> {
     let o = object_of(v, path)?;
     Ok(Pin {
-        root: text(o, "root", path)?,
+        root: root(o, path)?,
         endpoint: text(o, "endpoint", path)?,
         leaf: text(o, "leaf", path)?,
         state: opt_text(o, "state", path)?.unwrap_or_else(|| "active".into()),
@@ -221,11 +233,11 @@ fn node_state(v: &Value) -> Result<NodeState> {
         pins: opt_list(o, "pins", path, pin_of)?,
         tombstones: opt_list(o, "tombstones", path, |v, p| {
             let t = object_of(v, p)?;
-            Ok(Tombstone { root: text(t, "root", p)?, leaf: text(t, "leaf", p)?, at: text(t, "at", p)? })
+            Ok(Tombstone { root: root(t, p)?, leaf: text(t, "leaf", p)?, at: text(t, "at", p)? })
         })?,
         former_endpoints: opt_list(o, "former_endpoints", path, |v, p| {
             let f = object_of(v, p)?;
-            Ok(FormerEndpoint { root: text(f, "root", p)?, endpoint: text(f, "endpoint", p)?, at: text(f, "at", p)? })
+            Ok(FormerEndpoint { root: root(f, p)?, endpoint: text(f, "endpoint", p)?, at: text(f, "at", p)? })
         })?,
         seen: texts(o, "seen", path)?,
     })
