@@ -138,6 +138,11 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   it is `kdf parameters out of range` there too, as is an `m_kib` of 8192.5, which the Go port cut to
   8192 and refused as a wrong passphrase (C5). Parity sends these as raw text (`RawArgs`, js/port.mjs),
   which `JSON.stringify` cannot write.
+- Go, typed (T21): `SigningRequestCheck(nil, …)` is `request is required`, as the core answers a
+  request that is not an object (it named the first member, `csr is required`); `LimitsRules.Check`
+  answers a member the map does not hold `<name> is a number`, as a document without it is answered
+  (it read 0 and said `is at least 1`); `LimitsDecide` refuses a `Kind` nobody has, `Which`
+  `charge.kind` (it charged no bucket and allowed the call). The crate's types cannot hold either.
 - **JS loader:** `call(name, null)` hands `null` to the core, which answers `args is a JSON object`
   as the Go port does; it used to be made `{}` (`js/index.mjs`, `js/worker.mjs`). Only `args` left
   out is `{}`. The parity case `args that are null` sends `null` for the first time (TC-2).
