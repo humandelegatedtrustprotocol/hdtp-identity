@@ -227,9 +227,37 @@ pub(super) fn export_read_end_lean(args: &str) -> Option<Result<Value>> {
     // without keeping any of it: the lean path answers only what the ordinary one would. A member the
     // struct does not name is otherwise skipped unread, and `{"x": 1e400, ...}` was answered `ok` here
     // where the ordinary path refuses it.
-    serde_json::from_str::<Walk>(args).ok()?;
+    let TopKeys(keys) = serde_json::from_str(args).ok()?;
+    // A member the function does not declare, refused as `call` refuses it for every other function.
+    if let Some(e) = super::undeclared("export_read_end", keys.iter().map(String::as_str)) {
+        return Some(Err(e));
+    }
     let a: EndArgs<'_> = serde_json::from_str(args).ok()?;
     Some(read_end(&a))
+}
+
+/// An object's member names, its values walked whole as `Walk` walks them and not kept.
+struct TopKeys(Vec<String>);
+
+impl<'de> serde::Deserialize<'de> for TopKeys {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        use serde::de::{MapAccess, Visitor};
+        struct V;
+        impl<'de> Visitor<'de> for V {
+            type Value = TopKeys;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a JSON object")
+            }
+            fn visit_map<M: MapAccess<'de>>(self, mut m: M) -> std::result::Result<TopKeys, M::Error> {
+                let mut keys = Vec::new();
+                while let Some((k, Walk)) = m.next_entry::<String, Walk>()? {
+                    keys.push(k);
+                }
+                Ok(TopKeys(keys))
+            }
+        }
+        d.deserialize_map(V)
+    }
 }
 
 /// A JSON value walked whole, every number parsed and nothing kept.

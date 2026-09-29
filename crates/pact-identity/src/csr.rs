@@ -190,8 +190,6 @@ pub fn issue_tbs(
         ca: false,
         usage: None,
         aki: None,
-        extra: Vec::new(),
-        alg_oid: None,
     };
     Ok((x509::leaf_tbs(&spec)?, not_before, not_after))
 }

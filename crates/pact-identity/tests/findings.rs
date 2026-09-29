@@ -44,8 +44,6 @@ fn leaf(c: &Cast, endpoint: &str, dns: Option<&str>, aki: Option<Vec<u8>>) -> Ve
             ca: false,
             usage: None,
             aki,
-            extra: Vec::new(),
-            alg_oid: None,
         },
         &c.root,
     )
@@ -283,8 +281,6 @@ fn a_pending_contacts_sealed_listing_answers_at_the_pending_tier() {
             ca: false,
             usage: None,
             aki: None,
-            extra: Vec::new(),
-            alg_oid: None,
         },
         &them.root,
     )

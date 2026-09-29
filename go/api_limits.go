@@ -36,21 +36,6 @@ func limitsNumber(v any) (float64, bool) {
 	return f, err == nil
 }
 
-func limitsArgs(args json.RawMessage) (map[string]any, json.RawMessage) {
-	if len(args) == 0 {
-		return map[string]any{}, nil
-	}
-	decoded, err := decodeJSON(args)
-	if err != nil {
-		return nil, fail(codeArgs, "arguments do not read")
-	}
-	a, isObj := decoded.(map[string]any)
-	if !isObj {
-		return nil, fail(codeArgs, "args is a JSON object")
-	}
-	return a, nil
-}
-
 // limitsReadRules reads a rules document and holds it to Check; the error is the first reason.
 func limitsReadRules(doc any) (LimitsRules, error) {
 	o, isObj := doc.(map[string]any)
@@ -74,13 +59,9 @@ func limitsReadRules(doc any) (LimitsRules, error) {
 	return rules, nil
 }
 
-func callLimitsRulesCheck(args json.RawMessage) json.RawMessage {
-	a, bad := limitsArgs(args)
-	if bad != nil {
-		return bad
-	}
-	doc, present := a["rules"]
-	if !present || doc == nil {
+func callLimitsRulesCheck(a args) json.RawMessage {
+	doc := a.value("rules")
+	if doc == nil {
 		return fail(codeArgs, "rules is required")
 	}
 	if _, err := limitsReadRules(doc); err != nil {
@@ -226,29 +207,25 @@ type limitsAnswer struct {
 	Writes     []limitsWrite `json:"writes"`
 }
 
-func callLimitsDecide(args json.RawMessage) json.RawMessage {
-	a, bad := limitsArgs(args)
-	if bad != nil {
-		return bad
-	}
+func callLimitsDecide(a args) json.RawMessage {
 	// In the order the function needs them (CONTRACT §0): the rules, what is charged, when, the rows.
-	doc, present := a["rules"]
-	if !present || doc == nil {
+	doc := a.value("rules")
+	if doc == nil {
 		return fail(codeArgs, "rules is required")
 	}
 	rules, err := limitsReadRules(doc)
 	if err != nil {
 		return fail(codeArgs, "the limits rules cannot be enforced: "+err.Error())
 	}
-	charge, err := limitsReadCharge(a["charge"])
+	charge, err := limitsReadCharge(a.value("charge"))
 	if err != nil {
 		return failErr(codeArgs, err)
 	}
-	now, isWhole := limitsWhole(a["now"])
+	now, isWhole := limitsWhole(a.value("now"))
 	if !isWhole {
 		return fail(codeArgs, "now is a time in milliseconds")
 	}
-	store, err := limitsReadState(a["state"])
+	store, err := limitsReadState(a.value("state"))
 	if err != nil {
 		return failErr(codeArgs, err)
 	}
