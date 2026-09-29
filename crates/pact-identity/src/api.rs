@@ -262,6 +262,7 @@ fn dispatch(name: &str, a: &Value) -> Result<Answer> {
         // §4 cards
         "card_encode" => cards::card_encode(a)?,
         "card_decode" => cards::card_decode(a)?,
+        "refresh_check" => cards::refresh_check(a)?,
         // §5 envelopes
         "suite_for" => envelopes::suite_for(a)?,
         "hpke_seal" => envelopes::hpke_seal(a)?,
@@ -338,6 +339,7 @@ fn declared(name: &str) -> Option<&'static [&'static str]> {
         "signing_request_check" => &["request", "origin", "now", "root_spkis"],
         "card_encode" => &["fn", "cert", "seal", "extra"],
         "card_decode" => &["vcard", "now"],
+        "refresh_check" => &["pin", "answer", "now"],
         "suite_for" => &["spki"],
         "hpke_seal" => &["suite", "recipient_spki", "info", "aad", "plaintext", "ephemeral_seed"],
         "hpke_open" => &["suite", "recipient_pkcs8", "recipient_spki", "info", "aad", "enc", "ct"],
