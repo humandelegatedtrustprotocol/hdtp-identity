@@ -19,13 +19,9 @@ func callCSRNew(a args) json.RawMessage {
 	if err != nil {
 		return failAs(codeArgs, err)
 	}
-	dns, err := a.optStr("dns_name")
+	dnsName, err := a.dnsName()
 	if err != nil {
 		return failAs(codeArgs, err)
-	}
-	dnsName := ""
-	if dns != nil {
-		dnsName = *dns
 	}
 	der, err := CSRNew(cn, host, endpoint, dnsName)
 	if err != nil {

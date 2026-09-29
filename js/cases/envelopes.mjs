@@ -344,4 +344,15 @@ export default function envelopes({ add, expect }, f) {
   expect('follow_renewed on an answer whose data is not an object', { follow: false, why: 'no chain' });
   add('follow_renewed on an answer that is not an object', 'follow_renewed', follow('x'));
   expect('follow_renewed on an answer that is not an object', { follow: false, why: 'not certificate_renewed' });
+
+  // ── an empty string is a value (cluster D) ────────────────────────────────────────────────────
+  add('open_result in the chain form with an expected_root that is empty', 'open_result', open(chainForm, { expected_root: '' }));
+  expect('open_result in the chain form with an expected_root that is empty', { error: 'envelope_invalid', why: 'chain rule 2: root is not the one expected' });
+  // follow_renewed's pinned root and dialed address are required, and "" is held like any value: the
+  // Go port's typed FollowRenewed read it as "not given" and followed a renewed chain from any root
+  // at any address (T14's corrected text).
+  add('follow_renewed with a pinned_root that is empty', 'follow_renewed', { ...follow({ code: 'certificate_renewed', data: { chain: [leafDer, rootDer] } }), pinned_root: '' });
+  expect('follow_renewed with a pinned_root that is empty', { follow: false, why: 'chain rule 2: root is not the one expected' });
+  add('follow_renewed with a dialed address that is empty', 'follow_renewed', { ...follow({ code: 'certificate_renewed', data: { chain: [leafDer, rootDer] } }), dialed: '' });
+  expect('follow_renewed with a dialed address that is empty', { follow: false, why: 'chain rule 5: endpoint differs from the one in question' });
 }

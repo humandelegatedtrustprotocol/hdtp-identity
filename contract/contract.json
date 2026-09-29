@@ -1072,7 +1072,7 @@
           "root_cn": { "type": "string" },
           "host_spki": { "$ref": "#/$defs/Spki" },
           "endpoint": { "type": "string" },
-          "dns_name": { "type": "string" },
+          "dns_name": { "type": "string", "minLength": 1, "description": "The endpoint's host as a dNSName beside its URI. Absent or null is none; present and empty is refused (`dns_name is empty`)." },
           "not_before": { "$ref": "#/$defs/InstantIn" },
           "not_after": { "$ref": "#/$defs/InstantIn" },
           "serial": { "$ref": "#/$defs/Serial" },
@@ -1099,7 +1099,7 @@
           "root_cn": { "type": "string" },
           "host_spki": { "$ref": "#/$defs/Spki" },
           "endpoint": { "type": "string" },
-          "dns_name": { "type": "string" },
+          "dns_name": { "type": "string", "minLength": 1, "description": "The endpoint's host as a dNSName beside its URI. Absent or null is none; present and empty is refused (`dns_name is empty`)." },
           "not_before": { "$ref": "#/$defs/InstantIn" },
           "not_after": { "$ref": "#/$defs/InstantIn" },
           "serial": { "$ref": "#/$defs/Serial" },
@@ -1273,7 +1273,7 @@
           "cn": { "type": "string" },
           "host_pkcs8": { "$ref": "#/$defs/Pkcs8" },
           "endpoint": { "type": "string" },
-          "dns_name": { "type": "string" }
+          "dns_name": { "type": "string", "minLength": 1, "description": "The endpoint's host as a dNSName beside its URI. Absent or null is none; present and empty is refused (`dns_name is empty`)." }
         },
         "required": ["cn", "host_pkcs8", "endpoint"],
         "additionalProperties": false

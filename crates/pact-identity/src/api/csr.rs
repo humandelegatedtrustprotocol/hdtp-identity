@@ -4,7 +4,8 @@ use super::*;
 use crate::{csr, x509};
 
 pub(super) fn csr_new(a: &Value) -> Result<Value> {
-    Ok(json!({ "der": b64u(&csr::csr_new(s(a, "cn")?, &private(a, "host_pkcs8")?, s(a, "endpoint")?, opt_s(a, "dns_name"))?) }))
+    let (cn, host, endpoint) = (s(a, "cn")?, private(a, "host_pkcs8")?, s(a, "endpoint")?);
+    Ok(json!({ "der": b64u(&csr::csr_new(cn, &host, endpoint, dns_name(a)?.as_deref())?) }))
 }
 
 pub(super) fn csr_check(a: &Value) -> Result<Value> {
