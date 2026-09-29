@@ -579,8 +579,10 @@ func TestALowOrderRecipientIsRefused(t *testing.T) {
 
 // Every exported entry point that takes a key, or an options struct holding one, refuses a key that is
 // not one — nil, the zero value, a key given an Alg by hand — by name, before it reads a field of it
-// (T18: each of these panicked). One case per struct at its zero value, and each key argument nil and
-// empty; the words are `<who> is required`, as the JSON boundary names a member left out.
+// (T18: measured before, most of these panicked and the rest answered as if a key were there — a TBS
+// around an empty SubjectPublicKeyInfo, a PKCS #8 of an empty scalar). One case per struct at its zero
+// value, and each key argument nil and empty; the words are `<who> is required`, as the JSON boundary
+// names a member left out.
 func TestEveryTypedEntryPointRefusesAKeyThatIsNotOne(t *testing.T) {
 	now := time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC)
 	root, _ := KeyFromSeed(AlgEd25519, make([]byte, 32))
