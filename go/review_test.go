@@ -639,3 +639,35 @@ func TestTheTypedRefreshRefusesAPinRootThatIsNotAFingerprint(t *testing.T) {
 		t.Errorf("a pin that reads: %+v, %v", v, err)
 	}
 }
+
+// The typed Decide, DecideChain and OpenResult, which the node calls with structs that never pass
+// through the JSON reader, refuse a root the host holds that is not a fingerprint, by its path, before
+// anything else: read as a string it was a root nothing matched, and a pin or a former endpoint whose
+// root was "abc" came back as an address_claim of "abc".
+func TestTheTypedDecisionsRefuseAHostRootThatIsNotAFingerprint(t *testing.T) {
+	alina := reviewIdentity(t, "ed25519", reviewEndpoint)
+	fp := alina.rootFP
+	for _, c := range []struct {
+		node NodeState
+		want string
+	}{
+		{NodeState{Pins: []Pin{{Root: fp}, {Root: "abc"}}}, "node.pins[1].root is not a fingerprint"},
+		{NodeState{Tombstones: []TombstoneRec{{Root: ""}}}, "node.tombstones[0].root is not a fingerprint"},
+		{NodeState{FormerEndpoints: []FormerEndpoint{{Root: fp[:len(fp)-1]}}}, "node.former_endpoints[0].root is not a fingerprint"},
+	} {
+		if _, err := Decide(time.Now(), Envelope{}, c.node); err == nil || err.Error() != c.want {
+			t.Errorf("Decide: %v, want %q", err, c.want)
+		}
+		if _, err := DecideChain(time.Now(), [][]byte{alina.leaf, alina.root}, c.node); err == nil || err.Error() != c.want {
+			t.Errorf("DecideChain: %v, want %q", err, c.want)
+		}
+	}
+	_, err := OpenResult(Envelope{}, OpenOpts{Recipient: alina.leafKey, RecipientPublic: alina.leafKey.Public(), Pins: []Pin{{Root: "abc"}}})
+	if err == nil || err.Error() != "pins[0].root is not a fingerprint" {
+		t.Errorf("OpenResult: %v", err)
+	}
+	// The control: fingerprints get past the roots, to what is wrong with the rest.
+	if _, err := Decide(time.Now(), Envelope{}, NodeState{Pins: []Pin{{Root: fp}}}); err != nil && strings.Contains(err.Error(), "fingerprint") {
+		t.Errorf("a node whose roots are fingerprints: %v", err)
+	}
+}
