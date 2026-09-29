@@ -359,7 +359,7 @@
       ]
     },
     "Effect": {
-      "description": "Something the host must apply. `decide` changes nothing itself.",
+      "description": "Something the host must apply. `decide` changes nothing itself. `seen` is the envelope's; the rest are the pins' (`PinEffect`).",
       "oneOf": [
         {
           "type": "object",
@@ -367,6 +367,12 @@
           "required": ["op", "msg_id"],
           "additionalProperties": false
         },
+        { "$ref": "#/$defs/PinEffect" }
+      ]
+    },
+    "PinEffect": {
+      "description": "What the pins decided a host must apply — the moves of a pin, a former endpoint, an event, a new address waiting for the owner: what `decide` and `decide_chain` both answer. `decide` changes nothing itself, and neither does `decide_chain`.",
+      "oneOf": [
         {
           "type": "object",
           "properties": {
@@ -410,6 +416,46 @@
             "why": { "enum": ["ask", "returned after removal"] }
           },
           "required": ["op", "root", "endpoint", "leaf", "why"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "ChainDecision": {
+      "description": "What `decide_chain` decided about a chain proven outside an envelope: `decide`'s answer to the same chain and node, less what is the call's (`method`, `tool`, `params`, `form`) and less the envelope's own refusals. A guest carries its reason, `demote` and the address claim; a chain that fails a rule, or a leaf of the pinned one's notBefore that is not it, is `envelope_invalid` in `decide`'s words.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "code": { "const": "ok" },
+            "tier": { "enum": ["contact", "pending", "pending_new_address"] },
+            "root": { "$ref": "#/$defs/Fingerprint" },
+            "endpoint": { "type": "string" },
+            "leaf": { "$ref": "#/$defs/CertDer" },
+            "forced": { "const": "tombstone" },
+            "decision": { "const": "ask" }
+          },
+          "required": ["code", "tier", "root", "endpoint", "leaf"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "code": { "const": "ok" },
+            "tier": { "const": "guest" },
+            "root": { "$ref": "#/$defs/Fingerprint" },
+            "endpoint": { "type": "string" },
+            "leaf": { "$ref": "#/$defs/CertDer" },
+            "why": { "$ref": "#/$defs/GuestWhy" },
+            "demote": { "type": "boolean" },
+            "address_claim": { "anyOf": [{ "$ref": "#/$defs/Fingerprint" }, { "type": "null" }] }
+          },
+          "required": ["code", "tier", "root", "endpoint", "leaf", "why", "demote", "address_claim"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": { "code": { "const": "envelope_invalid" }, "why": { "type": "string" } },
+          "required": ["code", "why"],
           "additionalProperties": false
         }
       ]
@@ -1723,6 +1769,30 @@
       },
       "errors": ["bad_request", "parse", "unsupported"],
       "notes": "§5.1 below."
+    },
+    "decide_chain": {
+      "section": "envelopes",
+      "params": {
+        "type": "object",
+        "properties": {
+          "node": { "$ref": "#/$defs/NodeState" },
+          "chain": { "$ref": "#/$defs/Chain", "description": "The chain the caller proved outside an envelope — at the TLS layer, where the handshake is its leaf key's signature: leaf, then root." },
+          "now": { "$ref": "#/$defs/InstantIn" }
+        },
+        "required": ["node", "chain", "now"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "result": { "$ref": "#/$defs/ChainDecision" },
+          "effects": { "type": "array", "items": { "$ref": "#/$defs/PinEffect" } }
+        },
+        "required": ["result", "effects"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "parse", "unsupported"],
+      "notes": "§5.1's pin decision on its own, for a host's TLS door: the part of `decide` after the chain is validated and signed for, written once in each port and taken by both functions, so a chain presented at the TLS layer earns exactly what an envelope carrying it would (N1, N2: the node's TLS door read the removal tombstone in the states `decide` does not, and served a conflicting leaf as a guest). Read as `decide` reads its arguments: `node`, `chain` and `now` absent or null, in that order; the node whole, as `decide` reads it; the chain, as every function reads one (not a list: `chain is required`; a member that is not a base64url string: `parse` `not base64url`); `now`. The chain is validated at `now` with no expectation; one that fails is `envelope_invalid` `chain rule <n>: <reason>`. Then the pins, in `decide`'s order: no pin for the root — a tombstone for it (the first) within 30 days whose leaf the chain's is newer than is `pending_new_address` forced `ask` with a `pending` effect (`returned after removal`), and otherwise a guest (`unknown root`); a blocked pin is a guest (`blocked`); a leaf older than the pinned one a guest (`superseded leaf`); a different leaf of the pinned one's notBefore `envelope_invalid` (`a different leaf with the same notBefore`); another endpoint is `pending_new_address` under `ask` and, under `auto`, a re-pin with the former endpoint recorded and a `new_address` event; a newer leaf at the pinned endpoint a `pin_update` and a `renewal` event; then `pending` for a `pending_out` pin and `contact` otherwise. A guest carries `why`, `demote` and `address_claim`, as `decide`'s does. What is the call's — a guest's tools and card, the receiver's own address (§14.5), what a `pending_out` pin may call — the host applies to each call, as `decide` applies it to the envelope's. There is no `seen`. Node state that does not read is an error of the call in its reader's class, as in `decide`."
     },
     "vault_seal": {
       "section": "vault",

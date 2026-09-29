@@ -421,7 +421,7 @@ pub fn follow_renewed(answer: &Value, pinned_root: &str, pinned_leaf: &[u8], dia
 
 mod decide;
 mod state;
-pub use decide::decide;
+pub use decide::{decide, decide_chain};
 pub use state::{DecideInput, DecideOutput, FormerEndpoint, HeldKey, NodeState, Pin, Tombstone};
 
 /// The suite a recipient's SubjectPublicKeyInfo takes, by name.

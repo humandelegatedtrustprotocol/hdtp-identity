@@ -151,8 +151,10 @@ for (const c of cases) {
   // A case that carries the spec's (or the contract's) answer is held to it; one that misses it is
   // not compared besides.
   const want = expected.get(id)?.want;
-  // `decide` answers under `result`; a refusal is the answer itself.
-  const judged = (got) => got?.result ?? got;
+  // `decide` and `decide_chain` answer under `result`, and a refusal is the answer itself; an
+  // expectation that names `result` or `effects` is held to the whole answer, effects and all.
+  const answerWhole = want && ('result' in want || 'effects' in want);
+  const judged = (got) => (answerWhole ? got : got?.result ?? got);
   const missed = want ? [['wasm', raw], ['go', rawGo]].filter(([, got]) => !got?.threw && Object.entries(want).some(([k, v]) => !holds(v, judged(got)?.[k]))) : [];
   for (const [port, got] of missed) {
     fails.push(`${port} not as expected`);

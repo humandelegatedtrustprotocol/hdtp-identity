@@ -318,6 +318,34 @@ func callDecide(a args) json.RawMessage {
 	return ok(d)
 }
 
+// callDecideChain is a chain proven at the TLS layer, decided by the pins (DecideChain). Read as
+// callDecide reads its own: `node`, `chain` and `now` absent or null, in that order; then the node
+// whole, by the one reader; the chain, as every function reads one; `now`.
+func callDecideChain(a args) json.RawMessage {
+	for _, k := range []string{"node", "chain", "now"} {
+		if a.present(k) == nil {
+			return fail(codeArgs, k+" is required")
+		}
+	}
+	node, err := nodeStateOf(a.value("node"))
+	if err != nil {
+		return failAs(codeArgs, err)
+	}
+	chain, err := a.chain("chain")
+	if err != nil {
+		return failAs("parse", err)
+	}
+	now, err := a.instant("now")
+	if err != nil {
+		return failAs("parse", err)
+	}
+	d, err := DecideChain(now, chain, node)
+	if err != nil {
+		return failAs("parse", err)
+	}
+	return ok(d)
+}
+
 // ── the objects inside a member, read by hand (api/envelopes.rs reads them the same way, in the same order)
 
 // required is `<path> is required`: a member of an object inside the arguments that is absent, null

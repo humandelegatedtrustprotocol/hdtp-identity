@@ -106,6 +106,7 @@ export const BASES = {
   open_result: 'open_result in the leaf form, from a held leaf: the answer that succeeds',
   follow_renewed: 'follow_renewed on the same leaf',
   decide: 'decide on an envelope from a pinned contact',
+  decide_chain: 'decide_chain: the pinned leaf',
   vault_seal: 'vault_seal',
   vault_open: 'vault_open of what vault_seal made',
   wallet_issue: 'wallet_issue',

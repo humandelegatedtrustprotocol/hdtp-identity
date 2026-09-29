@@ -182,10 +182,17 @@ impl DecideInput {
                 return err("bad_request", format!("{k} is required"));
             }
         }
-        let node = node_state(&a["node"])?;
+        let node = NodeState::read(&a["node"])?;
         let envelope = Wire::read(&a["envelope"])?;
         let now = a["now"].as_str().ok_or_else(|| required("now"))?.to_string();
         Ok(DecideInput { now, envelope, node })
+    }
+}
+
+impl NodeState {
+    /// The node state, from JSON: the one reader, which `decide` and `decide_chain` both use.
+    pub fn read(v: &Value) -> Result<NodeState> {
+        node_state(v)
     }
 }
 
