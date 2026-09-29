@@ -58,7 +58,9 @@ const holder = (id) => {
   const e = map[id];
   if (!e) return '— *nothing claims it*';
   const names = [...(e.held_by ?? []), ...(e.elsewhere_names ?? [])];
-  if (names.length) return names.map((n) => `\`${n}\``).join(', ');
+  // A named gap is part of the answer to "held by what": the rest of the MUST is held by nothing.
+  const gap = e.gap ? ' — *and a named gap: a part nothing holds (js/musts.json)*' : '';
+  if (names.length) return names.map((n) => `\`${n}\``).join(', ') + gap;
   return `*${e.elsewhere ?? 'elsewhere'}, by declaration*`;
 };
 

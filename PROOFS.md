@@ -8,9 +8,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 case can be listed as proven that did not pass. The cases that fail today are listed apart, at the
 end, each with the finding it waits on.
 
-Specification: **2.2.4**. **88** normative sentences, **1468** cross-port parity cases over **50** guarded functions, and **463** known divergences that fail today and are listed apart, at the end.
+Specification: **2.2.4**. **88** normative sentences, **1476** cross-port parity cases over **50** guarded functions, and **463** known divergences that fail today and are listed apart, at the end.
 
-Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **3862** answers, of which **172** do not hold to the shape it declares — **172** of them in a known divergence. Of **94** declared error codes, **94** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **3878** answers, of which **172** do not hold to the shape it declares — **172** of them in a known divergence. Of **94** declared error codes, **94** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 88 normative sentences of the specification
 
@@ -40,10 +40,10 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 
 | # | The sentence | Held by |
 |---|---|---|
-| `2.2#1` | Before issuing any certificate, a wallet MUST establish that the root it is about to sign with is the root the identity already has. | `rust:a_vault_entry_that_disagrees_with_its_own_certificate_signs_nothing`, `go:TestVaultRulesMirrorTheCore` |
-| `2.2#2` | A wallet MUST refuse to sign unless all three hold: | `rust:a_card_whose_certificate_and_key_disagree_gets_no_leaf`, `rust:another_card_signs_nothing_for_this_identity`, `rust:a_card_that_swaps_its_key_after_the_check_signs_nothing_that_is_kept` |
+| `2.2#1` | Before issuing any certificate, a wallet MUST establish that the root it is about to sign with is the root the identity already has. | `rust:a_vault_entry_that_disagrees_with_its_own_certificate_signs_nothing` — *and a named gap: a part nothing holds (js/musts.json)* |
+| `2.2#2` | A wallet MUST refuse to sign unless all three hold: | `rust:a_card_whose_certificate_and_key_disagree_gets_no_leaf`, `rust:another_card_signs_nothing_for_this_identity`, `rust:a_card_that_swaps_its_key_after_the_check_signs_nothing_that_is_kept` — *and a named gap: a part nothing holds (js/musts.json)* |
 | `2.2#3` | The challenge MUST be domain-separated from certificate bytes — the ASCII `PACT root proof v1` followed by a newline and at least 32 random bytes — so that proving possession can never be made to sign a certificate. | *wallet, by declaration* |
-| `2.2#4` | A wallet MUST validate a chain it has assembled (§14.2) against the expected root and endpoint before returning it. | `rust:a_leaf_the_card_signed_validates_to_that_root_at_its_endpoint`, `go:TestWalletIssue` |
+| `2.2#4` | A wallet MUST validate a chain it has assembled (§14.2) against the expected root and endpoint before returning it. | `rust:a_leaf_the_card_signed_validates_to_that_root_at_its_endpoint` — *and a named gap: a part nothing holds (js/musts.json)* |
 | `2.2#5` | **A root certificate is issued once.** A wallet MUST NOT rebuild a root certificate for an identity that already has one. | `rust:a_root_the_card_signed_is_a_root`, `go:TestWalletIssue` |
 
 ### 3. Contact cards (vCard)
@@ -142,7 +142,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 
 | # | The sentence | Held by |
 |---|---|---|
-| `13.1#1` | base64url HPKE encapsulated key, of exactly the suite's `Npk` (RFC 9180 §7.1): 65 bytes for `PACT-SEAL-P256`, an uncompressed P-256 point, and 32 for `PACT-SEAL-X25519`. A receiver MUST refuse any other length (`envelope_invalid`) — `sig` covers the three members concatenated with nothing between them, so the suite's own length is what fixes the boundary; without it a byte moved from the end of `enc` to the front of `ct` leaves the signed bytes identical | `scenario:a byte moved from the encapsulated key into the ciphertext`, `go:TestSmallOrderPointsAndSPKIBits` |
+| `13.1#1` | base64url HPKE encapsulated key, of exactly the suite's `Npk` (RFC 9180 §7.1): 65 bytes for `PACT-SEAL-P256`, an uncompressed P-256 point, and 32 for `PACT-SEAL-X25519`. A receiver MUST refuse any other length (`envelope_invalid`) — `sig` covers the three members concatenated with nothing between them, so the suite's own length is what fixes the boundary; without it a byte moved from the end of `enc` to the front of `ct` leaves the signed bytes identical | `scenario:a byte moved from the encapsulated key into the ciphertext`, `rust:an_encapsulated_key_of_the_wrong_length_is_refused_under_each_suite`, `go:TestAnEncapsulatedKeyOfTheWrongLengthIsRefused` |
 | `13.1#2` | Each of the four members is base64url (RFC 4648 §5) without padding, in its one canonical spelling, and a receiver MUST refuse (`envelope_invalid`) a member written any other way: with a character outside that alphabet — padding, whitespace and the standard alphabet's `+` and `/` among them — or with a last character whose unused bits are not zero. | `scenario:a real envelope whose protected carries a stray character`, `scenario:a real envelope whose enc is padded`, `scenario:a real envelope whose ct has a line break in it`, `scenario:a real envelope whose signature is spelled with its spare bits set` |
 | `13.1#3` | The suite follows the recipient's key and nothing else: a receiver MUST refuse an envelope whose `suite` is not the one its key takes (`envelope_invalid`), so no choice is left on the wire for a sender to make badly. | `scenario:the wrong suite for the recipient's key` |
 | `13.1#4` | The HPKE `info` parameter is the ASCII string `PACT-SEAL-v2`, and an envelope sealed under any other info string MUST NOT open. | `scenario:sealed with a stale info string` |
@@ -165,7 +165,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 | # | The sentence | Held by |
 |---|---|---|
 | `13.3#1` | Receivers MUST validate in this order, rejecting at the first failure: decode `protected`; check `v` and `suite` supported; resolve `kid` to a leaf key this endpoint holds for the identity served at the path the envelope arrived at — the current one, or a superseded one not yet past its `notAfter` — and otherwise answer `certificate_renewed` with the current chain when `kid` names a key this endpoint once held for that identity, `envelope_invalid` when it never did or holds it for another identity (§14.4); check that `suite` is the one the leaf's key takes (§13.1); HPKE-open; require the plaintext to carry exactly `method`, `params` and one of `chain` or `leaf`; with `leaf`, find the leaf it names among the pins of active and pending contacts and verify `sig` under its key, answering `chain_required` to any failure, and proceed at that pin's tier and endpoint; with `chain`, validate it (§14.2), verify `sig` under its leaf key, and resolve the tier (§6.1) — when the chain's root is pinned, a leaf older than the pinned one is a guest, a different endpoint is §5.3, a newer leaf at the pinned endpoint replaces it; when it is not pinned, apply the guest binding of §13.2; enforce time — `now < exp`, and `\|now − ts\| ≤ 300 s`, since every 2.0 envelope is delivered directly; enforce `msg_id` idempotency (a replayed envelope is acknowledged with its original result, never re-executed); then dispatch. | `go:TestDecideOnVectors`, `rust:decide_on_the_vector_envelopes`, `scenario:a guessed kid learns nothing`, `scenario:an envelope for Alina's key delivered at Mallory's path on a shared host` |
-| `13.3#2` | Idempotency records for seen `msg_id`s MUST be retained until `min(exp, ts + 300 s)` — the end of the window in which the envelope could be presented again and accepted. | `scenario:an envelope that asks to be remembered for a year`, `rust:an_envelope_asking_to_be_remembered_for_a_year_is_refused` |
+| `13.3#2` | Idempotency records for seen `msg_id`s MUST be retained until `min(exp, ts + 300 s)` — the end of the window in which the envelope could be presented again and accepted. | `scenario:an envelope that asks to be remembered for a year`, `rust:an_envelope_asking_to_be_remembered_for_a_year_is_refused`, `go:TestLifetimeAndCallerSideChecks` |
 | `13.3#3` | A **blocked** sender's envelopes MUST be processed exactly as an unknown sender's — the guest card-binding rules of §13.2 apply and a sealed `tools/list` is rejected `envelope_invalid` — so sealing never becomes an oracle distinguishing blocked from unknown (§12); a guest envelope whose inner call carries no `card` argument is likewise rejected `envelope_invalid`. | `scenario:a blocked sender is answered exactly as an unknown one` |
 
 ### 13.4 Negotiation
@@ -203,7 +203,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 1468 cross-port parity cases
+## The 1476 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -211,7 +211,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **1468** cases (**1103** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
+At the run that generated this file: **1476** cases (**1103** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
 
 ### `address_guard` — 37 cases · whole on success
 
@@ -468,7 +468,7 @@ At the run that generated this file: **1468** cases (**1103** of the run's cases
 - generated · csr_new · endpoint absent, cn 7
 - generated · csr_new · endpoint absent, host_pkcs8 7
 
-### `decide` — 61 cases · whole on success
+### `decide` — 65 cases · whole on success
 
 - decide on an envelope from a pinned contact
 - decide on a pinned contact's call that names no tool
@@ -524,6 +524,10 @@ At the run that generated this file: **1468** cases (**1103** of the run's cases
 - decide: a pending_out contact's sealed send_message waits, chain form
 - decide: a pending_out contact's sealed tools/list, chain form, the pin moving
 - decide: a pending_out contact's sealed send_message waits, chain form, the pin moving
+- decide on a PACT-SEAL-X25519 envelope whose encapsulated key is one byte short
+- decide on a PACT-SEAL-X25519 envelope whose encapsulated key is one byte long
+- decide on a PACT-SEAL-P256 envelope whose encapsulated key is one byte short
+- decide on a PACT-SEAL-P256 envelope whose encapsulated key is one byte long
 - generated · decide · {}
 - generated · decide · now absent
 - generated · decide · now null
@@ -1356,7 +1360,7 @@ At the run that generated this file: **1468** cases (**1103** of the run's cases
 
 - a function nobody defines
 
-### `open_result` — 33 cases · whole on success
+### `open_result` — 37 cases · whole on success
 
 - open_result of a request envelope
 - open_result with nothing to work from
@@ -1378,6 +1382,10 @@ At the run that generated this file: **1468** cases (**1103** of the run's cases
 - open_result with no now
 - open_result, leaf form: the pin names its leaf
 - open_result, leaf form: a pin whose named leaf is not its leaf
+- open_result on a PACT-SEAL-X25519 answer whose encapsulated key is one byte short
+- open_result on a PACT-SEAL-X25519 answer whose encapsulated key is one byte long
+- open_result on a PACT-SEAL-P256 answer whose encapsulated key is one byte short
+- open_result on a PACT-SEAL-P256 answer whose encapsulated key is one byte long
 - generated · open_result · {}
 - generated · open_result · my_pkcs8 absent
 - generated · open_result · my_pkcs8 null

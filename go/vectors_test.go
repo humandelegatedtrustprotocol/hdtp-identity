@@ -1,8 +1,9 @@
 package pactidentity
 
-// Proves this port against Appendix B: the certificates rebuilt byte for byte, the v1 envelopes opened,
-// every chain, newest-leaf, certificate_renewed and v2 envelope case, and the envelopes reproduced from
-// their ephemeral seeds.
+// Proves this port against Appendix B: the certificates rebuilt (byte for byte where the issuer is
+// Ed25519; the TBS, and the vector's signature verified, where it is P-256), the ones marked refused
+// refused, every chain, newest-leaf, certificate_renewed and v2 envelope case, the envelopes
+// reproduced from their ephemeral seeds, decide on them, and the derivation vectors.
 
 import (
 	"bytes"
