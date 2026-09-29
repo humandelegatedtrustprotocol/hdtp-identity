@@ -8,9 +8,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 case can be listed as proven that did not pass. The cases that fail today are listed apart, at the
 end, each with the finding it waits on.
 
-Specification: **2.2.4**. **88** normative sentences, **2297** cross-port parity cases over **50** guarded functions, and **1** known divergences that fail today and are listed apart, at the end.
+Specification: **2.2.4**. **88** normative sentences, **2309** cross-port parity cases over **50** guarded functions, and **0** known divergences that fail today and are listed apart, at the end.
 
-Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **4596** answers, of which **1** do not hold to the shape it declares — **1** of them in a known divergence. Of **118** declared error codes, **118** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **4618** answers, of which **0** do not hold to the shape it declares — **0** of them in a known divergence. Of **118** declared error codes, **118** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 88 normative sentences of the specification
 
@@ -203,7 +203,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 2297 cross-port parity cases
+## The 2309 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -211,7 +211,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **2297** cases (**1108** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
+At the run that generated this file: **2309** cases (**1108** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
 
 ### `address_guard` — 50 cases · whole on success
 
@@ -324,10 +324,12 @@ At the run that generated this file: **2297** cases (**1108** of the run's cases
 - generated · book_rows · contacts absent, exported_at 7
 - generated · book_rows · exported_at absent, contacts "x"
 
-### `build_leaf` — 92 cases · whole on success
+### `build_leaf` — 94 cases · whole on success
 
 - build_leaf
 - build_leaf over 398 days
+- build_leaf of exactly 398 days
+- build_leaf of 398 days and a second
 - build_leaf backwards in time
 - build_leaf naming https://127.0.0.1/mcp
 - build_leaf naming http://a.example/x
@@ -612,7 +614,7 @@ At the run that generated this file: **2297** cases (**1108** of the run's cases
 - generated · csr_new · endpoint absent, host_pkcs8 7
 - generated · csr_new · endpoint absent, dns_name 7
 
-### `decide` — 107 cases · whole on success
+### `decide` — 110 cases · whole on success
 
 - decide on an envelope from a pinned contact
 - decide on a pinned contact's call that names no tool
@@ -691,6 +693,9 @@ At the run that generated this file: **2297** cases (**1108** of the run's cases
 - decide on an envelope with a body holding the largest double
 - decide on an envelope with a body nested 127 deep
 - decide on an envelope whose header holds a ts past the largest double
+- decide on an envelope whose header holds a ts of -0
+- decide on an envelope whose header holds an exp of -0
+- decide on an envelope whose header holds a ts written with a fraction
 - decide on a call sealed to the empty seed's key, held beside a P-256 key
 - decide with a held leaf holding a key outside the profile: rsa
 - decide with a pinned leaf holding a key outside the profile: rsa
@@ -1801,11 +1806,15 @@ At the run that generated this file: **2297** cases (**1108** of the run's cases
 - generated · limits_rules_check · rules null
 - generated · limits_rules_check · an undeclared member
 
-### `no_such_function` — 1 case · not a dispatched function
+### `no_such_function` — 5 cases · not a dispatched function
 
 - a function nobody defines
+- a function nobody defines, with args that are a list
+- a function nobody defines, with args that are null
+- a function nobody defines, with args holding half a surrogate pair
+- a function nobody defines, with args holding a number past the largest double
 
-### `open_result` — 107 cases · whole on success
+### `open_result` — 110 cases · whole on success
 
 - open_result of a request envelope
 - open_result with nothing to work from
@@ -1838,6 +1847,9 @@ At the run that generated this file: **2297** cases (**1108** of the run's cases
 - open_result with a pin that is not an object
 - open_result with pins that are null
 - open_result in the chain form with an expected_root that is empty
+- open_result on an answer whose header holds a ts of -0
+- open_result on an answer whose header holds an exp of -0
+- open_result on an answer whose header holds a ts written with a fraction
 - open_result on an answer whose result holds a number past the largest double
 - open_result on an answer whose result holds the largest double
 - open_result in the leaf form, with a pin holding a key outside the profile: rsa
@@ -2666,10 +2678,9 @@ At the run that generated this file: **2297** cases (**1108** of the run's cases
 - generated · wallet_issue · now absent, valid_days "7"
 - generated · wallet_issue · now absent, move "yes"
 
-## The 1 known divergences
+## The 0 known divergences
 
 Cases that FAIL today, each excused by `js/cases/known-divergences.json` only while it fails exactly
 as its entry says, and each waiting on the audit finding named beside it (the port-parity audit of
 2026-09-29). None of them is proven; they are here so that the list is read, not assumed.
 
-- a function nobody defines, with args that are a list — R34 (wasm off the contract, differ)

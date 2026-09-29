@@ -7,7 +7,5 @@
     "S1-<n> are divergences the generated cases found that the audit did not file; `new_findings` says what each is."
   ],
   "new_findings": {},
-  "cases": {
-    "a function nobody defines, with args that are a list": { "findings": ["R34"], "fails": ["wasm off the contract","differ"] }
-  }
+  "cases": {}
 }

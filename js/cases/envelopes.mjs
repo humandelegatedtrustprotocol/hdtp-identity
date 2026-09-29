@@ -426,6 +426,20 @@ export default function envelopes({ add, expect }, f) {
     now, envelope: callText('p-r40-5', '{}', { header: (t) => t.replace(`"ts":${at(now)}`, '"ts":1e400') }), node: pinnedNode,
   });
   expect('decide on an envelope whose header holds a ts past the largest double', { code: 'envelope_invalid', why: 'protected is not JSON' });
+  // S3-1, in the header: `v`, `ts` and `exp` are integers as the core reads one (serde_json's
+  // `as_i64`), so a `ts` or `exp` written `-0`, or written with a fraction, is `header member types`.
+  // The Go port read -0 as 0 and went on to the time window, where the core refused the header's
+  // types; one envelope was two answers. The fraction both ports refused already; the seed decides it
+  // `ok` and reads -0 as 0, which pact-protocol PR #10 changes.
+  const headerHolding = (member, text) => (t) => t.replace(member === 'ts' ? `"ts":${at(now)}` : `"exp":${at(now) + 600}`, `"${member}":${text}`);
+  const typesRefused = { code: 'envelope_invalid', why: 'header member types' };
+  for (const [what, member, text] of [['a ts of -0', 'ts', '-0'], ['an exp of -0', 'exp', '-0'], ['a ts written with a fraction', 'ts', `${at(now)}.0`]]) {
+    add(`decide on an envelope whose header holds ${what}`, 'decide', { now, envelope: callText(`p-s3-1-${member}`, '{}', { header: headerHolding(member, text) }), node: pinnedNode });
+    expect(`decide on an envelope whose header holds ${what}`, typesRefused);
+    const answer = sealText({ to: callerKey.pub, cty: 'application/pact-result+json', msgId: 'r-1', body: `{"result":{},"chain":${chainText}}`, header: headerHolding(member, text) });
+    add(`open_result on an answer whose header holds ${what}`, 'open_result', open(answer));
+    expect(`open_result on an answer whose header holds ${what}`, { error: 'envelope_invalid', why: 'header member types' });
+  }
   const resultText = (resultJSON) =>
     sealText({ to: callerKey.pub, cty: 'application/pact-result+json', msgId: 'r-1', body: `{"result":${resultJSON},"chain":${chainText}}` });
   add('open_result on an answer whose result holds a number past the largest double', 'open_result', open(resultText('{"n":1e400}')));

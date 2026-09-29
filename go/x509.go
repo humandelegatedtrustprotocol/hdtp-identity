@@ -145,15 +145,11 @@ func BuildRoot(o RootOpts) ([]byte, error) {
 	return Assemble(tbs, alg, sig), nil
 }
 
-// ExtraExtension is a knob for the intrusion suite: an extension a wallet never writes.
-type ExtraExtension struct {
-	OID      string
-	Critical bool
-	Value    []byte
-}
-
-// LeafOpts builds a leaf. URIs, CA, Usage, AKI, Extra and AlgOID exist so the intrusion suite can build
-// what a wallet never would; a wallet sets Endpoint, DNSName and the dates.
+// LeafOpts builds a leaf: a wallet sets the names, the keys, Endpoint, DNSName and the dates. URIs, when
+// set, are the subjectAltName's URIs in place of Endpoint alone. It carried a CA flag, key usages, an
+// authority key id, extra extensions and a signature algorithm OID "so the intrusion suite can build
+// what a wallet never would"; nothing set them — the suite builds with the seed — so they went, as the
+// core's LeafSpec lost its own (standing rule 2).
 type LeafOpts struct {
 	CN, RootCN string
 	RootKey    *PrivateKey // for BuildLeaf
@@ -165,11 +161,6 @@ type LeafOpts struct {
 	NotBefore  time.Time
 	NotAfter   time.Time
 	Serial     []byte
-	CA         bool
-	Usage      []int
-	AKI        []byte
-	Extra      []ExtraExtension
-	AlgOID     string
 }
 
 func leafTBS(o LeafOpts, rootPub *PublicKey) (tbs, alg []byte, err error) {
@@ -180,17 +171,10 @@ func leafTBS(o LeafOpts, rootPub *PublicKey) (tbs, alg []byte, err error) {
 		}
 	}
 	id := KeyID(o.HostPub.SPKI)
-	issuerID := o.AKI
-	if issuerID == nil {
-		issuerID = KeyID(rootPub.SPKI)
-	}
-	bits := o.Usage
-	if bits == nil {
-		if o.HostPub.Alg == AlgP256 {
-			bits = []int{0, 4}
-		} else {
-			bits = []int{0}
-		}
+	issuerID := KeyID(rootPub.SPKI)
+	bits := []int{0}
+	if o.HostPub.Alg == AlgP256 {
+		bits = []int{0, 4}
 	}
 	uris := o.URIs
 	if uris == nil {
@@ -203,27 +187,14 @@ func leafTBS(o LeafOpts, rootPub *PublicKey) (tbs, alg []byte, err error) {
 	if o.DNSName != "" {
 		san = append(san, implicit(2, []byte(o.DNSName)))
 	}
-	if o.AlgOID != "" {
-		alg = seq(oidBytes(o.AlgOID))
-	} else {
-		alg = sigAlgFor(rootPub.Alg)
-	}
-	var bc []byte
-	if o.CA {
-		bc = seq(derBool(true))
-	} else {
-		bc = seq()
-	}
+	alg = sigAlgFor(rootPub.Alg)
 	exts := [][]byte{
-		extension(OIDBasicConstraints, true, bc),
+		extension(OIDBasicConstraints, true, seq()),
 		extension(OIDKeyUsage, true, keyUsageBits(bits)),
 		extension(OIDExtKeyUsage, false, seq(oidBytes(OIDServerAuth), oidBytes(OIDClientAuth))),
 		extension(OIDSubjectAltName, false, seq(san...)),
 		extension(OIDSubjectKeyID, false, octet(id)),
 		extension(OIDAuthorityKeyID, false, seq(implicit(0, issuerID))),
-	}
-	for _, e := range o.Extra {
-		exts = append(exts, extension(e.OID, e.Critical, e.Value))
 	}
 	tbs = seq(
 		explicit(0, derIntN(2)), derInt(serial), alg, nameCN(o.RootCN), seq(derTime(o.NotBefore), derTime(o.NotAfter)), nameCN(o.CN), o.HostPub.SPKI,
