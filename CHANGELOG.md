@@ -43,6 +43,11 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   and returns a leaf that fails chain rule 3 for a vault entry holding another key (measured). 2.2#1
   and 2.2#4 no longer cite Go tests that do not test them, and 2.2#3 no longer says the library
   checks something in the challenge's place.
+- The four Appendix B readers here (`js/seed.mjs`, the CLI's `pact vectors check`, the core's
+  vector tests, the Go port's) are held to one list of cases, `js/appendix-b-reader.json`, refusals
+  word for word (TC-12). The core tests' reader found the end marker from the start of the file and
+  had no test; the CLI says `the document has no Appendix B` and `Appendix B block <n> is not JSON`,
+  as the others do, where it said `no Appendix B in the document` and serde's words.
 - **JS loader:** `call(name, null)` hands `null` to the core, which answers `args is a JSON object`
   as the Go port does; it used to be made `{}` (`js/index.mjs`, `js/worker.mjs`). Only `args` left
   out is `{}`. The parity case `args that are null` sends `null` for the first time (TC-2).
