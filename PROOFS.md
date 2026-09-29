@@ -8,9 +8,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 case can be listed as proven that did not pass. The cases that fail today are listed apart, at the
 end, each with the finding it waits on.
 
-Specification: **2.2.4**. **88** normative sentences, **2145** cross-port parity cases over **50** guarded functions, and **3** known divergences that fail today and are listed apart, at the end.
+Specification: **2.2.4**. **88** normative sentences, **2149** cross-port parity cases over **50** guarded functions, and **3** known divergences that fail today and are listed apart, at the end.
 
-Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **4296** answers, of which **2** do not hold to the shape it declares — **2** of them in a known divergence. Of **117** declared error codes, **117** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **4304** answers, of which **2** do not hold to the shape it declares — **2** of them in a known divergence. Of **117** declared error codes, **117** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 88 normative sentences of the specification
 
@@ -203,7 +203,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 2145 cross-port parity cases
+## The 2149 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -211,7 +211,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **2145** cases (**1108** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
+At the run that generated this file: **2149** cases (**1108** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
 
 ### `address_guard` — 50 cases · whole on success
 
@@ -1482,7 +1482,7 @@ At the run that generated this file: **2145** cases (**1108** of the run's cases
 - generated · key_from_seed · alg absent, seed 7
 - generated · key_from_seed · seed absent, alg 7
 
-### `key_info` — 30 cases · whole on success
+### `key_info` — 32 cases · whole on success
 
 - args that are not an object
 - args that are a list
@@ -1509,6 +1509,8 @@ At the run that generated this file: **2145** cases (**1108** of the run's cases
 - key_info of a key outside the profile: P-384
 - key_info of a key outside the profile: X25519
 - key_info of a key outside the profile: Ed25519 with a NULL
+- key_info of an Ed25519 key that is not a point
+- key_info of an Ed25519 key that is a point (the control)
 - generated · key_info · {}
 - generated · key_info · spki absent
 - generated · key_info · spki null
@@ -1864,7 +1866,7 @@ At the run that generated this file: **2145** cases (**1108** of the run's cases
 - generated · open_result · now absent, expected_root 7
 - generated · open_result · now absent, expected_endpoint 7
 
-### `parse_certificate` — 28 cases · whole on success
+### `parse_certificate` — 29 cases · whole on success
 
 - parse_certificate of a root
 - parse_certificate of a leaf
@@ -1888,6 +1890,7 @@ At the run that generated this file: **2145** cases (**1108** of the run's cases
 - parse_certificate of a leaf holding a key outside the profile: P-384
 - parse_certificate of a leaf holding a key outside the profile: X25519
 - parse_certificate of a leaf holding a key outside the profile: Ed25519 with a NULL
+- parse_certificate of a leaf whose Ed25519 key is not a point
 - generated · parse_certificate · {}
 - generated · parse_certificate · the hostile object
 - generated · parse_certificate · der absent
@@ -2250,7 +2253,7 @@ At the run that generated this file: **2145** cases (**1108** of the run's cases
 - generated · suite_for · an undeclared member
 - generated · suite_for · spki holding a key outside the profile
 
-### `validate_chain` — 62 cases · whole on success
+### `validate_chain` — 63 cases · whole on success
 
 - validate_chain of a real chain
 - validate_chain against the root and endpoint it really has
@@ -2296,6 +2299,7 @@ At the run that generated this file: **2145** cases (**1108** of the run's cases
 - validate_chain of a leaf holding a key outside the profile: P-384
 - validate_chain of a leaf holding a key outside the profile: X25519
 - validate_chain of a leaf holding a key outside the profile: Ed25519 with a NULL
+- validate_chain of a leaf whose Ed25519 key is not a point
 - generated · validate_chain · {}
 - generated · validate_chain · the hostile object
 - generated · validate_chain · chain absent

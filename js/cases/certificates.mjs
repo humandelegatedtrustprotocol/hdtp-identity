@@ -272,4 +272,13 @@ export default function certificates({ add, expect }, f) {
     add(`build_leaf for a host key outside the profile: ${kind}`, 'build_leaf', { cn: 'A', root_cn: 'A', root_pkcs8: rootPkcs8, host_spki: b64url(spki), endpoint: ENDPOINT, not_before: now, not_after: '2027-09-01T00:00:00Z', serial: SERIAL });
     expect(`build_leaf for a host key outside the profile: ${kind}`, refused);
   }
+
+  // A leaf whose Ed25519 key is 32 bytes that decode to no point (S4-1): refused at rule 1 by the core,
+  // and validated by the Go port, which read it as a key. Written by the seed, which reads no key here.
+  const notAPoint = Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), Buffer.from([2]), Buffer.alloc(31)]);
+  const notAPointLeaf = alinaLeaf({ hostKey: { pub: { export: () => notAPoint } }, usage: [0], label: 'parity/not-a-point' });
+  add('validate_chain of a leaf whose Ed25519 key is not a point', 'validate_chain', { chain: [notAPointLeaf, rootDer], now });
+  expect('validate_chain of a leaf whose Ed25519 key is not a point', { ok: false, rule: 1, reason: 'Ed25519 key is not a point' });
+  add('parse_certificate of a leaf whose Ed25519 key is not a point', 'parse_certificate', { der: notAPointLeaf });
+  expect('parse_certificate of a leaf whose Ed25519 key is not a point', { error: 'parse', why: 'Ed25519 key is not a point' });
 }
