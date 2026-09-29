@@ -45,6 +45,9 @@ fn timing(now: i64, ts: i64, exp: i64) -> Timing {
     Timing::Ok
 }
 
+/// How long an endpoint stays claimed by the root that was pinned at it, and how long a removal
+/// tombstone holds a returning root: contract/contract.json's `Windows`, which tests/constants.rs
+/// holds these to (and go/constants_test.go the Go port's).
 pub const CLAIM_WINDOW_S: i64 = 30 * 86_400;
 pub const TOMBSTONE_S: i64 = 30 * 86_400;
 pub const CTY_CALL: &str = "application/pact-call+json";

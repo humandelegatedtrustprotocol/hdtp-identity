@@ -8,9 +8,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 case can be listed as proven that did not pass. The cases that fail today are listed apart, at the
 end, each with the finding it waits on.
 
-Specification: **2.2.4**. **88** normative sentences, **1458** cross-port parity cases over **50** guarded functions, and **463** known divergences that fail today and are listed apart, at the end.
+Specification: **2.2.4**. **88** normative sentences, **1468** cross-port parity cases over **50** guarded functions, and **463** known divergences that fail today and are listed apart, at the end.
 
-Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **3842** answers, of which **172** do not hold to the shape it declares — **172** of them in a known divergence. Of **94** declared error codes, **94** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **3862** answers, of which **172** do not hold to the shape it declares — **172** of them in a known divergence. Of **94** declared error codes, **94** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 88 normative sentences of the specification
 
@@ -203,7 +203,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 1458 cross-port parity cases
+## The 1468 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -211,7 +211,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **1458** cases (**1103** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
+At the run that generated this file: **1468** cases (**1103** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
 
 ### `address_guard` — 37 cases · whole on success
 
@@ -468,7 +468,7 @@ At the run that generated this file: **1458** cases (**1103** of the run's cases
 - generated · csr_new · endpoint absent, cn 7
 - generated · csr_new · endpoint absent, host_pkcs8 7
 
-### `decide` — 57 cases · whole on success
+### `decide` — 61 cases · whole on success
 
 - decide on an envelope from a pinned contact
 - decide on a pinned contact's call that names no tool
@@ -509,6 +509,10 @@ At the run that generated this file: **1458** cases (**1103** of the run's cases
 - decide when a tombstone's leaf will not compare
 - decide with two tombstones for one root, the FIRST of them stale
 - decide on a peer who returns after removal: the answer that succeeds
+- decide on a peer who returns a second inside the tombstone window
+- decide on a peer who returns exactly at the end of the tombstone window
+- decide on a stranger at an endpoint another root left a second inside the claim window
+- decide on a stranger at an endpoint another root left exactly at the end of the claim window
 - decide with no now
 - decide, small form: the pin names its leaf
 - decide, small form: an unreadable pin that names some OTHER leaf is never parsed
@@ -1690,12 +1694,14 @@ At the run that generated this file: **1458** cases (**1103** of the run's cases
 - generated · validate_chain · now null
 - generated · validate_chain · now absent, chain "x"
 
-### `vault_open` — 15 cases · whole on success
+### `vault_open` — 17 cases · whole on success
 
 - vault_open of what vault_seal made
 - vault_open with a passphrase that is wrong
 - vault_open of a document that is not a vault
 - vault_open of no document at all
+- vault_open of what vault_seal made with the most passes the contract allows
+- vault_open of what vault_seal made with the most lanes the contract allows
 - vault_open of a document with a KDF one pass over the ceiling
 - vault_open of a document with a KDF below the floor
 - vault_open of a document with a KDF whose m_kib does not fit in 32 bits
@@ -1708,7 +1714,7 @@ At the run that generated this file: **1458** cases (**1103** of the run's cases
 - generated · vault_open · vault absent
 - generated · vault_open · vault null
 
-### `vault_seal` — 26 cases · whole on success
+### `vault_seal` — 30 cases · whole on success
 
 - vault_seal
 - vault_seal of a record
@@ -1717,6 +1723,10 @@ At the run that generated this file: **1458** cases (**1103** of the run's cases
 - vault_seal with a nonce that is not 12 bytes
 - vault_seal with an empty passphrase
 - vault_seal with no plaintext
+- vault_seal with the most passes the contract allows
+- vault_seal with the most lanes the contract allows
+- vault_seal with one lane more than the contract allows
+- vault_seal with one KiB less than the contract allows
 - vault_seal with a KDF one pass over the ceiling
 - vault_seal with a KDF below the floor
 - vault_seal with a KDF whose m_kib does not fit in 32 bits

@@ -14,6 +14,8 @@ import (
 	"time"
 )
 
+// SkewSeconds, ClaimWindow and Tombstone are contract/contract.json's `Windows`, which
+// constants_test.go holds them to (and tests/constants.rs the Rust core's).
 const (
 	HeaderMembers = "cty,exp,kid,msg_id,suite,ts,v"
 	SkewSeconds   = 300

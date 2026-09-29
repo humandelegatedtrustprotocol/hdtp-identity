@@ -154,6 +154,26 @@ export default function envelopes({ add, expect }, f) {
   add('decide with two tombstones for one root, the FIRST of them stale', 'decide', { now, envelope: sealed, node: { ...node, tombstones: [{ root: rootFp, at: '2026-01-01T00:00:00Z', leaf: olderLeaf }, { root: rootFp, at: '2026-09-10T00:00:00Z', leaf: olderLeaf }] } });
   add('decide on a peer who returns after removal: the answer that succeeds', 'decide', { now, envelope: sealed, node: { ...node, tombstones: [{ root: rootFp, at: '2026-09-10T00:00:00Z', leaf: olderLeaf }] } });
 
+  // C13 — the two 30-day windows at their edges, read from contract/contract.json's `Windows`, which a
+  // test in each port holds its constant to. The cases above sat about 5.5 and 257.5 days back, so
+  // either port's window could have drifted anywhere between and nothing would have said so. A window
+  // holds an age strictly under it: one second inside, and exactly at it.
+  const { tombstone_s: TOMBSTONE, claim_window_s: CLAIM } = f.defs.Windows.const;
+  const tombstoned = (back) => ({ now, envelope: sealed, node: { ...node, tombstones: [{ root: rootFp, at: f.before(back), leaf: olderLeaf }] } });
+  add('decide on a peer who returns a second inside the tombstone window', 'decide', tombstoned(TOMBSTONE - 1));
+  expect('decide on a peer who returns a second inside the tombstone window', { code: 'ok', forced: 'tombstone' });
+  add('decide on a peer who returns exactly at the end of the tombstone window', 'decide', tombstoned(TOMBSTONE));
+  expect('decide on a peer who returns exactly at the end of the tombstone window', { code: 'envelope_invalid', why: 'guest may only redeem or request' });
+  // A stranger asking to be a contact from an endpoint another root was pinned at: the claim is named
+  // while the window holds, and not after.
+  const OTHER_ROOT = 'sha256:' + 'B'.repeat(43);
+  const asking = request({ params: { name: 'request_contact', arguments: { card: f.card } }, msgId: 'p-claim' });
+  const claimed = (back) => ({ now, envelope: asking, node: { ...node, endpoint: 'https://bharat.example/mcp', former_endpoints: [{ root: OTHER_ROOT, endpoint: ENDPOINT, at: f.before(back) }] } });
+  add('decide on a stranger at an endpoint another root left a second inside the claim window', 'decide', claimed(CLAIM - 1));
+  expect('decide on a stranger at an endpoint another root left a second inside the claim window', { code: 'ok', address_claim: OTHER_ROOT });
+  add('decide on a stranger at an endpoint another root left exactly at the end of the claim window', 'decide', claimed(CLAIM));
+  expect('decide on a stranger at an endpoint another root left exactly at the end of the claim window', { code: 'ok', address_claim: null });
+
   // B4 — follow_renewed.
   add('follow_renewed on an answer that is some other code', 'follow_renewed', follow({ code: 'something_else' }));
   add('follow_renewed on a certificate_renewed answer with no data at all', 'follow_renewed', follow({ code: 'certificate_renewed' }));

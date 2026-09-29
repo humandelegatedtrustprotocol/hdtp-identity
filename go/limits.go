@@ -37,7 +37,8 @@ type LimitsStore interface {
 	Put(key string, level LimitsLevel)
 }
 
-// LimitsIdleMS is how long a row may sit untouched before it is full whatever it budgets.
+// LimitsIdleMS is how long a row may sit untouched before it is full whatever it budgets:
+// contract/contract.json's `LimitsIdle`, which constants_test.go holds it to.
 const LimitsIdleMS int64 = 3_600_000
 
 // LimitsRuleMembers are the members of a rules document, in the order they are checked.
