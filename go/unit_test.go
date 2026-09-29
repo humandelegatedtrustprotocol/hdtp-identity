@@ -5,6 +5,7 @@ package pactidentity
 
 import (
 	"bytes"
+	"crypto/ecdh"
 	"encoding/json"
 	"math/big"
 	"os"
@@ -574,4 +575,165 @@ func TestALowOrderRecipientIsRefused(t *testing.T) {
 	if _, err := ParseSPKI(concat(mustHex("302a300506032b656e032100"), make([]byte, 32))); err == nil || err.Error() != "unsupported key type 1.3.101.110" {
 		t.Errorf("a bare X25519 key: %v", err)
 	}
+}
+
+// Every exported entry point that takes a key, or an options struct holding one, refuses a key that is
+// not one — nil, the zero value, a key given an Alg by hand — by name, before it reads a field of it
+// (T18: each of these panicked). One case per struct at its zero value, and each key argument nil and
+// empty; the words are `<who> is required`, as the JSON boundary names a member left out.
+func TestEveryTypedEntryPointRefusesAKeyThatIsNotOne(t *testing.T) {
+	now := time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC)
+	root, _ := KeyFromSeed(AlgEd25519, make([]byte, 32))
+	host, _ := KeyFromSeed(AlgP256, make([]byte, 32))
+	csr, err := CSRNew("A", host, endpointA, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := func(what string, err error, who string) {
+		t.Helper()
+		if err == nil || err.Error() != who+" is required" || codeFor(err, "") != codeArgs {
+			t.Errorf("%s: %v, want %s is required, bad_request", what, err, who)
+		}
+	}
+	noPrivate := map[string]*PrivateKey{"nil": nil, "the zero value": {}, "an Alg and nothing else": {Alg: AlgEd25519}, "a P-256 Alg and nothing else": {Alg: AlgP256}}
+	noPublic := map[string]*PublicKey{"nil": nil, "the zero value": {}, "an Alg and nothing else": {Alg: AlgEd25519}, "a P-256 Alg and no point": {Alg: AlgP256, SPKI: []byte{1}}}
+
+	// The structs at their zero value.
+	_, err = BuildRoot(RootOpts{})
+	refused("BuildRoot(RootOpts{})", err, "the root's key")
+	_, err = BuildLeaf(LeafOpts{})
+	refused("BuildLeaf(LeafOpts{})", err, "the root's key")
+	_, _, err = LeafTBS(LeafOpts{})
+	refused("LeafTBS(LeafOpts{})", err, "the root's public key")
+	_, err = IssueFromCSR(csr, IssueOpts{})
+	refused("IssueFromCSR(csr, IssueOpts{})", err, "the root's key")
+	_, err = IssueTBSFromCSR(csr, IssueOpts{})
+	refused("IssueTBSFromCSR(csr, IssueOpts{})", err, "the root's public key")
+	_, err = SealRequest(SealOpts{})
+	refused("SealRequest(SealOpts{})", err, "the sender's key")
+	_, err = SealResult(SealOpts{})
+	refused("SealResult(SealOpts{})", err, "the sender's key")
+	_, err = OpenResult(Envelope{}, OpenOpts{})
+	refused("OpenResult(Envelope{}, OpenOpts{})", err, "the recipient's key")
+	if _, err := (&Signer{}).Sign([]byte("x")); err == nil {
+		t.Error("Signer{}.Sign signed")
+	}
+	if _, err := (*Signer)(nil).Sign([]byte("x")); err == nil {
+		t.Error("a nil Signer signed")
+	}
+
+	// Each key argument that is not a key.
+	for what, k := range noPrivate {
+		_, err := BuildRoot(RootOpts{CN: "A", Key: k, NotBefore: now})
+		refused("BuildRoot, Key "+what, err, "the root's key")
+		_, err = BuildLeaf(LeafOpts{RootKey: k, HostPub: host.Public()})
+		refused("BuildLeaf, RootKey "+what, err, "the root's key")
+		_, err = IssueFromCSR(csr, IssueOpts{RootKey: k, Now: now})
+		refused("IssueFromCSR, RootKey "+what, err, "the root's key")
+		_, err = CSRNew("A", k, endpointA, "")
+		refused("CSRNew, host "+what, err, "the host's key")
+		_, err = SignDetached(k, []byte("x"))
+		refused("SignDetached, "+what, err, "the signer's key")
+		_, err = k.PKCS8()
+		refused("PKCS8 of "+what, err, "the key")
+		if k.Public() != nil || k.Signer() != nil {
+			t.Errorf("Public or Signer of %s answered a key", what)
+		}
+		_, err = SealRequest(SealOpts{RecipientKey: root.Public(), Sender: k, MsgID: "m", TS: 1})
+		refused("SealRequest, Sender "+what, err, "the sender's key")
+		_, err = Open(SuiteX25519, k, root.Public(), nil, nil, make([]byte, 32), make([]byte, 16))
+		refused("Open, the key "+what, err, "the recipient's key")
+		_, err = OpenResult(Envelope{}, OpenOpts{Recipient: k, RecipientPublic: root.Public()})
+		refused("OpenResult, Recipient "+what, err, "the recipient's key")
+	}
+	for what, p := range noPublic {
+		_, _, err := RootTBS("A", p, now, nil)
+		refused("RootTBS, "+what, err, "the root's public key")
+		_, _, err = LeafTBS(LeafOpts{RootPub: p, HostPub: host.Public()})
+		refused("LeafTBS, RootPub "+what, err, "the root's public key")
+		_, _, err = LeafTBS(LeafOpts{RootPub: root.Public(), HostPub: p})
+		refused("LeafTBS, HostPub "+what, err, "the host's public key")
+		_, err = BuildLeaf(LeafOpts{RootKey: root, HostPub: p})
+		refused("BuildLeaf, HostPub "+what, err, "the host's public key")
+		_, err = IssueTBSFromCSR(csr, IssueOpts{RootPub: p, Now: now})
+		refused("IssueTBSFromCSR, RootPub "+what, err, "the root's public key")
+		_, _, err = Seal(SuiteX25519, p, nil, nil, []byte("x"))
+		refused("Seal, "+what, err, "the recipient's public key")
+		_, err = Open(SuiteX25519, root, p, nil, nil, make([]byte, 32), make([]byte, 16))
+		refused("Open, the public key "+what, err, "the recipient's public key")
+		_, err = SealRequest(SealOpts{RecipientKey: p, Sender: root, MsgID: "m", TS: 1})
+		refused("SealRequest, RecipientKey "+what, err, "the recipient's public key")
+		_, err = SealResult(SealOpts{RecipientKey: p, Sender: root, MsgID: "m", TS: 1, Result: json.RawMessage(`{}`)})
+		refused("SealResult, RecipientKey "+what, err, "the recipient's public key")
+		_, err = OpenResult(Envelope{}, OpenOpts{Recipient: root, RecipientPublic: p})
+		refused("OpenResult, RecipientPublic "+what, err, "the recipient's public key")
+		_, err = AlgorithmOf(p)
+		refused("AlgorithmOf, "+what, err, "the key")
+		_, err = SuiteForKey(p)
+		refused("SuiteForKey, "+what, err, "the key")
+		if VerifyDetached(p, []byte("x"), make([]byte, 64)) {
+			t.Errorf("VerifyDetached with %s verified", what)
+		}
+	}
+	// The control: real keys get through every one of them.
+	if _, err := BuildRoot(RootOpts{CN: "A", Key: root, NotBefore: now}); err != nil {
+		t.Errorf("the control, BuildRoot: %v", err)
+	}
+	if _, err := IssueFromCSR(csr, IssueOpts{RootCN: "A", RootKey: root, Now: now}); err != nil {
+		t.Errorf("the control, IssueFromCSR: %v", err)
+	}
+	if _, err := SignDetached(host, []byte("x")); err != nil {
+		t.Errorf("the control, SignDetached: %v", err)
+	}
+}
+
+// T5: an open under PACT-SEAL-X25519 with a P-256 key read the key's seed, which a P-256 key does not
+// have, and so used the scalar of the empty seed — SHA-512 of nothing, clamped: a public constant. Any
+// P-256 key then opened a seal addressed to the Ed25519 key whose X25519 form is that constant times
+// the base point. The private key is held to the suite's algorithm now, as the core holds it; the
+// control, the same seal opened by the key it was made for, opens.
+func TestAKeyOfTheOtherAlgorithmOpensNothing(t *testing.T) {
+	crafted := craftedEmptySeedRecipient(t)
+	enc, ct, err := Seal(SuiteX25519, crafted, []byte("PACT-SEAL-v2"), nil, []byte("admitted"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, seed := range [][]byte{make([]byte, 32), bytes.Repeat([]byte{7}, 32)} {
+		p256, _ := KeyFromSeed(AlgP256, seed)
+		if pt, err := Open(SuiteX25519, p256, crafted, []byte("PACT-SEAL-v2"), nil, enc, ct); err == nil || err.Error() != "does not open" {
+			t.Errorf("a P-256 key opened a seal to the crafted key: %q, %v", pt, err)
+		}
+	}
+	// And a key of the other algorithm under the P-256 suite.
+	p256, _ := KeyFromSeed(AlgP256, make([]byte, 32))
+	ed, _ := KeyFromSeed(AlgEd25519, make([]byte, 32))
+	enc, ct, _ = Seal(SuiteP256, p256.Public(), []byte("i"), nil, []byte("x"))
+	if _, err := Open(SuiteP256, ed, p256.Public(), []byte("i"), nil, enc, ct); err == nil || err.Error() != "does not open" {
+		t.Errorf("an Ed25519 key under the P-256 suite: %v", err)
+	}
+	if pt, err := Open(SuiteP256, p256, p256.Public(), []byte("i"), nil, enc, ct); err != nil || string(pt) != "x" {
+		t.Errorf("the control: %q, %v", pt, err)
+	}
+}
+
+// craftedEmptySeedRecipient is the Ed25519 public key whose X25519 form (RFC 7748 §4.1) is the empty
+// seed's clamped scalar times the base point: y = (u - 1) / (u + 1) mod p, written little-endian.
+func craftedEmptySeedRecipient(t *testing.T) *PublicKey {
+	t.Helper()
+	sk, err := ecdh.X25519().NewPrivateKey(ed25519SeedToX25519(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := leBytesToInt(sk.PublicKey().Bytes())
+	num := new(big.Int).Sub(u, big.NewInt(1))
+	den := new(big.Int).ModInverse(new(big.Int).Add(u, big.NewInt(1)), p25519)
+	y := new(big.Int).Mod(new(big.Int).Mul(num, den), p25519)
+	pub, err := ParseSPKI(concat(mustHex("302a300506032b6570032100"), intToLE(y, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(ed25519PublicToX25519(pub.Ed), sk.PublicKey().Bytes()) {
+		t.Fatal("the crafted key does not map to the empty seed's point")
+	}
+	return pub
 }

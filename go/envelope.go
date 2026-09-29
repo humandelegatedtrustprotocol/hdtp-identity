@@ -125,8 +125,11 @@ func sealRequest(o SealOpts) (*Envelope, error) {
 	if err != nil {
 		return nil, errors.New("params is not JSON")
 	}
-	if o.Sender == nil {
-		return nil, errArg("the sender's key is required")
+	if err := needPrivate(o.Sender, "the sender's key"); err != nil {
+		return nil, err
+	}
+	if err := needPublic(o.RecipientKey, "the recipient's public key"); err != nil {
+		return nil, err
 	}
 	// One expansion of the sender's key for the leaf form's fingerprint and the signature.
 	signer := o.Sender.Signer()
@@ -152,8 +155,11 @@ func SealResult(o SealOpts) (*Envelope, error) {
 // for the chain there (R19).
 func sealResult(o SealOpts) (*Envelope, error) {
 	o.Cty = CtyResult
-	if o.Sender == nil {
-		return nil, errArg("the sender's key is required")
+	if err := needPrivate(o.Sender, "the sender's key"); err != nil {
+		return nil, err
+	}
+	if err := needPublic(o.RecipientKey, "the recipient's public key"); err != nil {
+		return nil, err
 	}
 	// One expansion of the sender's key for the leaf form's fingerprint and the signature.
 	signer := o.Sender.Signer()
@@ -737,12 +743,12 @@ type Opened struct {
 // among its pins, verify the signature and correlate. Every failure is envelope_invalid.
 func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 	// Named, never a panic: in 0.4.0 a caller that left RecipientPublic out compiled, and the kid
-	// check dereferenced nil.
-	if o.Recipient == nil {
-		return nil, errArg("the recipient's key is required")
+	// check dereferenced nil; a zero-value key still panicked at the open.
+	if err := needPrivate(o.Recipient, "the recipient's key"); err != nil {
+		return nil, err
 	}
-	if o.RecipientPublic == nil {
-		return nil, errArg("the recipient's public key is required")
+	if err := needPublic(o.RecipientPublic, "the recipient's public key"); err != nil {
+		return nil, err
 	}
 	o.Now = o.Now.Truncate(time.Second)
 	aad, err := wireB64url(env.Protected)

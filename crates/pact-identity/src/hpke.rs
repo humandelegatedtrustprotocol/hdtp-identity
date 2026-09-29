@@ -342,6 +342,31 @@ mod tests {
         assert!(seal(Suite::X25519, &real, b"i", b"", b"x", None).is_ok());
     }
 
+    /// T5, the Go port's admit, held here as a property of the core: an open is by a key of the suite's
+    /// own algorithm. The Go port read a P-256 key's absent seed as the empty one, whose clamped
+    /// SHA-512 is a public scalar, so any P-256 key opened a seal to the Ed25519 key that maps to that
+    /// scalar's point. Here that seal, opened by two P-256 keys, does not open; and the control, a
+    /// seal to a real Ed25519 key, opens for it.
+    #[test]
+    fn a_key_of_the_other_algorithm_opens_nothing() {
+        use sha2::Digest;
+        let mut empty = [0u8; 32];
+        empty.copy_from_slice(&sha2::Sha512::digest([])[..32]);
+        let u = x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from(empty)).to_bytes();
+        let point = curve25519_dalek::montgomery::MontgomeryPoint(u).to_edwards(0).unwrap().compress().to_bytes();
+        let crafted = PublicKey::from_spki(&[crate::util::from_hex("302a300506032b6570032100").unwrap(), point.to_vec()].concat()).unwrap();
+        assert_eq!(crafted.x25519().unwrap(), u, "the crafted key maps to the empty seed's point");
+        let (enc, ct) = seal(Suite::X25519, &crafted, b"PACT-SEAL-v2", b"", b"admitted", None).unwrap();
+        for label in ["t/p256/a", "t/p256/b"] {
+            let p256 = PrivateKey::from_seed(Alg::P256, &label_seed(label)).unwrap();
+            let e = open(Suite::X25519, &p256, &crafted, b"PACT-SEAL-v2", b"", &enc, &ct).unwrap_err();
+            assert_eq!((e.code.as_str(), e.why.as_str()), ("envelope_invalid", "does not open"));
+        }
+        let real = PrivateKey::from_seed(Alg::Ed25519, &label_seed("t/r")).unwrap();
+        let (enc, ct) = seal(Suite::X25519, &real.public(), b"PACT-SEAL-v2", b"", b"x", None).unwrap();
+        assert_eq!(open(Suite::X25519, &real, &real.public(), b"PACT-SEAL-v2", b"", &enc, &ct).unwrap(), b"x");
+    }
+
     /// A suite that is not the recipient key's is refused as the envelope layer refuses it (F6, R14),
     /// and a key outside the profile is not a key at all (T4): an X25519 SubjectPublicKeyInfo does not
     /// read, so nothing is sealed to one.

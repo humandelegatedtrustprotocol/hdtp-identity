@@ -58,8 +58,55 @@ type PrivateKey struct {
 	scalar []byte // P-256: the 32-byte scalar, in [1, n-1]
 }
 
-// Public derives the public key. A caller that also signs takes a Signer and asks it for both.
-func (k *PrivateKey) Public() *PublicKey { return k.Signer().Public }
+// usable says whether a private key is one this package made: an algorithm of the profile and the
+// material that algorithm has. nil, the zero value, and a key given an Alg by hand hold nothing to sign
+// or open with — and each one panicked where its material was first read (T18).
+func (k *PrivateKey) usable() bool {
+	return k != nil && ((k.Alg == AlgEd25519 && len(k.seed) == ed25519.SeedSize) || (k.Alg == AlgP256 && len(k.scalar) == 32))
+}
+
+// usable says whether a public key is one ParseSPKI or Public made: an algorithm of the profile, its
+// point and its SPKI bytes. The zero value, and one assembled by hand without them, is no key.
+func (p *PublicKey) usable() bool {
+	if p == nil || len(p.SPKI) == 0 {
+		return false
+	}
+	switch p.Alg {
+	case AlgEd25519:
+		return len(p.Ed) == ed25519.PublicKeySize
+	case AlgP256:
+		return p.EC != nil && p.EC.Curve == elliptic.P256() && p.EC.X != nil && p.EC.Y != nil
+	}
+	return false
+}
+
+// needPrivate and needPublic are the typed API's check of a key argument, made before any field of it
+// is read: `<who> is required`, as the JSON boundary names a member left out (CONTRACT §0). The core's
+// typed API takes references, which cannot be nil; this port's took pointers, and a nil or zero-value
+// key was a panic in every function below that reads one (T18).
+func needPrivate(k *PrivateKey, who string) error {
+	if !k.usable() {
+		return errArg(who + " is required")
+	}
+	return nil
+}
+
+func needPublic(p *PublicKey, who string) error {
+	if !p.usable() {
+		return errArg(who + " is required")
+	}
+	return nil
+}
+
+// Public derives the public key, or nil for a key that is not one (see usable): it has no error to
+// answer with, and a caller that can be handed such a key asks PKCS8 or SignDetached, which do. A
+// caller that also signs takes a Signer and asks it for both.
+func (k *PrivateKey) Public() *PublicKey {
+	if !k.usable() {
+		return nil
+	}
+	return k.Signer().Public
+}
 
 // Signer is a private key expanded for signing: its public key and its signatures from one expansion.
 type Signer struct {
@@ -68,8 +115,12 @@ type Signer struct {
 	ec     *ecdsa.PrivateKey
 }
 
-// Signer expands the key once. The key's parts were checked when it was made, so this cannot fail.
+// Signer expands the key once. The key's parts were checked when it was made, so this cannot fail; a
+// key that is not one (see usable) gets nil, whose Sign refuses.
 func (k *PrivateKey) Signer() *Signer {
+	if !k.usable() {
+		return nil
+	}
 	if k.Alg == AlgEd25519 {
 		ed := ed25519.NewKeyFromSeed(k.seed)
 		pub := ed.Public().(ed25519.PublicKey)
@@ -274,6 +325,10 @@ func ParsePKCS8(der []byte) (*PrivateKey, error) {
 // RFC 8410; P-256 as an ECPrivateKey of version 1 and the scalar alone, the curve named once in the
 // algorithm identifier and the public key derived, never stored.
 func (k *PrivateKey) PKCS8() ([]byte, error) {
+	// The zero value wrote a 35-byte P-256 key with an empty scalar, and no error (T18).
+	if err := needPrivate(k, "the key"); err != nil {
+		return nil, err
+	}
 	if k.Alg == AlgEd25519 {
 		// RFC 8410's form, the one x509.MarshalPKCS8PrivateKey writes: the seed in an OCTET STRING
 		// inside the privateKey OCTET STRING.
@@ -337,10 +392,10 @@ func algKnown(alg string) error {
 }
 
 // AlgorithmOf names the key's algorithm: one of the profile's two, which every key ParseSPKI returns
-// has.
+// has. A key that is not one — nil, the zero value, one assembled by hand — is refused.
 func AlgorithmOf(pub *PublicKey) (string, error) {
-	if pub == nil || (pub.Alg != AlgEd25519 && pub.Alg != AlgP256) {
-		return "", errors.New("unsupported key type")
+	if err := needPublic(pub, "the key"); err != nil {
+		return "", err
 	}
 	return pub.Alg, nil
 }
