@@ -358,6 +358,40 @@ export default function vault({ add, expect }, f) {
     add(`wallet_issue with ${what}`, 'wallet_issue', args);
     expect(`wallet_issue with ${what}`, want);
   }
+  // The JSON literal null is absent inside the documents too (CONTRACT §0): wallet_issue's readers,
+  // written when the documents were first held to their schemas (836d080), read a null member as one
+  // of the wrong type in both ports — a root's pkcs8: null was `the vault's root 0 does not read:
+  // pkcs8`, where before it was the absent key of a card-held root — while vault_seal's kdf reader
+  // read null as absent (a lead of the port-parity verification, 2026-09-30). A null member each
+  // document declares is absent now: an optional one is not there, a required one is named as a
+  // missing one is. A member a document does not declare is refused whatever it holds, null too, as a
+  // function's arguments are (a vault's ledger: null is still a vault carrying a ledger).
+  {
+    const nulled = (o, ...ms) => ({ ...o, ...Object.fromEntries(ms.map((m) => [m, null])) });
+    const cardHeld = { error: 'bad_request', why: 'this root is held on a card: wallet_issue signs only with a key the vault holds' };
+    for (const [what, args, want] of [
+      ['a root whose pkcs8 is null', withRoot({ pkcs8: null }), cardHeld],
+      ['a root whose fingerprint is null', withRoot({ fingerprint: null }), rootUnread('vault', 'fingerprint')],
+      ['a vault whose roots are null', issueWith({ vault_plaintext: { ...held, roots: null } }), { error: 'bad_request', why: "the vault's roots is a list" }],
+      ['a vault whose ledger is null', issueWith({ vault_plaintext: { ...held, ledger: null } }), { error: 'bad_request', why: 'a vault holds the root and nothing else: its ledger and contacts belong in the record' }],
+      ['a vault with a null member it does not hold', issueWith({ vault_plaintext: { ...held, note: null } }), { error: 'bad_request', why: 'vault_plaintext holds v, roots, prf and passkey, and nothing else: note' }],
+      ['a record whose contact has a null endpoint', issueWith({ record_plaintext: { ...record, contacts: [{ root: rootFp, endpoint: null }] } }), { error: 'bad_request', why: "the record's contact 0 does not read: endpoint" }],
+      ['a record whose ledger entry has a null endpoint', issueWith({ record_plaintext: { ...record, ledger: [{ ...entry, endpoint: null }] } }), { error: 'bad_request', why: "the record's ledger entry 0 does not read: endpoint" }],
+    ]) {
+      add(`wallet_issue with ${what}`, 'wallet_issue', args);
+      expect(`wallet_issue with ${what}`, want);
+    }
+    // The controls: every optional member null, in each document and in each entry, and the leaf is
+    // issued as it is with none of them.
+    add('wallet_issue from documents whose every optional member is null', 'wallet_issue', issueWith({
+      valid_days: 30,
+      vault_plaintext: { ...held, roots: [nulled(root0, 'alg', 'holder', 'rebound_at')], prf: null, passkey: null },
+      record_plaintext: nulled({ ...record, roots: null, ledger: [{ ...entry, root: 'sha256:' + 'B'.repeat(43), origin: null }], contacts: [{ root: 'sha256:' + 'C'.repeat(43), endpoint: ENDPOINT, name: null, leaf: null, root_cert: null, added: null }] }, 'passkey', 'backup_verified_at'),
+    }), f.withoutSerial('der'));
+    expect('wallet_issue from documents whose every optional member is null', { endpoint: ENDPOINT, new_host: true });
+    add('wallet_issue from a record whose ledger and contacts are null', 'wallet_issue', issueWith({ valid_days: 30, record_plaintext: { ...record, ledger: null, contacts: null } }), f.withoutSerial('der'));
+    expect('wallet_issue from a record whose ledger and contacts are null', { new_host: true, warnings: ['new host: this endpoint\'s host has never been issued to'] });
+  }
   // The control that must get through: every optional member present and read, and a record carrying
   // the root and a contact.
   add('wallet_issue from documents with every member they may hold', 'wallet_issue', issueWith({
