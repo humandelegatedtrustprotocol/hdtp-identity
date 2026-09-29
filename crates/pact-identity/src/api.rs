@@ -329,9 +329,8 @@ mod tests {
     #[test]
     fn unknown_names_and_non_object_args_answer_rather_than_throw() {
         assert!(call("nope", "{}").contains("no function named nope"));
-        // Every shape that is not an object, `null` included. `js/parity.mjs` cannot reach these:
-        // its port shim turns them into `{}` before either port sees them, so the two ports' own
-        // suites are where this one is held.
+        // Every shape that is not an object, `null` included. js/parity.mjs holds the Go port to the
+        // same answers for each (js/cases/dispatcher.mjs); this is the core's own record of them.
         for args in ["[]", "null", "3", "\"x\"", "true"] {
             assert!(call("verify", args).contains("args is a JSON object"), "verify({args})");
         }

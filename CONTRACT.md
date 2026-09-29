@@ -454,7 +454,16 @@ waiting requests.
    mismatched `sig_alg`, a name that straddles the vCard fold, every private and loopback spelling of
    an address, a root offered as a key id — and compares the whole answer, `why` strings included.
    The vectors prove the bytes a peer sees; this proves the codes, the words and the shapes a
-   *caller* sees, which no vector carries. It also fails when:
+   *caller* sees, which no vector carries. Besides the cases written by hand, `js/cases/generated.mjs`
+   makes, for every function this file declares, the shapes of a caller's mistake from the function's
+   own `params`: `{}`; the hostile object `js/cases/hostile.json` (which the Go port's
+   `TestCallNeverPanics` sweeps with too); each required member absent and `null`, held to §0's
+   `<name> is required`; each optional string `""`; each optional member of the wrong type; a member
+   the contract does not declare; and, for read order, each required member absent beside each other
+   member of the wrong type. Each is varied from a call that succeeds on both ports, named per
+   function. Until the audit of 2026-09-29 is fixed, the cases that fail today are listed in
+   `js/cases/known-divergences.json`, each with the finding that closes it, and excused only while
+   they fail exactly as listed; the list can only shrink. It also fails when:
    - the two dispatchers and `contract/contract.json` stop naming the same set of functions
      (`version` lived in one dispatcher and not the other until this check existed; a function
      described in the contract and dispatched by neither port would be prose nothing runs);
@@ -462,6 +471,9 @@ waiting requests.
      check here that two agreeing ports cannot pass by agreeing, since a member both grew, or both
      dropped, is invisible to a comparison;
    - a function on either dispatcher has no case here, so the contract cannot grow past its guard;
+   - an error code a function declares is never produced by both ports in one case they answered
+     alike — a refusal nobody compared, or a code nothing can reach, which is a claim to take out of
+     this file;
    - a function is only ever compared through a list of named keys rather than whole. That last one
      is the point: `card_decode` dropped its entire `leaf` member in one port, and a key list would
      never have noticed, because a key list only looks at the keys someone thought to name. Where an

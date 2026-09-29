@@ -10,6 +10,24 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+- **The parity gate generates its own cases** (the port-parity plan of 2026-09-29, S1): for every
+  function the contract declares, `{}`, the hostile object, each required member absent and `null`
+  (held to CONTRACT §0's `<name> is required`), each optional string `""`, each optional member of
+  the wrong type, an undeclared member, and each required member absent beside each other member of
+  the wrong type (read order) — 1103 cases, varied from one named hand-written case per function
+  that succeeds on both ports. 463 cases fail today (459 generated, and 4 written beside them); each
+  is listed in `js/cases/known-divergences.json` with the audit finding that closes it, and the run
+  fails on any other failure, on an entry whose case passes, and on an entry nobody has.
+- The coverage gate fails when a declared error code is not produced by both ports in one case they
+  answered alike (S2, TC-1); all 94 are. It used to print the count and pass.
+- `js/cases/hostile.json` is the one hostile object: the generated cases send it to both ports, Go's
+  `TestCallNeverPanics` reads it and now fails on an answer of `internal` (its `recover()` turned a
+  panic into a JSON object, which the sweep accepted), and the core has the same sweep
+  (`tests/boundary.rs`) (TC-14).
+- **JS loader:** `call(name, null)` hands `null` to the core, which answers `args is a JSON object`
+  as the Go port does; it used to be made `{}` (`js/index.mjs`, `js/worker.mjs`). Only `args` left
+  out is `{}`. The parity case `args that are null` sends `null` for the first time (TC-2).
+
 ## 0.4.1 — 2026-09-28
 
 - **Correction to 0.4.0.** Its entry, and commit 3746e32, said the open no longer derives the

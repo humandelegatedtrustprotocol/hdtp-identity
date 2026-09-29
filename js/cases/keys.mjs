@@ -35,6 +35,8 @@ export default function keys({ add, expect }, f) {
   // A key whose algorithm the profile does not admit: it must be refused by name.
   add('key_info of an RSA key', 'key_info', { spki: rsaSpki });
   add('public_key of an RSA key', 'public_key', { pkcs8: rsaSpki });
+  // `verify` declares `unsupported`, and nothing produced it until the coverage gate asked (TC-1).
+  add('verify with an RSA key', 'verify', { spki: rsaSpki, data: b64url(new Uint8Array(4)), sig: b64url(new Uint8Array(4)) });
 
   // Every member that is absent rather than empty, which is the distinction a port loses when its
   // zero value and its missing value are the same thing.
