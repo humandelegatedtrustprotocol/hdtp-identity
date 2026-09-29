@@ -42,6 +42,16 @@ test('Appendix B is read as js/appendix-b-reader.json says, refusals word for wo
   }
 });
 
+// Two repositories keep this list, and each holds its own readers to its own copy: pact-protocol's
+// vectors/check.mjs holds the checker's and the splicer's reader to vectors/appendix-b-reader.json.
+// The two copies are held to each other here, byte for byte, from the pact-protocol checked out
+// beside this repository, as the gate reads it (TC-12): a case added to one list alone fails.
+test('the Appendix B cases are the same bytes in pact-protocol\'s copy', () => {
+  const mine = readFileSync(new URL('./appendix-b-reader.json', import.meta.url));
+  const theirs = readFileSync(new URL('../../pact-protocol/vectors/appendix-b-reader.json', import.meta.url));
+  assert.ok(mine.equals(theirs), 'js/appendix-b-reader.json and pact-protocol vectors/appendix-b-reader.json differ');
+});
+
 test('the specification\'s first block is the seed\'s vector file, unchanged', () => {
   const spec = readFileSync(new URL('../../pact-protocol/SPEC.md', import.meta.url), 'utf8');
   const file = JSON.parse(readFileSync(new URL('../../pact-protocol/vectors/pact-2.0-vectors.json', import.meta.url), 'utf8'));
