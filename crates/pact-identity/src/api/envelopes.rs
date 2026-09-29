@@ -57,7 +57,7 @@ pub(super) fn seal_request(a: &Value) -> Result<Value> {
             cty: opt_s(a, "cty")?.map(|c| c.to_string()),
             ephemeral_seed: seed32(a, "ephemeral_seed")?,
         })?;
-        serde_json::to_value(wire).map_err(|e| Error::new("internal", e.to_string()))?
+        serde_json::to_value(wire).map_err(|_| Error::new("internal", crate::util::UNSERIALISABLE))?
     })
 }
 
@@ -78,7 +78,7 @@ pub(super) fn seal_result(a: &Value) -> Result<Value> {
             exp: opt_int(a, "exp")?,
             ephemeral_seed: seed32(a, "ephemeral_seed")?,
         })?;
-        serde_json::to_value(wire).map_err(|e| Error::new("internal", e.to_string()))?
+        serde_json::to_value(wire).map_err(|_| Error::new("internal", crate::util::UNSERIALISABLE))?
     })
 }
 
@@ -124,5 +124,5 @@ pub(super) fn follow_renewed(a: &Value) -> Result<Value> {
 
 pub(super) fn decide(a: &Value) -> Result<Value> {
     let input = DecideInput::read(a)?;
-    serde_json::to_value(envelope::decide(&input)?).map_err(|e| Error::new("internal", e.to_string()))
+    serde_json::to_value(envelope::decide(&input)?).map_err(|_| Error::new("internal", crate::util::UNSERIALISABLE))
 }

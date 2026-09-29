@@ -138,6 +138,17 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   it is `kdf parameters out of range` there too, as is an `m_kib` of 8192.5, which the Go port cut to
   8192 and refused as a wrong passphrase (C5). Parity sends these as raw text (`RawArgs`, js/port.mjs),
   which `JSON.stringify` cannot write.
+- **What one JSON parser refuses and the other reads is refused by both** (cluster K; R40, F21, and
+  S3-2): a number infinite as a double (`1e400`) and containers nested more than 127 deep. The core's
+  serde_json refused both in its own words (`args: number out of range at line 1 column 10`,
+  `args: recursion limit exceeded …`); the Go port's encoding/json read them, so the Go port decided
+  `ok` on a sealed call whose body held `1e400` where the Wasm said `does not open`, opened such a
+  result, and read such a manifest or line. Both ports scan the arguments first, after half a
+  surrogate pair, and answer `args: a number is outside the range of a double` or `args: nested more
+  than 127 deep`, the first in the text; the Go port's JSON text readers (an envelope's header and
+  body, a manifest, a line of messages.jsonl, a vault's plaintext) refuse the same, so each answers as
+  the core's does. Arguments that do not parse are `args is a JSON object` in the core too, as in the
+  Go port's `Call`; `why` never carries serde's or encoding/json's words, internal answers included.
 - Go, typed (T21): `SigningRequestCheck(nil, …)` is `request is required`, as the core answers a
   request that is not an object (it named the first member, `csr is required`); `LimitsRules.Check`
   answers a member the map does not hold `<name> is a number`, as a document without it is answered

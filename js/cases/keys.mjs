@@ -31,6 +31,13 @@ export default function keys({ add, expect }, f) {
   add('key_info with no argument', 'key_info', {});
   for (const bad of B64_BAD) add(`key_info of bytes that are not base64url (${JSON.stringify(bad)})`, 'key_info', { spki: bad });
   add('key_info of a number', 'key_info', { spki: 123 });
+  // 127 containers deep reaches the function, which refuses a list for bytes; 128 is refused before
+  // (R40's limit, S3-2). The nesting is written, not raw: JSON.stringify can write it.
+  const nested = (n) => JSON.parse('['.repeat(n) + '1' + ']'.repeat(n));
+  add('key_info of an spki nested 126 deep, 127 with the arguments', 'key_info', { spki: nested(126) });
+  expect('key_info of an spki nested 126 deep, 127 with the arguments', { error: 'parse', why: 'not base64url' });
+  add('key_info of an spki nested 127 deep, 128 with the arguments', 'key_info', { spki: nested(127) });
+  expect('key_info of an spki nested 127 deep, 128 with the arguments', { error: 'bad_request', why: 'args: nested more than 127 deep' });
   add('sign with a public key', 'sign', { pkcs8: hostSpki, data: b64url(new Uint8Array(4)) });
   add('sign with no data', 'sign', { pkcs8: hostPkcs8 });
   add('verify a signature that is not one', 'verify', { spki: hostSpki, data: b64url(new Uint8Array(4)), sig: b64url(new Uint8Array(4)) });

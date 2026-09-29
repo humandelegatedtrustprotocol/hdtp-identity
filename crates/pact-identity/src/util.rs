@@ -78,13 +78,67 @@ pub fn from_hex(s: &str) -> Result<Vec<u8>> {
 
 pub fn random(n: usize) -> Result<Vec<u8>> {
     let mut out = vec![0u8; n];
-    getrandom::getrandom(&mut out).map_err(|e| Error::new("internal", format!("randomness unavailable: {e}")))?;
+    getrandom::getrandom(&mut out).map_err(|_| Error::new("internal", "randomness unavailable"))?;
     Ok(out)
 }
 
 /// The vectors' key derivation: every secret is the hash of a label.
 pub fn seed(label: &str) -> [u8; 32] {
     sha256(format!("pact-2.0-vectors/{label}").as_bytes())
+}
+
+/// What a value that serde_json will not write is answered with. Nothing the core builds is one; it
+/// is a fixed line because `why` never carries a library's own words (CONTRACT §0).
+pub const UNSERIALISABLE: &str = "does not serialise as JSON";
+
+/// The containers JSON text may nest, one inside another: serde_json refuses the 128th with its own
+/// words, and encoding/json reads ten thousand.
+pub const JSON_MAX_DEPTH: usize = 127;
+/// What `json_limit` finds, in the words both ports answer.
+pub const JSON_NUMBER_BEYOND_DOUBLE: &str = "a number is outside the range of a double";
+pub const JSON_NESTED_TOO_DEEP: &str = "nested more than 127 deep";
+
+/// The first thing, in text order, that JSON text holds and one of the two ports' parsers refuses
+/// while the other reads it: a number that is infinite as a double (`1e400`: serde_json refuses it,
+/// encoding/json keeps its digits), or containers nested more than `JSON_MAX_DEPTH` deep. Strings are
+/// skipped, escapes and all. The Go port's `jsonLimit` is the same scan, and its JSON readers refuse
+/// what it finds, as serde_json does; `call` names it before anything reads the arguments.
+pub fn json_limit(text: &str) -> Option<&'static str> {
+    let b = text.as_bytes();
+    let (mut i, mut depth) = (0, 0usize);
+    while i < b.len() {
+        match b[i] {
+            b'"' => {
+                i += 1;
+                while i < b.len() && b[i] != b'"' {
+                    i += if b[i] == b'\\' { 2 } else { 1 };
+                }
+                i += 1;
+            }
+            b'[' | b'{' => {
+                depth += 1;
+                if depth > JSON_MAX_DEPTH {
+                    return Some(JSON_NESTED_TOO_DEEP);
+                }
+                i += 1;
+            }
+            b']' | b'}' => {
+                depth = depth.saturating_sub(1);
+                i += 1;
+            }
+            b'-' | b'0'..=b'9' => {
+                let start = i;
+                while i < b.len() && matches!(b[i], b'0'..=b'9' | b'+' | b'-' | b'.' | b'e' | b'E') {
+                    i += 1;
+                }
+                if text[start..i].parse::<f64>().is_ok_and(f64::is_infinite) {
+                    return Some(JSON_NUMBER_BEYOND_DOUBLE);
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    None
 }
 
 /// Whether JSON text holds a `\u` escape of half of a UTF-16 surrogate pair: a high one not followed

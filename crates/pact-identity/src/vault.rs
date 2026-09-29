@@ -188,7 +188,7 @@ fn seal_any(passphrase: &str, plaintext: &Value, kdf: Option<Kdf>, salt: Option<
     let key = derive(passphrase, &salt, kdf)?;
     let h = header(kdf, &salt, &nonce);
     let aad = canonical(&Value::Object(h.clone()));
-    let pt = Zeroizing::new(serde_json::to_vec(plaintext).map_err(|e| Error::new("internal", e.to_string()))?);
+    let pt = Zeroizing::new(serde_json::to_vec(plaintext).map_err(|_| Error::new("internal", crate::util::UNSERIALISABLE))?);
     let ct = aes_gcm::Aes256Gcm::new_from_slice(&key[..])
         .map_err(|_| Error::new("internal", "key length"))?
         .encrypt(nonce.as_slice().into(), Payload { msg: &pt, aad: aad.as_bytes() })
