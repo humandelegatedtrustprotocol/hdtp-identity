@@ -416,6 +416,12 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   2026-09-30): `Call(name, nil)` and `Call(name, "")` answer `bad_request` `args is a JSON object`,
   as the core's `call(name, "")` does; they read as `{}`. The line adapter sends `{}` for a request
   with no `args`, as the JS loader does. `js/boundary-text.json` holds both ports to it.
+- **Removed: `js/limits-vectors.mjs`** (TC-13), the generator of `js/cases/limits-vectors.json`. It
+  ran the cloud's `RateLimiter.take`, which the cloud removed at pact-cloud ba68f9c when it moved its
+  budgets onto `limits_decide`; its compare mode threw against the cloud's main, and nothing ran it.
+  The vectors stay, a fixed record whose `about` and `source` say what made them (pact-cloud 6c771f7,
+  `limits.ts` sha256 85e3ff79…), replayed as before by the crate, the Wasm and the Go port. The
+  contract's §6.3 and `limits_decide` note, and the crate's and the tests' headers, say "was".
 
 ## 0.4.1 — 2026-09-28
 

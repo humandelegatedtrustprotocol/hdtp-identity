@@ -153,7 +153,8 @@ fn the_pending_cap_refuses_at_the_cap_with_no_wait_that_would_refill_it() {
 fn retry_after_is_the_wait_to_within_a_rounding_second() {
     // Over generated sequences: whenever a call is refused with retry_after n, the same call n + 1
     // seconds later is let through, and n - 2 seconds later (n > 2) is still refused. Between those,
-    // the answer is the rounding's. The TypeScript's arithmetic (`limits.ts`, which this reproduces)
+    // the answer is the rounding's. The TypeScript's arithmetic (`limits.ts`, which this reproduces,
+    // and which the cloud removed at ba68f9c)
     // computes n from the level when refused and the later level afresh from the row, and the two
     // roundings can part either way:
     //   - short: seed 74, level 0.06666666666666654 at 3 an hour, n = 1120 exactly, and the level

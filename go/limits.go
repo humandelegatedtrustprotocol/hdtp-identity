@@ -4,7 +4,8 @@ package pactidentity
 // `limits_rules_check`, `limits_decide` and `limits_buckets` answer with. The node decides its budgets in its sidecar,
 // pact-limitd, with the Rust crate itself; nothing outside this module calls these. The same token
 // buckets, the same keys, the same arithmetic in the same order, held to the Rust crate by parity
-// and to the cloud's TypeScript by js/cases/limits-vectors.json (limits_test.go).
+// and to what the cloud's TypeScript decided by js/cases/limits-vectors.json, a fixed record of it
+// (limits_test.go).
 //
 // One thing Go does that Rust and JavaScript do not: the compiler may fuse x*y + z into one
 // fused multiply-add on arm64, which rounds once where the others round twice. Every such sum here

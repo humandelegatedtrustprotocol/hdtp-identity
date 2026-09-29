@@ -1,6 +1,7 @@
-//! The cloud's TypeScript and this crate decide alike: every step of js/cases/limits-vectors.json,
-//! which js/limits-vectors.mjs made by running the cloud's `RateLimiter.take` over SQLite, replayed
-//! here on the crate's own state, bit for bit.
+//! This crate decides as the vectors of pact-cloud 6c771f7 say: every step of
+//! js/cases/limits-vectors.json, a fixed record of the cloud's `RateLimiter.take` run over SQLite
+//! (the cloud removed it at ba68f9c; the file's `about` says how it was made), replayed here on the
+//! crate's own state, bit for bit.
 //!
 //! The replay deletes every idle row after every step, where the TypeScript swept at most once a
 //! minute: the two stores hold different rows, and the decisions must not care.
