@@ -8,7 +8,7 @@
 //! fail open. So a `not_before` that does not parse never reaches the rules below, which skip it only
 //! because they are written over entries already read.
 use crate::time::{format_rfc3339, parse_rfc3339};
-use crate::util::{err, Result};
+use crate::util::{err, stranger, Result};
 use crate::x509;
 use serde_json::{json, Map, Value};
 
@@ -20,14 +20,6 @@ const ENTRY_INSTANTS: &[&str] = &["not_before", "not_after", "issued_at"];
 /// caller did not say this is a move. The same words wherever the rule is applied.
 pub fn second_home(live_endpoint: &str) -> String {
     format!("a leaf is live for {live_endpoint}: a second endpoint is a move, not a second home")
-}
-
-/// The first member, in sorted order, that `allowed` does not name: sorted, so that two ports that
-/// iterate a map differently name the same one.
-pub(crate) fn stranger(doc: &Map<String, Value>, allowed: &[&str]) -> Option<String> {
-    let mut extra: Vec<&String> = doc.keys().filter(|k| !allowed.contains(&k.as_str())).collect();
-    extra.sort();
-    extra.first().map(|k| k.to_string())
 }
 
 /// `sha256:` and 43 base64url characters: a root fingerprint as SPEC §2 writes one.

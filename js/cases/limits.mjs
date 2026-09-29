@@ -129,4 +129,39 @@ export default function limits({ add, expect }) {
   expect('limits_decide with a now of -0', { error: 'bad_request', why: 'now is a time in milliseconds' });
   add('limits_decide with nothing to work from', 'limits_decide', {});
   expect('limits_decide with nothing to work from', { error: 'bad_request', why: 'rules is required' });
+
+  // limits_buckets: the rows a charge reads, so a host can fetch them before limits_decide (X2). Each
+  // answer is held to the key scheme LimitsCharge describes and to rates worked out here from the rules
+  // — `n / 3600` an hour's budget, the identity's `max(1, min(cap × contact rate, capacity))` — so
+  // neither port's arithmetic is the expectation.
+  const perHour = (key, n) => ({ key, per_second: n / 3600, burst: n });
+  const identity = (key, cap) => {
+    const r = Math.max(1, Math.min(cap * rules.contact_calls_per_second, rules.identity_capacity_per_second));
+    return { key, per_second: r, burst: r };
+  };
+  const contact = (key) => ({ key, per_second: rules.contact_calls_per_second, burst: rules.contact_burst });
+  for (const [what, charge, buckets] of [
+    ['a contact in', { kind: 'contact_in', root: 'rA', contact_cap: 100 }, [contact('contact:rA'), identity('identity', 100)]],
+    ['a contact out', { kind: 'contact_out', root: 'rA', contact_cap: 100 }, [contact('out:contact:rA'), identity('out:identity', 100)]],
+    ['a contact in whose cap is 0', { kind: 'contact_in', root: 'rA', contact_cap: 0 }, [contact('contact:rA'), identity('identity', 0)]],
+    ['a contact in whose cap is 1', { kind: 'contact_in', root: 'rA', contact_cap: 1 }, [contact('contact:rA'), identity('identity', 1)]],
+    ['a guest with an address', { kind: 'guest_in', root: 'rG', source: 's1', addressed: true }, [perHour('guest:rG:s1', rules.guest_calls_per_hour)]],
+    ['a guest with no address', { kind: 'guest_in', root: 'rG', source: 's1', addressed: false }, [perHour('guest:rG', rules.guest_calls_per_hour)]],
+    ['a small form, no root', { kind: 'guest_in', root: null, source: 's1', addressed: true }, [perHour('source:s1', rules.guest_source_calls_per_hour)]],
+    ['a small form, an empty root', { kind: 'guest_in', root: '', source: 's1', addressed: false }, [perHour('source:s1', rules.guest_source_calls_per_hour)]],
+    ['the guest total', { kind: 'guest_total' }, [perHour('guest-total', rules.guest_total_calls_per_hour)]],
+    ['a stranger out', { kind: 'stranger_out' }, [perHour('out:stranger', rules.stranger_calls_out_per_hour)]],
+    ['an integration', { kind: 'integration', integration: 'i1', contact: 'rA' }, [perHour('integration:i1:rA', rules.integration_calls_per_hour)]],
+    ['a contact request, a count', { kind: 'pending_in', held: 1 }, []],
+  ]) {
+    add(`limits_buckets: ${what}`, 'limits_buckets', { rules, charge });
+    expect(`limits_buckets: ${what}`, { buckets });
+  }
+  // The rules and the charge are read as limits_decide reads them, by the same reader, in its words.
+  for (const [what, over, why] of bad.filter(([, o]) => 'rules' in o || 'charge' in o)) {
+    const args = { rules, charge: { kind: 'stranger_out' }, ...over };
+    for (const k of Object.keys(args)) if (args[k] === undefined) delete args[k];
+    add(`limits_buckets with ${what}`, 'limits_buckets', args);
+    expect(`limits_buckets with ${what}`, { error: 'bad_request', why });
+  }
 }

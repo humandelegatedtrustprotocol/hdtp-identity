@@ -27,6 +27,15 @@ impl std::fmt::Display for Error {
     }
 }
 
+/// The first member of an object, in sorted order, that `allowed` does not name: sorted, so that two
+/// ports that iterate a map differently name the same one. The one copy: `api/limits.rs` kept its own
+/// beside this one, which was `ledger.rs`'s.
+pub(crate) fn stranger(doc: &serde_json::Map<String, serde_json::Value>, allowed: &[&str]) -> Option<String> {
+    let mut extra: Vec<&String> = doc.keys().filter(|k| !allowed.contains(&k.as_str())).collect();
+    extra.sort();
+    extra.first().map(|k| k.to_string())
+}
+
 pub fn b64u(b: &[u8]) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b)
 }

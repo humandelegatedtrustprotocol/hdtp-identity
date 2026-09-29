@@ -323,6 +323,11 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   what a wallet never would", and nothing in this repository, the node or the cloud's battery set
   them. `LeafOpts.URIs` stays; the node's tests set it.
 - Parity cases put a leaf at exactly `max_leaf_days` and one second past it (C15's residual).
+- **`limits_buckets`, a contract function** (X2): the buckets a charge is charged to, in charge order,
+  each with its key, rate and burst — the rows `limits_decide` reads, which a host fetches first. The
+  Wasm could decide a charge and not say which rows it reads, so a host on it had to derive the key
+  scheme and the identity rate a second time. It reads `rules` and `charge` as `limits_decide` does,
+  by the same reader, in its words.
 
 ## 0.4.1 — 2026-09-28
 

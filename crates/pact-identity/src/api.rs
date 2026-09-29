@@ -289,6 +289,7 @@ fn dispatch(name: &str, a: &Value) -> Result<Answer> {
         // §6.3 limits
         "limits_rules_check" => limits::limits_rules_check(a)?,
         "limits_decide" => limits::limits_decide(a)?,
+        "limits_buckets" => limits::limits_buckets(a)?,
         "version" => json!({ "crate": env!("CARGO_PKG_VERSION"), "spec": SPEC_VERSION }),
         // `call` names a function nobody declares before this is reached; `declared` and this match are
         // one list, which every_function_declares_the_contracts_members and js/parity.mjs hold.
@@ -362,6 +363,7 @@ fn declared(name: &str) -> Option<&'static [&'static str]> {
         "ledger_check" => &["ledger", "root", "endpoint", "now", "move"],
         "limits_rules_check" => &["rules"],
         "limits_decide" => &["rules", "charge", "now", "state"],
+        "limits_buckets" => &["rules", "charge"],
         _ => return None,
     })
 }
