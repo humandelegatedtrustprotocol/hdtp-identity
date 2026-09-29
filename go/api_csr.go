@@ -1,51 +1,49 @@
 package pactidentity
 
 // The Certificate signing requests section of contract/contract.json: a body for each function it
-// declares, which api.go's `functions` map dispatches by name, and the helpers only these use.
+// declares, which api.go's `functions` map dispatches by name, and the helpers only these use. Each
+// reads its members as api/csr.rs does, in its order.
 
 import "encoding/json"
 
-func callCSRNew(args json.RawMessage) json.RawMessage {
-	var a struct {
-		CN        *string `json:"cn"`
-		HostPKCS8 B64     `json:"host_pkcs8"`
-		Endpoint  *string `json:"endpoint"`
-		DNSName   string  `json:"dns_name"`
-	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	cn, err := needStr(a.CN, "cn")
+func callCSRNew(a args) json.RawMessage {
+	cn, err := a.str("cn")
 	if err != nil {
-		return failErr(codeArgs, err)
+		return failAs(codeArgs, err)
 	}
-	host, err := privIn(a.HostPKCS8, "host_pkcs8")
+	host, err := a.priv("host_pkcs8")
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs("parse", err)
 	}
-	endpoint, err := needStr(a.Endpoint, "endpoint")
+	endpoint, err := a.str("endpoint")
 	if err != nil {
-		return failErr(codeArgs, err)
+		return failAs(codeArgs, err)
 	}
-	der, err := CSRNew(cn, host, endpoint, a.DNSName)
+	dns, err := a.optStr("dns_name")
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs(codeArgs, err)
+	}
+	dnsName := ""
+	if dns != nil {
+		dnsName = *dns
+	}
+	der, err := CSRNew(cn, host, endpoint, dnsName)
+	if err != nil {
+		return failAs("parse", err)
 	}
 	return ok(map[string]any{"der": B64url(der)})
 }
 
-func callCSRCheck(args json.RawMessage) json.RawMessage {
-	var a struct {
-		DER       B64   `json:"der"`
-		RootSPKIs []B64 `json:"root_spkis"`
+func callCSRCheck(a args) json.RawMessage {
+	der, err := a.bytes("der")
+	if err != nil {
+		return failAs(codeArgs, err)
 	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
+	roots, err := a.optChain("root_spkis")
+	if err != nil {
+		return failAs(codeArgs, err)
 	}
-	if err := need(a.DER, "der"); err != nil {
-		return failErr(codeArgs, err)
-	}
-	info := CSRCheck(a.DER, chainOf(a.RootSPKIs))
+	info := CSRCheck(der, roots)
 	if !info.OK {
 		return ok(map[string]any{"ok": false, "why": info.Why})
 	}
@@ -58,80 +56,79 @@ func callCSRCheck(args json.RawMessage) json.RawMessage {
 	return ok(map[string]any{"ok": true, "cn": info.CN, "spki": B64url(info.Key.SPKI), "fingerprint": info.Fingerprint, "alg": info.Alg, "endpoint": info.Endpoint, "dns_name": dns})
 }
 
-func callIssueFromCSR(args json.RawMessage) json.RawMessage {
-	var a issueArgs
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	root, err := privIn(a.RootPKCS8, "root_pkcs8")
+// issueArgs is what both issue functions read after the root: the request, checked before anything
+// else of it is read (csr::check, whose refusal keeps its class: bytes that do not read are `parse`),
+// then `root_cn`, `now`, `previous_not_before` and `valid_days`, in the core's order (R27, T15, F3).
+func issueArgs(a args, roots [][]byte, o IssueOpts) (CSRInfo, IssueOpts, json.RawMessage) {
+	csr, err := a.bytes("csr")
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return CSRInfo{}, o, failAs(codeArgs, err)
 	}
-	o, err := a.opts()
+	info := CSRCheck(csr, roots)
+	if !info.OK {
+		return info, o, failAs(codeArgs, info.err)
+	}
+	if o.RootCN, err = a.str("root_cn"); err != nil {
+		return info, o, failAs(codeArgs, err)
+	}
+	if o.Now, err = a.instant("now"); err != nil {
+		return info, o, failAs("parse", err)
+	}
+	if o.PreviousNotBefore, err = a.optInstant("previous_not_before"); err != nil {
+		return info, o, failAs("parse", err)
+	}
+	if o.ValidDays, err = a.validDays(); err != nil {
+		return info, o, failAs(codeArgs, err)
+	}
+	return info, o, nil
+}
+
+func callIssueFromCSR(a args) json.RawMessage {
+	root, err := a.priv("root_pkcs8")
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs("parse", err)
 	}
 	// §9's refusal covers the root that is signing, whether or not the caller listed it: a wallet
 	// that omits `root_spkis` still cannot be talked into issuing a leaf for its own root key.
-	o.RootKey = root
-	o.RootSPKIs = append(o.RootSPKIs, root.Public().SPKI)
-	issued, err := IssueFromCSR(a.CSR, o)
+	roots, err := a.optChain("root_spkis")
 	if err != nil {
-		return failErr("bad_request", err)
+		return failAs(codeArgs, err)
+	}
+	info, o, bad := issueArgs(a, append(roots, root.Public().SPKI), IssueOpts{RootKey: root})
+	if bad != nil {
+		return bad
+	}
+	lo, err := planOf(info, o)
+	if err != nil {
+		return failAs(codeArgs, err)
+	}
+	issued, err := issuedLeaf(lo)
+	if err != nil {
+		return failAs(codeArgs, err)
 	}
 	return ok(map[string]any{"der": B64url(issued.DER), "endpoint": issued.Endpoint, "not_before": timeOut(issued.NotBefore), "not_after": timeOut(issued.NotAfter)})
 }
 
-func callIssueTBSFromCSR(args json.RawMessage) json.RawMessage {
-	var a issueArgs
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	rootPub, err := pubIn(a.RootSPKI, "root_spki")
+func callIssueTBSFromCSR(a args) json.RawMessage {
+	rootPub, err := a.pub("root_spki")
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs("parse", err)
 	}
-	o, err := a.opts()
+	roots, err := a.optChain("root_spkis")
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs(codeArgs, err)
 	}
-	o.RootPub = rootPub
-	o.RootSPKIs = append(o.RootSPKIs, rootPub.SPKI)
-	issued, err := IssueTBSFromCSR(a.CSR, o)
+	info, o, bad := issueArgs(a, append(roots, rootPub.SPKI), IssueOpts{RootPub: rootPub})
+	if bad != nil {
+		return bad
+	}
+	lo, err := planOf(info, o)
 	if err != nil {
-		return failErr("bad_request", err)
+		return failAs(codeArgs, err)
+	}
+	issued, err := issuedTBS(lo)
+	if err != nil {
+		return failAs(codeArgs, err)
 	}
 	return ok(map[string]any{"tbs": B64url(issued.TBS), "sig_alg": B64url(issued.Alg), "endpoint": issued.Endpoint, "not_before": timeOut(issued.NotBefore), "not_after": timeOut(issued.NotAfter)})
-}
-
-type issueArgs struct {
-	CSR               B64     `json:"csr"`
-	RootCN            string  `json:"root_cn"`
-	RootPKCS8         B64     `json:"root_pkcs8"`
-	RootSPKI          B64     `json:"root_spki"`
-	RootSPKIs         []B64   `json:"root_spkis"`
-	Now               *string `json:"now"`
-	PreviousNotBefore *string `json:"previous_not_before"`
-	// A pointer so an absent member takes the default and an explicit 0 is refused, as in Rust.
-	ValidDays *int `json:"valid_days"`
-}
-
-func (a issueArgs) opts() (IssueOpts, error) {
-	now, err := timeIn(a.Now, "now")
-	if err != nil {
-		return IssueOpts{}, err
-	}
-	days, err := daysOr(a.ValidDays)
-	if err != nil {
-		return IssueOpts{}, err
-	}
-	o := IssueOpts{RootCN: a.RootCN, RootSPKIs: chainOf(a.RootSPKIs), Now: now, ValidDays: days}
-	if a.PreviousNotBefore != nil {
-		p, err := timeIn(a.PreviousNotBefore, "previous_not_before")
-		if err != nil {
-			return IssueOpts{}, err
-		}
-		o.PreviousNotBefore = &p
-	}
-	return o, nil
 }

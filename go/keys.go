@@ -310,7 +310,13 @@ func GenerateKey(alg string) (*PrivateKey, error) {
 
 // KeyFromSeed is the vectors' derivation: an Ed25519 seed used directly; a P-256 scalar of seed mod n,
 // zero becoming one.
+//
+// The algorithm is judged before the seed, as the core's typed `from_seed` takes an `Alg` already
+// parsed and the JSON boundary reads `alg` first.
 func KeyFromSeed(alg string, seed []byte) (*PrivateKey, error) {
+	if err := algKnown(alg); err != nil {
+		return nil, err
+	}
 	if len(seed) != 32 {
 		return nil, errArg("seed is 32 bytes")
 	}
@@ -326,6 +332,14 @@ func KeyFromSeed(alg string, seed []byte) (*PrivateKey, error) {
 		return newP256(k.FillBytes(make([]byte, 32)))
 	}
 	return nil, unsupportedError{"unsupported key type " + alg}
+}
+
+// algKnown is the core's `Alg::parse`: an algorithm this profile has, or `unsupported`.
+func algKnown(alg string) error {
+	if alg != AlgEd25519 && alg != AlgP256 {
+		return unsupportedError{"unsupported key type " + alg}
+	}
+	return nil
 }
 
 // AlgorithmOf names the key's algorithm, or errors for one the profile does not admit.

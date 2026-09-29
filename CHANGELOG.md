@@ -16,7 +16,7 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   the wrong type, an undeclared member, and each required member absent beside each other member of
   the wrong type (read order) — 1103 cases, varied from one named hand-written case per function
   that succeeds on both ports. 463 cases failed when they were written (459 generated, and 4 written
-  beside them), 410 fail today (406 and 4); each is listed in `js/cases/known-divergences.json` with
+  beside them), 213 fail today (211 and 2); each is listed in `js/cases/known-divergences.json` with
   the audit finding that closes it, and the run fails on any other failure, on an entry whose case
   passes, and on an entry nobody has.
 - The coverage gate fails when a declared error code is not produced by both ports in one case they
@@ -59,6 +59,23 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   to `contract/contract.json` by a test in each (`every_function_declares_the_contracts_members`,
   `TestEveryFunctionDeclaresTheContractsMembers`). The Go port reads a call's arguments once, into a
   map by exact name: its struct decoding matched `{"CN": …}` to `cn`, a member the core never saw.
+- **The Go port reads every member where the core reads it** (S3; clusters A and J of the port-parity
+  audit), for the keys, certificates, CSR, signing request, card, vault and ledger functions. It
+  decoded the arguments into a struct first: a required member left out was its zero value (a root
+  built with an empty commonName, a leaf issued under an empty issuer, a profile judged as a leaf with
+  no `kind`, a vault opened with the empty passphrase), and a member of the wrong type was named
+  before any member was read, so two missing members were named differently by the two ports. Each
+  body now reads its members in the core's order with readers that answer as the core's do
+  (go/api_args.go), and names an absent one `<name> is required`. `issue_from_csr` and
+  `issue_tbs_from_csr` check the request before `root_cn`, `now` and `valid_days`, and answer bytes
+  that do not read as `parse`, as the core does, where this port said `bad_request` for everything
+  (R27, T15, F3).
+- The core reads three functions in the contract's order where the Go port already did: `card_decode`
+  reads `vcard` before `now` (R25); `key_from_seed` reads `alg` before the seed (T21, R01; the Go port's
+  `KeyFromSeed` also judges the algorithm first now); `vault_seal` answers `empty passphrase` before a
+  missing plaintext, as its note says (T21).
+- `version` and `prf_salt` declare `bad_request`: they refuse a member they do not declare, like every
+  function.
 - **JS loader:** `call(name, null)` hands `null` to the core, which answers `args is a JSON object`
   as the Go port does; it used to be made `{}` (`js/index.mjs`, `js/worker.mjs`). Only `args` left
   out is `{}`. The parity case `args that are null` sends `null` for the first time (TC-2).
