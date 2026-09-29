@@ -23,6 +23,15 @@ fn plaintext_v(plaintext: &Value) -> Option<u64> {
 }
 
 const GENERATION: &str = "a vault plaintext is v 2: the root, or the record";
+
+/// A member a document declares, read as CONTRACT §0 reads every member: the JSON literal `null` is
+/// absent. These readers took a null member for one of the wrong type (836d080), so a root's
+/// `pkcs8: null` was `does not read: pkcs8` where its absence is a card-held root. A member a
+/// document does not declare is refused whatever it holds, null too (`stranger`), as a function's
+/// arguments are.
+fn member<'a>(o: &'a Map<String, Value>, k: &str) -> Option<&'a Value> {
+    o.get(k).filter(|v| !v.is_null())
+}
 const FILE_MEMBERS: &[&str] = &["v", "roots", "prf", "passkey"];
 const RECORD_MEMBERS: &[&str] = &["v", "roots", "ledger", "contacts", "passkey", "backup_verified_at"];
 
@@ -48,13 +57,13 @@ pub fn check_file(vault: &Value) -> Result<()> {
     // types were never read: a root's key given as a number was a card-held root here and `arguments
     // do not read` in the Go port, a root that was not an object was skipped here, and a `prf` of any
     // type was carried (F18, R31).
-    read_roots(doc.get("roots"), "vault", true)?;
-    if let Some(prf) = doc.get("prf") {
+    read_roots(member(doc, "roots"), "vault", true)?;
+    if let Some(prf) = member(doc, "prf") {
         if prf.as_str().and_then(|p| from_b64u(p).ok()).is_none_or(|b| b.len() != 32) {
             return err("bad_request", "the vault's prf does not read");
         }
     }
-    read_passkey(doc.get("passkey"), "vault")
+    read_passkey(member(doc, "passkey"), "vault")
 }
 
 const ROOT_REQUIRED: &[&str] = &["fingerprint", "cn", "cert", "created"];
@@ -86,10 +95,10 @@ fn read_roots(roots: Option<&Value>, whose: &str, required: bool) -> Result<()> 
             }
         }
         for (m, reads) in [
-            ("alg", o.get("alg").map(|v| matches!(v.as_str(), Some("ed25519" | "p256")))),
-            ("pkcs8", o.get("pkcs8").map(Value::is_string)),
-            ("holder", o.get("holder").map(Value::is_object)),
-            ("rebound_at", o.get("rebound_at").map(|v| v.as_u64().is_some())),
+            ("alg", member(o, "alg").map(|v| matches!(v.as_str(), Some("ed25519" | "p256")))),
+            ("pkcs8", member(o, "pkcs8").map(Value::is_string)),
+            ("holder", member(o, "holder").map(Value::is_object)),
+            ("rebound_at", member(o, "rebound_at").map(|v| v.as_u64().is_some())),
         ] {
             if reads == Some(false) {
                 return unread(m);
@@ -124,7 +133,7 @@ fn read_contacts(contacts: Option<&Value>) -> Result<()> {
             }
         }
         for m in ["name", "leaf", "root_cert", "added"] {
-            let reads = o.get(m).map(|v| v.as_str().is_some_and(|text| m != "added" || parse_rfc3339(text).is_ok()));
+            let reads = member(o, m).map(|v| v.as_str().is_some_and(|text| m != "added" || parse_rfc3339(text).is_ok()));
             if reads == Some(false) {
                 return unread(m);
             }
@@ -168,13 +177,13 @@ pub fn check_record(record: &Value) -> Result<()> {
     }
     // Then each member, in the order RecordPlaintext lists them (F18: a record whose contacts were a
     // number issued here and was `arguments do not read` in the Go port).
-    read_roots(doc.get("roots"), "record", false)?;
-    if let Some(ledger) = doc.get("ledger") {
+    read_roots(member(doc, "roots"), "record", false)?;
+    if let Some(ledger) = member(doc, "ledger") {
         ledger::read(ledger)?;
     }
-    read_contacts(doc.get("contacts"))?;
-    read_passkey(doc.get("passkey"), "record")?;
-    if doc.get("backup_verified_at").is_some_and(|b| b.as_u64().is_none()) {
+    read_contacts(member(doc, "contacts"))?;
+    read_passkey(member(doc, "passkey"), "record")?;
+    if member(doc, "backup_verified_at").is_some_and(|b| b.as_u64().is_none()) {
         return err("bad_request", "the record's backup_verified_at does not read");
     }
     Ok(())
@@ -464,7 +473,7 @@ pub fn wallet_issue(
     let request = csr::check(csr_der, &root_spkis)?;
     // The ledger's rules, in the one place they are written (ledger.rs): the record was read whole
     // above, so what is refused here is the one live leaf per identity, and nothing else.
-    let facts = ledger::check(record.get("ledger"), root_fingerprint, &request.endpoint, now, moving)?;
+    let facts = ledger::check(record.get("ledger").filter(|l| !l.is_null()), root_fingerprint, &request.endpoint, now, moving)?;
     if let Some(why) = facts.refusal {
         return err("bad_request", why);
     }
