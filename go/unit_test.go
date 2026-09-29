@@ -383,12 +383,31 @@ func TestArgsMustBeAnObject(t *testing.T) {
 // not see one (TC-14): no input known reaches `internal`, and an answer carrying it fails here. The
 // hostile object is js/cases/hostile.json, which js/parity.mjs sends to both ports as well.
 func TestCallNeverPanics(t *testing.T) {
-	hostile, err := os.ReadFile("../js/cases/hostile.json")
+	raw, err := os.ReadFile("../js/cases/hostile.json")
 	if err != nil {
 		t.Fatal(err)
 	}
+	var hostile map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &hostile); err != nil {
+		t.Fatal(err)
+	}
+	reached := 0
 	for _, name := range Functions() {
-		for _, args := range []string{``, `{}`, `[]`, string(bytes.TrimSpace(hostile))} {
+		// The hostile members this function declares: sent whole, the object is refused for its
+		// first undeclared member before any member is read (CONTRACT §0), and reaches no body.
+		mine := map[string]json.RawMessage{}
+		for _, m := range functions[name].members {
+			if v, has := hostile[m]; has {
+				mine[m] = v
+			}
+		}
+		sweep := []string{``, `{}`, `[]`}
+		if len(mine) > 0 {
+			b, _ := json.Marshal(mine)
+			sweep = append(sweep, string(b))
+			reached++
+		}
+		for _, args := range sweep {
 			out := Call(name, json.RawMessage(args))
 			var v map[string]any
 			if err := json.Unmarshal(out, &v); err != nil {
@@ -397,7 +416,13 @@ func TestCallNeverPanics(t *testing.T) {
 			if v["error"] == "internal" {
 				t.Errorf("%s(%s): a panic, recovered: %s", name, args, out)
 			}
+			if why, _ := v["why"].(string); strings.Contains(why, "takes no member") {
+				t.Errorf("%s(%s): refused before its body, so the sweep reached nothing: %s", name, args, out)
+			}
 		}
+	}
+	if reached < 10 {
+		t.Errorf("the hostile object reaches %d functions' bodies", reached)
 	}
 	if !bytes.Contains(Call("no_such", nil), []byte(`"unsupported"`)) {
 		t.Error("unknown function")

@@ -9,9 +9,13 @@
 // wrong, taken from the contract's own description of each function's arguments:
 //
 //   {}           the empty object, compared whole;
-//   hostile      js/cases/hostile.json, the object go/unit_test.go's TestCallNeverPanics sweeps every
-//                function with, compared whole — so the sweep runs on BOTH ports, where it ran on one
-//                and could not see a panic its own recover() had turned into an answer;
+//   hostile      js/cases/hostile.json, the object go/unit_test.go's TestCallNeverPanics and the core's
+//                tests/boundary.rs sweep every function with, compared whole — so the sweep runs on
+//                BOTH ports, where it ran on one and could not see a panic its own recover() had turned
+//                into an answer. Each function is sent the hostile members it DECLARES, and a function
+//                that declares none of them has no such case (`{}` is that case): the whole object
+//                is refused for its first undeclared member before any is read (CONTRACT §0), so sent
+//                whole it reached no function's body at all;
 //   absent       each required member left out of a call that succeeds, held to CONTRACT §0's answer
 //                for it: `{"error": "bad_request", "why": "<name> is required"}`;
 //   null         the same member as the JSON literal null, which §0 says is absent: the same answer;
@@ -91,6 +95,9 @@ export const BASES = {
   limits_decide: 'limits_decide: a contact in, fresh',
 };
 
+/** The members of the hostile object a function declares: what reaches its body. */
+export const hostileFor = (m) => Object.fromEntries(Object.entries(HOSTILE).filter(([k]) => k in (m.params.properties ?? {})));
+
 const typeOf = (v) => (v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v);
 
 /** The JSON types a schema admits: some of `string number integer boolean object array null`. */
@@ -161,7 +168,8 @@ export function generate(contract, bases) {
   for (const [fn, m] of Object.entries(contract.methods)) {
     if (m.section === 'build') continue; // `version` describes the port; its answer cannot agree
     add('{}', fn, {}, '*', 'the empty object');
-    add('the hostile object', fn, HOSTILE, '*', 'the hostile object');
+    const hostile = hostileFor(m);
+    if (Object.keys(hostile).length) add('the hostile object', fn, hostile, '*', 'the hostile object');
     const base = bases.get(fn);
     if (!base) continue; // pickBases has said why
     const members = Object.entries(m.params.properties ?? {});
