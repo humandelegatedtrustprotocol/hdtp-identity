@@ -81,9 +81,9 @@
     "hash": "448b0a994299",
     "text": "**A root certificate is issued once.** A wallet MUST NOT rebuild a root certificate for an identity that alrea",
     "held_by": [
-      "rust:a_root_the_card_signed_is_a_root",
-      "go:TestWalletIssue"
-    ]
+      "rust:a_root_the_card_signed_is_a_root"
+    ],
+    "why": "the card path is held by the test cited. On the software path `wallet_issue` answers one certificate, the leaf it issued (`der`); contract/contract.json gives its answer no member for a root, and js/parity.mjs holds both ports to that, so it hands back no rebuilt root. (go:TestWalletIssue was cited here; it rebuilds no root and checks for no rebuilding.)"
   },
   "3.#1": {
     "hash": "8afaa9bec8f1",
