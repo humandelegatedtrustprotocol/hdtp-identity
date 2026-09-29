@@ -272,6 +272,7 @@ fn dispatch(name: &str, a: &Value) -> Result<Answer> {
         "open_result" => envelopes::open_result(a)?,
         "follow_renewed" => envelopes::follow_renewed(a)?,
         "decide" => envelopes::decide(a)?,
+        "decide_chain" => envelopes::decide_chain(a)?,
         // §6 vault
         "vault_seal" => vault::vault_seal(a)?,
         "vault_open" => vault::vault_open(a)?,
@@ -352,6 +353,7 @@ fn declared(name: &str) -> Option<&'static [&'static str]> {
         "open_result" => &["envelope", "my_pkcs8", "my_spki", "msg_id", "now", "pins", "expected_root", "expected_endpoint"],
         "follow_renewed" => &["answer", "pinned_root", "pinned_leaf", "dialed", "now"],
         "decide" => &["now", "envelope", "node"],
+        "decide_chain" => &["node", "chain", "now"],
         "vault_seal" => &["passphrase", "plaintext", "kdf", "salt", "nonce"],
         "vault_open" => &["passphrase", "vault"],
         "wallet_issue" => &["vault_plaintext", "record_plaintext", "root_fingerprint", "csr", "now", "valid_days", "move"],

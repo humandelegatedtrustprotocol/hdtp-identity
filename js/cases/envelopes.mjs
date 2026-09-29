@@ -611,4 +611,79 @@ export default function envelopes({ add, expect }, f) {
     add(`decide with a held key whose PKCS #8 ${what}`, 'decide', { now, envelope: sealed, node: { ...node, keys: [{ ...heldKey, pkcs8 }] } });
     expect(`decide with a held key whose PKCS #8 ${what}`, want);
   }
+
+  // ── decide_chain: the pin decision alone, for a host's TLS door (N1, N2) ─────────────────────────
+  //
+  // The node's TLS door decided a client chain by hand and parted from `decide`: it read the removal
+  // tombstone in the states decide does not, and served a conflicting leaf as a guest. decide_chain is
+  // decide's own pin decision, answered for a chain proven outside an envelope. Every outcome, each
+  // held whole — result and effects — to what decide answers for the same chain and node (the cases
+  // above hold decide), and a case for each code it declares.
+  {
+    const chainOf = (leaf) => [typeof leaf === 'string' ? leaf : b64url(leaf), rootDer];
+    const proven = chainOf(leafDer);
+    const at = (o = {}) => ({ node: { ...node, endpoint: 'https://bharat.example/mcp', ...o }, chain: proven, now });
+    const guest = (why, demote, claim = null) => ({ code: 'ok', tier: 'guest', root: rootFp, endpoint: ENDPOINT, leaf: leafDer, why, demote, address_claim: claim });
+    const contact = (tier = 'contact', o = {}) => ({ code: 'ok', tier, root: rootFp, endpoint: ENDPOINT, leaf: leafDer, ...o });
+    const pending = (why, endpoint = ENDPOINT, leaf = leafDer) => ({ op: 'pending', root: rootFp, endpoint, why, leaf });
+    const moved = b64url(movedLeaf);
+    const movedEffects = [
+      { op: 'former_endpoint', root: rootFp, endpoint: ENDPOINT, at: now },
+      { op: 'pin_update', root: rootFp, endpoint: MOVED, leaf: moved },
+      { op: 'event', event: 'new_address', root: rootFp, endpoint: MOVED },
+    ];
+    const tombstone = (back, leaf = olderLeaf) => [{ root: rootFp, leaf, at: f.before(back) }];
+    const sameDay = b64url(buildLeaf({ cn: 'Alina Rao', rootCn: 'Alina Rao', root: rootKey, hostKey, endpoint: ENDPOINT, notBefore: BORN, notAfter: DIES, label: 'parity/decide-chain/same-day' }));
+    const cases = [
+      ['a root nobody pins', at(), guest('unknown root', false), []],
+      ['a root nobody pins, at an address another root is pinned at', at({ pins: [{ root: OTHER_ROOT, endpoint: ENDPOINT, leaf: leafDer }] }), guest('unknown root', false, OTHER_ROOT), []],
+      ['a root removed a second inside the tombstone window, with a newer leaf', at({ tombstones: tombstone(TOMBSTONE - 1) }), contact('pending_new_address', { forced: 'tombstone', decision: 'ask' }), [pending('returned after removal')]],
+      ['a root removed exactly at the end of the tombstone window', at({ tombstones: tombstone(TOMBSTONE) }), guest('unknown root', false), []],
+      ['a root removed with the leaf it presents', at({ tombstones: tombstone(60, leafDer) }), guest('unknown root', false), []],
+      ['a blocked pin', at({ pins: [{ ...pinned[0], state: 'blocked' }] }), guest('blocked', true), []],
+      ['a leaf older than the pinned one', at({ pins: [{ ...pinned[0], leaf: pinnedNewer }] }), guest('superseded leaf', true), []],
+      ['a different leaf of the pinned one\'s notBefore', at({ pins: [{ ...pinned[0], leaf: sameDay }] }), { code: 'envelope_invalid', why: 'a different leaf with the same notBefore' }, []],
+      ['the pinned leaf', at({ pins: pinned }), contact(), []],
+      ['a newer leaf at the pinned endpoint', at({ pins: [{ ...pinned[0], leaf: olderLeaf }] }), contact(), [{ op: 'pin_update', root: rootFp, endpoint: ENDPOINT, leaf: leafDer }, { op: 'event', event: 'renewal', root: rootFp }]],
+      ['a pending_out pin', at({ pins: [{ ...pinned[0], state: 'pending_out' }] }), contact('pending'), []],
+    ];
+    for (const [what, args, result, effects] of cases) {
+      add(`decide_chain: ${what}`, 'decide_chain', args);
+      expect(`decide_chain: ${what}`, { result, effects });
+    }
+    // Another endpoint, under auto and under ask, and a pending_out pin that moved under ask: the
+    // new-address rule comes before the pending_out one.
+    const movedAt = (o, pins = pinned) => ({ ...at({ pins, ...o }), chain: chainOf(movedLeaf) });
+    const movedTo = (tier, o = {}) => ({ code: 'ok', tier, root: rootFp, endpoint: MOVED, leaf: moved, ...o });
+    for (const [what, args, result, effects] of [
+      ['the pinned root at another endpoint, under auto', movedAt({ accept_new_hosts: 'auto' }), movedTo('contact'), movedEffects],
+      ['the pinned root at another endpoint, under ask', movedAt({ accept_new_hosts: 'ask' }), movedTo('pending_new_address', { decision: 'ask' }), [pending('ask', MOVED, moved)]],
+      ['a pending_out pin at another endpoint, under ask', movedAt({ accept_new_hosts: 'ask' }, [{ ...pinned[0], state: 'pending_out' }]), movedTo('pending_new_address', { decision: 'ask' }), [pending('ask', MOVED, moved)]],
+      // N1's state B, which is the owner's question (SPEC §5.3 reads a removal tombstone only where no
+      // pin stands; the plan's (owner) item): a pin re-added while the tombstone stands, and a newer
+      // leaf at another endpoint under auto. The port follows the seed, which follows the SPEC: the pin
+      // decides and the tombstone is not read. This fixes today's answer, so a change is a decision.
+      ['a pin and a removal tombstone for one root, at another endpoint under auto (N1, state B)', movedAt({ accept_new_hosts: 'auto', tombstones: tombstone(60) }), movedTo('contact'), movedEffects],
+    ]) {
+      add(`decide_chain: ${what}`, 'decide_chain', args);
+      expect(`decide_chain: ${what}`, { result, effects });
+    }
+    // What the chain and the arguments are.
+    for (const [what, args, want] of [
+      ['a chain of the leaf alone', { ...at(), chain: [leafDer] }, { result: { code: 'envelope_invalid', why: 'chain rule 1: chain of 1' }, effects: [] }],
+      ['a chain past its leaf\'s notAfter', { ...at(), now: '2028-01-01T00:00:00Z' }, { result: { code: 'envelope_invalid', why: 'chain rule 4: leaf outside its validity' }, effects: [] }],
+      ['a chain member that is not base64url', { ...at(), chain: ['!!!', rootDer] }, { error: 'parse', why: 'not base64url' }],
+      ['a chain that is not a list', { ...at(), chain: leafDer }, { error: 'bad_request', why: 'chain is required' }],
+      ['a now that is not an instant', { ...at(), now: 'soon' }, { error: 'parse' }],
+      ['no node', { chain: proven, now }, { error: 'bad_request', why: 'node is required' }],
+      ['no chain', { node, now }, { error: 'bad_request', why: 'chain is required' }],
+      ['no now', { node, chain: proven }, { error: 'bad_request', why: 'now is required' }],
+      ['a node with no endpoint', { ...at(), node: { ...node, endpoint: undefined } }, { error: 'bad_request', why: 'node.endpoint is required' }],
+      ['a pinned leaf holding a key outside the profile', at({ pins: [{ ...pinned[0], leaf: f.foreignLeaf('Ed25519 with a NULL') }] }), { error: 'unsupported' }],
+      ['a pinned leaf that does not read', at({ pins: [{ ...pinned[0], leaf: 'AAAA' }] }), { error: 'parse' }],
+    ]) {
+      add(`decide_chain with ${what}`, 'decide_chain', args);
+      expect(`decide_chain with ${what}`, want);
+    }
+  }
 }
