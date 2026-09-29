@@ -224,8 +224,10 @@ pub fn oid_minimal(node: &Node<'_>) -> bool {
 /// are removed, so the lowest bit still encoded is set. Either spelling of one set is a second
 /// encoding. Not for the signature or the public key, where every bit is carried and `unused` is 0.
 pub fn named_bits_ok(content: &[u8]) -> bool {
-    let unused = content.first().copied().unwrap_or(0);
-    let bits = &content[1.min(content.len())..];
+    // The initial octet is required (X.690 §8.6.2), even for no bits at all (`03 01 00`): `03 00` is no
+    // BIT STRING. This took it as a keyUsage of no bits, as the seed did, where the Go port refused it
+    // (R33).
+    let Some((&unused, bits)) = content.split_first() else { return false };
     if unused > 7 {
         return false;
     }
