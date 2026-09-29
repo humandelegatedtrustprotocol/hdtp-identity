@@ -120,8 +120,6 @@ fn leaf<'a>(
         ca: false,
         usage: None,
         aki: None,
-        extra: Vec::new(),
-        alg_oid: None,
     };
     x509::build_leaf(&spec, root).unwrap()
 }

@@ -15,9 +15,10 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   (held to CONTRACT §0's `<name> is required`), each optional string `""`, each optional member of
   the wrong type, an undeclared member, and each required member absent beside each other member of
   the wrong type (read order) — 1103 cases, varied from one named hand-written case per function
-  that succeeds on both ports. 463 cases fail today (459 generated, and 4 written beside them); each
-  is listed in `js/cases/known-divergences.json` with the audit finding that closes it, and the run
-  fails on any other failure, on an entry whose case passes, and on an entry nobody has.
+  that succeeds on both ports. 463 cases failed when they were written (459 generated, and 4 written
+  beside them), 410 fail today (406 and 4); each is listed in `js/cases/known-divergences.json` with
+  the audit finding that closes it, and the run fails on any other failure, on an entry whose case
+  passes, and on an entry nobody has.
 - The coverage gate fails when a declared error code is not produced by both ports in one case they
   answered alike (S2, TC-1); all 94 are. It used to print the count and pass.
 - `js/cases/hostile.json` is the one hostile object: the generated cases send it to both ports, Go's
@@ -48,6 +49,16 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   word for word (TC-12). The core tests' reader found the end marker from the start of the file and
   had no test; the CLI says `the document has no Appendix B` and `Appendix B block <n> is not JSON`,
   as the others do, where it said `no Appendix B in the document` and serde's words.
+- **A member a function does not declare is refused** (CONTRACT §0; T16, F1), in both ports, before
+  any member is read: `{"error": "bad_request", "why": "<fn> takes no member \"<m>\""}`, the first
+  such member in sorted order. Both ports accepted one and went on; the Rust core read six that
+  `build_leaf` and `leaf_tbs` never declared (`uris`, `usage`, `extra`, `ca`, `aki`, `alg_oid`), so
+  the Wasm built a CA leaf, a leaf with no URI or one under another algorithm's name where the Go port
+  built a profile leaf. They are gone from the boundary, and `extra` and `alg_oid` from the typed
+  `LeafSpec`, which nothing else ever set. Each port's dispatcher lists every function's members, held
+  to `contract/contract.json` by a test in each (`every_function_declares_the_contracts_members`,
+  `TestEveryFunctionDeclaresTheContractsMembers`). The Go port reads a call's arguments once, into a
+  map by exact name: its struct decoding matched `{"CN": …}` to `cn`, a member the core never saw.
 - **JS loader:** `call(name, null)` hands `null` to the core, which answers `args is a JSON object`
   as the Go port does; it used to be made `{}` (`js/index.mjs`, `js/worker.mjs`). Only `args` left
   out is `{}`. The parity case `args that are null` sends `null` for the first time (TC-2).

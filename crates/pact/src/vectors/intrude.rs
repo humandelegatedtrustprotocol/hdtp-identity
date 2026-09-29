@@ -348,8 +348,6 @@ fn mallory(now: i64) -> Res<Mallory> {
             ca,
             usage: if ca { Some(vec![5]) } else { None },
             aki: None,
-            extra: Vec::new(),
-            alg_oid: None,
         };
         x509::build_leaf(&spec, &root).map_err(|e| Fail(e.why))
     };
@@ -817,8 +815,6 @@ mod tests {
                 ca: false,
                 usage: None,
                 aki: None,
-                extra: Vec::new(),
-                alg_oid: None,
             },
             &root_t,
         )

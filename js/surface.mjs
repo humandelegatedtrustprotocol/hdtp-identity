@@ -91,9 +91,9 @@ export function rustDispatch(src) {
 export function goDispatch(src) {
   const at = src.search(/\bvar\s+functions\s*=\s*map\[string\]/);
   if (at < 0) throw new Error('surface: the functions map was not found in the Go source');
-  // The map's own brace follows its type, which contains `func(json.RawMessage) json.RawMessage`.
-  const typeEnd = src.slice(at).search(/json\.RawMessage\s*\{/);
-  const t = topLevel(block(src, typeEnd < 0 ? -1 : at + typeEnd, 'the functions map literal'));
+  // The map's own brace is the first after `map[string]`: its value type is a named type (`function`,
+  // api.go), which has none.
+  const t = topLevel(block(src, at, 'the functions map literal'));
   const names = new Set();
   for (let i = 0; i < t.length; i++) if (t[i].str !== undefined && t[i + 1]?.p === ':') names.add(t[i].str);
   return names;

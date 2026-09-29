@@ -3,7 +3,7 @@
 use crate::keys::{PrivateKey, PublicKey};
 use crate::time::{format_rfc3339, parse_rfc3339};
 use crate::util::{b64u, err, from_b64u, Error, Result};
-use crate::x509::{self, ChainResult, Extra, LeafSpec};
+use crate::x509::{self, ChainResult, LeafSpec};
 use serde_json::{json, Map, Value};
 use zeroize::Zeroizing;
 
@@ -149,18 +149,11 @@ fn cert_json(c: &x509::Cert) -> Value {
 }
 
 fn leaf_spec<'a>(a: &'a Value, issuer: &'a PublicKey, host_key: &'a PublicKey, serial_bytes: Vec<u8>) -> Result<LeafSpec<'a>> {
-    let uris: Vec<String> = match a.get("uris").and_then(|u| u.as_array()) {
-        Some(items) => items.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect(),
-        None => vec![s(a, "endpoint")?.to_string()],
-    };
-    let usage = a.get("usage").and_then(|u| u.as_array()).map(|items| items.iter().filter_map(|x| x.as_u64().map(|b| b as u8)).collect());
-    let extra = match a.get("extra").and_then(|e| e.as_array()) {
-        Some(items) => items
-            .iter()
-            .map(|e| Ok(Extra { oid: s(e, "oid")?.to_string(), critical: boolean(e, "critical"), value: bytes(e, "value")? }))
-            .collect::<Result<Vec<_>>>()?,
-        None => Vec::new(),
-    };
+    // The contract's members and no others: `uris`, `usage`, `extra`, `ca`, `aki` and `alg_oid` were
+    // read here too, undeclared, so one call built a CA leaf, a leaf with no URI or a leaf under
+    // another algorithm's name through this port and a profile leaf through the Go port (T16, F1).
+    // No JSON caller ever sent them; the typed `LeafSpec` keeps them for the tests and the CLI.
+    let uris = vec![s(a, "endpoint")?.to_string()];
     let not_before = instant(a, "not_before")?;
     let not_after = instant(a, "not_after")?;
     // §14.1 at the boundary, where the Go port also puts it. Not in `x509::build_leaf`: the vector
@@ -182,11 +175,9 @@ fn leaf_spec<'a>(a: &'a Value, issuer: &'a PublicKey, host_key: &'a PublicKey, s
         not_before,
         not_after,
         serial: serial_bytes,
-        ca: boolean(a, "ca"),
-        usage,
-        aki: opt_bytes(a, "aki")?,
-        extra,
-        alg_oid: opt_s(a, "alg_oid").map(|o| o.to_string()),
+        ca: false,
+        usage: None,
+        aki: None,
     })
 }
 
@@ -273,6 +264,80 @@ fn dispatch(name: &str, a: &Value) -> Result<Answer> {
     }))
 }
 
+/// The members each function declares, `params.properties` of contract/contract.json, in its order.
+/// `call` holds the arguments to them before a member is read (CONTRACT §0): a member the function
+/// does not declare is a caller's mistake, refused by name, and never read as though it were absent.
+/// `build_leaf` read six the contract never declared (T16), and the member nobody checks is where
+/// the two ports come apart. The test `every_function_declares_the_contracts_members` holds this
+/// table to the contract file; go/api.go carries the Go port's, held the same way.
+fn declared(name: &str) -> Option<&'static [&'static str]> {
+    Some(match name {
+        "version" | "prf_salt" => &[],
+        "generate_key" => &["alg"],
+        "key_from_seed" => &["alg", "seed"],
+        "derive_seed" => &["prf", "info"],
+        "public_key" => &["pkcs8"],
+        "key_info" => &["spki"],
+        "sign" => &["pkcs8", "data"],
+        "verify" => &["spki", "data", "sig"],
+        "build_root" => &["cn", "pkcs8", "not_before", "serial"],
+        "root_tbs" => &["cn", "spki", "not_before", "serial"],
+        "assemble_root" | "assemble_leaf" => &["tbs", "sig", "sig_alg"],
+        "build_leaf" => &["cn", "root_cn", "host_spki", "endpoint", "dns_name", "not_before", "not_after", "serial", "root_pkcs8"],
+        "leaf_tbs" => &["cn", "root_cn", "host_spki", "endpoint", "dns_name", "not_before", "not_after", "serial", "root_spki"],
+        "parse_certificate" => &["der"],
+        "profile_error" => &["der", "kind"],
+        "validate_chain" => &["chain", "now", "expected_root", "expected_endpoint"],
+        "compare_leaves" => &["pinned", "presented"],
+        "is_normal_https" => &["url"],
+        "address_guard" => &["endpoint", "self_endpoint", "guest"],
+        "ip_is_private" => &["ip"],
+        "csr_new" => &["cn", "host_pkcs8", "endpoint", "dns_name"],
+        "csr_check" => &["der", "root_spkis"],
+        "issue_from_csr" => &["csr", "root_cn", "root_spkis", "now", "previous_not_before", "valid_days", "root_pkcs8"],
+        "issue_tbs_from_csr" => &["csr", "root_cn", "root_spkis", "now", "previous_not_before", "valid_days", "root_spki"],
+        "signing_request_check" => &["request", "origin", "now", "root_spkis"],
+        "card_encode" => &["fn", "cert", "seal", "extra"],
+        "card_decode" => &["vcard", "now"],
+        "suite_for" => &["spki"],
+        "hpke_seal" => &["suite", "recipient_spki", "info", "aad", "plaintext", "ephemeral_seed"],
+        "hpke_open" => &["suite", "recipient_pkcs8", "recipient_spki", "info", "aad", "enc", "ct"],
+        "seal_request" => {
+            &["recipient_leaf", "sender_pkcs8", "form", "sender_chain", "msg_id", "ts", "exp", "ephemeral_seed", "method", "params", "cty"]
+        }
+        "seal_result" => {
+            &["recipient_spki", "sender_pkcs8", "form", "sender_chain", "msg_id", "ts", "exp", "ephemeral_seed", "result", "error"]
+        }
+        "open_result" => &["envelope", "my_pkcs8", "my_spki", "msg_id", "now", "pins", "expected_root", "expected_endpoint"],
+        "follow_renewed" => &["answer", "pinned_root", "pinned_leaf", "dialed", "now"],
+        "decide" => &["now", "envelope", "node"],
+        "vault_seal" => &["passphrase", "plaintext", "kdf", "salt", "nonce"],
+        "vault_open" => &["passphrase", "vault"],
+        "wallet_issue" => &["vault_plaintext", "record_plaintext", "root_fingerprint", "csr", "now", "valid_days", "move"],
+        "export_read" => &["directory", "manifest", "contacts_csv", "threads_csv", "owner", "now"],
+        "export_read_messages" => &["lines", "threads", "contacts", "media", "first_line"],
+        "export_read_end" => &["manifest", "messages_sha256", "lines", "ids", "msg_ids", "reply_tos", "media_seen", "media"],
+        "export_write" => &["owner", "owner_name", "exported_at", "tool", "contacts", "threads", "media"],
+        "export_write_messages" => &["messages", "msg_ids"],
+        "export_manifest" => &["partial", "hashes", "messages"],
+        "export_merge" => &["held", "rows"],
+        "book_rows" => &["contacts", "exported_at"],
+        "ledger_check" => &["ledger", "root", "endpoint", "now", "move"],
+        "limits_rules_check" => &["rules"],
+        "limits_decide" => &["rules", "charge", "now", "state"],
+        _ => return None,
+    })
+}
+
+/// The first member of `keys`, in sorted order, that function `name` does not declare, refused in
+/// the words CONTRACT §0 fixes. `None` for a function nobody defines: `dispatch` names that.
+pub(crate) fn undeclared<'k>(name: &str, keys: impl Iterator<Item = &'k str>) -> Option<Error> {
+    let allowed = declared(name)?;
+    let mut extra: Vec<&str> = keys.filter(|k| !allowed.contains(k)).collect();
+    extra.sort_unstable();
+    extra.first().map(|k| Error::new("bad_request", format!("{name} takes no member \"{k}\"")))
+}
+
 /// What `call` answers arguments holding an unpaired UTF-16 surrogate escape.
 pub const LONE_SURROGATE: &str = "args: a string holds half of a UTF-16 surrogate pair";
 
@@ -301,6 +366,9 @@ pub fn call(name: &str, args: &str) -> String {
         Ok(_) => return json!({ "error": "bad_request", "why": "args is a JSON object" }).to_string(),
         Err(e) => return json!({ "error": "bad_request", "why": format!("args: {e}") }).to_string(),
     };
+    if let Some(e) = undeclared(name, a.as_object().into_iter().flat_map(|o| o.keys().map(String::as_str))) {
+        return answer(Err(e));
+    }
     let run = || dispatch(name, &a);
     #[cfg(not(target_arch = "wasm32"))]
     let out = std::panic::catch_unwind(run).unwrap_or_else(|_| err("internal", "panic"));
@@ -351,6 +419,29 @@ mod tests {
         assert_eq!(k["alg"], "ed25519");
         let v: Value = serde_json::from_str(&call("version", "{}")).unwrap();
         assert_eq!(v["spec"], SPEC_VERSION);
+    }
+
+    /// `declared` is contract/contract.json's `params.properties`, function by function, in order;
+    /// and `call` refuses a member outside it, before it reads the ones inside it.
+    #[test]
+    fn every_function_declares_the_contracts_members() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../contract/contract.json");
+        let contract: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let methods = contract["methods"].as_object().unwrap();
+        for (name, m) in methods {
+            let want: Vec<&str> = m["params"]["properties"].as_object().map(|p| p.keys().map(String::as_str).collect()).unwrap_or_default();
+            assert_eq!(declared(name), Some(&want[..]), "{name}: the members this port holds its arguments to, and the contract's");
+            // Every member the contract declares gets past the check; one it does not is named, and a
+            // missing required member beside it is not reached.
+            for member in &want {
+                let out = call(name, &json!({ *member: null }).to_string());
+                assert!(!out.contains("takes no member"), "{name}({member}) answered {out}");
+            }
+            let out: Value = serde_json::from_str(&call(name, r#"{"not_a_member":1,"zz":2}"#)).unwrap();
+            assert_eq!(out, json!({ "error": "bad_request", "why": format!("{name} takes no member \"not_a_member\"") }), "{name}");
+        }
+        assert_eq!(declared("nope"), None);
+        assert!(call("nope", r#"{"not_a_member":1}"#).contains("no function named nope"));
     }
 
     /// The name above used to be `the_boundary_never_throws`, which claimed a property of wasm32 while
