@@ -8,9 +8,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 case can be listed as proven that did not pass. The cases that fail today are listed apart, at the
 end, each with the finding it waits on.
 
-Specification: **2.2.4**. **88** normative sentences, **2292** cross-port parity cases over **50** guarded functions, and **1** known divergences that fail today and are listed apart, at the end.
+Specification: **2.2.4**. **88** normative sentences, **2297** cross-port parity cases over **50** guarded functions, and **1** known divergences that fail today and are listed apart, at the end.
 
-Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **4586** answers, of which **1** do not hold to the shape it declares — **1** of them in a known divergence. Of **118** declared error codes, **118** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **4596** answers, of which **1** do not hold to the shape it declares — **1** of them in a known divergence. Of **118** declared error codes, **118** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 88 normative sentences of the specification
 
@@ -203,7 +203,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 2292 cross-port parity cases
+## The 2297 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -211,7 +211,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **2292** cases (**1108** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
+At the run that generated this file: **2297** cases (**1108** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
 
 ### `address_guard` — 50 cases · whole on success
 
@@ -612,7 +612,7 @@ At the run that generated this file: **2292** cases (**1108** of the run's cases
 - generated · csr_new · endpoint absent, host_pkcs8 7
 - generated · csr_new · endpoint absent, dns_name 7
 
-### `decide` — 104 cases · whole on success
+### `decide` — 107 cases · whole on success
 
 - decide on an envelope from a pinned contact
 - decide on a pinned contact's call that names no tool
@@ -657,6 +657,9 @@ At the run that generated this file: **2292** cases (**1108** of the run's cases
 - decide on a peer who returns exactly at the end of the tombstone window
 - decide on a stranger at an endpoint another root left a second inside the claim window
 - decide on a stranger at an endpoint another root left exactly at the end of the claim window
+- decide on a caller proven by a chain who is a guest: unknown root
+- decide on a caller proven by a chain who is a guest: blocked
+- decide on a caller proven by a chain who is a guest: superseded leaf
 - decide with no now
 - decide, small form: the pin names its leaf
 - decide, small form: an unreadable pin that names some OTHER leaf is never parsed
@@ -1912,7 +1915,7 @@ At the run that generated this file: **2292** cases (**1108** of the run's cases
 - generated · open_result · now absent, expected_root 7
 - generated · open_result · now absent, expected_endpoint 7
 
-### `parse_certificate` — 37 cases · whole on success
+### `parse_certificate` — 39 cases · whole on success
 
 - parse_certificate of a root
 - parse_certificate of a leaf
@@ -1945,6 +1948,8 @@ At the run that generated this file: **2292** cases (**1108** of the run's cases
 - parse_certificate of a leaf holding a key outside the profile: X25519
 - parse_certificate of a leaf holding a key outside the profile: Ed25519 with a NULL
 - parse_certificate of a leaf whose Ed25519 key is not a point
+- parse_certificate of a CA certificate whose issuer is not its subject
+- parse_certificate of a CA certificate whose issuer is its subject
 - generated · parse_certificate · {}
 - generated · parse_certificate · the hostile object
 - generated · parse_certificate · der absent

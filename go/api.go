@@ -85,9 +85,12 @@ func certOut(c *Cert) map[string]any {
 	} else if ProfileError(c, "leaf") == "" {
 		kind = "leaf"
 	}
+	// A certificate that is neither is judged as a root when it is a CA AND self-issued, and as a leaf
+	// otherwise, as the contract's `Certificate` says and the core judges it: this judged every CA as a
+	// root, so a CA-flagged leaf under another name was a root's refusal here and a leaf's there (T17).
 	var profileErr any
 	if kind == "other" {
-		if c.CA {
+		if c.CA && c.Issuer == c.Subject {
 			profileErr = ProfileError(c, "root")
 		} else {
 			profileErr = ProfileError(c, "leaf")
