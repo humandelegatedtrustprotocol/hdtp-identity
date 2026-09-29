@@ -86,19 +86,25 @@ const small = {
   },
 };
 
-test('every function gets {} and the hostile object; one with a base gets each shape of a mistake, from the contract', () => {
+test('every function gets {} and the hostile members it declares; one with a base gets each shape of a mistake, from the contract', () => {
   const base = { id: 'sign', fn: 'sign', args: { pkcs8: 'AA', data: 'BB' }, how: '*' };
   const { cases, expected } = generate(small, new Map([['sign', base]]));
   const byId = new Map(cases.map((c) => [c.id.replace('generated · sign · ', ''), c]));
+  // `sign` declares none of the hostile object's members: sent whole, the object would be refused for
+  // its first undeclared member before any member is read, so there is no such case (`{}` is it).
   assert.deepEqual([...byId.keys()], [
-    '{}', 'the hostile object',
+    '{}',
     'pkcs8 absent', 'pkcs8 null', 'data absent', 'data null',
     'deep "yes"',
     'an undeclared member',
     'pkcs8 absent, data 7', 'pkcs8 absent, deep "yes"', 'data absent, pkcs8 7', 'data absent, deep "yes"',
   ]);
   assert.ok(!cases.some((c) => c.fn === 'version'), 'version describes the port and is not compared');
-  assert.deepEqual(byId.get('the hostile object').args, HOSTILE);
+  // A function that declares some of them is sent those, and only those.
+  const withNow = structuredClone(small);
+  withNow.methods.sign.params.properties.now = { type: 'string' };
+  const hostile = generate(withNow, new Map()).cases.find((c) => c.id === 'generated · sign · the hostile object');
+  assert.deepEqual(hostile.args, { now: HOSTILE.now });
   assert.deepEqual(byId.get('pkcs8 absent').args, { data: 'BB' });
   assert.deepEqual(byId.get('pkcs8 null').args, { pkcs8: null, data: 'BB' });
   assert.deepEqual(byId.get('data absent, pkcs8 7').args, { pkcs8: 7 });
