@@ -16,7 +16,7 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   the wrong type, an undeclared member, and each required member absent beside each other member of
   the wrong type (read order) — 1103 cases, varied from one named hand-written case per function
   that succeeds on both ports. 463 cases failed when they were written (459 generated, and 4 written
-  beside them), 75 fail today (73 and 2); each is listed in `js/cases/known-divergences.json` with
+  beside them), 68 fail today (66 and 2); each is listed in `js/cases/known-divergences.json` with
   the audit finding that closes it, and the run fails on any other failure, on an entry whose case
   passes, and on an entry nobody has.
 - The coverage gate fails when a declared error code is not produced by both ports in one case they
@@ -94,6 +94,15 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   that says anything but `auto` or `ask` is refused. `follow_renewed` reads the peer's answer as it
   was sent: a code or data of the wrong type is `{follow: false}`, as the core answers, not a
   refusal of the call (F14).
+- **An empty string is a value at the boundary** (cluster D; F4, R07, T14, R26): `expected_root` or
+  `expected_endpoint` given as `""` to `validate_chain` or `open_result` is compared and refused, as
+  the core compares it, where the Go port read it as not given and accepted any root or address.
+  The typed `ChainOpts` and `OpenOpts` keep `""` as not given for a Go caller (the node's first
+  certification passes an empty root). `FollowRenewed` holds a renewed chain to its pinned root and
+  dialed address even when they are empty, as the core does; it followed one from any root. A
+  `dns_name` given as `""` to `csr_new`, `build_leaf` or `leaf_tbs` is refused in both ports,
+  `dns_name is empty`: the core wrote an empty dNSName, which rule 5 then refuses, and the Go port
+  wrote none.
 - The core reads three functions in the contract's order where the Go port already did: `card_decode`
   reads `vcard` before `now` (R25); `key_from_seed` reads `alg` before the seed (T21, R01; the Go port's
   `KeyFromSeed` also judges the algorithm first now); `vault_seal` answers `empty passphrase` before a

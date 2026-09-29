@@ -186,4 +186,15 @@ export default function certificates({ add, expect }, f) {
   // `CN` filled `cn` there and a root was built for a member the Rust core never read.
   add('build_root with CN, not cn', 'build_root', { CN: 'Mallory' });
   expect('build_root with CN, not cn', { error: 'bad_request', why: 'build_root takes no member "CN"' });
+  // An empty string is a value, not an absent member (CONTRACT §0; F4, R07, T14): an expectation
+  // given as "" is compared and refused, as the core compares it. The Go port read it as "not given"
+  // at the boundary; its typed ChainOpts still do, for a Go caller (the node) that means that by it.
+  add('validate_chain with an expected_root that is empty', 'validate_chain', { chain: [leafDer, rootDer], now, expected_root: '', expected_endpoint: ENDPOINT });
+  expect('validate_chain with an expected_root that is empty', { ok: false, rule: 2, reason: 'root is not the one expected' });
+  add('validate_chain with an expected_endpoint that is empty', 'validate_chain', { chain: [leafDer, rootDer], now, expected_root: rootFp, expected_endpoint: '' });
+  expect('validate_chain with an expected_endpoint that is empty', { ok: false, rule: 5, reason: 'endpoint differs from the one in question' });
+  // A dns_name given as "" names no host, and is refused where it is read (R26, F4): the core wrote an
+  // empty dNSName, which rule 5 then refused, and the Go port wrote none.
+  add('build_leaf with a dns_name that is empty', 'build_leaf', { cn: 'Alina Rao', root_cn: 'Alina Rao', root_pkcs8: rootPkcs8, host_spki: hostSpki, endpoint: ENDPOINT, dns_name: '', not_before: now, not_after: '2027-09-01T00:00:00Z', serial: SERIAL });
+  expect('build_leaf with a dns_name that is empty', { error: 'bad_request', why: 'dns_name is empty' });
 }

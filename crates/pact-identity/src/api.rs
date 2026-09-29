@@ -148,6 +148,16 @@ fn cert_json(c: &x509::Cert) -> Value {
     })
 }
 
+/// An optional `dns_name`: absent or null is none; present and empty is refused, `dns_name is empty`.
+/// Written, it was an empty dNSName that csr_check and chain rule 5 then refused, and the Go port wrote
+/// none (R26, F4).
+fn dns_name(a: &Value) -> Result<Option<String>> {
+    match opt_s(a, "dns_name") {
+        Some("") => err("bad_request", "dns_name is empty"),
+        d => Ok(d.map(str::to_string)),
+    }
+}
+
 fn leaf_spec<'a>(a: &'a Value, issuer: &'a PublicKey, host_key: &'a PublicKey, serial_bytes: Vec<u8>) -> Result<LeafSpec<'a>> {
     // The contract's members and no others: `uris`, `usage`, `extra`, `ca`, `aki` and `alg_oid` were
     // read here too, undeclared, so one call built a CA leaf, a leaf with no URI or a leaf under
@@ -171,7 +181,7 @@ fn leaf_spec<'a>(a: &'a Value, issuer: &'a PublicKey, host_key: &'a PublicKey, s
         issuer,
         host_key,
         uris,
-        dns_name: opt_s(a, "dns_name").map(|d| d.to_string()),
+        dns_name: dns_name(a)?,
         not_before,
         not_after,
         serial: serial_bytes,

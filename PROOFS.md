@@ -8,9 +8,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 case can be listed as proven that did not pass. The cases that fail today are listed apart, at the
 end, each with the finding it waits on.
 
-Specification: **2.2.4**. **88** normative sentences, **1895** cross-port parity cases over **50** guarded functions, and **75** known divergences that fail today and are listed apart, at the end.
+Specification: **2.2.4**. **88** normative sentences, **1909** cross-port parity cases over **50** guarded functions, and **68** known divergences that fail today and are listed apart, at the end.
 
-Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **3940** answers, of which **37** do not hold to the shape it declares — **37** of them in a known divergence. Of **96** declared error codes, **96** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **3954** answers, of which **37** do not hold to the shape it declares — **37** of them in a known divergence. Of **96** declared error codes, **96** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 88 normative sentences of the specification
 
@@ -203,7 +203,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 1895 cross-port parity cases
+## The 1909 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -211,7 +211,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **1895** cases (**1103** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
+At the run that generated this file: **1909** cases (**1103** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
 
 ### `address_guard` — 40 cases · whole on success
 
@@ -313,7 +313,7 @@ At the run that generated this file: **1895** cases (**1103** of the run's cases
 - generated · book_rows · contacts absent, exported_at 7
 - generated · book_rows · exported_at absent, contacts "x"
 
-### `build_leaf` — 76 cases · whole on success
+### `build_leaf` — 78 cases · whole on success
 
 - build_leaf
 - build_leaf over 398 days
@@ -322,6 +322,7 @@ At the run that generated this file: **1895** cases (**1103** of the run's cases
 - build_leaf naming http://a.example/x
 - build_leaf naming https://a.example/x/
 - build_leaf with no not_before
+- build_leaf with a dns_name that is empty
 - generated · build_leaf · {}
 - generated · build_leaf · the hostile object
 - generated · build_leaf · cn absent
@@ -338,6 +339,7 @@ At the run that generated this file: **1895** cases (**1103** of the run's cases
 - generated · build_leaf · not_after null
 - generated · build_leaf · root_pkcs8 absent
 - generated · build_leaf · root_pkcs8 null
+- generated · build_leaf · dns_name ""
 - generated · build_leaf · serial ""
 - generated · build_leaf · an undeclared member
 - generated · build_leaf · cn absent, root_cn 7
@@ -519,7 +521,7 @@ At the run that generated this file: **1895** cases (**1103** of the run's cases
 - generated · csr_check · an undeclared member
 - generated · csr_check · der absent, root_spkis "x"
 
-### `csr_new` — 24 cases · whole on success
+### `csr_new` — 26 cases · whole on success
 
 - csr_new with no key
 - csr_new naming a local address
@@ -527,6 +529,7 @@ At the run that generated this file: **1895** cases (**1103** of the run's cases
 - csr_new with a dns_name that is not the host
 - csr_new
 - csr_new with nothing to work from
+- csr_new with a dns_name that is empty
 - generated · csr_new · {}
 - generated · csr_new · the hostile object
 - generated · csr_new · cn absent
@@ -535,6 +538,7 @@ At the run that generated this file: **1895** cases (**1103** of the run's cases
 - generated · csr_new · host_pkcs8 null
 - generated · csr_new · endpoint absent
 - generated · csr_new · endpoint null
+- generated · csr_new · dns_name ""
 - generated · csr_new · an undeclared member
 - generated · csr_new · cn absent, host_pkcs8 7
 - generated · csr_new · cn absent, endpoint 7
@@ -1019,7 +1023,7 @@ At the run that generated this file: **1895** cases (**1103** of the run's cases
 - generated · export_write_messages · an undeclared member
 - generated · export_write_messages · messages absent, msg_ids "x"
 
-### `follow_renewed` — 40 cases · whole on success
+### `follow_renewed` — 42 cases · whole on success
 
 - follow_renewed on a chain to another root
 - follow_renewed on a chain that is not one
@@ -1037,6 +1041,8 @@ At the run that generated this file: **1895** cases (**1103** of the run's cases
 - follow_renewed on an answer whose code is not a string
 - follow_renewed on an answer whose data is not an object
 - follow_renewed on an answer that is not an object
+- follow_renewed with a pinned_root that is empty
+- follow_renewed with a dialed address that is empty
 - generated · follow_renewed · {}
 - generated · follow_renewed · the hostile object
 - generated · follow_renewed · pinned_root absent
@@ -1378,7 +1384,7 @@ At the run that generated this file: **1895** cases (**1103** of the run's cases
 - generated · key_info · spki null
 - generated · key_info · an undeclared member
 
-### `leaf_tbs` — 71 cases · whole on success
+### `leaf_tbs` — 72 cases · whole on success
 
 - leaf_tbs
 - leaf_tbs with no issuer
@@ -1398,6 +1404,7 @@ At the run that generated this file: **1895** cases (**1103** of the run's cases
 - generated · leaf_tbs · not_after null
 - generated · leaf_tbs · root_spki absent
 - generated · leaf_tbs · root_spki null
+- generated · leaf_tbs · dns_name ""
 - generated · leaf_tbs · serial ""
 - generated · leaf_tbs · an undeclared member
 - generated · leaf_tbs · cn absent, root_cn 7
@@ -1617,7 +1624,7 @@ At the run that generated this file: **1895** cases (**1103** of the run's cases
 
 - a function nobody defines
 
-### `open_result` — 79 cases · whole on success
+### `open_result` — 82 cases · whole on success
 
 - open_result of a request envelope
 - open_result with nothing to work from
@@ -1649,6 +1656,7 @@ At the run that generated this file: **1895** cases (**1103** of the run's cases
 - open_result with a pin whose root is not a string
 - open_result with a pin that is not an object
 - open_result with pins that are null
+- open_result in the chain form with an expected_root that is empty
 - generated · open_result · {}
 - generated · open_result · the hostile object
 - generated · open_result · envelope absent
@@ -1662,6 +1670,8 @@ At the run that generated this file: **1895** cases (**1103** of the run's cases
 - generated · open_result · now absent
 - generated · open_result · now null
 - generated · open_result · pins "x"
+- generated · open_result · expected_root ""
+- generated · open_result · expected_endpoint ""
 - generated · open_result · an undeclared member
 - generated · open_result · envelope absent, my_pkcs8 7
 - generated · open_result · envelope absent, my_spki 7
@@ -2042,7 +2052,7 @@ At the run that generated this file: **1895** cases (**1103** of the run's cases
 - generated · suite_for · spki null
 - generated · suite_for · an undeclared member
 
-### `validate_chain` — 49 cases · whole on success
+### `validate_chain` — 53 cases · whole on success
 
 - validate_chain of a real chain
 - validate_chain against the root and endpoint it really has
@@ -2080,12 +2090,16 @@ At the run that generated this file: **1895** cases (**1103** of the run's cases
 - validate_chain of a leaf on another port carrying its host's dNSName
 - validate_chain half a second after the leaf's last second
 - validate_chain in the leaf's last second, with a fraction
+- validate_chain with an expected_root that is empty
+- validate_chain with an expected_endpoint that is empty
 - generated · validate_chain · {}
 - generated · validate_chain · the hostile object
 - generated · validate_chain · chain absent
 - generated · validate_chain · chain null
 - generated · validate_chain · now absent
 - generated · validate_chain · now null
+- generated · validate_chain · expected_root ""
+- generated · validate_chain · expected_endpoint ""
 - generated · validate_chain · an undeclared member
 - generated · validate_chain · chain absent, now 7
 - generated · validate_chain · chain absent, expected_root 7
@@ -2264,7 +2278,7 @@ At the run that generated this file: **1895** cases (**1103** of the run's cases
 - generated · wallet_issue · now absent, valid_days "7"
 - generated · wallet_issue · now absent, move "yes"
 
-## The 75 known divergences
+## The 68 known divergences
 
 Cases that FAIL today, each excused by `js/cases/known-divergences.json` only while it fails exactly
 as its entry says, and each waiting on the audit finding named beside it (the port-parity audit of
@@ -2276,7 +2290,6 @@ as its entry says, and each waiting on the audit finding named beside it (the po
 - generated · root_tbs · serial 7 — F5, R02 (wasm off the contract, differ)
 - generated · assemble_root · sig_alg 7 — F5, R02 (wasm off the contract, differ)
 - generated · assemble_root · sig absent, sig_alg 7 — F5 (differ)
-- generated · build_leaf · dns_name "" — R26, F4 (differ)
 - generated · build_leaf · dns_name 7 — F5, R02 (wasm off the contract, differ)
 - generated · build_leaf · serial 7 — F5, R02 (wasm off the contract, differ)
 - generated · build_leaf · cn absent, serial 7 — F5 (differ)
@@ -2284,7 +2297,6 @@ as its entry says, and each waiting on the audit finding named beside it (the po
 - generated · build_leaf · endpoint absent, serial 7 — F5 (differ)
 - generated · build_leaf · not_before absent, serial 7 — F5 (differ)
 - generated · build_leaf · not_after absent, serial 7 — F5 (differ)
-- generated · leaf_tbs · dns_name "" — R26, F4 (differ)
 - generated · leaf_tbs · dns_name 7 — F5, R02 (wasm off the contract, differ)
 - generated · leaf_tbs · serial 7 — F5, R02 (wasm off the contract, differ)
 - generated · leaf_tbs · cn absent, serial 7 — F5 (differ)
@@ -2294,13 +2306,10 @@ as its entry says, and each waiting on the audit finding named beside it (the po
 - generated · leaf_tbs · not_after absent, serial 7 — F5 (differ)
 - generated · assemble_leaf · sig_alg 7 — F5, R02 (wasm off the contract, differ)
 - generated · assemble_leaf · sig absent, sig_alg 7 — F5 (differ)
-- generated · validate_chain · expected_root "" — R07, F4, T14 (differ)
 - generated · validate_chain · expected_root 7 — F5, R02 (wasm off the contract, differ)
-- generated · validate_chain · expected_endpoint "" — R07, F4, T14 (differ)
 - generated · validate_chain · expected_endpoint 7 — F5, R02 (wasm off the contract, differ)
 - generated · address_guard · self_endpoint 7 — F5, R02 (wasm off the contract, differ)
 - generated · address_guard · guest "yes" — F5, R02 (wasm off the contract, differ)
-- generated · csr_new · dns_name "" — R26, F4 (differ)
 - generated · csr_new · dns_name 7 — F5, R02 (wasm off the contract, differ)
 - generated · issue_from_csr · previous_not_before 7 — F5, R02 (wasm off the contract, differ)
 - generated · issue_tbs_from_csr · previous_not_before 7 — F5, R02 (wasm off the contract, differ)
@@ -2326,9 +2335,7 @@ as its entry says, and each waiting on the audit finding named beside it (the po
 - generated · seal_result · ephemeral_seed 7 — F5, R02 (wasm off the contract, differ)
 - generated · seal_result · msg_id absent, form 7 — F5 (differ)
 - generated · seal_result · ts absent, form 7 — F5 (differ)
-- generated · open_result · expected_root "" — R07, F4, T14 (differ)
 - generated · open_result · expected_root 7 — F5, R02 (wasm off the contract, differ)
-- generated · open_result · expected_endpoint "" — R07, F4, T14 (differ)
 - generated · open_result · expected_endpoint 7 — F5, R02 (wasm off the contract, differ)
 - generated · vault_seal · kdf "x" — R28, C4 (wasm off the contract, go off the contract, differ)
 - generated · vault_seal · salt "" — R29, C6 (differ)
