@@ -247,4 +247,29 @@ export default function certificates({ add, expect }, f) {
     add(`ip_is_private in brackets: ${ip}`, 'ip_is_private', { ip });
     expect(`ip_is_private in brackets: ${ip}`, { private: isPrivate });
   }
+
+  // ── G: a key outside the profile (R12, T2, R13, R35) ─────────────────────────────────────────────
+  //
+  // A certificate carrying one does not read, in either port, and names the key: the Go port parsed
+  // it with an `alg` of "" (or `x25519`), which the contract's Alg does not have, and judged it at the
+  // profile, so compare_leaves compared it and parse_certificate answered it. And a key that is not a
+  // signing key's algorithm signs nothing: the Go port declared ECDSA for an X25519 root key (R13).
+  for (const [kind, { spki, oid }] of Object.entries(f.foreign)) {
+    const why = `unsupported key type ${oid}`, refused = { error: 'unsupported', why };
+    const leaf = f.foreignLeaf(kind);
+    add(`parse_certificate of a leaf holding a key outside the profile: ${kind}`, 'parse_certificate', { der: leaf });
+    expect(`parse_certificate of a leaf holding a key outside the profile: ${kind}`, refused);
+    add(`profile_error of a leaf holding a key outside the profile: ${kind}`, 'profile_error', { der: leaf, kind: 'leaf' });
+    expect(`profile_error of a leaf holding a key outside the profile: ${kind}`, refused);
+    add(`validate_chain of a leaf holding a key outside the profile: ${kind}`, 'validate_chain', { chain: [leaf, rootDer], now });
+    expect(`validate_chain of a leaf holding a key outside the profile: ${kind}`, { ok: false, rule: 1, reason: why });
+    add(`compare_leaves against a leaf holding a key outside the profile: ${kind}`, 'compare_leaves', { pinned: leafDer, presented: leaf });
+    expect(`compare_leaves against a leaf holding a key outside the profile: ${kind}`, refused);
+    add(`root_tbs of a key outside the profile: ${kind}`, 'root_tbs', { cn: 'Alina Rao', spki: b64url(spki), not_before: now, serial: SERIAL });
+    expect(`root_tbs of a key outside the profile: ${kind}`, refused);
+    add(`leaf_tbs under a root key outside the profile: ${kind}`, 'leaf_tbs', { cn: 'A', root_cn: 'A', root_spki: b64url(spki), host_spki: hostSpki, endpoint: ENDPOINT, not_before: now, not_after: '2027-09-01T00:00:00Z', serial: SERIAL });
+    expect(`leaf_tbs under a root key outside the profile: ${kind}`, refused);
+    add(`build_leaf for a host key outside the profile: ${kind}`, 'build_leaf', { cn: 'A', root_cn: 'A', root_pkcs8: rootPkcs8, host_spki: b64url(spki), endpoint: ENDPOINT, not_before: now, not_after: '2027-09-01T00:00:00Z', serial: SERIAL });
+    expect(`build_leaf for a host key outside the profile: ${kind}`, refused);
+  }
 }

@@ -477,7 +477,9 @@ func WalletIssue(plain VaultPlaintext, record RecordPlaintext, rootFingerprint s
 	}
 	info := CSRCheck(csr, rootSPKIs)
 	if !info.OK {
-		return nil, errors.New(info.Why)
+		// With its class, as the core's `csr::check` propagates it: a key outside the profile is
+		// `unsupported` and bytes that do not read are `parse`, where this said `bad_request` for both.
+		return nil, info.err
 	}
 	// The ledger's rules, in the one place they are written (ledger.go).
 	facts, err := LedgerCheck(record.Ledger, rootFingerprint, info.Endpoint, now, move)

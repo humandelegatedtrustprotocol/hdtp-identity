@@ -135,10 +135,10 @@ func TestDERDeviationsAreRefused(t *testing.T) {
 		// credential through `Decide` -> `ValidateChain` -> `Parse`, before any signature is verified.
 		// Rust put the length first in a short-circuiting `||`, so only this port could be reached.
 		{"an empty attribute in the Name", 5, seq(tlv(0x31, seq())), "name is not a UTF-8 commonName"},
-		// An X25519 key. `AlgorithmOf` errors only on an EMPTY Alg, and `ParseSPKI` names X25519, so
-		// this leaf was inside the profile here and outside it in Rust — a chain this port validated
-		// and the wallet refused.
-		{"a key algorithm outside the profile", 6, seq(seq(oidBytes(oidX25519)), bitstr(make([]byte, 32), 0)), "key algorithm not in the profile"},
+		// An X25519 key. It was a third algorithm to this port, and this leaf was once inside the
+		// profile here and outside it in Rust — a chain this port validated and the wallet refused. A
+		// key outside the profile is refused where it is read now, in the core's words (R12, T2).
+		{"a key algorithm outside the profile", 6, seq(seq(oidBytes("1.3.101.110")), bitstr(make([]byte, 32), 0)), "unsupported key type 1.3.101.110"},
 	}
 	for _, c := range cases {
 		cert := withField(t, p.root, c.index, c.field, p.rootKey)

@@ -78,4 +78,17 @@ export default function csr({ add, expect }, f) {
     add(`issue_tbs_from_csr of a request naming ${endpoint}`, 'issue_tbs_from_csr', { csr: zoned, root_cn: 'A', root_spki: rootSpki, now });
     expect(`issue_tbs_from_csr of a request naming ${endpoint}`, { error: 'bad_request', why: refused });
   }
+
+  // A well-formed request carrying a key outside the profile, signed by the host key (T3, R12, T2): the
+  // key is refused where it is read, and named, in both ports. The Go port read a bare X25519 key as a
+  // key, and then said the request's signature does not verify; an RSA or P-384 one it named as not in
+  // the profile, and issue_from_csr answered that as `bad_request`.
+  for (const [kind, { spki, oid }] of Object.entries(f.foreign)) {
+    const why = `unsupported key type ${oid}`;
+    const request = f.requestFor(spki);
+    add(`csr_check of a request carrying a key outside the profile: ${kind}`, 'csr_check', { der: request });
+    expect(`csr_check of a request carrying a key outside the profile: ${kind}`, { ok: false, why });
+    add(`issue_from_csr of a request carrying a key outside the profile: ${kind}`, 'issue_from_csr', { csr: request, root_cn: 'A', root_pkcs8: rootPkcs8, now });
+    expect(`issue_from_csr of a request carrying a key outside the profile: ${kind}`, { error: 'unsupported', why });
+  }
 }

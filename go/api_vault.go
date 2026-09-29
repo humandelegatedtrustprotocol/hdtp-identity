@@ -114,7 +114,7 @@ func callWalletIssue(a args) json.RawMessage {
 	}
 	issued, err := WalletIssue(vault, record, fingerprint, csr, now, days, moving)
 	if err != nil {
-		return failErr("bad_request", err)
+		return failAs("bad_request", err)
 	}
 	warnings := issued.Warnings
 	if warnings == nil {

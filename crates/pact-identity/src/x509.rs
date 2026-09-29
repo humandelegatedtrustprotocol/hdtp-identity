@@ -102,7 +102,7 @@ pub fn assemble_raw(tbs: &[u8], alg_der: &[u8], sig: &[u8]) -> Vec<u8> {
 }
 
 pub fn root_tbs(cn: &str, key: &PublicKey, not_before: i64, serial: &[u8]) -> Result<Unsigned> {
-    let alg_oid = key.alg().sig_oid()?;
+    let alg_oid = key.alg().sig_oid();
     let id = key.key_id();
     let tbs = der::seq(&[
         der::explicit(0, &der::int(2)),
@@ -157,7 +157,7 @@ pub fn leaf_tbs(s: &LeafSpec<'_>) -> Result<Unsigned> {
     if let Some(d) = &s.dns_name {
         san.push(der::implicit(2, d.as_bytes()));
     }
-    let alg_oid = s.issuer.alg().sig_oid()?.to_string();
+    let alg_oid = s.issuer.alg().sig_oid().to_string();
     let exts = [
         ext(OID_BASIC_CONSTRAINTS, true, &if s.ca { der::seq(&[der::boolean(true)]) } else { der::seq(&[]) }),
         ext(OID_KEY_USAGE, true, &key_usage(&bits)),
@@ -423,9 +423,6 @@ pub fn profile_error(c: &Cert, kind: &str) -> Option<String> {
     if c.sig_alg == OID_ECDSA_SHA256 && crate::keys::ecdsa_is_low_s(&c.sig) == Some(false) {
         return Some("ECDSA signature not in the low-S form".into());
     }
-    if c.public_key.alg() == Alg::X25519 {
-        return Some("key algorithm not in the profile".into());
-    }
     if c.time_tags[0] != time::tag_for(c.not_before) || c.time_tags[1] != time::tag_for(c.not_after) {
         return Some("time encoding not per RFC 5280".into());
     }
@@ -493,10 +490,7 @@ pub fn profile_error(c: &Cert, kind: &str) -> Option<String> {
 
 /// The declared algorithm must be the issuer key's own; a verifier never picks it from the certificate.
 pub fn verify_cert(cert: &Cert, issuer: &PublicKey) -> bool {
-    match issuer.alg().sig_oid() {
-        Ok(oid) => cert.sig_alg == oid && issuer.verify(&cert.tbs, &cert.sig),
-        Err(_) => false,
-    }
+    cert.sig_alg == issuer.alg().sig_oid() && issuer.verify(&cert.tbs, &cert.sig)
 }
 
 pub fn fingerprint_of(cert: &Cert) -> String {

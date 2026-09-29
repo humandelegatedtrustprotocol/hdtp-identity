@@ -99,7 +99,7 @@ func callParseCertificate(a args) json.RawMessage {
 	}
 	c, err := Parse(der)
 	if err != nil {
-		return failErr("parse", err)
+		return failAs("parse", err)
 	}
 	return ok(certOut(c))
 }
@@ -111,7 +111,7 @@ func callProfileError(a args) json.RawMessage {
 	}
 	c, err := Parse(der)
 	if err != nil {
-		return failErr("parse", err)
+		return failAs("parse", err)
 	}
 	kind, err := a.str("kind")
 	if err != nil {
@@ -162,7 +162,7 @@ func callCompareLeaves(a args) json.RawMessage {
 	}
 	order, err := CompareLeaves(pinned, presented)
 	if err != nil {
-		return failErr("parse", err)
+		return failAs("parse", err)
 	}
 	return ok(map[string]any{"order": order})
 }

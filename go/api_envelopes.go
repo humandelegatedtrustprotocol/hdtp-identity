@@ -104,7 +104,7 @@ func callSealRequest(a args) json.RawMessage {
 	}
 	leaf, err := Parse(leafDER)
 	if err != nil {
-		return failErr("parse", err)
+		return failAs("parse", err)
 	}
 	o, err := sealArgs(a, leaf.PublicKey, func(o *SealOpts) error {
 		method, err := a.optStr("method")

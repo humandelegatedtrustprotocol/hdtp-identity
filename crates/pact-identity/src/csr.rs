@@ -4,7 +4,7 @@ use crate::address::address_guard;
 use crate::der::{self, children, read, read_oid_strict};
 use crate::keys::{PrivateKey, PublicKey};
 use crate::time::{DAY, HOUR};
-use crate::util::{err, Error, Result};
+use crate::util::{err, Result};
 use crate::x509::{self, is_normal_https, name, LeafSpec, MAX_LEAF_DAYS, OID_SAN};
 
 pub const OID_EXTENSION_REQUEST: &str = "1.2.840.113549.1.9.14";
@@ -22,7 +22,7 @@ fn cri(cn: &str, key: &PublicKey, endpoint: &str, dns_name: Option<&str>) -> Vec
 pub fn csr_new(cn: &str, host_key: &PrivateKey, endpoint: &str, dns_name: Option<&str>) -> Result<Vec<u8>> {
     let signer = host_key.signer();
     let info = cri(cn, &signer.public(), endpoint, dns_name);
-    let alg = host_key.alg().sig_oid()?;
+    let alg = host_key.alg().sig_oid();
     Ok(der::seq(&[info.clone(), der::seq(&[der::oid(alg)]), der::bitstr(&signer.sign(&info), 0)]))
 }
 
@@ -127,8 +127,7 @@ fn x509_name(node: &der::Node<'_>) -> Result<String> {
 /// The wallet's checks: proof of possession, the root-key refusal, a normal endpoint, the address guard.
 pub fn check(bytes: &[u8], root_spkis: &[Vec<u8>]) -> Result<Csr> {
     let csr = parse(bytes)?;
-    let own = csr.key.alg().sig_oid().map_err(|_| Error::new("bad_request", "request key algorithm not in the profile"))?;
-    if csr.sig_alg != own || !csr.key.verify(&csr.cri, &csr.sig) {
+    if csr.sig_alg != csr.key.alg().sig_oid() || !csr.key.verify(&csr.cri, &csr.sig) {
         return err("bad_request", "the request's signature does not verify: no proof of possession");
     }
     let id = csr.key.key_id();
