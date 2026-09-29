@@ -1,49 +1,53 @@
 package pactidentity
 
 // The Cards section of contract/contract.json: a body for each function it declares, which
-// api.go's `functions` map dispatches by name.
+// api.go's `functions` map dispatches by name. Each reads its members as api/cards.rs does, in its
+// order.
 
 import "encoding/json"
 
-func callCardEncode(args json.RawMessage) json.RawMessage {
-	var a struct {
-		FN    *string  `json:"fn"`
-		Cert  B64      `json:"cert"`
-		Seal  string   `json:"seal"`
-		Extra []string `json:"extra"`
-	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	fn, err := needStr(a.FN, "fn")
+func callCardEncode(a args) json.RawMessage {
+	fn, err := a.str("fn")
 	if err != nil {
-		return failErr(codeArgs, err)
+		return failAs(codeArgs, err)
 	}
-	if err := need(a.Cert, "cert"); err != nil {
-		return failErr(codeArgs, err)
-	}
-	vcard, err := EncodeCard(fn, a.Cert, a.Seal, a.Extra)
+	cert, err := a.bytes("cert")
 	if err != nil {
-		return failErr(codeFor(err, codeArgs), err)
+		return failAs(codeArgs, err)
+	}
+	seal, err := a.optStr("seal")
+	if err != nil {
+		return failAs(codeArgs, err)
+	}
+	sealPolicy := ""
+	if seal != nil {
+		sealPolicy = *seal
+	}
+	// A list of strings, or `extra is required` (the core drops an item that is not a string: the
+	// audit's T21, cluster C).
+	var extra []string
+	if raw := a.present("extra"); raw != nil {
+		if raw[0] != '[' || json.Unmarshal(raw, &extra) != nil || holdsNull(raw) {
+			return fail(codeArgs, "extra is required")
+		}
+	}
+	vcard, err := EncodeCard(fn, cert, sealPolicy, extra)
+	if err != nil {
+		return failAs(codeArgs, err)
 	}
 	return ok(map[string]any{"vcard": vcard})
 }
 
-func callCardDecode(args json.RawMessage) json.RawMessage {
-	var a struct {
-		VCard *string `json:"vcard"`
-		Now   *string `json:"now"`
-	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	vcard, err := needStr(a.VCard, "vcard")
+// card_decode reads the card, then the instant it is judged at: the contract's order, which the core
+// now reads too (R25).
+func callCardDecode(a args) json.RawMessage {
+	vcard, err := a.str("vcard")
 	if err != nil {
-		return failErr(codeArgs, err)
+		return failAs(codeArgs, err)
 	}
-	now, err := timeIn(a.Now, "now")
+	now, err := a.instant("now")
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs("parse", err)
 	}
 	c, err := DecodeCard(vcard, now)
 	if err != nil {

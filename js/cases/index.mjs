@@ -6,9 +6,9 @@
 // could break alike. An `expect` naming an id no case has is a problem, not a quiet no-op: that is how
 // a renamed case used to drop its spec check without a sound.
 //
-// `build` has no file: its one function, `version`, answers what the port IS, which two ports cannot
-// agree on.
-export const CASE_FILES = ['dispatcher', 'keys', 'certificates', 'csr', 'signing', 'cards', 'envelopes', 'vault', 'ledger', 'export', 'limits'];
+// `build` needs no file: its one function, `version`, answers what the port IS, which two ports cannot
+// agree on. Its file holds the one refusal every function shares, which they can.
+export const CASE_FILES = ['dispatcher', 'build', 'keys', 'certificates', 'csr', 'signing', 'cards', 'envelopes', 'vault', 'ledger', 'export', 'limits'];
 const NO_CASES = ['build'];
 
 const load = (file) => import(`./${file}.mjs`);

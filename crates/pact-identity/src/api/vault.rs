@@ -5,10 +5,15 @@ use crate::vault;
 
 pub(super) fn vault_seal(a: &Value) -> Result<Value> {
     Ok({
-        // In the order the function needs them (CONTRACT §0): the passphrase, the plaintext and
-        // its generation, and only then the KDF — read before, a v 1 plaintext under a KDF out
-        // of range was named for the KDF here and for its generation in the other port.
+        // In the order the contract's note fixes: the passphrase (absent: `passphrase is required`;
+        // empty: `empty passphrase`), the plaintext and its generation, and only then the KDF — read
+        // before, a v 1 plaintext under a KDF out of range was named for the KDF here and for its
+        // generation in the other port. An empty passphrase was judged after an absent plaintext
+        // here and before it in the Go port (T21).
         let passphrase = s(a, "passphrase")?;
+        if passphrase.is_empty() {
+            return err("bad_request", "empty passphrase");
+        }
         // Sealing an absent plaintext sealed the JSON literal `null` and handed back a
         // well-formed vault with nothing in it — a file a person would keep, and restore from.
         let Some(plaintext) = a.get("plaintext").filter(|v| !v.is_null()) else {

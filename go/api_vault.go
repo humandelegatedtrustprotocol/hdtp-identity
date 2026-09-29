@@ -1,119 +1,118 @@
 package pactidentity
 
 // The Vault section of contract/contract.json: a body for each function it declares, which
-// api.go's `functions` map dispatches by name.
+// api.go's `functions` map dispatches by name. Each reads its members as api/vault.rs does, in the
+// order the contract's notes fix.
 
-import (
-	"bytes"
-	"encoding/json"
-)
+import "encoding/json"
 
-func callVaultSeal(args json.RawMessage) json.RawMessage {
-	var a struct {
-		Passphrase *string         `json:"passphrase"`
-		Plaintext  json.RawMessage `json:"plaintext"`
-		KDF        *KDF            `json:"kdf"`
-		Salt       B64             `json:"salt"`
-		Nonce      B64             `json:"nonce"`
-	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	// Absent is `passphrase is required`, as the core says it; present and empty is its own refusal.
-	passphrase, err := needStr(a.Passphrase, "passphrase")
+func callVaultSeal(a args) json.RawMessage {
+	// In the contract's order: `passphrase` (absent: `passphrase is required`; empty: `empty
+	// passphrase`), `plaintext` and its generation, then `kdf`, `salt` and `nonce` — each judged
+	// where it is read, never by a decoder that ran first (R32's corrected case: a `kdf` of the wrong
+	// type was named before a missing passphrase).
+	passphrase, err := a.str("passphrase")
 	if err != nil {
-		return failErr(codeArgs, err)
+		return failAs(codeArgs, err)
 	}
 	if passphrase == "" {
 		return fail("bad_request", "empty passphrase")
 	}
-	if len(bytes.TrimSpace(a.Plaintext)) == 0 || string(bytes.TrimSpace(a.Plaintext)) == "null" {
+	raw := a.present("plaintext")
+	if raw == nil {
 		return fail(codeArgs, "plaintext is required")
 	}
-	pt, err := compactJSON(a.Plaintext)
+	pt, err := compactJSON(raw)
 	if err != nil {
 		return fail("parse", "plaintext is not JSON")
 	}
-	salt, nonce := []byte(a.Salt), []byte(a.Nonce)
-	v, err := VaultSeal(passphrase, pt, a.KDF, salt, nonce)
-	if err != nil {
-		// The generation is a bad request, as the Rust core answers it; the rest is the vault's.
-		if plaintextV(pt) != PlaintextV {
-			return failErr("bad_request", err)
+	// The generation is a bad request, as the Rust core answers it; the rest is the vault's.
+	if plaintextV(pt) != PlaintextV {
+		return fail("bad_request", generationWhy)
+	}
+	var kdf *KDF
+	if raw := a.present("kdf"); raw != nil {
+		kdf = &KDF{}
+		if err := json.Unmarshal(raw, kdf); err != nil {
+			return failAs(codeArgs, err)
 		}
+	}
+	salt, err := a.optBytes("salt")
+	if err != nil {
+		return failAs(codeArgs, err)
+	}
+	nonce, err := a.optBytes("nonce")
+	if err != nil {
+		return failAs(codeArgs, err)
+	}
+	v, err := VaultSeal(passphrase, pt, kdf, salt, nonce)
+	if err != nil {
 		return failErr("vault", err)
 	}
 	return ok(map[string]any{"vault": v})
 }
 
-func callVaultOpen(args json.RawMessage) json.RawMessage {
-	var a struct {
-		Passphrase string          `json:"passphrase"`
-		Vault      json.RawMessage `json:"vault"`
-	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
+func callVaultOpen(a args) json.RawMessage {
 	// The document as received, every member of it: the AAD is the header as written, so a
-	// member added after sealing fails to open here as it does in the Rust core.
-	if len(bytes.TrimSpace(a.Vault)) == 0 || string(bytes.TrimSpace(a.Vault)) == "null" {
+	// member added after sealing fails to open here as it does in the Rust core. The core reads
+	// `vault`, then `passphrase` (absent: `passphrase is required`, where this port opened with "").
+	raw := a.present("vault")
+	if raw == nil {
 		return fail(codeArgs, "vault is required")
 	}
-	dv, err := decodeJSON(a.Vault)
+	passphrase, err := a.str("passphrase")
+	if err != nil {
+		return failAs(codeArgs, err)
+	}
+	dv, err := decodeJSON(raw)
 	doc, isDoc := dv.(map[string]any)
 	if err != nil || !isDoc {
 		return fail("vault", "not a pact-vault/1 document")
 	}
-	pt, err := VaultOpenDoc(a.Passphrase, doc)
+	pt, err := VaultOpenDoc(passphrase, doc)
 	if err != nil {
 		return failErr("vault", err)
 	}
 	return ok(map[string]any{"plaintext": json.RawMessage(pt)})
 }
 
-func callWalletIssue(args json.RawMessage) json.RawMessage {
-	var a struct {
-		VaultPlaintext  json.RawMessage `json:"vault_plaintext"`
-		RecordPlaintext json.RawMessage `json:"record_plaintext"`
-		RootFingerprint *string         `json:"root_fingerprint"`
-		CSR             B64             `json:"csr"`
-		Now             *string         `json:"now"`
-		ValidDays       *int            `json:"valid_days"`
-		Move            bool            `json:"move"`
-	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	fingerprint, err := needStr(a.RootFingerprint, "root_fingerprint")
+func callWalletIssue(a args) json.RawMessage {
+	fingerprint, err := a.str("root_fingerprint")
 	if err != nil {
-		return failErr(codeArgs, err)
+		return failAs(codeArgs, err)
 	}
-	if err := need(a.CSR, "csr"); err != nil {
-		return failErr(codeArgs, err)
-	}
-	now, err := timeIn(a.Now, "now")
+	csr, err := a.bytes("csr")
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs(codeArgs, err)
 	}
-	days, err := daysOr(a.ValidDays)
+	now, err := a.instant("now")
 	if err != nil {
-		return failErr("bad_request", err)
+		return failAs("parse", err)
+	}
+	days, err := a.validDays()
+	if err != nil {
+		return failAs(codeArgs, err)
+	}
+	moving, err := a.boolean("move")
+	if err != nil {
+		return failAs(codeArgs, err)
 	}
 	// After the arguments, the documents, each held to CONTRACT §6 as it arrived — before any typed
 	// decoding, which would drop a member the contract does not describe and put encoding/json's
 	// own words into an answer (CONTRACT §0).
-	if err := CheckFile(a.VaultPlaintext); err != nil {
+	vaultPlaintext, recordPlaintext := a["vault_plaintext"], a["record_plaintext"]
+	if err := CheckFile(vaultPlaintext); err != nil {
 		return failErr("bad_request", err)
 	}
-	if err := CheckRecord(a.RecordPlaintext); err != nil {
+	if err := CheckRecord(recordPlaintext); err != nil {
 		return failErr("bad_request", err)
 	}
 	var vault VaultPlaintext
 	var record RecordPlaintext
-	if json.Unmarshal(a.VaultPlaintext, &vault) != nil || json.Unmarshal(a.RecordPlaintext, &record) != nil {
+	if json.Unmarshal(vaultPlaintext, &vault) != nil || json.Unmarshal(recordPlaintext, &record) != nil {
 		return fail(codeArgs, "arguments do not read")
 	}
-	issued, err := WalletIssue(vault, record, fingerprint, a.CSR, now, days, a.Move)
+	issued, err := WalletIssue(vault, record, fingerprint, csr, now, days, moving)
 	if err != nil {
 		return failErr("bad_request", err)
 	}

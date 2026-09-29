@@ -3,40 +3,29 @@ package pactidentity
 // The Ledger section of contract/contract.json: a body for each function it declares, which
 // api.go's `functions` map dispatches by name.
 
-import (
-	"bytes"
-	"encoding/json"
-)
+import "encoding/json"
 
-func callLedgerCheck(args json.RawMessage) json.RawMessage {
-	var a struct {
-		Ledger   json.RawMessage `json:"ledger"`
-		Root     *string         `json:"root"`
-		Endpoint *string         `json:"endpoint"`
-		Now      *string         `json:"now"`
-		Move     *bool           `json:"move"`
-	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	// In the order the function needs them (CONTRACT §0): whose ledger, where, when, then the ledger.
-	root, err := needStr(a.Root, "root")
-	if err == nil && root == "" {
-		err = errArg("root is required")
-	}
+func callLedgerCheck(a args) json.RawMessage {
+	// In the order the function needs them (CONTRACT §0): whose ledger, where, when, whether it is a
+	// move, then the ledger. `move` was judged with every other member before any was read (R32).
+	root, err := a.id("root")
 	if err != nil {
-		return failErr(codeArgs, err)
+		return failAs(codeArgs, err)
 	}
-	endpoint, err := needStr(a.Endpoint, "endpoint")
+	endpoint, err := a.str("endpoint")
 	if err != nil {
-		return failErr(codeArgs, err)
+		return failAs(codeArgs, err)
 	}
-	now, err := timeIn(a.Now, "now")
+	now, err := a.instant("now")
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs("parse", err)
+	}
+	moving, err := a.boolean("move")
+	if err != nil {
+		return failAs(codeArgs, err)
 	}
 	var entries []LedgerEntry
-	if raw := bytes.TrimSpace(a.Ledger); len(raw) > 0 && string(raw) != "null" {
+	if raw := a.present("ledger"); raw != nil {
 		// The ledger as it arrived, every member of it, before any typed decoding drops one.
 		if !IsNormalHTTPS(endpoint) {
 			return fail(codeArgs, "endpoint is not an https URL in normal form")
@@ -53,7 +42,7 @@ func callLedgerCheck(args json.RawMessage) json.RawMessage {
 			return fail(codeArgs, "arguments do not read")
 		}
 	}
-	facts, err := LedgerCheck(entries, root, endpoint, now, a.Move != nil && *a.Move)
+	facts, err := LedgerCheck(entries, root, endpoint, now, moving)
 	if err != nil {
 		return failErr(codeFor(err, codeArgs), err)
 	}

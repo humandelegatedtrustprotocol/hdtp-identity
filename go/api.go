@@ -32,6 +32,9 @@ func fail(code, why string) json.RawMessage {
 
 func failErr(code string, err error) json.RawMessage { return fail(code, err.Error()) }
 
+// failAs is an error answered with the code CONTRACT §0 names for it (codeFor), or `fallback`.
+func failAs(fallback string, err error) json.RawMessage { return failErr(codeFor(err, fallback), err) }
+
 func ok(v any) json.RawMessage {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -284,45 +287,45 @@ func viaJSON(body func(json.RawMessage) json.RawMessage) func(args) json.RawMess
 // each naming the function in api_<section>.go that answers it.
 var functions = map[string]function{
 	// The build: api_build.go
-	"version": {nil, viaJSON(callVersion)},
+	"version": {nil, callVersion},
 
 	// Keys: api_keys.go
-	"generate_key":  {[]string{"alg"}, viaJSON(callGenerateKey)},
-	"prf_salt":      {nil, viaJSON(callPrfSalt)},
-	"derive_seed":   {[]string{"prf", "info"}, viaJSON(callDeriveSeed)},
-	"key_from_seed": {[]string{"alg", "seed"}, viaJSON(callKeyFromSeed)},
-	"public_key":    {[]string{"pkcs8"}, viaJSON(callPublicKey)},
-	"key_info":      {[]string{"spki"}, viaJSON(callKeyInfo)},
-	"sign":          {[]string{"pkcs8", "data"}, viaJSON(callSign)},
-	"verify":        {[]string{"spki", "data", "sig"}, viaJSON(callVerify)},
+	"generate_key":  {[]string{"alg"}, callGenerateKey},
+	"prf_salt":      {nil, callPrfSalt},
+	"derive_seed":   {[]string{"prf", "info"}, callDeriveSeed},
+	"key_from_seed": {[]string{"alg", "seed"}, callKeyFromSeed},
+	"public_key":    {[]string{"pkcs8"}, callPublicKey},
+	"key_info":      {[]string{"spki"}, callKeyInfo},
+	"sign":          {[]string{"pkcs8", "data"}, callSign},
+	"verify":        {[]string{"spki", "data", "sig"}, callVerify},
 
 	// Certificates: api_certificates.go
-	"build_root":        {[]string{"cn", "pkcs8", "not_before", "serial"}, viaJSON(callBuildRoot)},
-	"root_tbs":          {[]string{"cn", "spki", "not_before", "serial"}, viaJSON(callRootTBS)},
-	"assemble_root":     {[]string{"tbs", "sig", "sig_alg"}, viaJSON(assembleFn)},
-	"assemble_leaf":     {[]string{"tbs", "sig", "sig_alg"}, viaJSON(assembleFn)},
-	"build_leaf":        {[]string{"cn", "root_cn", "host_spki", "endpoint", "dns_name", "not_before", "not_after", "serial", "root_pkcs8"}, viaJSON(callBuildLeaf)},
-	"leaf_tbs":          {[]string{"cn", "root_cn", "host_spki", "endpoint", "dns_name", "not_before", "not_after", "serial", "root_spki"}, viaJSON(callLeafTBS)},
-	"parse_certificate": {[]string{"der"}, viaJSON(callParseCertificate)},
-	"profile_error":     {[]string{"der", "kind"}, viaJSON(callProfileError)},
-	"validate_chain":    {[]string{"chain", "now", "expected_root", "expected_endpoint"}, viaJSON(callValidateChain)},
-	"compare_leaves":    {[]string{"pinned", "presented"}, viaJSON(callCompareLeaves)},
-	"is_normal_https":   {[]string{"url"}, viaJSON(callIsNormalHTTPS)},
-	"address_guard":     {[]string{"endpoint", "self_endpoint", "guest"}, viaJSON(callAddressGuard)},
-	"ip_is_private":     {[]string{"ip"}, viaJSON(callIPIsPrivate)},
+	"build_root":        {[]string{"cn", "pkcs8", "not_before", "serial"}, callBuildRoot},
+	"root_tbs":          {[]string{"cn", "spki", "not_before", "serial"}, callRootTBS},
+	"assemble_root":     {[]string{"tbs", "sig", "sig_alg"}, assembleFn},
+	"assemble_leaf":     {[]string{"tbs", "sig", "sig_alg"}, assembleFn},
+	"build_leaf":        {[]string{"cn", "root_cn", "host_spki", "endpoint", "dns_name", "not_before", "not_after", "serial", "root_pkcs8"}, callBuildLeaf},
+	"leaf_tbs":          {[]string{"cn", "root_cn", "host_spki", "endpoint", "dns_name", "not_before", "not_after", "serial", "root_spki"}, callLeafTBS},
+	"parse_certificate": {[]string{"der"}, callParseCertificate},
+	"profile_error":     {[]string{"der", "kind"}, callProfileError},
+	"validate_chain":    {[]string{"chain", "now", "expected_root", "expected_endpoint"}, callValidateChain},
+	"compare_leaves":    {[]string{"pinned", "presented"}, callCompareLeaves},
+	"is_normal_https":   {[]string{"url"}, callIsNormalHTTPS},
+	"address_guard":     {[]string{"endpoint", "self_endpoint", "guest"}, callAddressGuard},
+	"ip_is_private":     {[]string{"ip"}, callIPIsPrivate},
 
 	// Certificate signing requests: api_csr.go
-	"csr_new":            {[]string{"cn", "host_pkcs8", "endpoint", "dns_name"}, viaJSON(callCSRNew)},
-	"csr_check":          {[]string{"der", "root_spkis"}, viaJSON(callCSRCheck)},
-	"issue_from_csr":     {[]string{"csr", "root_cn", "root_spkis", "now", "previous_not_before", "valid_days", "root_pkcs8"}, viaJSON(callIssueFromCSR)},
-	"issue_tbs_from_csr": {[]string{"csr", "root_cn", "root_spkis", "now", "previous_not_before", "valid_days", "root_spki"}, viaJSON(callIssueTBSFromCSR)},
+	"csr_new":            {[]string{"cn", "host_pkcs8", "endpoint", "dns_name"}, callCSRNew},
+	"csr_check":          {[]string{"der", "root_spkis"}, callCSRCheck},
+	"issue_from_csr":     {[]string{"csr", "root_cn", "root_spkis", "now", "previous_not_before", "valid_days", "root_pkcs8"}, callIssueFromCSR},
+	"issue_tbs_from_csr": {[]string{"csr", "root_cn", "root_spkis", "now", "previous_not_before", "valid_days", "root_spki"}, callIssueTBSFromCSR},
 
 	// Signing requests: api_signing.go
-	"signing_request_check": {[]string{"request", "origin", "now", "root_spkis"}, viaJSON(callSigningRequestCheck)},
+	"signing_request_check": {[]string{"request", "origin", "now", "root_spkis"}, callSigningRequestCheck},
 
 	// Cards: api_cards.go
-	"card_encode": {[]string{"fn", "cert", "seal", "extra"}, viaJSON(callCardEncode)},
-	"card_decode": {[]string{"vcard", "now"}, viaJSON(callCardDecode)},
+	"card_encode": {[]string{"fn", "cert", "seal", "extra"}, callCardEncode},
+	"card_decode": {[]string{"vcard", "now"}, callCardDecode},
 
 	// Envelopes: api_envelopes.go
 	"suite_for":      {[]string{"spki"}, viaJSON(callSuiteFor)},
@@ -335,9 +338,9 @@ var functions = map[string]function{
 	"decide":         {[]string{"now", "envelope", "node"}, viaJSON(callDecide)},
 
 	// Vault: api_vault.go
-	"vault_seal":   {[]string{"passphrase", "plaintext", "kdf", "salt", "nonce"}, viaJSON(callVaultSeal)},
-	"vault_open":   {[]string{"passphrase", "vault"}, viaJSON(callVaultOpen)},
-	"wallet_issue": {[]string{"vault_plaintext", "record_plaintext", "root_fingerprint", "csr", "now", "valid_days", "move"}, viaJSON(callWalletIssue)},
+	"vault_seal":   {[]string{"passphrase", "plaintext", "kdf", "salt", "nonce"}, callVaultSeal},
+	"vault_open":   {[]string{"passphrase", "vault"}, callVaultOpen},
+	"wallet_issue": {[]string{"vault_plaintext", "record_plaintext", "root_fingerprint", "csr", "now", "valid_days", "move"}, callWalletIssue},
 
 	// Export: api_export.go
 	"export_read":           {[]string{"directory", "manifest", "contacts_csv", "threads_csv", "owner", "now"}, callExportRead},
@@ -350,7 +353,7 @@ var functions = map[string]function{
 	"export_merge":          {[]string{"held", "rows"}, callExportMerge},
 
 	// Ledger: api_ledger.go
-	"ledger_check": {[]string{"ledger", "root", "endpoint", "now", "move"}, viaJSON(callLedgerCheck)},
+	"ledger_check": {[]string{"ledger", "root", "endpoint", "now", "move"}, callLedgerCheck},
 
 	// Limits: api_limits.go
 	"limits_rules_check": {[]string{"rules"}, callLimitsRulesCheck},

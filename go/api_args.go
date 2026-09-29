@@ -13,6 +13,7 @@ package pactidentity
 
 import (
 	"encoding/json"
+	"strconv"
 	"time"
 )
 
@@ -64,8 +65,10 @@ func (a args) str(k string) (string, error) {
 	return s, nil
 }
 
-// optStr is the core's `opt_s`: anything but a string is absent.
-func (a args) optStr(k string) *string {
+// optText is the core's `opt_s` as the export section reads it: anything but a string is absent.
+// Every other section refuses an optional member of the wrong type (optStr); the core reads them
+// all this way still, which the audit's cluster C changes in both ports.
+func (a args) optText(k string) *string {
 	s, isText := a.text(k)
 	if !isText {
 		return nil
@@ -73,16 +76,240 @@ func (a args) optStr(k string) *string {
 	return &s
 }
 
-func (a args) instant(k string) (time.Time, json.RawMessage) {
+// present is a member's JSON text, or nil when it is absent or null: CONTRACT §0, the JSON literal
+// null counts as absent.
+func (a args) present(k string) json.RawMessage {
+	raw := a[k]
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	return raw
+}
+
+// id is the core's `id`: a string that is not empty, or `<k> is required`.
+func (a args) id(k string) (string, error) {
+	s, err := a.str(k)
+	if err == nil && s == "" {
+		err = errArg(k + " is required")
+	}
+	return s, err
+}
+
+// optStr is an optional string: absent or null is nil; present and not a string is `<k> is
+// required`, the answer for a member of the wrong type (the core's `opt_s` reads it as absent).
+func (a args) optStr(k string) (*string, error) {
+	if a.present(k) == nil {
+		return nil, nil
+	}
 	s, err := a.str(k)
 	if err != nil {
-		return time.Time{}, failErr(codeArgs, err)
+		return nil, err
+	}
+	return &s, nil
+}
+
+// instant is the core's `instant`: a required RFC 3339 instant in the one grammar (parseInstantZ).
+// Absent or not a string is `<k> is required`; present and unreadable is `parse`, in the core's words.
+func (a args) instant(k string) (time.Time, error) {
+	s, err := a.str(k)
+	if err != nil {
+		return time.Time{}, err
 	}
 	t, ok := parseInstantZ(s)
 	if !ok {
-		return time.Time{}, fail("parse", "not an RFC 3339 instant: "+s)
+		return time.Time{}, parseError{"not an RFC 3339 instant: " + s}
 	}
 	return t, nil
+}
+
+// optInstant is the core's `opt_instant`, with optStr's reading of a member of the wrong type.
+func (a args) optInstant(k string) (*time.Time, error) {
+	s, err := a.optStr(k)
+	if s == nil || err != nil {
+		return nil, err
+	}
+	t, ok := parseInstantZ(*s)
+	if !ok {
+		return nil, parseError{"not an RFC 3339 instant: " + *s}
+	}
+	return &t, nil
+}
+
+// bytes is the core's `bytes`: absent or null is `<k> is required`; present and not a base64url
+// string is `parse`, `not base64url`.
+func (a args) bytes(k string) ([]byte, error) {
+	if a.present(k) == nil {
+		return nil, errArg(k + " is required")
+	}
+	return a.optBytes(k)
+}
+
+// optBytes is the core's `opt_bytes`, with a member of the wrong type refused as bytes that will not
+// decode (the core's reads it as absent). Absent or null is nil; `""` is a non-nil empty slice.
+func (a args) optBytes(k string) ([]byte, error) {
+	if a.present(k) == nil {
+		return nil, nil
+	}
+	s, isText := a.text(k)
+	if !isText {
+		return nil, parseError{"not base64url"}
+	}
+	b, err := decodeB64url(s)
+	if b == nil && err == nil {
+		b = []byte{}
+	}
+	return b, err
+}
+
+// int is the core's `int`: an integer written without a fraction or an exponent that fits 64 bits;
+// anything else, absent and null included, is `<k> is required`.
+func (a args) int(k string) (int64, error) {
+	n, err := a.optInt(k)
+	if err == nil && n == nil {
+		err = errArg(k + " is required")
+	}
+	if err != nil {
+		return 0, err
+	}
+	return *n, nil
+}
+
+// optInt is an optional integer: absent or null is nil; present and not an integer is `<k> is
+// required` (the core's `opt_int` reads it as absent).
+func (a args) optInt(k string) (*int64, error) {
+	raw := a.present(k)
+	if raw == nil {
+		return nil, nil
+	}
+	n, err := strconv.ParseInt(string(raw), 10, 64)
+	if err != nil {
+		return nil, errArg(k + " is required")
+	}
+	return &n, nil
+}
+
+// boolean is an optional boolean: absent or null is false; present and not a boolean is `<k> is
+// required` (the core's `boolean` reads it as false, but for ledger_check's `move`).
+func (a args) boolean(k string) (bool, error) {
+	switch string(a.present(k)) {
+	case "":
+		return false, nil
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	}
+	return false, errArg(k + " is required")
+}
+
+// chain is the core's `chain`: a list of base64url strings. Not a list — absent and null included —
+// is `<k> is required`; an item that is not a base64url string, null included, is `not base64url`.
+func (a args) chain(k string) ([][]byte, error) {
+	raw := a.present(k)
+	if len(raw) == 0 || raw[0] != '[' {
+		return nil, errArg(k + " is required")
+	}
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil, errArg(k + " is required")
+	}
+	out := make([][]byte, 0, len(items))
+	for _, item := range items {
+		var s string
+		if len(item) == 0 || item[0] != '"' || json.Unmarshal(item, &s) != nil {
+			return nil, parseError{"not base64url"}
+		}
+		b, err := decodeB64url(s)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, nil
+}
+
+// optChain is the core's `opt_chain`: absent or null is an empty list, anything else is `chain`.
+func (a args) optChain(k string) ([][]byte, error) {
+	if a.present(k) == nil {
+		return [][]byte{}, nil
+	}
+	return a.chain(k)
+}
+
+// presentChain is the core's `present_chain`: absent or null is nil, anything else is `chain` — a
+// chain that was sent and does not read is never one that was not sent.
+func (a args) presentChain(k string) ([][]byte, error) {
+	if a.present(k) == nil {
+		return nil, nil
+	}
+	return a.chain(k)
+}
+
+// seed32 is the core's `seed32`: an optional member of exactly 32 bytes (`<k> is 32 bytes`).
+func (a args) seed32(k string) ([]byte, error) {
+	b, err := a.optBytes(k)
+	if err != nil || b == nil {
+		return nil, err
+	}
+	if len(b) != 32 {
+		return nil, errArg(k + " is 32 bytes")
+	}
+	return b, nil
+}
+
+// serial is §14.1's serial rule, the core's `serial`: absent means one is made (nil here; BuildRoot
+// and BuildLeaf make it), and a serial that is given is 8 to 20 bytes — the width the profile fixes
+// so a serial cannot be a channel or a collision.
+func (a args) serial() ([]byte, error) {
+	b, err := a.optBytes("serial")
+	if err != nil || b == nil {
+		return nil, err
+	}
+	if len(b) < 8 || len(b) > 20 {
+		return nil, errArg("serial is 8 to 20 bytes")
+	}
+	return b, nil
+}
+
+// validDays is the core's `valid_days`: absent or null is a year; present and not an integer is
+// `valid_days is required`, never a year it was not asked for; outside 1–398 is refused.
+func (a args) validDays() (int, error) {
+	n, err := a.optInt("valid_days")
+	if err != nil {
+		return 0, err
+	}
+	if n == nil {
+		return 365, nil
+	}
+	if *n < 1 || *n > MaxLeafDays {
+		return 0, errArg("validity must be between one and 398 days")
+	}
+	return int(*n), nil
+}
+
+// priv and pub are the core's `private` and `public`: the member's bytes, then the key parser, whose
+// refusal names what is wrong with them.
+func (a args) priv(k string) (*PrivateKey, error) {
+	der, err := a.bytes(k)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePKCS8(der)
+}
+
+func (a args) pub(k string) (*PublicKey, error) {
+	der, err := a.bytes(k)
+	if err != nil {
+		return nil, err
+	}
+	p, err := ParseSPKI(der)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := AlgorithmOf(p); err != nil {
+		return nil, err
+	}
+	return p, nil
 }
 
 func (a args) list(k string) ([]any, error) {

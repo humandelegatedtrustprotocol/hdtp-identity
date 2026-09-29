@@ -863,7 +863,7 @@
         "required": ["spec"],
         "additionalProperties": false
       },
-      "errors": [],
+      "errors": ["bad_request"],
       "notes": "The build, not a rule: `spec` is the version of `pact-protocol/SPEC.md` the port implements and is the same everywhere; the other member names the port's own release, so the answers differ and nothing compares them."
     },
     "generate_key": {
@@ -901,7 +901,7 @@
         "required": ["salt", "infos"],
         "additionalProperties": false
       },
-      "errors": [],
+      "errors": ["bad_request"],
       "notes": "SPEC §2.1's fixed PRF input, `SHA-256(\"pact/vault/1\")`, and the three `info` strings. A call rather than a constant a caller copies, so the bytes live in one place and the vectors prove them."
     },
     "derive_seed": {
