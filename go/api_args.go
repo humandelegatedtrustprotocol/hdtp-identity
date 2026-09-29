@@ -287,6 +287,21 @@ func (a args) validDays() (int, error) {
 	return int(*n), nil
 }
 
+// dnsName is an optional `dns_name`: absent or null is none (the typed CSRNew and LeafOpts read ""
+// as none, which a Go caller means by it); present and empty is refused, `dns_name is empty`. The
+// core wrote an empty dNSName for it, which csr_check and rule 5 then refuse, and this port wrote
+// none (R26, F4).
+func (a args) dnsName() (string, error) {
+	dns, err := a.optStr("dns_name")
+	if err != nil || dns == nil {
+		return "", err
+	}
+	if *dns == "" {
+		return "", errArg("dns_name is empty")
+	}
+	return *dns, nil
+}
+
 // priv and pub are the core's `private` and `public`: the member's bytes, then the key parser, whose
 // refusal names what is wrong with them.
 func (a args) priv(k string) (*PrivateKey, error) {

@@ -680,6 +680,11 @@ type ChainOpts struct {
 	Now              time.Time
 	ExpectedRoot     string
 	ExpectedEndpoint string
+	// A Go caller that leaves ExpectedRoot or ExpectedEndpoint empty has not given it: the node's
+	// first certification passes an empty root (pact-gateway internal/identity/leaf.go:561). The JSON
+	// boundary has: a member present as "" is a value there (CONTRACT §0), compared and refused like
+	// any other, as the core's Option compares it (F4, R07, T14). It sets these.
+	rootGiven, endpointGiven bool
 }
 
 // ChainResult is the verdict of ValidateChain: accepted with the proven facts, or refused by a rule.
@@ -722,7 +727,7 @@ func ValidateChain(chain [][]byte, o ChainOpts) ChainResult {
 		return refuse(2, "root is not self-signed")
 	}
 	rootFingerprint := FingerprintOf(root)
-	if o.ExpectedRoot != "" && o.ExpectedRoot != rootFingerprint {
+	if (o.ExpectedRoot != "" || o.rootGiven) && o.ExpectedRoot != rootFingerprint {
 		return refuse(2, "root is not the one expected")
 	}
 	if !verifyCert(leaf, root.PublicKey) {
@@ -744,7 +749,7 @@ func ValidateChain(chain [][]byte, o ChainOpts) ChainResult {
 	if !IsNormalHTTPS(endpoint) {
 		return refuse(5, "endpoint is not an https URL in normal form")
 	}
-	if o.ExpectedEndpoint != "" && o.ExpectedEndpoint != endpoint {
+	if (o.ExpectedEndpoint != "" || o.endpointGiven) && o.ExpectedEndpoint != endpoint {
 		return refuse(5, "endpoint differs from the one in question")
 	}
 	host := hostOf(endpoint)

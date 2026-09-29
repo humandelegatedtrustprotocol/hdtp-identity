@@ -207,10 +207,10 @@ func callOpenResult(a args) json.RawMessage {
 	}
 	o := OpenOpts{Recipient: priv, RecipientPublic: me, MsgID: msgID, Now: now, Pins: pins}
 	if root != nil {
-		o.ExpectedRoot = *root
+		o.ExpectedRoot, o.rootGiven = *root, true
 	}
 	if endpoint != nil {
-		o.ExpectedEndpoint = *endpoint
+		o.ExpectedEndpoint, o.endpointGiven = *endpoint, true
 	}
 	opened, err := OpenResult(env, o)
 	if err != nil {

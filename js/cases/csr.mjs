@@ -3,7 +3,7 @@ import { b64url } from '../../../pact-protocol/vectors/lib/keys.mjs';
 import { read as derRead, children as derChildren, tlv as derTlv, seq as derSeq, set as derSet, bitstr as derBitstr, int as derInt } from '../../../pact-protocol/vectors/lib/der.mjs';
 import { signDetached } from '../../../pact-protocol/vectors/lib/hpke.mjs';
 
-export default function csr({ add }, f) {
+export default function csr({ add, expect }, f) {
   const { now, ENDPOINT, hostKey, rootDer, rootPkcs8, rootSpki, hostPkcs8, rootKeyId, csr: request, rootCsr, x25519SpkiDer } = f;
   add('csr_new with no key', 'csr_new', { cn: 'A', endpoint: ENDPOINT });
   add('csr_new naming a local address', 'csr_new', { cn: 'A', host_pkcs8: hostPkcs8, endpoint: 'https://127.0.0.1:8443/mcp' });
@@ -60,4 +60,7 @@ export default function csr({ add }, f) {
   const E8443 = 'https://agent.alina.example:8443/mcp';
   add('csr_check on another port, asking for the host\'s dNSName', 'csr_check', { der: f.wasm.call('csr_new', { cn: 'Alina Rao', host_pkcs8: hostPkcs8, endpoint: E8443, dns_name: 'agent.alina.example' }).der });
   add('csr_check on another port, asking for some other dNSName', 'csr_check', { der: f.wasm.call('csr_new', { cn: 'Alina Rao', host_pkcs8: hostPkcs8, endpoint: E8443, dns_name: 'agent.mallory.example' }).der });
+  // A dns_name given as "" is refused where it is read (R26, F4); see certificates.mjs.
+  add('csr_new with a dns_name that is empty', 'csr_new', { cn: 'Alina Rao', host_pkcs8: hostPkcs8, endpoint: ENDPOINT, dns_name: '' });
+  expect('csr_new with a dns_name that is empty', { error: 'bad_request', why: 'dns_name is empty' });
 }

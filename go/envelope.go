@@ -719,6 +719,8 @@ type OpenOpts struct {
 	Pins             []Pin
 	ExpectedRoot     string
 	ExpectedEndpoint string
+	// As ChainOpts's: set by the JSON boundary, where an expectation present as "" is a value.
+	rootGiven, endpointGiven bool
 }
 
 // Opened is a verified result: the result or error object, who answered, and a newer leaf if one rode along.
@@ -839,10 +841,10 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 		if !VerifyDetached(leaf.PublicKey, signed, sig) {
 			return nil, errors.New("signature is not the held leaf's key")
 		}
-		if o.ExpectedRoot != "" && p.Root != o.ExpectedRoot {
+		if (o.ExpectedRoot != "" || o.rootGiven) && p.Root != o.ExpectedRoot {
 			return nil, errors.New("root is not the one expected")
 		}
-		if o.ExpectedEndpoint != "" && p.Endpoint != o.ExpectedEndpoint {
+		if (o.ExpectedEndpoint != "" || o.endpointGiven) && p.Endpoint != o.ExpectedEndpoint {
 			return nil, errors.New("endpoint differs from the one in question")
 		}
 		out.Root, out.Endpoint = p.Root, p.Endpoint
@@ -860,7 +862,7 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 		}
 		chain = append(chain, FromB64url(s))
 	}
-	vr := ValidateChain(chain, ChainOpts{Now: o.Now, ExpectedRoot: o.ExpectedRoot, ExpectedEndpoint: o.ExpectedEndpoint})
+	vr := ValidateChain(chain, ChainOpts{Now: o.Now, ExpectedRoot: o.ExpectedRoot, ExpectedEndpoint: o.ExpectedEndpoint, rootGiven: o.rootGiven, endpointGiven: o.endpointGiven})
 	if !vr.OK {
 		return nil, errors.New("chain rule " + itoa(vr.Rule) + ": " + vr.Reason)
 	}
@@ -898,7 +900,10 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 // validates to the pinned root at the dialed address and is newer than or equal to the pin.
 func FollowRenewed(answerChain [][]byte, pinnedRoot string, pinnedLeaf []byte, dialed string, now time.Time) (bool, string, []byte) {
 	now = now.Truncate(time.Second)
-	vr := ValidateChain(answerChain, ChainOpts{Now: now, ExpectedRoot: pinnedRoot, ExpectedEndpoint: dialed})
+	// The pinned root and the dialed address are what the chain is held to, always: "" is compared
+	// like any other value, as the core compares it. Read as "not given", "" followed a renewed
+	// chain from any root at any address (T14's corrected text).
+	vr := ValidateChain(answerChain, ChainOpts{Now: now, ExpectedRoot: pinnedRoot, ExpectedEndpoint: dialed, rootGiven: true, endpointGiven: true})
 	if !vr.OK {
 		return false, "chain rule " + itoa(vr.Rule) + ": " + vr.Reason, nil
 	}

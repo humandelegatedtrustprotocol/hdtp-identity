@@ -143,10 +143,10 @@ func callValidateChain(a args) json.RawMessage {
 	}
 	o := ChainOpts{Now: now}
 	if root != nil {
-		o.ExpectedRoot = *root
+		o.ExpectedRoot, o.rootGiven = *root, true
 	}
 	if endpoint != nil {
-		o.ExpectedEndpoint = *endpoint
+		o.ExpectedEndpoint, o.endpointGiven = *endpoint, true
 	}
 	return ok(chainOut(ValidateChain(chain, o)))
 }
@@ -302,13 +302,9 @@ func leafSpec(a args) (LeafOpts, error) {
 	if err != nil {
 		return LeafOpts{}, err
 	}
-	dns, err := a.optStr("dns_name")
+	dns, err := a.dnsName()
 	if err != nil {
 		return LeafOpts{}, err
 	}
-	o := LeafOpts{CN: cn, RootCN: rootCN, HostPub: host, Endpoint: endpoint, NotBefore: nb, NotAfter: na, Serial: serial}
-	if dns != nil {
-		o.DNSName = *dns
-	}
-	return o, nil
+	return LeafOpts{CN: cn, RootCN: rootCN, HostPub: host, Endpoint: endpoint, DNSName: dns, NotBefore: nb, NotAfter: na, Serial: serial}, nil
 }

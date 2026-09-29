@@ -71,3 +71,29 @@ func TestEveryFunctionDeclaresTheContractsMembers(t *testing.T) {
 		t.Errorf("nope answered %s", out)
 	}
 }
+
+// An empty expectation is "not given" to a Go caller of the typed API and a value at the JSON
+// boundary (CONTRACT §0). The node's first certification passes ExpectedRoot "" and must validate
+// (pact-gateway internal/identity/leaf.go:561); the same chain with `expected_root: ""` handed to Call
+// is refused, as the core refuses it. FollowRenewed's pinned root and dialed address are always held.
+func TestAnEmptyExpectationIsNotGivenOnlyToAGoCaller(t *testing.T) {
+	p := reviewIdentity(t, "ed25519", reviewEndpoint)
+	now := mustTime(t, "2026-09-13T12:00:00Z")
+	chain := [][]byte{p.leaf, p.root}
+	if vr := ValidateChain(chain, ChainOpts{Now: now}); !vr.OK {
+		t.Fatalf("the typed call with no expectation must validate: %+v", vr)
+	}
+	for _, member := range []string{"expected_root", "expected_endpoint"} {
+		raw, _ := json.Marshal(map[string]any{"chain": []string{B64url(p.leaf), B64url(p.root)}, "now": "2026-09-13T12:00:00Z", member: ""})
+		var out map[string]any
+		if err := json.Unmarshal(Call("validate_chain", raw), &out); err != nil || out["ok"] != false {
+			t.Errorf("validate_chain with %s \"\" answered %v", member, out)
+		}
+	}
+	if follow, why, _ := FollowRenewed(chain, "", p.leaf, reviewEndpoint, now); follow || why != "chain rule 2: root is not the one expected" {
+		t.Errorf("FollowRenewed from an empty pinned root: %v %q", follow, why)
+	}
+	if follow, why, _ := FollowRenewed(chain, p.rootFP, p.leaf, "", now); follow || why != "chain rule 5: endpoint differs from the one in question" {
+		t.Errorf("FollowRenewed to an empty dialed address: %v %q", follow, why)
+	}
+}
