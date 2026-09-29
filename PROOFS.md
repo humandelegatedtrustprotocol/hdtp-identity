@@ -7,9 +7,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed as proven that did not pass.
 
-Specification: **2.2.4**. **88** normative sentences, **2465** cross-port parity cases over **54** guarded functions.
+Specification: **2.2.4**. **88** normative sentences, **2470** cross-port parity cases over **54** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 2.2.4): **4930** answers, of which **0** do not hold to the shape it declares. Of **127** declared error codes, **127** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 2.2.4): **4940** answers, of which **0** do not hold to the shape it declares. Of **127** declared error codes, **127** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 88 normative sentences of the specification
 
@@ -202,7 +202,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 2465 cross-port parity cases
+## The 2470 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -210,7 +210,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **2465** cases (**1149** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
+At the run that generated this file: **2470** cases (**1149** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
 
 ### `address_guard` — 50 cases · whole on success
 
@@ -613,7 +613,7 @@ At the run that generated this file: **2465** cases (**1149** of the run's cases
 - generated · csr_new · endpoint absent, host_pkcs8 7
 - generated · csr_new · endpoint absent, dns_name 7
 
-### `decide` — 110 cases · whole on success
+### `decide` — 113 cases · whole on success
 
 - decide on an envelope from a pinned contact
 - decide on a pinned contact's call that names no tool
@@ -692,9 +692,12 @@ At the run that generated this file: **2465** cases (**1149** of the run's cases
 - decide on an envelope with a body holding the largest double
 - decide on an envelope with a body nested 127 deep
 - decide on an envelope whose header holds a ts past the largest double
+- decide on an envelope whose header holds a ts past 2^53 and within 64 bits
 - decide on an envelope whose header holds a ts of -0
 - decide on an envelope whose header holds an exp of -0
 - decide on an envelope whose header holds a ts written with a fraction
+- decide on an envelope whose header holds a ts written with an exponent
+- decide on an envelope whose header holds a ts past 64 bits
 - decide on a call sealed to the empty seed's key, held beside a P-256 key
 - decide with a held leaf holding a key outside the profile: rsa
 - decide with a pinned leaf holding a key outside the profile: rsa
@@ -1928,7 +1931,7 @@ At the run that generated this file: **2465** cases (**1149** of the run's cases
 - a function nobody defines, with args holding half a surrogate pair
 - a function nobody defines, with args holding a number past the largest double
 
-### `open_result` — 110 cases · whole on success
+### `open_result` — 112 cases · whole on success
 
 - open_result of a request envelope
 - open_result with nothing to work from
@@ -1964,6 +1967,8 @@ At the run that generated this file: **2465** cases (**1149** of the run's cases
 - open_result on an answer whose header holds a ts of -0
 - open_result on an answer whose header holds an exp of -0
 - open_result on an answer whose header holds a ts written with a fraction
+- open_result on an answer whose header holds a ts written with an exponent
+- open_result on an answer whose header holds a ts past 64 bits
 - open_result on an answer whose result holds a number past the largest double
 - open_result on an answer whose result holds the largest double
 - open_result in the leaf form, with a pin holding a key outside the profile: rsa
