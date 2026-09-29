@@ -87,6 +87,44 @@ export default function envelopes({ add, expect }, f) {
     add(`seal_request with ${m} -0`, 'seal_request', RawArgs.edit(args, `"${m}":${args[m]}`, `"${m}":-0`));
     expect(`seal_request with ${m} -0`, { error: 'bad_request', why: `${m} is required` });
   }
+  // A header's integers are ones it carries as themselves: RFC 8785 writes a number as the double it
+  // is, so a ts past 2^53 - 1 was sealed as the nearest double by the core and as itself by the Go
+  // port, whose Canonical wrote an int64's digits — two headers for one call, and the core's not the
+  // one asked for (a lead of the port-parity verification, 2026-09-30). Both refuse it now, in the
+  // core, below the typed API, `ts` first; `exp` absent is ts + 600, which is held too. Raw text where
+  // JavaScript cannot write the number.
+  {
+    const MAX = Number.MAX_SAFE_INTEGER;
+    const base = { ...toMe, params: {}, msg_id: 'p-11', ts: 1757000001, exp: 1757000601 };
+    const out = (m) => ({ error: 'bad_request', why: `${m} is an integer from -(2^53 - 1) to 2^53 - 1` });
+    for (const [what, args, want] of [
+      ['a ts of 2^53 + 1', RawArgs.edit(base, '"ts":1757000001', '"ts":9007199254740993'), out('ts')],
+      ['a ts of 2^53', { ...base, ts: MAX + 1 }, out('ts')],
+      ['a ts of -2^53', { ...base, ts: -(MAX + 1) }, out('ts')],
+      ['a ts of the largest i64, and no exp', RawArgs.edit({ ...base, exp: undefined }, '"ts":1757000001', '"ts":9223372036854775807'), out('ts')],
+      ['an exp of 2^53 + 1', RawArgs.edit(base, '"exp":1757000601', '"exp":9007199254740993'), out('exp')],
+      ['a ts of 2^53 - 1 and no exp, whose default is past it', { ...base, ts: MAX, exp: undefined }, out('exp')],
+      // Two faults: the chain is judged after the header's times, and the seed's length before them.
+      ['a ts of 2^53 and a chain of one', { ...base, ts: MAX + 1, sender_chain: [leafDer] }, out('ts')],
+      ['a ts of 2^53 and no sender_chain', { ...base, ts: MAX + 1, sender_chain: undefined }, out('ts')],
+      ['a ts of 2^53 and a seed of 31 bytes', { ...base, ts: MAX + 1, ephemeral_seed: b64url(new Uint8Array(31)) }, { error: 'bad_request', why: 'ephemeral_seed is 32 bytes' }],
+    ]) {
+      add(`seal_request with ${what}`, 'seal_request', args);
+      expect(`seal_request with ${what}`, want);
+    }
+    // The controls, at the edge: sealed, and held to the envelope the seed seals from the same members.
+    for (const [what, ts, exp] of [['a ts and an exp of 2^53 - 1', MAX, MAX], ['a ts of -(2^53 - 1)', -MAX, -MAX + 600]]) {
+      add(`seal_request with ${what}`, 'seal_request', { ...base, ts, exp });
+      expect(`seal_request with ${what}`, seeded({ msgId: 'p-11', ts, exp }));
+    }
+    const result = { recipient_spki: hostSpki, sender_pkcs8: hostPkcs8, sender_chain: [leafDer, rootDer], result: { ok: true }, msg_id: 'p-12', ts: 1757000001, ephemeral_seed: eph(7) };
+    add('seal_result with a ts of 2^53 + 1', 'seal_result', RawArgs.edit(result, '"ts":1757000001', '"ts":9007199254740993'));
+    expect('seal_result with a ts of 2^53 + 1', out('ts'));
+    add('seal_result with an exp of -2^53', 'seal_result', { ...result, exp: -(MAX + 1) });
+    expect('seal_result with an exp of -2^53', out('exp'));
+    add('seal_result with a ts of 2^53 - 1 and no exp', 'seal_result', { ...result, ts: MAX });
+    expect('seal_result with a ts of 2^53 - 1 and no exp', out('exp'));
+  }
   // The JSON literal null is absent (CONTRACT §0), for the members sealed into the body too: both ports
   // sealed `params: null`, `result: null` and `error: null` as present, so a null params was not the
   // contract's `{}`, a null result alone was sealed, and a null result beside an error was refused as

@@ -81,6 +81,26 @@ impl Form {
     }
 }
 
+/// The largest integer a header carries as itself: 2^53 - 1. RFC 8785 writes a number as the double
+/// it is, so a `ts` of 9007199254740993 was sealed as 9007199254740992 here, and as itself by the Go
+/// port, which wrote an int64 exactly: two headers for one call, and neither the one asked for.
+pub const HEADER_INT_MAX: i64 = (1 << 53) - 1;
+
+/// A header's `ts` and `exp` (`exp` absent is `ts + 600`), each an integer a header carries as itself
+/// (`HEADER_INT_MAX`), or the one that is not, named. `ts` first, so the default is computed only from
+/// one that is: `i64::MAX + 600` overflows.
+fn header_times(ts: i64, exp: Option<i64>) -> Result<(i64, i64)> {
+    let carried = |n: i64| (-HEADER_INT_MAX..=HEADER_INT_MAX).contains(&n);
+    if !carried(ts) {
+        return err("bad_request", "ts is an integer from -(2^53 - 1) to 2^53 - 1");
+    }
+    let exp = exp.unwrap_or(ts + 600);
+    if !carried(exp) {
+        return err("bad_request", "exp is an integer from -(2^53 - 1) to 2^53 - 1");
+    }
+    Ok((ts, exp))
+}
+
 fn header(suite: Suite, kid: &str, msg_id: &str, ts: i64, exp: i64, cty: &str) -> Vec<u8> {
     let h = json!({ "v": 2, "suite": suite.id(), "kid": kid, "msg_id": msg_id, "ts": ts, "exp": exp, "cty": cty });
     canonical(&h).into_bytes()
@@ -139,6 +159,7 @@ pub struct SealRequest<'a> {
 
 /// `{method, params, chain | leaf}`, in that member order, sealed to the recipient leaf's key.
 pub fn seal_request(r: SealRequest<'_>) -> Result<Wire> {
+    let (ts, exp) = header_times(r.ts, r.exp)?;
     // One expansion of the sender's key for the leaf form's fingerprint and the signature.
     let signer = r.sender.signer();
     let (k, v) = proof(r.form, &signer, r.sender_chain)?;
@@ -146,16 +167,7 @@ pub fn seal_request(r: SealRequest<'_>) -> Result<Wire> {
     body.insert("method".into(), Value::String(r.method.clone()));
     body.insert("params".into(), r.params.clone());
     body.insert(k.into(), v);
-    seal_body(
-        r.recipient,
-        &signer,
-        &Value::Object(body),
-        &r.msg_id,
-        r.ts,
-        r.exp.unwrap_or(r.ts + 600),
-        r.cty.as_deref().unwrap_or(CTY_CALL),
-        r.ephemeral_seed,
-    )
+    seal_body(r.recipient, &signer, &Value::Object(body), &r.msg_id, ts, exp, r.cty.as_deref().unwrap_or(CTY_CALL), r.ephemeral_seed)
 }
 
 pub struct SealResult<'a> {
@@ -173,6 +185,7 @@ pub struct SealResult<'a> {
 
 /// `{result | error, chain | leaf}` sealed back to the caller's key with the request's `msg_id`.
 pub fn seal_result(r: SealResult<'_>) -> Result<Wire> {
+    let (ts, exp) = header_times(r.ts, r.exp)?;
     // One expansion of the sender's key for the leaf form's fingerprint and the signature.
     let signer = r.sender.signer();
     let (k, v) = proof(r.form, &signer, r.sender_chain)?;
@@ -183,7 +196,7 @@ pub fn seal_result(r: SealResult<'_>) -> Result<Wire> {
         _ => return err("bad_request", "a result carries exactly one of result and error"),
     };
     body.insert(k.into(), v);
-    seal_body(r.recipient, &signer, &Value::Object(body), &r.msg_id, r.ts, r.exp.unwrap_or(r.ts + 600), CTY_RESULT, r.ephemeral_seed)
+    seal_body(r.recipient, &signer, &Value::Object(body), &r.msg_id, ts, exp, CTY_RESULT, r.ephemeral_seed)
 }
 
 fn members(v: &Value) -> String {

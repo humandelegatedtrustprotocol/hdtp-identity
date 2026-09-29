@@ -8,6 +8,7 @@ package pactidentity
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -454,6 +455,59 @@ func TestNumbersAsECMAScriptPrintsThem(t *testing.T) {
 		if got := Canonical(v); string(got) != c[1] {
 			t.Errorf("%s canonicalises to %s, and ECMAScript prints %s", c[0], got, c[1])
 		}
+	}
+}
+
+// An integer a Go caller hands Canonical is written as the double it is, as a json.Number is and as
+// the core and the seed write every number (RFC 8785): the int and int64 arms wrote the digits, so a
+// header's ts of 2^53 + 1 was 9007199254740993 here and 9007199254740992 there. The CanonicalNumbers
+// rows above reach Canonical as json.Number only.
+func TestAnIntegerIsWrittenAsTheDoubleItIs(t *testing.T) {
+	for _, c := range []struct {
+		v    any
+		want string
+	}{
+		{int64(1<<53 + 1), "9007199254740992"},
+		{int64(-(1<<53 + 1)), "-9007199254740992"},
+		{int64(math.MaxInt64), "9223372036854776000"},
+		{int64(math.MinInt64), "-9223372036854776000"},
+		{int(1<<53 + 1), "9007199254740992"},
+		{int64(1<<53 - 1), "9007199254740991"},
+		{int(-7), "-7"},
+	} {
+		if got := string(Canonical(map[string]any{"n": c.v})); got != `{"n":`+c.want+`}` {
+			t.Errorf("%T %v canonicalises to %s, and ECMAScript prints %s", c.v, c.v, got, c.want)
+		}
+	}
+}
+
+// The typed API holds a header's integers as the JSON boundary does: the check is in the seal itself
+// (headerTimes), below both, and TS is judged before the Exp a zero asks to be TS + 600.
+func TestTheTypedSealRefusesAHeaderIntegerItCannotCarry(t *testing.T) {
+	alina := reviewIdentity(t, "ed25519", reviewEndpoint)
+	o := SealOpts{RecipientKey: alina.leafKey.Public(), Sender: alina.leafKey, Form: "chain", SenderChain: [][]byte{alina.leaf, alina.root}, MsgID: "m"}
+	for _, c := range []struct {
+		ts, exp int64
+		want    string
+	}{
+		{1 << 53, 0, "ts is an integer from -(2^53 - 1) to 2^53 - 1"},
+		{math.MaxInt64, 0, "ts is an integer from -(2^53 - 1) to 2^53 - 1"},
+		{1<<53 - 1, 0, "exp is an integer from -(2^53 - 1) to 2^53 - 1"},
+		{1, 1 << 53, "exp is an integer from -(2^53 - 1) to 2^53 - 1"},
+	} {
+		o.TS, o.Exp = c.ts, c.exp
+		if _, err := SealRequest(o); err == nil || err.Error() != c.want {
+			t.Errorf("SealRequest ts %d exp %d: %v, want %q", c.ts, c.exp, err, c.want)
+		}
+		o.Result = json.RawMessage(`{}`)
+		if _, err := SealResult(o); err == nil || err.Error() != c.want {
+			t.Errorf("SealResult ts %d exp %d: %v, want %q", c.ts, c.exp, err, c.want)
+		}
+		o.Result = nil
+	}
+	o.TS, o.Exp = 1<<53-1, 1<<53-1
+	if _, err := SealRequest(o); err != nil {
+		t.Errorf("the largest ts a header carries: %v", err)
 	}
 }
 

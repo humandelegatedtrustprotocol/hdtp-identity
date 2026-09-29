@@ -113,9 +113,11 @@ func writeCanonical(b *bytes.Buffer, v any) {
 	case float64:
 		b.WriteString(es6Number(x))
 	case int:
-		b.WriteString(strconv.Itoa(x))
+		b.WriteString(canonicalNumber(strconv.Itoa(x)))
 	case int64:
-		b.WriteString(strconv.FormatInt(x, 10))
+		// As the double it is, past 2^53, as every number here: this wrote the int64's digits, so a
+		// header's ts of 9007199254740993 was that here and 9007199254740992 in the core and the seed.
+		b.WriteString(canonicalNumber(strconv.FormatInt(x, 10)))
 	case string:
 		writeJSONString(b, x)
 	case []any:
