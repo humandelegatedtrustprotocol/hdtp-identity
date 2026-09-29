@@ -3,6 +3,7 @@ package pactidentity
 import (
 	"encoding/json"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -98,20 +99,20 @@ func TestAnEmptyExpectationIsNotGivenOnlyToAGoCaller(t *testing.T) {
 	}
 }
 
-// An integer is what the core reads as one (serde_json's `as_i64`): no fraction, no exponent, within
-// 64 bits, and not -0, which serde_json reads as a float. strconv reads -0 as 0, so this port sealed
-// an `exp` of -0 and decided a limits `now` of -0 where the core refused both (S3-1).
+// An integer is what the core reads as one (serde_json's `as_i64`): js/boundary-text.json's list,
+// which the core's the_arguments_text_is_read_as_the_go_port_reads_it reads too — no fraction, no
+// exponent, within 64 bits, and not -0, which serde_json reads as a float. strconv reads -0 as 0, so
+// this port sealed an `exp` of -0 and decided a limits `now` of -0 where the core refused both (S3-1).
 func TestAnIntegerIsWhatTheCoreReadsAsOne(t *testing.T) {
-	for text, want := range map[string]bool{
-		"0": true, "7": true, "-7": true, "9223372036854775807": true, "-9223372036854775808": true,
-		"-0": false, "7.0": false, "1.5": false, "1e2": false, `"7"`: false, "9223372036854775808": false, "-9223372036854775809": false,
-	} {
-		if _, isInt := integerText(text); isInt != want {
-			t.Errorf("integerText(%s) = %v, want %v", text, isInt, want)
-		}
-		_, err := args{"k": json.RawMessage(text)}.optInt("k")
-		if (err == nil) != want {
-			t.Errorf("optInt(%s): %v", text, err)
+	doc := boundaryText(t)
+	for list, want := range map[string]bool{"read": true, "refused": false} {
+		for _, text := range doc.Integers[list] {
+			if _, isInt := integerText(text); isInt != want {
+				t.Errorf("integerText(%s) = %v, want %v", text, isInt, want)
+			}
+			if _, err := (args{"k": json.RawMessage(text)}).optInt("k"); (err == nil) != want {
+				t.Errorf("optInt(%s): %v", text, err)
+			}
 		}
 	}
 	if n, err := (args{"k": json.RawMessage("null")}).optInt("k"); n != nil || err != nil {
@@ -120,6 +121,39 @@ func TestAnIntegerIsWhatTheCoreReadsAsOne(t *testing.T) {
 	if _, isWhole := limitsWhole(json.Number("-0")); isWhole {
 		t.Error("limitsWhole(-0) read a whole number")
 	}
+}
+
+// boundaryText is js/boundary-text.json: the arguments text both ports read alike, one list for both.
+type boundaryTextDoc struct {
+	MaxDepth int `json:"max_depth"`
+	Nested   struct {
+		Within json.RawMessage `json:"within"`
+		Beyond json.RawMessage `json:"beyond"`
+	} `json:"nested"`
+	Calls []struct {
+		Args string          `json:"args"`
+		Want json.RawMessage `json:"want"`
+	} `json:"calls"`
+	Integers map[string][]string `json:"integers"`
+}
+
+func boundaryText(t *testing.T) boundaryTextDoc {
+	t.Helper()
+	raw, err := os.ReadFile("../js/boundary-text.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc boundaryTextDoc
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	return doc
+}
+
+// sameJSON is whether two JSON texts hold one value.
+func sameJSON(a, b []byte) bool {
+	var x, y any
+	return json.Unmarshal(a, &x) == nil && json.Unmarshal(b, &y) == nil && reflect.DeepEqual(x, y)
 }
 
 // A vault document's KDF parameters are whole numbers written as whole numbers, as the core reads
@@ -156,42 +190,33 @@ func TestAVaultsKDFNumbersAreWholeNumbers(t *testing.T) {
 }
 
 // What one port's parser refuses and the other's reads is named at Call before any member is read,
-// in the core's words, the first in text order (R40, S3-2); and every text this port reads refuses
-// it, as serde_json does. The edges: 127 containers deep reads and 128 does not;
-// 1.7976931348623158e308 rounds to the largest double and 1.7976931348623159e308 to infinity; 1e-400
-// is 0; a number in a string is text. Text that does not parse is `args is a JSON object`, as the
-// core answers it (the adapter's request line cannot carry it, so parity cannot ask).
+// in the core's words (R40, S3-2), and text that does not parse is `args is a JSON object`:
+// js/boundary-text.json's calls, which the core's the_arguments_text_is_read_as_the_go_port_reads_it
+// answers too (the adapter's request line cannot carry text that does not parse, so parity cannot
+// ask). Every text this port reads refuses the same, as serde_json does.
 func TestJSONTheCoreDoesNotReadIsNotReadHere(t *testing.T) {
-	const beyond = `{"error":"bad_request","why":"args: a number is outside the range of a double"}`
-	const deep = `{"error":"bad_request","why":"args: nested more than 127 deep"}`
-	nested := func(n int) string { return strings.Repeat("[", n) + "1" + strings.Repeat("]", n) }
-	for args, want := range map[string]string{
-		`{"x":1e400,"manifest":"{}"}`:            beyond,
-		`{"x":-1e400}`:                           beyond,
-		`{"x":1.7976931348623159e308}`:           beyond,
-		`{"x":1e400,"y":` + nested(128) + `}`:    beyond,
-		`{"y":` + nested(128) + `,"x":1e400}`:    deep,
-		`{"spki":` + nested(126) + `}`:           `{"error":"parse","why":"not base64url"}`,
-		`{"spki":` + nested(127) + `}`:           deep,
-		`{"x":1.7976931348623158e308}`:           `{"error":"bad_request","why":"key_info takes no member \"x\""}`,
-		`{"x":1e-400}`:                           `{"error":"bad_request","why":"key_info takes no member \"x\""}`,
-		`{"x":"1e400","y":"[[[[","z":"\"1e400"}`: `{"error":"bad_request","why":"key_info takes no member \"x\""}`,
-		`{`:                                      `{"error":"bad_request","why":"args is a JSON object"}`,
-		`{"spki":"x"} x`:                         `{"error":"bad_request","why":"args is a JSON object"}`,
-		"{\"spki\":\"\x01\"}":                    `{"error":"bad_request","why":"args is a JSON object"}`,
-		`{"spki":"\q"}`:                          `{"error":"bad_request","why":"args is a JSON object"}`,
-	} {
-		if out := string(Call("key_info", json.RawMessage(args))); out != want {
-			t.Errorf("key_info(%.60s) = %s, want %s", args, out, want)
+	doc := boundaryText(t)
+	if doc.MaxDepth != jsonMaxDepth {
+		t.Fatalf("jsonMaxDepth is %d and js/boundary-text.json says %d", jsonMaxDepth, doc.MaxDepth)
+	}
+	for _, c := range doc.Calls {
+		if out := Call("key_info", json.RawMessage(c.Args)); !sameJSON(out, c.Want) {
+			t.Errorf("key_info(%.60s) = %s, want %s", c.Args, out, c.Want)
 		}
 	}
-	for _, text := range []string{`{"x":1e400}`, `{"x":` + nested(127) + `}`} {
+	nested := func(n int) string { return strings.Repeat("[", n) + "1" + strings.Repeat("]", n) }
+	for n, want := range map[int]json.RawMessage{jsonMaxDepth - 1: doc.Nested.Within, jsonMaxDepth: doc.Nested.Beyond} {
+		if out := Call("key_info", json.RawMessage(`{"spki":`+nested(n)+`}`)); !sameJSON(out, want) {
+			t.Errorf("key_info of an spki %d deep = %s, want %s", n, out, want)
+		}
+	}
+	for _, text := range []string{`{"x":1e400}`, `{"x":` + nested(jsonMaxDepth) + `}`} {
 		if _, err := decodeJSON([]byte(text)); err == nil {
 			t.Errorf("decodeJSON read %.40s", text)
 		}
 	}
-	if _, err := decodeJSON([]byte(`{"x":` + nested(126) + `}`)); err != nil {
-		t.Errorf("decodeJSON at 127 deep: %v", err)
+	if _, err := decodeJSON([]byte(`{"x":` + nested(jsonMaxDepth-1) + `}`)); err != nil {
+		t.Errorf("decodeJSON at %d deep: %v", jsonMaxDepth, err)
 	}
 }
 
