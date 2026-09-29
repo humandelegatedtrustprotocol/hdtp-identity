@@ -54,6 +54,15 @@ export default function vault({ add, expect }, f) {
     add(`vault_open of what vault_seal made, with ${what}`, 'vault_open', RawArgs.edit(opened, from, to));
     expect(`vault_open of what vault_seal made, with ${what}`, { error: 'vault', why: 'kdf parameters out of range' });
   }
+  // A vault's document is written as a sealed plaintext is (canonical::in_order, Go inOrder): the core
+  // sealed what serde_json wrote and the Go port the caller's text, so one document sealed under one
+  // salt and nonce was two ciphertexts (a lead of the port-parity verification, 2026-09-30).
+  for (const [what, text] of [
+    ['a member written twice', '{"v":2,"roots":[],"x":1,"x":2}'],
+    ['numbers and escapes JSON.stringify does not write', '{"v":2,"roots":[],"n":123456789012345678901234567890,"f":1.50,"e":1e2,"z":-0,"s":"\\u00e9\\/"}'],
+  ]) {
+    add(`vault_seal of a document holding ${what}`, 'vault_seal', RawArgs.edit({ passphrase: 'a passphrase', plaintext: '@@', kdf: K, salt: SALT, nonce: NONCE }, '"plaintext":"@@"', `"plaintext":${text}`));
+  }
   add('vault_seal with a nonce that is not 12 bytes', 'vault_seal', { passphrase: 'a passphrase', plaintext: { v: 2 }, kdf: K, salt: SALT, nonce: b64url(new Uint8Array(8)) });
   add('vault_seal with an empty passphrase', 'vault_seal', { passphrase: '', plaintext: { v: 2 }, kdf: K });
   add('vault_seal with no plaintext', 'vault_seal', { passphrase: 'a passphrase', kdf: K });

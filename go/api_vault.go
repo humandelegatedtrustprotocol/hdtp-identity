@@ -22,10 +22,8 @@ func callVaultSeal(a args) json.RawMessage {
 	if raw == nil {
 		return fail(codeArgs, "plaintext is required")
 	}
-	pt, err := compactJSON(raw)
-	if err != nil {
-		return fail("parse", "plaintext is not JSON")
-	}
+	// Written as a sealed plaintext is (inOrder) by VaultSeal, as the core's seal writes it.
+	pt := []byte(raw)
 	// The generation is a bad request, as the Rust core answers it; the rest is the vault's.
 	if plaintextV(pt) != PlaintextV {
 		return fail("bad_request", generationWhy)

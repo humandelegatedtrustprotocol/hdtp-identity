@@ -145,7 +145,7 @@ func sealRequest(o SealOpts) (*Envelope, error) {
 	if err := headerTimes(o.TS, o.Exp); err != nil {
 		return nil, err
 	}
-	params, err := compactJSON(o.Params)
+	params, err := inOrder(o.Params)
 	if err != nil {
 		return nil, errors.New("params is not JSON")
 	}
@@ -197,13 +197,13 @@ func sealResult(o SealOpts) (*Envelope, error) {
 	var lead []byte
 	switch {
 	case o.Result != nil && o.Error == nil:
-		r, err := compactJSON(o.Result)
+		r, err := inOrder(o.Result)
 		if err != nil {
 			return nil, errors.New("result is not JSON")
 		}
 		lead = concat([]byte(`{"result":`), r)
 	case o.Error != nil && o.Result == nil:
-		e, err := compactJSON(o.Error)
+		e, err := inOrder(o.Error)
 		if err != nil {
 			return nil, errors.New("error is not JSON")
 		}

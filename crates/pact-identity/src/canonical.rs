@@ -4,11 +4,24 @@ use serde_json::Value;
 
 pub fn canonical(v: &Value) -> String {
     let mut out = String::new();
-    write(v, &mut out);
+    write(v, true, &mut out);
     out
 }
 
-fn write(v: &Value, out: &mut String) {
+/// A JSON value a caller handed in, as it is sealed into a plaintext (`params`, `result`, `error`, a
+/// vault's document): numbers and strings as RFC 8785 writes them, and members in the order the value
+/// holds them — the order they were written in, a member written twice once, where it first appeared,
+/// with the value it was given last, as serde_json's `preserve_order` map reads it (and JSON.parse).
+/// Not sorted: Appendix B's plaintexts write `name` before `arguments`. serde_json's own writer
+/// printed `1e2` as `100.0` and `-0` as `-0.0`, and the Go port sealed the caller's text as it was
+/// written, duplicates and escapes and all: two plaintexts for one call.
+pub fn in_order(v: &Value) -> String {
+    let mut out = String::new();
+    write(v, false, &mut out);
+    out
+}
+
+fn write(v: &Value, sorted: bool, out: &mut String) {
     match v {
         Value::Null => out.push_str("null"),
         Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
@@ -20,13 +33,15 @@ fn write(v: &Value, out: &mut String) {
                 if i > 0 {
                     out.push(',');
                 }
-                write(x, out);
+                write(x, sorted, out);
             }
             out.push(']');
         }
         Value::Object(o) => {
             let mut keys: Vec<&String> = o.keys().collect();
-            keys.sort_by(|a, b| a.encode_utf16().cmp(b.encode_utf16()));
+            if sorted {
+                keys.sort_by(|a, b| a.encode_utf16().cmp(b.encode_utf16()));
+            }
             out.push('{');
             for (i, k) in keys.iter().enumerate() {
                 if i > 0 {
@@ -34,7 +49,7 @@ fn write(v: &Value, out: &mut String) {
                 }
                 out.push_str(&string(k));
                 out.push(':');
-                write(&o[*k], out);
+                write(&o[*k], sorted, out);
             }
             out.push('}');
         }
@@ -108,6 +123,14 @@ mod tests {
         let v: Value =
             serde_json::from_str(r#"{"v":2,"suite":"PACT-SEAL-P256","kid":"k","ts":1,"exp":2,"cty":"c","msg_id":"m\n"}"#).unwrap();
         assert_eq!(canonical(&v), r#"{"cty":"c","exp":2,"kid":"k","msg_id":"m\n","suite":"PACT-SEAL-P256","ts":1,"v":2}"#);
+    }
+    /// A sealed value keeps its members in the order it holds them, where `canonical` sorts them; a
+    /// member read twice is held once, where it first appeared, with its last value.
+    #[test]
+    fn in_order_keeps_the_order_written() {
+        let v: Value = serde_json::from_str(r#"{"name":"x","arguments":{"b":1,"a":[2.50,-0,1e2]},"name":"y"}"#).unwrap();
+        assert_eq!(in_order(&v), r#"{"name":"y","arguments":{"b":1,"a":[2.5,0,100]}}"#);
+        assert_eq!(canonical(&v), r#"{"arguments":{"a":[2.5,0,100],"b":1},"name":"y"}"#);
     }
     /// The rows are contract/contract.json's `CanonicalNumbers`, one list, which go/review_test.go's
     /// TestNumbersAsECMAScriptPrintsThem runs through the Go port too. (Each port carried its own copy
