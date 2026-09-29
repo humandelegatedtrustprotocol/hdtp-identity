@@ -422,6 +422,10 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   The vectors stay, a fixed record whose `about` and `source` say what made them (pact-cloud 6c771f7,
   `limits.ts` sha256 85e3ff79…), replayed as before by the crate, the Wasm and the Go port. The
   contract's §6.3 and `limits_decide` note, and the crate's and the tests' headers, say "was".
+- **The two copies of the Appendix B case list are held to each other** (TC-12's protocol half):
+  `js/seed.test.mjs` compares `js/appendix-b-reader.json` with pact-protocol's
+  `vectors/appendix-b-reader.json`, byte for byte, from the pact-protocol beside this repository, as
+  the gate reads it. pact-protocol's copy arrives with its PR #10, so this lands with it.
 
 ## 0.4.1 — 2026-09-28
 
