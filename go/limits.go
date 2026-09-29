@@ -1,9 +1,10 @@
 package pactidentity
 
-// PACT SPEC §12's per-caller call budgets: the Go port of crates/pact-limits, for the node's layer 2
-// (pact-gateway docs/release/two-layer-limits-2026-09-28.md). The same token buckets, the same keys,
-// the same arithmetic in the same order, held to the Rust crate by parity and to the cloud's
-// TypeScript by js/cases/limits-vectors.json (limits_test.go).
+// PACT SPEC §12's per-caller call budgets: the Go port of crates/pact-limits, which this port's
+// `limits_rules_check` and `limits_decide` answer with. The node decides its budgets in its sidecar,
+// pact-limitd, with the Rust crate itself; nothing outside this module calls these. The same token
+// buckets, the same keys, the same arithmetic in the same order, held to the Rust crate by parity
+// and to the cloud's TypeScript by js/cases/limits-vectors.json (limits_test.go).
 //
 // One thing Go does that Rust and JavaScript do not: the compiler may fuse x*y + z into one
 // fused multiply-add on arm64, which rounds once where the others round twice. Every such sum here
@@ -57,11 +58,14 @@ var LimitsRuleMembers = []string{
 // LimitsRules are the numbers of §12's call budgets, by member name.
 type LimitsRules map[string]float64
 
-// Check says whether the rules can be enforced as written: crates/pact-limits's Rules::check.
+// Check says whether the rules can be enforced as written: crates/pact-limits's Rules::check. A
+// member the map does not hold is `<name> is a number`, as a document without it is answered; it
+// was read as 0 and refused as `is at least 1`, a rule about a number nobody wrote (T21). The
+// crate's Rules is a struct and cannot lack one.
 func (r LimitsRules) Check() error {
 	for _, name := range LimitsRuleMembers {
-		v := r[name]
-		if math.IsNaN(v) || math.IsInf(v, 0) {
+		v, held := r[name]
+		if !held || math.IsNaN(v) || math.IsInf(v, 0) {
 			return errArg(name + " is a number")
 		}
 		if name == "contact_calls_per_second" {
@@ -84,6 +88,9 @@ func (r LimitsRules) Check() error {
 func (r LimitsRules) identityPerSecond(contactCap float64) float64 {
 	return math.Max(1, math.Min(contactCap*r["contact_calls_per_second"], r["identity_capacity_per_second"]))
 }
+
+// limitsChargeKinds are the kinds of charge, in the order the core names them (api/limits.rs KINDS).
+var limitsChargeKinds = []string{"contact_in", "guest_in", "guest_total", "contact_out", "stranger_out", "integration", "pending_in"}
 
 // LimitsCharge is what a call is charged to: Kind and the members that kind reads.
 type LimitsCharge struct {
@@ -143,7 +150,13 @@ type LimitsDecision struct {
 }
 
 // LimitsDecide charges one call to every bucket of the charge or to none: crates/pact-limits's decide.
+// A Kind this port does not know is refused, `Which` "charge.kind", and no wait refills it: it had
+// no bucket, so nothing refused it and the call was allowed (T21). The crate's Charge is an enum and
+// cannot hold one; the JSON boundary refuses it before it gets here.
 func LimitsDecide(r LimitsRules, c LimitsCharge, now int64, store LimitsStore) LimitsDecision {
+	if !contains(limitsChargeKinds, c.Kind) {
+		return LimitsDecision{Which: "charge.kind"}
+	}
 	if c.Kind == "pending_in" {
 		if c.Held >= r["pending_in_cap"] {
 			return LimitsDecision{Which: "pending_in"}

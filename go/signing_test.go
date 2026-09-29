@@ -97,3 +97,14 @@ func TestRedirectAllowedIsHTTPSOrHTTPToLoopbackOnly(t *testing.T) {
 		}
 	}
 }
+
+// No request at all is `request is required`, as the core's check answers a request that is not an
+// object (T21): it was judged as an empty one and named its first member.
+func TestSigningRequestCheckOfNoRequestIsRequestIsRequired(t *testing.T) {
+	if _, err := SigningRequestCheck(nil, "http://localhost:8080", signingNow, nil); err == nil || err.Error() != "request is required" {
+		t.Errorf("nil: %v", err)
+	}
+	if _, err := SigningRequestCheck(map[string]any{}, "http://localhost:8080", signingNow, nil); err == nil || err.Error() != "csr is required" {
+		t.Errorf("an empty request: %v", err)
+	}
+}
