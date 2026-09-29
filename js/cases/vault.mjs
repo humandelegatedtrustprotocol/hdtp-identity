@@ -153,7 +153,7 @@ export default function vault({ add, expect }, f) {
   const sibling = p256FromSeed(seed('parity/card-held-sibling'));
   const siblingDer = buildRoot({ cn: 'Alina at work', key: sibling, notBefore: BORN, label: 'parity/sibling' });
   const siblingCsr = f.wasm.call('csr_new', { cn: 'A Host', host_pkcs8: b64url(pkcs8Of(sibling.priv)), endpoint: ENDPOINT }).der;
-  add('wallet_issue: a request carrying a CARD-held sibling root\'s key', 'wallet_issue', { vault_plaintext: { ...held, roots: [...held.roots, { fingerprint: fingerprint(sibling.pub), cn: 'Alina at work', cert: b64url(siblingDer), holder: { kind: 'piv' } }] }, record_plaintext: record, root_fingerprint: rootFp, csr: siblingCsr, now });
+  add('wallet_issue: a request carrying a CARD-held sibling root\'s key', 'wallet_issue', { vault_plaintext: { ...held, roots: [...held.roots, { fingerprint: fingerprint(sibling.pub), cn: 'Alina at work', cert: b64url(siblingDer), created: now, holder: { kind: 'piv' } }] }, record_plaintext: record, root_fingerprint: rootFp, csr: siblingCsr, now });
 
   // The review of PR #29 (C6): a ledger entry that does not read is REFUSED, and two ports that both
   // skipped it would agree with each other while one live leaf per identity failed open. So these carry
@@ -196,4 +196,147 @@ export default function vault({ add, expect }, f) {
     add(`vault_open of what vault_seal made, with ${what}`, 'vault_open', { ...opened, vault: { ...doc, ...over } });
     expect(`vault_open of what vault_seal made, with ${what}`, want);
   }
+
+  // ── I: one KDF reader, the salt floor, and the documents wallet_issue reads (S5) ──────────────────
+  //
+  // A caller's `kdf` and a document's are read by one reader in each port, never truncated. The Go port
+  // read a caller's with encoding/json, before the passphrase and the plaintext, and answered `parse`
+  // `kdf does not read` for a number of another type or spelling; the core read a `kdf` that was not an
+  // object, or a `name` that was not a string, as the default, and sealed (R28, C4, F17). Hand-written:
+  // the generator sends a string for `kdf` and nothing inside it.
+  const range = { error: 'vault', why: 'kdf parameters out of range' };
+  const unknown = { error: 'vault', why: 'unknown kdf' };
+  const sealWith = (over) => ({ passphrase: 'a passphrase', plaintext: { v: 2 }, kdf: K, salt: SALT, nonce: NONCE, ...over });
+  for (const [what, args, want] of [
+    ['a kdf that is a number', sealWith({ kdf: 5 }), { error: 'bad_request', why: 'kdf is required' }],
+    ['a kdf that is a list', sealWith({ kdf: [8192, 1, 1] }), { error: 'bad_request', why: 'kdf is required' }],
+    ['a kdf that is a string, and no passphrase', { plaintext: { v: 2 }, kdf: 'x' }, { error: 'bad_request', why: 'passphrase is required' }],
+    ['a kdf nobody implements, and an empty passphrase', sealWith({ passphrase: '', kdf: { name: 'scrypt' } }), { error: 'bad_request', why: 'empty passphrase' }],
+    ['a kdf that is a string, and an earlier generation', sealWith({ plaintext: { v: 1 }, kdf: 'x' }), { error: 'bad_request', why: 'a vault plaintext is v 2: the root, or the record' }],
+    ['a kdf whose name is a number', sealWith({ kdf: { ...K, name: 5 } }), unknown],
+    ['a kdf whose m_kib is a string', sealWith({ kdf: { ...K, m_kib: '8192' } }), range],
+    ['a kdf whose m_kib is negative', sealWith({ kdf: { ...K, m_kib: -1 } }), range],
+    ['a kdf whose m_kib is 8192.5', sealWith({ kdf: { ...K, m_kib: 8192.5 } }), range],
+    ['a kdf whose t is true', sealWith({ kdf: { ...K, t: true } }), range],
+  ]) {
+    add(`vault_seal with ${what}`, 'vault_seal', args);
+    expect(`vault_seal with ${what}`, want);
+  }
+  // A whole number written as a fraction or an exponent, and -0: the core's reader takes each for a
+  // float. Raw text: JSON.stringify writes none of them.
+  for (const [what, from, to] of [
+    ['t spelled 1.0', '"t":1,', '"t":1.0,'],
+    ['m_kib spelled 8192.0', '"m_kib":8192,', '"m_kib":8192.0,'],
+    ['p spelled 1e0', '"p":1}', '"p":1e0}'],
+    ['t spelled -0', '"t":1,', '"t":-0,'],
+  ]) {
+    add(`vault_seal with a kdf whose ${what}`, 'vault_seal', RawArgs.edit(sealWith({}), from, to));
+    expect(`vault_seal with a kdf whose ${what}`, range);
+  }
+  // Members by their exact names, and no others. encoding/json matched `M_KIB` to m_kib, so the Go port
+  // refused 8 KiB as out of range, where the core read no `M_KIB` and sealed under the default. A null
+  // member is left out: that case seals, and the two documents are compared whole (salt and nonce are
+  // given).
+  add('vault_seal with a kdf member named in capitals', 'vault_seal', sealWith({ kdf: { M_KIB: 8, t: 1, p: 1 } }));
+  expect('vault_seal with a kdf member named in capitals', { error: 'vault', why: 'kdf holds name, m_kib, t and p, and nothing else: M_KIB' });
+  add('vault_seal with a kdf whose name is null', 'vault_seal', sealWith({ kdf: { ...K, name: null } }));
+
+  // The salt floor, in both ports' own words at both ends: the core passed Argon2id's (`salt is too
+  // short`) and the Go port said `not a pact-vault/1 document` (R29, C6). The first salt out and the last
+  // in, from contract/contract.json's VaultSaltMin; a nonce of the wrong length is judged first.
+  const floor = f.defs.VaultSaltMin.const;
+  const short = { error: 'vault', why: `salt is at least ${floor} bytes` };
+  add('vault_seal with a salt one byte short', 'vault_seal', sealWith({ salt: b64url(new Uint8Array(floor - 1).fill(3)) }));
+  expect('vault_seal with a salt one byte short', short);
+  add('vault_seal with the shortest salt (the control)', 'vault_seal', sealWith({ salt: b64url(new Uint8Array(floor).fill(3)) }));
+  add('vault_seal with a salt one byte short and a nonce of 8 bytes', 'vault_seal', sealWith({ salt: b64url(new Uint8Array(floor - 1)), nonce: b64url(new Uint8Array(8)) }));
+  expect('vault_seal with a salt one byte short and a nonce of 8 bytes', { error: 'vault', why: 'nonce is 12 bytes' });
+  add('vault_seal with an empty salt', 'vault_seal', sealWith({ salt: '' }));
+  expect('vault_seal with an empty salt', short);
+
+  // A document's header, read in its members' order by the one reader: a document that is not an
+  // object was damage to the core and not a vault to the Go port; a `kdf` absent, null, not an object or
+  // with no `name` opened in the core under the default and was unknown to the Go port; a parameter
+  // absent was the default in the core and zero in the Go port (R30, T12, F17, C5).
+  const withDoc = (over) => ({ passphrase: 'a passphrase', vault: { ...doc, ...over } });
+  const withKdf = (over) => withDoc({ kdf: { ...doc.kdf, ...over } });
+  const notVault = { error: 'vault', why: 'not a pact-vault/1 document' };
+  const noKdf = { ...doc };
+  delete noKdf.kdf;
+  const { name: _name, ...nameless } = doc.kdf;
+  const { m_kib: _m, ...memoryless } = doc.kdf;
+  for (const [what, args, want] of [
+    ['a vault that is a string', { passphrase: 'a passphrase', vault: 'x' }, notVault],
+    ['a vault that is a list', { passphrase: 'a passphrase', vault: [] }, notVault],
+    ['no passphrase', { vault: doc }, { error: 'bad_request', why: 'passphrase is required' }],
+    ['no kdf', { passphrase: 'a passphrase', vault: noKdf }, unknown],
+    ['a kdf that is null', withDoc({ kdf: null }), unknown],
+    ['a kdf that is a string', withDoc({ kdf: 'argon2id' }), unknown],
+    ['a kdf with no name', withDoc({ kdf: nameless }), unknown],
+    ['a kdf whose name is a number', withKdf({ name: 5 }), unknown],
+    ['a kdf with no m_kib', withDoc({ kdf: memoryless }), range],
+    ['a kdf whose m_kib is null', withKdf({ m_kib: null }), range],
+    ['a kdf whose t is 1.9', withKdf({ t: 1.9 }), range],
+    ['a kdf whose p is 257', withKdf({ p: 257 }), range],
+    ['a kdf whose m_kib is 2^32 + 8192', withKdf({ m_kib: 4294975488 }), range],
+    ['a salt one byte short', withDoc({ salt: b64url(new Uint8Array(floor - 1).fill(3)) }), short],
+    ['no salt', withDoc({ salt: undefined }), short],
+    ['a salt that is a number', withDoc({ salt: 5 }), short],
+    ['a salt one byte short and a nonce that is not base64url', withDoc({ salt: b64url(new Uint8Array(floor - 1)), nonce: '!!!' }), damaged],
+    ['a salt one byte short and no nonce', withDoc({ salt: b64url(new Uint8Array(floor - 1)), nonce: undefined }), damaged],
+  ]) {
+    add(`vault_open of what vault_seal made, with ${what}`, 'vault_open', JSON.parse(JSON.stringify(args)));
+    expect(`vault_open of what vault_seal made, with ${what}`, want);
+  }
+
+  // The documents wallet_issue reads, held to CONTRACT §6 in both ports, in the core's order and words
+  // (F18, R31). The Go port decoded them into typed structs, so a member of the wrong type anywhere was
+  // `arguments do not read` and a `pkcs8` of "" was a card-held root; the core read a wrong type as
+  // absent or skipped it, and carried the rest. A root key that does not read is refused in its
+  // reader's class, where the Go port said `bad_request` `the root key does not parse`.
+  const [root0] = held.roots;
+  const withRoot = (over) => issueWith({ vault_plaintext: { ...held, roots: [{ ...root0, ...over }] } });
+  const rootUnread = (whose, m) => ({ error: 'bad_request', why: `the ${whose}'s root 0 does not read${m ? `: ${m}` : ''}` });
+  const { created: _created, ...uncreated } = root0;
+  for (const [what, args, want] of [
+    ['a root key that is not base64url', withRoot({ pkcs8: '!!!' }), { error: 'parse', why: 'not base64url' }],
+    ['a root key that is not a key', withRoot({ pkcs8: 'AAAA' }), { error: 'parse' }],
+    ['a root key that is empty', withRoot({ pkcs8: '' }), { error: 'parse' }],
+    ['a root key outside the profile', withRoot({ pkcs8: f.outside.Pkcs8 }), { error: 'unsupported', why: 'unsupported key type 1.3.101.112' }],
+    ['a root key that is a number', withRoot({ pkcs8: 5 }), rootUnread('vault', 'pkcs8')],
+    ['a root with no created', issueWith({ vault_plaintext: { ...held, roots: [uncreated] } }), rootUnread('vault', 'created')],
+    ['a root whose created is a number', withRoot({ created: 5 }), rootUnread('vault', 'created')],
+    ['a root whose cert is a number', withRoot({ cert: 5 }), rootUnread('vault', 'cert')],
+    ['a root whose cn is a number', withRoot({ cn: 5 }), rootUnread('vault', 'cn')],
+    ['a root whose fingerprint is not one', withRoot({ fingerprint: 'sha256:x' }), rootUnread('vault', 'fingerprint')],
+    ['a root whose alg is not in the profile', withRoot({ alg: 'rsa' }), rootUnread('vault', 'alg')],
+    ['a root whose holder is a string', withRoot({ holder: 'piv' }), rootUnread('vault', 'holder')],
+    ['a root whose rebound_at is a string', withRoot({ rebound_at: 'x' }), rootUnread('vault', 'rebound_at')],
+    ['a root with a member it does not hold', withRoot({ note: 'hello' }), rootUnread('vault', 'note')],
+    ['a root that is not an object', issueWith({ vault_plaintext: { ...held, roots: ['a root'] } }), rootUnread('vault', '')],
+    ['roots that are not a list', issueWith({ vault_plaintext: { ...held, roots: {} } }), { error: 'bad_request', why: "the vault's roots is a list" }],
+    ['a vault with no roots', issueWith({ vault_plaintext: { v: 2 } }), { error: 'bad_request', why: "the vault's roots is a list" }],
+    ['a prf that is a number', issueWith({ vault_plaintext: { ...held, prf: 5 } }), { error: 'bad_request', why: "the vault's prf does not read" }],
+    ['a prf of 31 bytes', issueWith({ vault_plaintext: { ...held, prf: b64url(new Uint8Array(31)) } }), { error: 'bad_request', why: "the vault's prf does not read" }],
+    ['a passkey with nothing in it', issueWith({ vault_plaintext: { ...held, passkey: {} } }), { error: 'bad_request', why: "the vault's passkey does not read" }],
+    ['a record whose roots are not a list', issueWith({ record_plaintext: { ...record, roots: 'x' } }), { error: 'bad_request', why: "the record's roots is a list" }],
+    ['a record whose root has no created', issueWith({ record_plaintext: { ...record, roots: [uncreated] } }), rootUnread('record', 'created')],
+    ['a record whose contacts are a number', issueWith({ record_plaintext: { ...record, contacts: 5 } }), { error: 'bad_request', why: "the record's contacts is a list" }],
+    ['a record whose contact is a number', issueWith({ record_plaintext: { ...record, contacts: [5] } }), { error: 'bad_request', why: "the record's contact 0 does not read" }],
+    ['a record whose contact has no endpoint', issueWith({ record_plaintext: { ...record, contacts: [{ root: rootFp }] } }), { error: 'bad_request', why: "the record's contact 0 does not read: endpoint" }],
+    ['a record whose contact was added at no instant', issueWith({ record_plaintext: { ...record, contacts: [{ root: rootFp, endpoint: ENDPOINT, added: 'yesterday' }] } }), { error: 'bad_request', why: "the record's contact 0 does not read: added" }],
+    ['a record whose contact holds its state', issueWith({ record_plaintext: { ...record, contacts: [{ root: rootFp, endpoint: ENDPOINT, state: 'active' }] } }), { error: 'bad_request', why: "the record's contact 0 does not read: state" }],
+    ['a record whose passkey is a string', issueWith({ record_plaintext: { ...record, passkey: 'x' } }), { error: 'bad_request', why: "the record's passkey does not read" }],
+    ['a record whose backup_verified_at is negative', issueWith({ record_plaintext: { ...record, backup_verified_at: -1 } }), { error: 'bad_request', why: "the record's backup_verified_at does not read" }],
+  ]) {
+    add(`wallet_issue with ${what}`, 'wallet_issue', args);
+    expect(`wallet_issue with ${what}`, want);
+  }
+  // The control that must get through: every optional member present and read, and a record carrying
+  // the root and a contact.
+  add('wallet_issue from documents with every member they may hold', 'wallet_issue', issueWith({
+    valid_days: 30,
+    vault_plaintext: { ...held, roots: [{ ...root0, alg: 'ed25519', holder: { kind: 'piv' } }], prf: b64url(new Uint8Array(32).fill(7)), passkey: { credential_id: 'a-credential' } },
+    record_plaintext: { ...record, roots: [{ ...uncreated, created: now, rebound_at: 1789214400000 }], contacts: [{ root: 'sha256:' + 'C'.repeat(43), endpoint: ENDPOINT, name: 'Bharat', added: now }], passkey: { credential_id: 'a-credential' }, backup_verified_at: 1789214400000 },
+  }), f.withoutSerial('der'));
 }

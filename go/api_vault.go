@@ -30,12 +30,17 @@ func callVaultSeal(a args) json.RawMessage {
 	if plaintextV(pt) != PlaintextV {
 		return fail("bad_request", generationWhy)
 	}
-	var kdf *KDF
-	if raw := a.present("kdf"); raw != nil {
-		kdf = &KDF{}
-		if err := json.Unmarshal(raw, kdf); err != nil {
-			return failAs(codeArgs, err)
+	// The one KDF reader, which vault_open reads a document's with (vault.go readKDF).
+	var kdfValue any
+	raw = a.present("kdf")
+	if raw != nil {
+		if kdfValue, err = decodeJSON(raw); err != nil {
+			return fail(codeArgs, "kdf is required")
 		}
+	}
+	kdf, err := kdfFromArgs(kdfValue, raw != nil)
+	if err != nil {
+		return failAs("vault", err)
 	}
 	salt, err := a.optBytes("salt")
 	if err != nil {
@@ -47,7 +52,7 @@ func callVaultSeal(a args) json.RawMessage {
 	}
 	v, err := VaultSeal(passphrase, pt, kdf, salt, nonce)
 	if err != nil {
-		return failErr("vault", err)
+		return failAs("vault", err)
 	}
 	return ok(map[string]any{"vault": v})
 }
@@ -97,22 +102,41 @@ func callWalletIssue(a args) json.RawMessage {
 	if err != nil {
 		return failAs(codeArgs, err)
 	}
-	// After the arguments, the documents, each held to CONTRACT §6 as it arrived — before any typed
-	// decoding, which would drop a member the contract does not describe and put encoding/json's
-	// own words into an answer (CONTRACT §0).
-	vaultPlaintext, recordPlaintext := a["vault_plaintext"], a["record_plaintext"]
-	if err := CheckFile(vaultPlaintext); err != nil {
+	// After the arguments, the documents, each held to CONTRACT §6 as it arrived, in the core's order
+	// and words. Then what the rules read is taken from them by hand: decoding them into the typed
+	// structs refused a member of the wrong type anywhere, a contact's included, as `arguments do not
+	// read` — encoding/json's reading, not the contract's — and read a `pkcs8` of "" as none (R31).
+	file, err := fileOf(a["vault_plaintext"])
+	if err != nil {
 		return failErr("bad_request", err)
 	}
-	if err := CheckRecord(recordPlaintext); err != nil {
+	record, err := recordOf(a["record_plaintext"])
+	if err != nil {
 		return failErr("bad_request", err)
 	}
 	var vault VaultPlaintext
-	var record RecordPlaintext
-	if json.Unmarshal(vaultPlaintext, &vault) != nil || json.Unmarshal(recordPlaintext, &record) != nil {
-		return fail(codeArgs, "arguments do not read")
+	for _, r := range file["roots"].([]any) {
+		o := r.(map[string]any)
+		root := VaultRoot{}
+		root.Fingerprint, _ = o["fingerprint"].(string)
+		root.CN, _ = o["cn"].(string)
+		root.Cert, _ = o["cert"].(string)
+		root.PKCS8, root.pkcs8Given = o["pkcs8"].(string)
+		vault.Roots = append(vault.Roots, root)
 	}
-	issued, err := WalletIssue(vault, record, fingerprint, csr, now, days, moving)
+	// A record with no `ledger` has no entry to read, and one with an empty ledger has read all of
+	// them: nil and empty stay apart, as the typed decode kept them.
+	var ledger []LedgerEntry
+	entries, has := record["ledger"].([]any)
+	if has {
+		ledger = make([]LedgerEntry, 0, len(entries))
+	}
+	for _, e := range entries {
+		o := e.(map[string]any)
+		text := func(k string) string { s, _ := o[k].(string); return s }
+		ledger = append(ledger, LedgerEntry{Root: text("root"), Endpoint: text("endpoint"), NotBefore: text("not_before"), NotAfter: text("not_after"), IssuedAt: text("issued_at"), Origin: text("origin")})
+	}
+	issued, err := WalletIssue(vault, RecordPlaintext{V: PlaintextV, Ledger: ledger}, fingerprint, csr, now, days, moving)
 	if err != nil {
 		return failAs("bad_request", err)
 	}

@@ -8,9 +8,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 case can be listed as proven that did not pass. The cases that fail today are listed apart, at the
 end, each with the finding it waits on.
 
-Specification: **2.2.4**. **88** normative sentences, **2214** cross-port parity cases over **50** guarded functions, and **3** known divergences that fail today and are listed apart, at the end.
+Specification: **2.2.4**. **88** normative sentences, **2284** cross-port parity cases over **50** guarded functions, and **1** known divergences that fail today and are listed apart, at the end.
 
-Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **4434** answers, of which **2** do not hold to the shape it declares — **2** of them in a known divergence. Of **118** declared error codes, **118** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **4570** answers, of which **1** do not hold to the shape it declares — **1** of them in a known divergence. Of **118** declared error codes, **118** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 88 normative sentences of the specification
 
@@ -203,7 +203,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 2214 cross-port parity cases
+## The 2284 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -211,7 +211,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **2214** cases (**1108** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
+At the run that generated this file: **2284** cases (**1108** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
 
 ### `address_guard` — 50 cases · whole on success
 
@@ -2379,7 +2379,7 @@ At the run that generated this file: **2214** cases (**1108** of the run's cases
 - generated · validate_chain · now absent, expected_root 7
 - generated · validate_chain · now absent, expected_endpoint 7
 
-### `vault_open` — 29 cases · whole on success
+### `vault_open` — 47 cases · whole on success
 
 - vault_open of what vault_seal made
 - vault_open of what vault_seal made, with t spelled 1.0
@@ -2403,6 +2403,24 @@ At the run that generated this file: **2214** cases (**1108** of the run's cases
 - vault_open of what vault_seal made, with a nonce with a stray character
 - vault_open of what vault_seal made, with a salt with a stray character
 - vault_open of what vault_seal made, with a ct padded (the control)
+- vault_open of what vault_seal made, with a vault that is a string
+- vault_open of what vault_seal made, with a vault that is a list
+- vault_open of what vault_seal made, with no passphrase
+- vault_open of what vault_seal made, with no kdf
+- vault_open of what vault_seal made, with a kdf that is null
+- vault_open of what vault_seal made, with a kdf that is a string
+- vault_open of what vault_seal made, with a kdf with no name
+- vault_open of what vault_seal made, with a kdf whose name is a number
+- vault_open of what vault_seal made, with a kdf with no m_kib
+- vault_open of what vault_seal made, with a kdf whose m_kib is null
+- vault_open of what vault_seal made, with a kdf whose t is 1.9
+- vault_open of what vault_seal made, with a kdf whose p is 257
+- vault_open of what vault_seal made, with a kdf whose m_kib is 2^32 + 8192
+- vault_open of what vault_seal made, with a salt one byte short
+- vault_open of what vault_seal made, with no salt
+- vault_open of what vault_seal made, with a salt that is a number
+- vault_open of what vault_seal made, with a salt one byte short and a nonce that is not base64url
+- vault_open of what vault_seal made, with a salt one byte short and no nonce
 - generated · vault_open · {}
 - generated · vault_open · passphrase absent
 - generated · vault_open · passphrase null
@@ -2411,7 +2429,7 @@ At the run that generated this file: **2214** cases (**1108** of the run's cases
 - generated · vault_open · an undeclared member
 - generated · vault_open · vault absent, passphrase 7
 
-### `vault_seal` — 39 cases · whole on success
+### `vault_seal` — 61 cases · whole on success
 
 - vault_seal
 - vault_seal of a record
@@ -2436,11 +2454,33 @@ At the run that generated this file: **2214** cases (**1108** of the run's cases
 - vault_seal of a plaintext that is a string
 - vault_seal with nothing to work from
 - vault_seal with an empty passphrase and no plaintext
+- vault_seal with a kdf that is a number
+- vault_seal with a kdf that is a list
+- vault_seal with a kdf that is a string, and no passphrase
+- vault_seal with a kdf nobody implements, and an empty passphrase
+- vault_seal with a kdf that is a string, and an earlier generation
+- vault_seal with a kdf whose name is a number
+- vault_seal with a kdf whose m_kib is a string
+- vault_seal with a kdf whose m_kib is negative
+- vault_seal with a kdf whose m_kib is 8192.5
+- vault_seal with a kdf whose t is true
+- vault_seal with a kdf whose t spelled 1.0
+- vault_seal with a kdf whose m_kib spelled 8192.0
+- vault_seal with a kdf whose p spelled 1e0
+- vault_seal with a kdf whose t spelled -0
+- vault_seal with a kdf member named in capitals
+- vault_seal with a kdf whose name is null
+- vault_seal with a salt one byte short
+- vault_seal with the shortest salt (the control)
+- vault_seal with a salt one byte short and a nonce of 8 bytes
+- vault_seal with an empty salt
 - generated · vault_seal · {}
 - generated · vault_seal · passphrase absent
 - generated · vault_seal · passphrase null
 - generated · vault_seal · plaintext absent
 - generated · vault_seal · plaintext null
+- generated · vault_seal · kdf "x"
+- generated · vault_seal · salt ""
 - generated · vault_seal · salt 7
 - generated · vault_seal · nonce ""
 - generated · vault_seal · nonce 7
@@ -2495,7 +2535,7 @@ At the run that generated this file: **2214** cases (**1108** of the run's cases
 - version with a number past the largest double before containers nested 129 deep
 - version with containers nested 129 deep before a number past the largest double
 
-### `wallet_issue` — 85 cases · whole on success
+### `wallet_issue` — 115 cases · whole on success
 
 - wallet_issue
 - wallet_issue from a vault that carries a ledger
@@ -2536,6 +2576,36 @@ At the run that generated this file: **2214** cases (**1108** of the run's cases
 - wallet_issue over a ledger that reads
 - wallet_issue with nothing to work from
 - wallet_issue: a request carrying a CARD-held sibling root's key
+- wallet_issue with a root key that is not base64url
+- wallet_issue with a root key that is not a key
+- wallet_issue with a root key that is empty
+- wallet_issue with a root key outside the profile
+- wallet_issue with a root key that is a number
+- wallet_issue with a root with no created
+- wallet_issue with a root whose created is a number
+- wallet_issue with a root whose cert is a number
+- wallet_issue with a root whose cn is a number
+- wallet_issue with a root whose fingerprint is not one
+- wallet_issue with a root whose alg is not in the profile
+- wallet_issue with a root whose holder is a string
+- wallet_issue with a root whose rebound_at is a string
+- wallet_issue with a root with a member it does not hold
+- wallet_issue with a root that is not an object
+- wallet_issue with roots that are not a list
+- wallet_issue with a vault with no roots
+- wallet_issue with a prf that is a number
+- wallet_issue with a prf of 31 bytes
+- wallet_issue with a passkey with nothing in it
+- wallet_issue with a record whose roots are not a list
+- wallet_issue with a record whose root has no created
+- wallet_issue with a record whose contacts are a number
+- wallet_issue with a record whose contact is a number
+- wallet_issue with a record whose contact has no endpoint
+- wallet_issue with a record whose contact was added at no instant
+- wallet_issue with a record whose contact holds its state
+- wallet_issue with a record whose passkey is a string
+- wallet_issue with a record whose backup_verified_at is negative
+- wallet_issue from documents with every member they may hold
 - generated · wallet_issue · {}
 - generated · wallet_issue · the hostile object
 - generated · wallet_issue · vault_plaintext absent
@@ -2583,12 +2653,10 @@ At the run that generated this file: **2214** cases (**1108** of the run's cases
 - generated · wallet_issue · now absent, valid_days "7"
 - generated · wallet_issue · now absent, move "yes"
 
-## The 3 known divergences
+## The 1 known divergences
 
 Cases that FAIL today, each excused by `js/cases/known-divergences.json` only while it fails exactly
 as its entry says, and each waiting on the audit finding named beside it (the port-parity audit of
 2026-09-29). None of them is proven; they are here so that the list is read, not assumed.
 
 - a function nobody defines, with args that are a list — R34 (wasm off the contract, differ)
-- generated · vault_seal · kdf "x" — R28, C4 (wasm off the contract, wasm not as expected, go not as expected)
-- generated · vault_seal · salt "" — R29, C6 (differ)

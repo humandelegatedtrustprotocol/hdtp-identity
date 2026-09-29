@@ -4,8 +4,8 @@
 use crate::canonical::canonical;
 use crate::csr;
 use crate::keys::PrivateKey;
-use crate::ledger::{self, stranger};
-use crate::time::format_rfc3339;
+use crate::ledger::{self, is_fingerprint, stranger};
+use crate::time::{format_rfc3339, parse_rfc3339};
 use crate::util::{b64u, err, from_b64u, Error, Result};
 use aes_gcm::aead::{Aead, KeyInit, Payload};
 use serde_json::{json, Map, Value};
@@ -43,6 +43,106 @@ pub fn check_file(vault: &Value) -> Result<()> {
     if let Some(k) = stranger(doc, FILE_MEMBERS) {
         return err("bad_request", format!("vault_plaintext holds v, roots, prf and passkey, and nothing else: {k}"));
     }
+    // Then each member, as CONTRACT §6 types it, in the order VaultPlaintext lists them. Read as their
+    // types were never read: a root's key given as a number was a card-held root here and `arguments
+    // do not read` in the Go port, a root that was not an object was skipped here, and a `prf` of any
+    // type was carried (F18, R31).
+    read_roots(doc.get("roots"), "vault", true)?;
+    if let Some(prf) = doc.get("prf") {
+        if prf.as_str().and_then(|p| from_b64u(p).ok()).is_none_or(|b| b.len() != 32) {
+            return err("bad_request", "the vault's prf does not read");
+        }
+    }
+    read_passkey(doc.get("passkey"), "vault")
+}
+
+const ROOT_REQUIRED: &[&str] = &["fingerprint", "cn", "cert", "created"];
+const ROOT_MEMBERS: &[&str] = &["fingerprint", "cn", "alg", "cert", "created", "pkcs8", "holder", "rebound_at"];
+
+/// A document's `roots`, each entry read as CONTRACT §6's `VaultRoot`: a list, each entry an object
+/// whose `fingerprint` is a fingerprint, `cn` and `cert` strings and `created` an instant, whose
+/// `alg`, `pkcs8`, `holder` and `rebound_at` are of their types where present, and that holds nothing
+/// else. The first that does not read is named by its index and member, as a ledger entry is.
+/// `whose` is `vault` or `record`; the file must have `roots`, and the record may leave it out.
+fn read_roots(roots: Option<&Value>, whose: &str, required: bool) -> Result<()> {
+    let entries = match roots {
+        None if !required => return Ok(()),
+        Some(Value::Array(entries)) => entries,
+        _ => return err("bad_request", format!("the {whose}'s roots is a list")),
+    };
+    for (i, r) in entries.iter().enumerate() {
+        let Some(o) = r.as_object() else { return err("bad_request", format!("the {whose}'s root {i} does not read")) };
+        let unread = |m: &str| err("bad_request", format!("the {whose}'s root {i} does not read: {m}"));
+        for m in ROOT_REQUIRED {
+            let Some(text) = o.get(*m).and_then(|v| v.as_str()) else { return unread(m) };
+            let wrong = match *m {
+                "fingerprint" => !is_fingerprint(text),
+                "created" => parse_rfc3339(text).is_err(),
+                _ => false,
+            };
+            if wrong {
+                return unread(m);
+            }
+        }
+        for (m, reads) in [
+            ("alg", o.get("alg").map(|v| matches!(v.as_str(), Some("ed25519" | "p256")))),
+            ("pkcs8", o.get("pkcs8").map(Value::is_string)),
+            ("holder", o.get("holder").map(Value::is_object)),
+            ("rebound_at", o.get("rebound_at").map(|v| v.as_u64().is_some())),
+        ] {
+            if reads == Some(false) {
+                return unread(m);
+            }
+        }
+        if let Some(k) = stranger(o, ROOT_MEMBERS) {
+            return unread(&k);
+        }
+    }
+    Ok(())
+}
+
+const CONTACT_REQUIRED: &[&str] = &["root", "endpoint"];
+const CONTACT_MEMBERS: &[&str] = &["root", "endpoint", "name", "leaf", "root_cert", "added"];
+
+/// The record's `contacts`, each entry read as CONTRACT §6's `VaultContact`, as a root is: a list, each
+/// entry an object whose `root` is a fingerprint and `endpoint` a string, whose `name`, `leaf`,
+/// `root_cert` and `added` are strings where present, `added` an instant, and that holds nothing else.
+fn read_contacts(contacts: Option<&Value>) -> Result<()> {
+    let entries = match contacts {
+        None => return Ok(()),
+        Some(Value::Array(entries)) => entries,
+        Some(_) => return err("bad_request", "the record's contacts is a list"),
+    };
+    for (i, c) in entries.iter().enumerate() {
+        let Some(o) = c.as_object() else { return err("bad_request", format!("the record's contact {i} does not read")) };
+        let unread = |m: &str| err("bad_request", format!("the record's contact {i} does not read: {m}"));
+        for m in CONTACT_REQUIRED {
+            let Some(text) = o.get(*m).and_then(|v| v.as_str()) else { return unread(m) };
+            if *m == "root" && !is_fingerprint(text) {
+                return unread(m);
+            }
+        }
+        for m in ["name", "leaf", "root_cert", "added"] {
+            let reads = o.get(m).map(|v| v.as_str().is_some_and(|text| m != "added" || parse_rfc3339(text).is_ok()));
+            if reads == Some(false) {
+                return unread(m);
+            }
+        }
+        if let Some(k) = stranger(o, CONTACT_MEMBERS) {
+            return unread(&k);
+        }
+    }
+    Ok(())
+}
+
+/// `passkey`, where a document carries one: an object naming its credential and nothing else.
+fn read_passkey(passkey: Option<&Value>, whose: &str) -> Result<()> {
+    let Some(p) = passkey else { return Ok(()) };
+    let reads =
+        p.as_object().is_some_and(|o| o.get("credential_id").is_some_and(Value::is_string) && stranger(o, &["credential_id"]).is_none());
+    if !reads {
+        return err("bad_request", format!("the {whose}'s passkey does not read"));
+    }
     Ok(())
 }
 
@@ -65,10 +165,18 @@ pub fn check_record(record: &Value) -> Result<()> {
             format!("record_plaintext holds v, roots, ledger, contacts, passkey and backup_verified_at, and nothing else: {k}"),
         );
     }
-    match doc.get("ledger") {
-        Some(ledger) => ledger::read(ledger),
-        None => Ok(()),
+    // Then each member, in the order RecordPlaintext lists them (F18: a record whose contacts were a
+    // number issued here and was `arguments do not read` in the Go port).
+    read_roots(doc.get("roots"), "record", false)?;
+    if let Some(ledger) = doc.get("ledger") {
+        ledger::read(ledger)?;
     }
+    read_contacts(doc.get("contacts"))?;
+    read_passkey(doc.get("passkey"), "record")?;
+    if doc.get("backup_verified_at").is_some_and(|b| b.as_u64().is_none()) {
+        return err("bad_request", "the record's backup_verified_at does not read");
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -102,45 +210,94 @@ const MIN_M_KIB: u32 = 8 * 1024; // 8 MiB: enough to be worth doing, low enough 
 const MAX_T: u32 = 16;
 const MAX_P: u32 = 16;
 
+/// The shortest salt either end takes, in bytes: contract/contract.json's `VaultSaltMin`, which a
+/// test here and one in go/constants_test.go hold both ports to. Argon2id's own floor is the same
+/// number, and its words (`salt is too short`) reached `why` here while the Go port answered `not a
+/// pact-vault/1 document` (R29, C6); the floor is named before Argon2id is asked for anything.
+const MIN_SALT: usize = 8;
+
 impl Kdf {
-    fn from_value(v: Option<&Value>) -> Result<Kdf> {
-        let Some(v) = v else { return Ok(Kdf::default()) };
-        if v.get("name").and_then(|n| n.as_str()).unwrap_or("argon2id") != "argon2id" {
-            return err("vault", "unknown kdf");
+    /// The one reader of a KDF, for a document's and for a caller's (S5; CONTRACT §6). A document's
+    /// `Kdf` names all four members; a caller's `KdfArgs` may leave any out, and it takes the default.
+    /// `name` is `argon2id`, and anything else — another name, one that is not a string, or, in a
+    /// document, none — is `unknown kdf`. Each parameter is a whole number written as one that fits
+    /// in 32 bits, and inside its range; anything else, a parameter a document lacks included, is
+    /// `kdf parameters out of range`. `u32::try_from`, never `as`: a truncating cast turned `m_kib:
+    /// 4294967304` (2^32 + 8) into 8. This read a `name` that was not a string as `argon2id`, a
+    /// document with no `kdf` as the default and opened it, and a `kdf` that was not an object as
+    /// the default and sealed under it (R28, R30, T12, F17).
+    fn read(o: &Map<String, Value>, document: bool) -> Result<Kdf> {
+        match o.get("name") {
+            Some(Value::String(n)) if n == "argon2id" => {}
+            None | Some(Value::Null) if !document => {}
+            _ => return err("vault", "unknown kdf"),
         }
         let d = Kdf::default();
-        // `u32::try_from`, not `as`: a truncating cast turned `m_kib: 4294967304` (2^32 + 8) into 8,
-        // so a caller asking for more than it could express got the weakest KDF that is legal, and
-        // was told nothing.
+        let out_of_range = || Error::new("vault", "kdf parameters out of range");
         let g = |k: &str, dflt: u32| -> Result<u32> {
-            match v.get(k) {
-                None | Some(Value::Null) => Ok(dflt),
-                Some(x) => x.as_u64().and_then(|n| u32::try_from(n).ok()).ok_or_else(|| Error::new("vault", "kdf parameters out of range")),
+            match o.get(k) {
+                None | Some(Value::Null) if !document => Ok(dflt),
+                None => Err(out_of_range()),
+                Some(x) => x.as_u64().and_then(|n| u32::try_from(n).ok()).ok_or_else(out_of_range),
             }
         };
-        let kdf = Kdf { m_kib: g("m_kib", d.m_kib)?, t: g("t", d.t)?, p: g("p", d.p)? };
-        if !(MIN_M_KIB..=MAX_M_KIB).contains(&kdf.m_kib) || kdf.t < 1 || kdf.t > MAX_T || kdf.p < 1 || kdf.p > MAX_P {
-            return err("vault", "kdf parameters out of range");
+        let kdf = Kdf { m_kib: g("m_kib", d.m_kib)?, t: g("t", d.t)?, p: g("p", d.p)? }.check()?;
+        // Members by their exact names, and no others (`Kdf`, `KdfArgs`: additionalProperties false).
+        // The Go port matched `M_KIB` to `m_kib`, as encoding/json does, and sealed under what this
+        // read as absent.
+        if let Some(k) = stranger(o, &["name", "m_kib", "t", "p"]) {
+            return err("vault", format!("kdf holds name, m_kib, t and p, and nothing else: {k}"));
         }
         Ok(kdf)
     }
+
+    /// The range, which every derivation is held to: the typed `seal` took any `Kdf` and handed it to
+    /// Argon2id unbounded, and only the JSON reader checked it, so a typed caller could write a
+    /// document both ports' `open` refuse (T19).
+    fn check(self) -> Result<Kdf> {
+        if !(MIN_M_KIB..=MAX_M_KIB).contains(&self.m_kib) || self.t < 1 || self.t > MAX_T || self.p < 1 || self.p > MAX_P {
+            return err("vault", "kdf parameters out of range");
+        }
+        Ok(self)
+    }
+
     fn to_value(self) -> Value {
         json!({ "name": "argon2id", "m_kib": self.m_kib, "t": self.t, "p": self.p })
     }
 }
 
-/// The KDF a caller named, parsed and bounded exactly as `vault_open` parses the document's own —
-/// so `vault_seal` cannot write a document that `vault_open` would refuse, and neither end has a
-/// range the other does not.
-pub fn kdf_from_args(v: Option<&Value>) -> Result<Kdf> {
-    Kdf::from_value(v)
+/// `vault_seal`'s `kdf` argument: absent or null is the default, an object is read by the one reader
+/// `vault_open` reads a document's with, and anything else is `kdf is required` (CONTRACT §0: a member
+/// of the wrong type is refused in the words its absence gets, and never read as absent).
+pub fn kdf_from_args(v: Option<&Value>) -> Result<Option<Kdf>> {
+    match v {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Object(o)) => Kdf::read(o, false).map(Some),
+        Some(_) => err("bad_request", "kdf is required"),
+    }
 }
 
+/// A document's `kdf`: an object with all four members. One that is not an object names no KDF.
+fn kdf_of_document(v: Option<&Value>) -> Result<Kdf> {
+    match v {
+        Some(Value::Object(o)) => Kdf::read(o, true),
+        _ => err("vault", "unknown kdf"),
+    }
+}
+
+/// Argon2id, after the one range and the salt floor, so no caller — typed or JSON, sealing or
+/// opening — reaches it with parameters the other end would refuse, and no refusal of its is worded
+/// by the library. What it could still refuse (a passphrase or salt past 4 GiB) no argument reaches.
 fn derive(passphrase: &str, salt: &[u8], kdf: Kdf) -> Result<Zeroizing<[u8; 32]>> {
-    let params = argon2::Params::new(kdf.m_kib, kdf.t, kdf.p, Some(32)).map_err(|e| Error::new("vault", e.to_string()))?;
+    let kdf = kdf.check()?;
+    if salt.len() < MIN_SALT {
+        return err("vault", "salt is at least 8 bytes");
+    }
+    let unreachable = |_| Error::new("internal", "the key derivation refused its parameters");
+    let params = argon2::Params::new(kdf.m_kib, kdf.t, kdf.p, Some(32)).map_err(unreachable)?;
     let a = argon2::Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
     let mut key = Zeroizing::new([0u8; 32]);
-    a.hash_password_into(passphrase.as_bytes(), salt, &mut key[..]).map_err(|e| Error::new("vault", e.to_string()))?;
+    a.hash_password_into(passphrase.as_bytes(), salt, &mut key[..]).map_err(unreachable)?;
     Ok(key)
 }
 
@@ -198,14 +355,17 @@ fn seal_any(passphrase: &str, plaintext: &Value, kdf: Option<Kdf>, salt: Option<
     Ok(Value::Object(doc))
 }
 
-/// A wrong passphrase and a tampered document are one message: nothing distinguishes them.
+/// A wrong passphrase and a tampered document are one message: nothing distinguishes them. The
+/// header is read first, in its members' order, and named where it does not read: a document that
+/// is not an object, or whose `format` is not this one, is `not a pact-vault/1 document` (this said
+/// the passphrase was wrong when the document was not an object, and the Go port said this, T12); then
+/// its `kdf`; then `salt`, `nonce` and `ct`, of which one that does not read is damage.
 pub fn open(passphrase: &str, vault: &Value) -> Result<Value> {
     let fail = || Error::new("vault", "the passphrase is wrong or the vault is damaged");
-    let Some(doc) = vault.as_object() else { return Err(fail()) };
-    if doc.get("format").and_then(|f| f.as_str()) != Some(FORMAT) {
+    let Some(doc) = vault.as_object().filter(|d| d.get("format").and_then(|f| f.as_str()) == Some(FORMAT)) else {
         return err("vault", "not a pact-vault/1 document");
-    }
-    let kdf = Kdf::from_value(doc.get("kdf"))?;
+    };
+    let kdf = kdf_of_document(doc.get("kdf"))?;
     let salt = from_b64u(doc.get("salt").and_then(|s| s.as_str()).unwrap_or("")).map_err(|_| fail())?;
     let nonce = from_b64u(doc.get("nonce").and_then(|s| s.as_str()).unwrap_or("")).map_err(|_| fail())?;
     let ct = from_b64u(doc.get("ct").and_then(|s| s.as_str()).unwrap_or("")).map_err(|_| fail())?;
@@ -348,6 +508,33 @@ mod tests {
             let args = json!({ "passphrase": "x", "plaintext": { "v": 2 }, "kdf": kdf }).to_string();
             let out: Value = serde_json::from_str(&crate::api::call("vault_seal", &args)).unwrap();
             assert_eq!(out, json!({ "error": "vault", "why": "kdf parameters out of range" }), "{member} {over}");
+        }
+    }
+
+    /// contract/contract.json's `VaultSaltMin` is this file's floor (go/constants_test.go holds the Go
+    /// port's to it): a salt one byte shorter is refused in the words both ports use, before Argon2id
+    /// is asked for anything — whose own words (`salt is too short`) reached `why` here (R29, C6) — and
+    /// one of that length is taken, at both ends.
+    #[test]
+    fn the_contracts_salt_floor_is_this_one() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../contract/contract.json");
+        let contract: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(contract["$defs"]["VaultSaltMin"]["const"], json!(MIN_SALT), "contract/contract.json's VaultSaltMin and MIN_SALT");
+        let short = seal("x", &json!({"v": 2}), Some(small()), Some(vec![0; MIN_SALT - 1]), None).unwrap_err();
+        assert_eq!((short.code.as_str(), short.why.as_str()), ("vault", "salt is at least 8 bytes"));
+        let mut v = seal("x", &json!({"v": 2}), Some(small()), Some(vec![0; MIN_SALT]), None).unwrap();
+        assert_eq!(open("x", &v).unwrap()["v"], 2);
+        v["salt"] = json!(b64u(&[0; MIN_SALT - 1]));
+        assert_eq!(open("x", &v).unwrap_err().why, "salt is at least 8 bytes");
+    }
+
+    /// The typed `seal` is held to the range, as the JSON reader is: it handed any `Kdf` to Argon2id,
+    /// so a typed caller could write a document both ports' `open` refuse (T19).
+    #[test]
+    fn a_typed_seal_is_held_to_the_range() {
+        for kdf in [Kdf { m_kib: 64, t: 1, p: 1 }, Kdf { m_kib: MIN_M_KIB, t: MAX_T + 1, p: 1 }, Kdf { m_kib: MIN_M_KIB, t: 1, p: 0 }] {
+            let e = seal("x", &json!({"v": 2}), Some(kdf), None, None).unwrap_err();
+            assert_eq!((e.code.as_str(), e.why.as_str()), ("vault", "kdf parameters out of range"), "{kdf:?}");
         }
     }
 
