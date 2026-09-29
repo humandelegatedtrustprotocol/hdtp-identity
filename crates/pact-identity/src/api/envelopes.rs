@@ -50,7 +50,8 @@ pub(super) fn seal_request(a: &Value) -> Result<Value> {
             form: Form::parse(opt_s(a, "form")?.unwrap_or("chain"))?,
             sender_chain: sender_chain.as_deref(),
             method: opt_s(a, "method")?.unwrap_or("tools/call").to_string(),
-            params: a.get("params").cloned().unwrap_or(json!({})),
+            // Absent or null is `{}` (CONTRACT §0: null is absent); present, sealed as given.
+            params: a.get("params").filter(|v| !v.is_null()).cloned().unwrap_or(json!({})),
             msg_id: id(a, "msg_id")?.to_string(),
             ts: int(a, "ts")?,
             exp: opt_int(a, "exp")?,
@@ -71,8 +72,10 @@ pub(super) fn seal_result(a: &Value) -> Result<Value> {
             sender: &sender,
             form: Form::parse(opt_s(a, "form")?.unwrap_or("chain"))?,
             sender_chain: sender_chain.as_deref(),
-            result: a.get("result").cloned(),
-            error: a.get("error").cloned(),
+            // Null is absent (CONTRACT §0): a null result alone is no result, and beside an error it is
+            // not a second one. Both ports sealed it as present.
+            result: a.get("result").filter(|v| !v.is_null()).cloned(),
+            error: a.get("error").filter(|v| !v.is_null()).cloned(),
             msg_id: id(a, "msg_id")?.to_string(),
             ts: int(a, "ts")?,
             exp: opt_int(a, "exp")?,
