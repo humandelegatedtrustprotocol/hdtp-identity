@@ -5,11 +5,12 @@ regenerates and fails on any difference, which is what gate.sh runs. Both lists 
 that prove them rather than from prose beside them: the MUSTs from `pact-protocol/SPEC.md` through
 the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the parity cases from
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
-case can be listed here that did not pass.
+case can be listed as proven that did not pass. The cases that fail today are listed apart, at the
+end, each with the finding it waits on.
 
-Specification: **2.2.4**. **88** normative sentences, **807** cross-port parity cases over **50** guarded functions.
+Specification: **2.2.4**. **88** normative sentences, **1458** cross-port parity cases over **50** guarded functions, and **463** known divergences that fail today and are listed apart, at the end.
 
-Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **1614** answers held to the shape it declares, **0** did not. Of **94** declared error codes, **79** were produced by a case here; the rest are declared for a caller's benefit and no argument in this suite reaches them.
+Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **3842** answers, of which **172** do not hold to the shape it declares — **172** of them in a known divergence. Of **94** declared error codes, **94** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 88 normative sentences of the specification
 
@@ -202,7 +203,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 807 cross-port parity cases
+## The 1458 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -210,9 +211,9 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **807** cases, **0** disagreements, **50** of **50** functions compared whole on success.
+At the run that generated this file: **1458** cases (**1103** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
 
-### `address_guard` — 32 cases · whole on success
+### `address_guard` — 37 cases · whole on success
 
 - address_guard https://255.255.255.255/mcp
 - address_guard https://127.0.0.1/mcp
@@ -246,8 +247,13 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - address_guard https://[2002:c0a8:101::1]/mcp
 - address_guard https://[64:ff9b::808:808]/mcp
 - address_guard https://[2606:4700:4700::1111]/mcp
+- generated · address_guard · {}
+- generated · address_guard · the hostile object
+- generated · address_guard · endpoint absent
+- generated · address_guard · endpoint null
+- generated · address_guard · self_endpoint ""
 
-### `assemble_leaf` — 6 cases · whole on success
+### `assemble_leaf` — 14 cases · whole on success
 
 - assemble_leaf with a token's high-S signature
 - assemble_leaf with a low-S signature
@@ -255,14 +261,30 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - assemble_leaf with no signature
 - assemble_leaf with nothing to work from
 - assemble_leaf
+- generated · assemble_leaf · {}
+- generated · assemble_leaf · the hostile object
+- generated · assemble_leaf · tbs absent
+- generated · assemble_leaf · tbs null
+- generated · assemble_leaf · sig absent
+- generated · assemble_leaf · sig null
+- generated · assemble_leaf · sig_alg ""
+- generated · assemble_leaf · sig absent, tbs 7
 
-### `assemble_root` — 3 cases · whole on success
+### `assemble_root` — 11 cases · whole on success
 
 - assemble_root of a TBS that is not one
 - assemble_root with nothing to work from
 - assemble_root
+- generated · assemble_root · {}
+- generated · assemble_root · the hostile object
+- generated · assemble_root · tbs absent
+- generated · assemble_root · tbs null
+- generated · assemble_root · sig absent
+- generated · assemble_root · sig null
+- generated · assemble_root · sig_alg ""
+- generated · assemble_root · sig absent, tbs 7
 
-### `book_rows` — 8 cases · whole on success
+### `book_rows` — 16 cases · whole on success
 
 - book_rows: a contact with everything, one with the least
 - book_rows: an empty book
@@ -272,8 +294,16 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - book_rows: a contact that is not an object
 - book_rows with nothing to work from
 - book_rows with an exported_at that does not read
+- generated · book_rows · {}
+- generated · book_rows · the hostile object
+- generated · book_rows · contacts absent
+- generated · book_rows · contacts null
+- generated · book_rows · exported_at absent
+- generated · book_rows · exported_at null
+- generated · book_rows · contacts absent, exported_at 7
+- generated · book_rows · exported_at absent, contacts "x"
 
-### `build_leaf` — 7 cases · whole on success
+### `build_leaf` — 39 cases · whole on success
 
 - build_leaf
 - build_leaf over 398 days
@@ -282,16 +312,58 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - build_leaf naming http://a.example/x
 - build_leaf naming https://a.example/x/
 - build_leaf with no not_before
+- generated · build_leaf · {}
+- generated · build_leaf · the hostile object
+- generated · build_leaf · host_spki absent
+- generated · build_leaf · host_spki null
+- generated · build_leaf · not_before absent
+- generated · build_leaf · not_before null
+- generated · build_leaf · not_after absent
+- generated · build_leaf · not_after null
+- generated · build_leaf · root_pkcs8 absent
+- generated · build_leaf · root_pkcs8 null
+- generated · build_leaf · serial ""
+- generated · build_leaf · cn absent, host_spki 7
+- generated · build_leaf · cn absent, endpoint 7
+- generated · build_leaf · cn absent, not_before 7
+- generated · build_leaf · cn absent, not_after 7
+- generated · build_leaf · cn absent, root_pkcs8 7
+- generated · build_leaf · root_cn absent, cn 7
+- generated · build_leaf · root_cn absent, host_spki 7
+- generated · build_leaf · root_cn absent, endpoint 7
+- generated · build_leaf · root_cn absent, not_before 7
+- generated · build_leaf · root_cn absent, not_after 7
+- generated · build_leaf · root_cn absent, root_pkcs8 7
+- generated · build_leaf · host_spki absent, root_pkcs8 7
+- generated · build_leaf · endpoint absent, host_spki 7
+- generated · build_leaf · endpoint absent, root_pkcs8 7
+- generated · build_leaf · not_before absent, host_spki 7
+- generated · build_leaf · not_before absent, endpoint 7
+- generated · build_leaf · not_before absent, root_pkcs8 7
+- generated · build_leaf · not_after absent, host_spki 7
+- generated · build_leaf · not_after absent, endpoint 7
+- generated · build_leaf · not_after absent, not_before 7
+- generated · build_leaf · not_after absent, root_pkcs8 7
 
-### `build_root` — 5 cases · whole on success
+### `build_root` — 15 cases · whole on success
 
 - build_root with no key
 - build_root
 - build_root with a serial that is too short
 - build_root with an instant that is not one
 - build_root with nothing to work from
+- generated · build_root · {}
+- generated · build_root · the hostile object
+- generated · build_root · pkcs8 absent
+- generated · build_root · pkcs8 null
+- generated · build_root · not_before absent
+- generated · build_root · not_before null
+- generated · build_root · serial ""
+- generated · build_root · cn absent, pkcs8 7
+- generated · build_root · not_before absent, cn 7
+- generated · build_root · not_before absent, pkcs8 7
 
-### `card_decode` — 11 cases · whole on success
+### `card_decode` — 16 cases · whole on success
 
 - card_decode of a real card
 - card_decode of an empty card
@@ -304,8 +376,13 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - card_decode with nothing to work from
 - card_decode with no now
 - card_decode of a card whose leaf names its issuer in three bytes
+- generated · card_decode · vcard absent
+- generated · card_decode · vcard null
+- generated · card_decode · now absent
+- generated · card_decode · now null
+- generated · card_decode · vcard absent, now 7
 
-### `card_encode` — 13 cases · whole on success
+### `card_encode` — 21 cases · whole on success
 
 - card_encode
 - card_encode with a name outside ASCII
@@ -320,16 +397,31 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - card_encode: a seal with CR LF
 - card_encode: an extra line with CR LF
 - card_encode: a name with a comma and a semicolon
+- generated · card_encode · {}
+- generated · card_encode · the hostile object
+- generated · card_encode · fn absent
+- generated · card_encode · fn null
+- generated · card_encode · cert absent
+- generated · card_encode · cert null
+- generated · card_encode · seal ""
+- generated · card_encode · cert absent, fn 7
 
-### `compare_leaves` — 5 cases · whole on success
+### `compare_leaves` — 12 cases · whole on success
 
 - compare_leaves with itself
 - compare_leaves against a root
 - compare_leaves of nothing
 - compare_leaves with nothing to work from
 - compare_leaves with pinned as null
+- generated · compare_leaves · {}
+- generated · compare_leaves · the hostile object
+- generated · compare_leaves · pinned absent
+- generated · compare_leaves · pinned null
+- generated · compare_leaves · presented absent
+- generated · compare_leaves · presented null
+- generated · compare_leaves · presented absent, pinned 7
 
-### `csr_check` — 18 cases · whole on success
+### `csr_check` — 24 cases · whole on success
 
 - csr_check of bytes that are not a request
 - csr_check of a certificate
@@ -339,6 +431,7 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - the root-key refusal with a list of numbers
 - the root-key refusal with a list of one empty string
 - the root-key refusal with no list
+- csr_check
 - the root-key refusal against a key id
 - csr_check with nothing to work from
 - csr_check with der as null
@@ -349,16 +442,33 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - csr_check: a key outside the profile AND a malformed attribute set: which is said first
 - csr_check on another port, asking for the host's dNSName
 - csr_check on another port, asking for some other dNSName
+- generated · csr_check · {}
+- generated · csr_check · the hostile object
+- generated · csr_check · der absent
+- generated · csr_check · der null
+- generated · csr_check · root_spkis "x"
 
-### `csr_new` — 5 cases · whole on success
+### `csr_new` — 17 cases · whole on success
 
 - csr_new with no key
 - csr_new naming a local address
 - csr_new naming nothing
 - csr_new with a dns_name that is not the host
+- csr_new
 - csr_new with nothing to work from
+- generated · csr_new · {}
+- generated · csr_new · the hostile object
+- generated · csr_new · cn absent
+- generated · csr_new · cn null
+- generated · csr_new · host_pkcs8 absent
+- generated · csr_new · host_pkcs8 null
+- generated · csr_new · endpoint absent
+- generated · csr_new · endpoint null
+- generated · csr_new · host_pkcs8 absent, cn 7
+- generated · csr_new · endpoint absent, cn 7
+- generated · csr_new · endpoint absent, host_pkcs8 7
 
-### `decide` — 50 cases · whole on success
+### `decide` — 57 cases · whole on success
 
 - decide on an envelope from a pinned contact
 - decide on a pinned contact's call that names no tool
@@ -410,8 +520,15 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - decide: a pending_out contact's sealed send_message waits, chain form
 - decide: a pending_out contact's sealed tools/list, chain form, the pin moving
 - decide: a pending_out contact's sealed send_message waits, chain form, the pin moving
+- generated · decide · {}
+- generated · decide · now absent
+- generated · decide · now null
+- generated · decide · envelope absent
+- generated · decide · envelope null
+- generated · decide · node absent
+- generated · decide · node null
 
-### `derive_seed` — 10 cases · whole on success
+### `derive_seed` — 17 cases · whole on success
 
 - derive_seed with an info string that is not one of the three
 - derive_seed with the wrong case in the domain separator
@@ -423,8 +540,15 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - derive_seed for pact/root/1
 - derive_seed for pact/store-key/1
 - derive_seed for pact/store-id/1
+- generated · derive_seed · {}
+- generated · derive_seed · the hostile object
+- generated · derive_seed · prf absent
+- generated · derive_seed · prf null
+- generated · derive_seed · info absent
+- generated · derive_seed · info null
+- generated · derive_seed · info absent, prf 7
 
-### `export_manifest` — 7 cases · whole on success
+### `export_manifest` — 15 cases · whole on success
 
 - export_manifest: finished with the messages
 - export_manifest: a book
@@ -433,16 +557,33 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - export_manifest: a hash the host does not make
 - export_manifest: a partial that already counts messages
 - export_manifest: 5000 media files, the manifest under 64 KiB
+- generated · export_manifest · {}
+- generated · export_manifest · the hostile object
+- generated · export_manifest · partial absent
+- generated · export_manifest · partial null
+- generated · export_manifest · hashes "x"
+- generated · export_manifest · messages "7"
+- generated · export_manifest · partial absent, hashes "x"
+- generated · export_manifest · partial absent, messages "7"
 
-### `export_merge` — 3 cases · whole on success
+### `export_merge` — 11 cases · whole on success
 
 - export_merge: a held pin is never replaced
 - export_merge with rows whose root is no fingerprint
 - export_merge: a held blocked contact keeps what the person decided
+- generated · export_merge · {}
+- generated · export_merge · the hostile object
+- generated · export_merge · held absent
+- generated · export_merge · held null
+- generated · export_merge · rows absent
+- generated · export_merge · rows null
+- generated · export_merge · held absent, rows "x"
+- generated · export_merge · rows absent, held "x"
 
-### `export_read` — 60 cases · whole on success
+### `export_read` — 90 cases · whole on success
 
 - export_read: what export_write wrote
+- export_read at an instant that does not read
 - export corpus valid-export.zip: export_read
 - export corpus valid-book.zip: export_read
 - export corpus local-names-differ.zip: export_read
@@ -502,8 +643,37 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - export_read: a thread created at an instant with an offset
 - export_read: a manifest exported at an instant with an offset
 - export_read: instants in the one grammar, a fraction included
+- generated · export_read · {}
+- generated · export_read · the hostile object
+- generated · export_read · directory absent
+- generated · export_read · directory null
+- generated · export_read · owner absent
+- generated · export_read · owner null
+- generated · export_read · now absent
+- generated · export_read · now null
+- generated · export_read · manifest ""
+- generated · export_read · manifest 7
+- generated · export_read · contacts_csv ""
+- generated · export_read · contacts_csv 7
+- generated · export_read · threads_csv ""
+- generated · export_read · threads_csv 7
+- generated · export_read · directory absent, manifest 7
+- generated · export_read · directory absent, contacts_csv 7
+- generated · export_read · directory absent, threads_csv 7
+- generated · export_read · directory absent, owner 7
+- generated · export_read · directory absent, now 7
+- generated · export_read · owner absent, directory "x"
+- generated · export_read · owner absent, manifest 7
+- generated · export_read · owner absent, contacts_csv 7
+- generated · export_read · owner absent, threads_csv 7
+- generated · export_read · owner absent, now 7
+- generated · export_read · now absent, directory "x"
+- generated · export_read · now absent, manifest 7
+- generated · export_read · now absent, contacts_csv 7
+- generated · export_read · now absent, threads_csv 7
+- generated · export_read · now absent, owner 7
 
-### `export_read_end` — 28 cases · whole on success
+### `export_read_end` — 93 cases · whole on success
 
 - export_read_end: what was written
 - export corpus valid-export.zip: export_read_end
@@ -533,8 +703,73 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - export_read_end: a manifest whose owner_name is a private key
 - export_read_end: a manifest whose tool is a private key
 - export_read_end: a manifest that lists a media member in files
+- generated · export_read_end · {}
+- generated · export_read_end · the hostile object
+- generated · export_read_end · manifest absent
+- generated · export_read_end · manifest null
+- generated · export_read_end · ids absent
+- generated · export_read_end · ids null
+- generated · export_read_end · msg_ids absent
+- generated · export_read_end · msg_ids null
+- generated · export_read_end · reply_tos absent
+- generated · export_read_end · reply_tos null
+- generated · export_read_end · media_seen absent
+- generated · export_read_end · media_seen null
+- generated · export_read_end · media absent
+- generated · export_read_end · media null
+- generated · export_read_end · messages_sha256 ""
+- generated · export_read_end · messages_sha256 7
+- generated · export_read_end · manifest absent, messages_sha256 7
+- generated · export_read_end · manifest absent, lines "7"
+- generated · export_read_end · manifest absent, ids "x"
+- generated · export_read_end · manifest absent, msg_ids "x"
+- generated · export_read_end · manifest absent, reply_tos "x"
+- generated · export_read_end · manifest absent, media_seen "x"
+- generated · export_read_end · manifest absent, media "x"
+- generated · export_read_end · lines absent, manifest 7
+- generated · export_read_end · lines absent, messages_sha256 7
+- generated · export_read_end · lines absent, ids "x"
+- generated · export_read_end · lines absent, msg_ids "x"
+- generated · export_read_end · lines absent, reply_tos "x"
+- generated · export_read_end · lines absent, media_seen "x"
+- generated · export_read_end · lines absent, media "x"
+- generated · export_read_end · ids absent, manifest 7
+- generated · export_read_end · ids absent, messages_sha256 7
+- generated · export_read_end · ids absent, lines "7"
+- generated · export_read_end · ids absent, msg_ids "x"
+- generated · export_read_end · ids absent, reply_tos "x"
+- generated · export_read_end · ids absent, media_seen "x"
+- generated · export_read_end · ids absent, media "x"
+- generated · export_read_end · msg_ids absent, manifest 7
+- generated · export_read_end · msg_ids absent, messages_sha256 7
+- generated · export_read_end · msg_ids absent, lines "7"
+- generated · export_read_end · msg_ids absent, ids "x"
+- generated · export_read_end · msg_ids absent, reply_tos "x"
+- generated · export_read_end · msg_ids absent, media_seen "x"
+- generated · export_read_end · msg_ids absent, media "x"
+- generated · export_read_end · reply_tos absent, manifest 7
+- generated · export_read_end · reply_tos absent, messages_sha256 7
+- generated · export_read_end · reply_tos absent, lines "7"
+- generated · export_read_end · reply_tos absent, ids "x"
+- generated · export_read_end · reply_tos absent, msg_ids "x"
+- generated · export_read_end · reply_tos absent, media_seen "x"
+- generated · export_read_end · reply_tos absent, media "x"
+- generated · export_read_end · media_seen absent, manifest 7
+- generated · export_read_end · media_seen absent, messages_sha256 7
+- generated · export_read_end · media_seen absent, lines "7"
+- generated · export_read_end · media_seen absent, ids "x"
+- generated · export_read_end · media_seen absent, msg_ids "x"
+- generated · export_read_end · media_seen absent, reply_tos "x"
+- generated · export_read_end · media_seen absent, media "x"
+- generated · export_read_end · media absent, manifest 7
+- generated · export_read_end · media absent, messages_sha256 7
+- generated · export_read_end · media absent, lines "7"
+- generated · export_read_end · media absent, ids "x"
+- generated · export_read_end · media absent, msg_ids "x"
+- generated · export_read_end · media absent, reply_tos "x"
+- generated · export_read_end · media absent, media_seen "x"
 
-### `export_read_messages` — 25 cases · whole on success
+### `export_read_messages` — 52 cases · whole on success
 
 - export_read_messages: what export_write_messages wrote
 - export corpus valid-export.zip: export_read_messages
@@ -561,8 +796,35 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - export_read_messages: a message time with a lower-case t
 - export_read_messages: a message time with a comma before the fraction
 - export_read_messages: a message time with an offset
+- generated · export_read_messages · {}
+- generated · export_read_messages · the hostile object
+- generated · export_read_messages · lines absent
+- generated · export_read_messages · lines null
+- generated · export_read_messages · threads absent
+- generated · export_read_messages · threads null
+- generated · export_read_messages · contacts absent
+- generated · export_read_messages · contacts null
+- generated · export_read_messages · media absent
+- generated · export_read_messages · media null
+- generated · export_read_messages · first_line "7"
+- generated · export_read_messages · lines absent, threads "x"
+- generated · export_read_messages · lines absent, contacts "x"
+- generated · export_read_messages · lines absent, media "x"
+- generated · export_read_messages · lines absent, first_line "7"
+- generated · export_read_messages · threads absent, lines "x"
+- generated · export_read_messages · threads absent, contacts "x"
+- generated · export_read_messages · threads absent, media "x"
+- generated · export_read_messages · threads absent, first_line "7"
+- generated · export_read_messages · contacts absent, lines "x"
+- generated · export_read_messages · contacts absent, threads "x"
+- generated · export_read_messages · contacts absent, media "x"
+- generated · export_read_messages · contacts absent, first_line "7"
+- generated · export_read_messages · media absent, lines "x"
+- generated · export_read_messages · media absent, threads "x"
+- generated · export_read_messages · media absent, contacts "x"
+- generated · export_read_messages · media absent, first_line "7"
 
-### `export_write` — 17 cases · whole on success
+### `export_write` — 61 cases · whole on success
 
 - export_write: every formula prefix, quoting and line breaks, sorted rows
 - export_write: a book
@@ -581,8 +843,52 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - export_write: an exported_at with a comma before the fraction
 - export_write: a contact added with a comma before the fraction
 - export_write: instants in the one grammar, a fraction included
+- generated · export_write · {}
+- generated · export_write · the hostile object
+- generated · export_write · owner absent
+- generated · export_write · owner null
+- generated · export_write · owner_name absent
+- generated · export_write · owner_name null
+- generated · export_write · exported_at absent
+- generated · export_write · exported_at null
+- generated · export_write · tool absent
+- generated · export_write · tool null
+- generated · export_write · contacts absent
+- generated · export_write · contacts null
+- generated · export_write · threads "x"
+- generated · export_write · media "x"
+- generated · export_write · owner absent, owner_name 7
+- generated · export_write · owner absent, exported_at 7
+- generated · export_write · owner absent, tool 7
+- generated · export_write · owner absent, contacts "x"
+- generated · export_write · owner absent, threads "x"
+- generated · export_write · owner absent, media "x"
+- generated · export_write · owner_name absent, owner 7
+- generated · export_write · owner_name absent, exported_at 7
+- generated · export_write · owner_name absent, tool 7
+- generated · export_write · owner_name absent, contacts "x"
+- generated · export_write · owner_name absent, threads "x"
+- generated · export_write · owner_name absent, media "x"
+- generated · export_write · exported_at absent, owner 7
+- generated · export_write · exported_at absent, owner_name 7
+- generated · export_write · exported_at absent, tool 7
+- generated · export_write · exported_at absent, contacts "x"
+- generated · export_write · exported_at absent, threads "x"
+- generated · export_write · exported_at absent, media "x"
+- generated · export_write · tool absent, owner 7
+- generated · export_write · tool absent, owner_name 7
+- generated · export_write · tool absent, exported_at 7
+- generated · export_write · tool absent, contacts "x"
+- generated · export_write · tool absent, threads "x"
+- generated · export_write · tool absent, media "x"
+- generated · export_write · contacts absent, owner 7
+- generated · export_write · contacts absent, owner_name 7
+- generated · export_write · contacts absent, exported_at 7
+- generated · export_write · contacts absent, tool 7
+- generated · export_write · contacts absent, threads "x"
+- generated · export_write · contacts absent, media "x"
 
-### `export_write_messages` — 8 cases · whole on success
+### `export_write_messages` — 14 cases · whole on success
 
 - export_write_messages: a text, a file and a link
 - export_write_messages: a dangling reply, a key in a body, a reply to what was left out
@@ -592,8 +898,14 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - export_write_messages: text beside a file
 - export_write_messages: a message time with a lower-case z
 - export_write_messages: a message time with a comma before the fraction
+- generated · export_write_messages · {}
+- generated · export_write_messages · the hostile object
+- generated · export_write_messages · messages absent
+- generated · export_write_messages · messages null
+- generated · export_write_messages · msg_ids "x"
+- generated · export_write_messages · messages absent, msg_ids "x"
 
-### `follow_renewed` — 13 cases · whole on success
+### `follow_renewed` — 29 cases · whole on success
 
 - follow_renewed on a chain to another root
 - follow_renewed on a chain that is not one
@@ -608,16 +920,36 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - follow_renewed on a chain of none
 - follow_renewed to a leaf OLDER than the one pinned
 - follow_renewed with no now
+- generated · follow_renewed · {}
+- generated · follow_renewed · the hostile object
+- generated · follow_renewed · pinned_root absent
+- generated · follow_renewed · pinned_root null
+- generated · follow_renewed · pinned_leaf absent
+- generated · follow_renewed · pinned_leaf null
+- generated · follow_renewed · dialed absent
+- generated · follow_renewed · dialed null
+- generated · follow_renewed · now absent
+- generated · follow_renewed · now null
+- generated · follow_renewed · pinned_leaf absent, pinned_root 7
+- generated · follow_renewed · dialed absent, pinned_root 7
+- generated · follow_renewed · dialed absent, pinned_leaf 7
+- generated · follow_renewed · now absent, pinned_root 7
+- generated · follow_renewed · now absent, pinned_leaf 7
+- generated · follow_renewed · now absent, dialed 7
 
-### `generate_key` — 5 cases · whole on success
+### `generate_key` — 9 cases · whole on success
 
 - generate_key
 - generate_key of a P-256 key
 - generate_key with no algorithm
 - generate_key with an algorithm nobody has
 - generate_key with nothing to work from
+- generated · generate_key · {}
+- generated · generate_key · the hostile object
+- generated · generate_key · alg absent
+- generated · generate_key · alg null
 
-### `hpke_open` — 6 cases · whole on success
+### `hpke_open` — 30 cases · whole on success
 
 - hpke_open of a ciphertext that is not one
 - hpke_open with nothing to work from
@@ -625,14 +957,51 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - hpke_open with a public key that is another Ed25519 key
 - hpke_open with a public key of the other algorithm
 - hpke_open with no public key
+- generated · hpke_open · {}
+- generated · hpke_open · the hostile object
+- generated · hpke_open · suite absent
+- generated · hpke_open · suite null
+- generated · hpke_open · recipient_pkcs8 absent
+- generated · hpke_open · recipient_pkcs8 null
+- generated · hpke_open · recipient_spki absent
+- generated · hpke_open · recipient_spki null
+- generated · hpke_open · aad ""
+- generated · hpke_open · recipient_pkcs8 absent, suite 7
+- generated · hpke_open · recipient_spki absent, suite 7
+- generated · hpke_open · recipient_spki absent, recipient_pkcs8 7
+- generated · hpke_open · info absent, suite 7
+- generated · hpke_open · info absent, recipient_pkcs8 7
+- generated · hpke_open · info absent, recipient_spki 7
+- generated · hpke_open · enc absent, suite 7
+- generated · hpke_open · enc absent, recipient_pkcs8 7
+- generated · hpke_open · enc absent, recipient_spki 7
+- generated · hpke_open · enc absent, info 7
+- generated · hpke_open · ct absent, suite 7
+- generated · hpke_open · ct absent, recipient_pkcs8 7
+- generated · hpke_open · ct absent, recipient_spki 7
+- generated · hpke_open · ct absent, info 7
+- generated · hpke_open · ct absent, enc 7
 
-### `hpke_seal` — 3 cases · whole on success
+### `hpke_seal` — 16 cases · whole on success
 
 - hpke_seal with a suite nobody has
 - hpke_seal with nothing to work from
 - hpke_seal
+- generated · hpke_seal · {}
+- generated · hpke_seal · the hostile object
+- generated · hpke_seal · suite absent
+- generated · hpke_seal · suite null
+- generated · hpke_seal · recipient_spki absent
+- generated · hpke_seal · recipient_spki null
+- generated · hpke_seal · aad ""
+- generated · hpke_seal · recipient_spki absent, suite 7
+- generated · hpke_seal · info absent, suite 7
+- generated · hpke_seal · info absent, recipient_spki 7
+- generated · hpke_seal · plaintext absent, suite 7
+- generated · hpke_seal · plaintext absent, recipient_spki 7
+- generated · hpke_seal · plaintext absent, info 7
 
-### `ip_is_private` — 25 cases · whole on success
+### `ip_is_private` — 29 cases · whole on success
 
 - ip_is_private "10.0.0.1"
 - ip_is_private "8.8.8.8"
@@ -659,8 +1028,12 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - ip_is_private ::ffff:127.0.0.1
 - ip_is_private ::1
 - ip_is_private ::
+- generated · ip_is_private · {}
+- generated · ip_is_private · the hostile object
+- generated · ip_is_private · ip absent
+- generated · ip_is_private · ip null
 
-### `is_normal_https` — 28 cases · whole on success
+### `is_normal_https` — 32 cases · whole on success
 
 - is_normal_https "https://agent.alina.example/mcp"
 - is_normal_https "https://agent.alina.example:8443/mcp"
@@ -690,8 +1063,12 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - is_normal_https with nothing to work from
 - is_normal_https with args holding a lone low surrogate
 - is_normal_https with args holding a surrogate pair
+- generated · is_normal_https · {}
+- generated · is_normal_https · the hostile object
+- generated · is_normal_https · url absent
+- generated · is_normal_https · url null
 
-### `issue_from_csr` — 8 cases · whole on success
+### `issue_from_csr` — 26 cases · whole on success
 
 - issue_from_csr with an explicit zero validity
 - issue_from_csr over 398 days
@@ -701,24 +1078,69 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - issue_from_csr
 - issue_from_csr refusing a root given as a key id
 - issue_from_csr with no now
+- generated · issue_from_csr · {}
+- generated · issue_from_csr · the hostile object
+- generated · issue_from_csr · root_pkcs8 absent
+- generated · issue_from_csr · root_pkcs8 null
+- generated · issue_from_csr · now absent
+- generated · issue_from_csr · now null
+- generated · issue_from_csr · root_spkis "x"
+- generated · issue_from_csr · previous_not_before ""
+- generated · issue_from_csr · valid_days "7"
+- generated · issue_from_csr · csr absent, root_spkis "x"
+- generated · issue_from_csr · csr absent, root_pkcs8 7
+- generated · issue_from_csr · root_cn absent, csr 7
+- generated · issue_from_csr · root_cn absent, root_spkis "x"
+- generated · issue_from_csr · root_cn absent, root_pkcs8 7
+- generated · issue_from_csr · now absent, csr 7
+- generated · issue_from_csr · now absent, root_cn 7
+- generated · issue_from_csr · now absent, root_spkis "x"
+- generated · issue_from_csr · now absent, root_pkcs8 7
 
-### `issue_tbs_from_csr` — 1 case · whole on success
+### `issue_tbs_from_csr` — 19 cases · whole on success
 
 - issue_tbs_from_csr
+- generated · issue_tbs_from_csr · {}
+- generated · issue_tbs_from_csr · the hostile object
+- generated · issue_tbs_from_csr · root_spki absent
+- generated · issue_tbs_from_csr · root_spki null
+- generated · issue_tbs_from_csr · now absent
+- generated · issue_tbs_from_csr · now null
+- generated · issue_tbs_from_csr · root_spkis "x"
+- generated · issue_tbs_from_csr · previous_not_before ""
+- generated · issue_tbs_from_csr · valid_days "7"
+- generated · issue_tbs_from_csr · csr absent, root_spkis "x"
+- generated · issue_tbs_from_csr · csr absent, root_spki 7
+- generated · issue_tbs_from_csr · root_cn absent, csr 7
+- generated · issue_tbs_from_csr · root_cn absent, root_spkis "x"
+- generated · issue_tbs_from_csr · root_cn absent, root_spki 7
+- generated · issue_tbs_from_csr · now absent, csr 7
+- generated · issue_tbs_from_csr · now absent, root_cn 7
+- generated · issue_tbs_from_csr · now absent, root_spkis "x"
+- generated · issue_tbs_from_csr · now absent, root_spki 7
 
-### `key_from_seed` — 5 cases · whole on success
+### `key_from_seed` — 11 cases · whole on success
 
 - key_from_seed with a short seed
 - key_from_seed with an unknown algorithm
 - key_from_seed with nothing to work from
 - key_from_seed
 - key_from_seed of a P-256 key
+- generated · key_from_seed · {}
+- generated · key_from_seed · the hostile object
+- generated · key_from_seed · alg absent
+- generated · key_from_seed · alg null
+- generated · key_from_seed · seed absent
+- generated · key_from_seed · seed null
 
-### `key_info` — 16 cases · whole on success
+### `key_info` — 23 cases · whole on success
 
 - args that are not an object
 - args that are a list
 - args that are null
+- args that are a number
+- args that are true
+- args that are an empty list
 - key_info of an spki that is not one
 - key_info with no argument
 - key_info of bytes that are not base64url ("!!!")
@@ -732,13 +1154,49 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - key_info with spki as null
 - key_info
 - key_info of a P-256 key
+- generated · key_info · {}
+- generated · key_info · the hostile object
+- generated · key_info · spki absent
+- generated · key_info · spki null
 
-### `leaf_tbs` — 2 cases · whole on success
+### `leaf_tbs` — 34 cases · whole on success
 
 - leaf_tbs
 - leaf_tbs with no issuer
+- generated · leaf_tbs · {}
+- generated · leaf_tbs · the hostile object
+- generated · leaf_tbs · host_spki absent
+- generated · leaf_tbs · host_spki null
+- generated · leaf_tbs · not_before absent
+- generated · leaf_tbs · not_before null
+- generated · leaf_tbs · not_after absent
+- generated · leaf_tbs · not_after null
+- generated · leaf_tbs · root_spki absent
+- generated · leaf_tbs · root_spki null
+- generated · leaf_tbs · serial ""
+- generated · leaf_tbs · cn absent, host_spki 7
+- generated · leaf_tbs · cn absent, endpoint 7
+- generated · leaf_tbs · cn absent, not_before 7
+- generated · leaf_tbs · cn absent, not_after 7
+- generated · leaf_tbs · cn absent, root_spki 7
+- generated · leaf_tbs · root_cn absent, cn 7
+- generated · leaf_tbs · root_cn absent, host_spki 7
+- generated · leaf_tbs · root_cn absent, endpoint 7
+- generated · leaf_tbs · root_cn absent, not_before 7
+- generated · leaf_tbs · root_cn absent, not_after 7
+- generated · leaf_tbs · root_cn absent, root_spki 7
+- generated · leaf_tbs · host_spki absent, root_spki 7
+- generated · leaf_tbs · endpoint absent, host_spki 7
+- generated · leaf_tbs · endpoint absent, root_spki 7
+- generated · leaf_tbs · not_before absent, host_spki 7
+- generated · leaf_tbs · not_before absent, endpoint 7
+- generated · leaf_tbs · not_before absent, root_spki 7
+- generated · leaf_tbs · not_after absent, host_spki 7
+- generated · leaf_tbs · not_after absent, endpoint 7
+- generated · leaf_tbs · not_after absent, not_before 7
+- generated · leaf_tbs · not_after absent, root_spki 7
 
-### `ledger_check` — 33 cases · whole on success
+### `ledger_check` — 49 cases · whole on success
 
 - ledger_check: a renewal where the live leaf is
 - ledger_check: a move, not chosen
@@ -773,8 +1231,24 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - ledger_check with a move that is not a boolean
 - ledger_check with nothing to work from
 - ledger_check over a ledger that reads
+- generated · ledger_check · {}
+- generated · ledger_check · the hostile object
+- generated · ledger_check · root absent
+- generated · ledger_check · root null
+- generated · ledger_check · endpoint absent
+- generated · ledger_check · endpoint null
+- generated · ledger_check · now absent
+- generated · ledger_check · now null
+- generated · ledger_check · ledger "x"
+- generated · ledger_check · move "yes"
+- generated · ledger_check · root absent, ledger "x"
+- generated · ledger_check · endpoint absent, ledger "x"
+- generated · ledger_check · endpoint absent, root 7
+- generated · ledger_check · now absent, ledger "x"
+- generated · ledger_check · now absent, root 7
+- generated · ledger_check · now absent, endpoint 7
 
-### `limits_decide` — 56 cases · whole on success
+### `limits_decide` — 72 cases · whole on success
 
 - limits_decide: a contact in, fresh
 - limits_decide: a contact in, empty
@@ -832,8 +1306,24 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - limits_decide with a row with no updated_at
 - limits_decide with a row whose updated_at has a fraction
 - limits_decide with nothing to work from
+- generated · limits_decide · {}
+- generated · limits_decide · the hostile object
+- generated · limits_decide · rules absent
+- generated · limits_decide · rules null
+- generated · limits_decide · charge absent
+- generated · limits_decide · charge null
+- generated · limits_decide · state "x"
+- generated · limits_decide · rules absent, charge "x"
+- generated · limits_decide · rules absent, now "7"
+- generated · limits_decide · rules absent, state "x"
+- generated · limits_decide · charge absent, rules "x"
+- generated · limits_decide · charge absent, now "7"
+- generated · limits_decide · charge absent, state "x"
+- generated · limits_decide · now absent, rules "x"
+- generated · limits_decide · now absent, charge "x"
+- generated · limits_decide · now absent, state "x"
 
-### `limits_rules_check` — 18 cases · whole on success
+### `limits_rules_check` — 22 cases · whole on success
 
 - limits_rules_check: a document that can be enforced
 - limits_rules_check: not an object
@@ -853,12 +1343,16 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - limits_rules_check: a contact bucket slower than the hour
 - limits_rules_check with no rules
 - limits_rules_check with null rules
+- generated · limits_rules_check · {}
+- generated · limits_rules_check · the hostile object
+- generated · limits_rules_check · rules absent
+- generated · limits_rules_check · rules null
 
 ### `no_such_function` — 1 case · not a dispatched function
 
 - a function nobody defines
 
-### `open_result` — 20 cases · whole on success
+### `open_result` — 33 cases · whole on success
 
 - open_result of a request envelope
 - open_result with nothing to work from
@@ -880,8 +1374,21 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - open_result with no now
 - open_result, leaf form: the pin names its leaf
 - open_result, leaf form: a pin whose named leaf is not its leaf
+- generated · open_result · {}
+- generated · open_result · my_pkcs8 absent
+- generated · open_result · my_pkcs8 null
+- generated · open_result · my_spki absent
+- generated · open_result · my_spki null
+- generated · open_result · now absent
+- generated · open_result · now null
+- generated · open_result · my_spki absent, my_pkcs8 7
+- generated · open_result · msg_id absent, my_pkcs8 7
+- generated · open_result · msg_id absent, my_spki 7
+- generated · open_result · now absent, my_pkcs8 7
+- generated · open_result · now absent, my_spki 7
+- generated · open_result · now absent, msg_id 7
 
-### `parse_certificate` — 18 cases · whole on success
+### `parse_certificate` — 22 cases · whole on success
 
 - parse_certificate of a root
 - parse_certificate of a leaf
@@ -901,12 +1408,17 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - parse_certificate with nothing to work from
 - parse_certificate with der as null
 - parse_certificate of a leaf naming its issuer in three bytes
+- generated · parse_certificate · {}
+- generated · parse_certificate · the hostile object
+- generated · parse_certificate · der absent
+- generated · parse_certificate · der null
 
-### `prf_salt` — 1 case · whole on success
+### `prf_salt` — 2 cases · whole on success
 
 - prf_salt
+- generated · prf_salt · {}
 
-### `profile_error` — 7 cases · whole on success
+### `profile_error` — 12 cases · whole on success
 
 - profile_error of a leaf read as a root
 - profile_error of a root read as a leaf
@@ -915,8 +1427,13 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - profile_error with nothing to work from
 - profile_error of a leaf read as a leaf
 - profile_error of a root read as a root
+- generated · profile_error · {}
+- generated · profile_error · the hostile object
+- generated · profile_error · der absent
+- generated · profile_error · der null
+- generated · profile_error · kind absent, der 7
 
-### `public_key` — 7 cases · whole on success
+### `public_key` — 11 cases · whole on success
 
 - public_key of a key that is not one
 - public_key with no argument
@@ -925,14 +1442,26 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - public_key
 - public_key of a P-256 key
 - public_key from an Ed25519 PKCS #8 whose algorithm carries a NULL
+- generated · public_key · {}
+- generated · public_key · the hostile object
+- generated · public_key · pkcs8 absent
+- generated · public_key · pkcs8 null
 
-### `root_tbs` — 3 cases · whole on success
+### `root_tbs` — 11 cases · whole on success
 
 - root_tbs
 - root_tbs with no key
 - root_tbs with a serial that is too long
+- generated · root_tbs · spki absent
+- generated · root_tbs · spki null
+- generated · root_tbs · not_before absent
+- generated · root_tbs · not_before null
+- generated · root_tbs · serial ""
+- generated · root_tbs · spki absent, cn 7
+- generated · root_tbs · not_before absent, cn 7
+- generated · root_tbs · not_before absent, spki 7
 
-### `seal_request` — 12 cases · whole on success
+### `seal_request` — 32 cases · whole on success
 
 - seal_request with no recipient
 - seal_request with a form nobody has
@@ -946,8 +1475,28 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - seal_request in the chain form with no sender_chain
 - seal_request whose sender_chain is not base64url
 - seal_request whose sender_chain is not a list
+- generated · seal_request · {}
+- generated · seal_request · the hostile object
+- generated · seal_request · recipient_leaf absent
+- generated · seal_request · recipient_leaf null
+- generated · seal_request · sender_pkcs8 absent
+- generated · seal_request · sender_pkcs8 null
+- generated · seal_request · msg_id absent
+- generated · seal_request · msg_id null
+- generated · seal_request · ts absent
+- generated · seal_request · ts null
+- generated · seal_request · sender_chain "x"
+- generated · seal_request · params ""
+- generated · seal_request · sender_pkcs8 absent, recipient_leaf 7
+- generated · seal_request · msg_id absent, recipient_leaf 7
+- generated · seal_request · msg_id absent, sender_pkcs8 7
+- generated · seal_request · msg_id absent, sender_chain "x"
+- generated · seal_request · ts absent, recipient_leaf 7
+- generated · seal_request · ts absent, sender_pkcs8 7
+- generated · seal_request · ts absent, sender_chain "x"
+- generated · seal_request · ts absent, msg_id 7
 
-### `seal_result` — 6 cases · whole on success
+### `seal_result` — 27 cases · whole on success
 
 - seal_result
 - seal_result with no recipient
@@ -955,8 +1504,29 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - seal_result with nothing to work from
 - seal_result of a real result
 - seal_result whose sender_chain is not base64url
+- generated · seal_result · {}
+- generated · seal_result · the hostile object
+- generated · seal_result · recipient_spki absent
+- generated · seal_result · recipient_spki null
+- generated · seal_result · sender_pkcs8 absent
+- generated · seal_result · sender_pkcs8 null
+- generated · seal_result · msg_id absent
+- generated · seal_result · msg_id null
+- generated · seal_result · ts absent
+- generated · seal_result · ts null
+- generated · seal_result · sender_chain "x"
+- generated · seal_result · result ""
+- generated · seal_result · error ""
+- generated · seal_result · sender_pkcs8 absent, recipient_spki 7
+- generated · seal_result · msg_id absent, recipient_spki 7
+- generated · seal_result · msg_id absent, sender_pkcs8 7
+- generated · seal_result · msg_id absent, sender_chain "x"
+- generated · seal_result · ts absent, recipient_spki 7
+- generated · seal_result · ts absent, sender_pkcs8 7
+- generated · seal_result · ts absent, sender_chain "x"
+- generated · seal_result · ts absent, msg_id 7
 
-### `sign` — 6 cases · whole on success
+### `sign` — 13 cases · whole on success
 
 - sign with a public key
 - sign with no data
@@ -964,8 +1534,15 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - sign
 - sign with a P-256 key
 - sign with an Ed25519 PKCS #8 whose algorithm carries a NULL
+- generated · sign · {}
+- generated · sign · the hostile object
+- generated · sign · pkcs8 absent
+- generated · sign · pkcs8 null
+- generated · sign · data absent
+- generated · sign · data null
+- generated · sign · data absent, pkcs8 7
 
-### `signing_request_check` — 75 cases · whole on success
+### `signing_request_check` — 87 cases · whole on success
 
 - signing_request_check: a renewal from a localhost node
 - signing_request_check: a move from an https host, without root_cert
@@ -1042,16 +1619,32 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - signing_request_check with no now
 - signing_request_check with root_spkis that do not read
 - signing_request_check with nothing to work from
+- generated · signing_request_check · {}
+- generated · signing_request_check · the hostile object
+- generated · signing_request_check · request absent
+- generated · signing_request_check · request null
+- generated · signing_request_check · origin absent
+- generated · signing_request_check · origin null
+- generated · signing_request_check · now absent
+- generated · signing_request_check · now null
+- generated · signing_request_check · root_spkis "x"
+- generated · signing_request_check · origin absent, request "x"
+- generated · signing_request_check · now absent, request "x"
+- generated · signing_request_check · now absent, origin 7
 
-### `suite_for` — 5 cases · whole on success
+### `suite_for` — 9 cases · whole on success
 
 - suite_for an spki that is not one
 - suite_for an Ed25519 key
 - suite_for a P-256 key
 - suite_for an RSA key
 - suite_for with nothing to work from
+- generated · suite_for · {}
+- generated · suite_for · the hostile object
+- generated · suite_for · spki absent
+- generated · suite_for · spki null
 
-### `validate_chain` — 36 cases · whole on success
+### `validate_chain` — 43 cases · whole on success
 
 - validate_chain of a real chain
 - validate_chain against the root and endpoint it really has
@@ -1089,8 +1682,15 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - validate_chain of a leaf on another port carrying its host's dNSName
 - validate_chain half a second after the leaf's last second
 - validate_chain in the leaf's last second, with a fraction
+- generated · validate_chain · {}
+- generated · validate_chain · the hostile object
+- generated · validate_chain · chain absent
+- generated · validate_chain · chain null
+- generated · validate_chain · now absent
+- generated · validate_chain · now null
+- generated · validate_chain · now absent, chain "x"
 
-### `vault_open` — 11 cases · whole on success
+### `vault_open` — 15 cases · whole on success
 
 - vault_open of what vault_seal made
 - vault_open with a passphrase that is wrong
@@ -1103,8 +1703,12 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - vault_open of a document with a KDF with too many lanes
 - vault_open of a document with a KDF nobody implements
 - vault_open with nothing to work from
+- generated · vault_open · {}
+- generated · vault_open · the hostile object
+- generated · vault_open · vault absent
+- generated · vault_open · vault null
 
-### `vault_seal` — 18 cases · whole on success
+### `vault_seal` — 26 cases · whole on success
 
 - vault_seal
 - vault_seal of a record
@@ -1124,16 +1728,36 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - vault_seal of an earlier generation under a KDF out of range
 - vault_seal of a plaintext that is a string
 - vault_seal with nothing to work from
+- generated · vault_seal · {}
+- generated · vault_seal · the hostile object
+- generated · vault_seal · passphrase absent
+- generated · vault_seal · passphrase null
+- generated · vault_seal · plaintext absent
+- generated · vault_seal · plaintext null
+- generated · vault_seal · nonce ""
+- generated · vault_seal · plaintext absent, passphrase 7
 
-### `verify` — 5 cases · whole on success
+### `verify` — 17 cases · whole on success
 
 - verify a signature that is not one
 - verify with an empty signature
+- verify with an RSA key
 - verify with nothing to work from
 - verify a signature the other port made
 - verify with args holding a lone high surrogate
+- generated · verify · {}
+- generated · verify · the hostile object
+- generated · verify · spki absent
+- generated · verify · spki null
+- generated · verify · data absent
+- generated · verify · data null
+- generated · verify · sig absent
+- generated · verify · sig null
+- generated · verify · data absent, spki 7
+- generated · verify · sig absent, spki 7
+- generated · verify · sig absent, data 7
 
-### `wallet_issue` — 36 cases · whole on success
+### `wallet_issue` — 64 cases · whole on success
 
 - wallet_issue
 - wallet_issue from a vault that carries a ledger
@@ -1171,3 +1795,501 @@ At the run that generated this file: **807** cases, **0** disagreements, **50** 
 - wallet_issue over a ledger that reads
 - wallet_issue with nothing to work from
 - wallet_issue: a request carrying a CARD-held sibling root's key
+- generated · wallet_issue · {}
+- generated · wallet_issue · the hostile object
+- generated · wallet_issue · root_fingerprint absent
+- generated · wallet_issue · root_fingerprint null
+- generated · wallet_issue · csr absent
+- generated · wallet_issue · csr null
+- generated · wallet_issue · now absent
+- generated · wallet_issue · now null
+- generated · wallet_issue · valid_days "7"
+- generated · wallet_issue · vault_plaintext absent, record_plaintext "x"
+- generated · wallet_issue · vault_plaintext absent, root_fingerprint 7
+- generated · wallet_issue · vault_plaintext absent, csr 7
+- generated · wallet_issue · vault_plaintext absent, now 7
+- generated · wallet_issue · vault_plaintext absent, valid_days "7"
+- generated · wallet_issue · record_plaintext absent, vault_plaintext "x"
+- generated · wallet_issue · record_plaintext absent, root_fingerprint 7
+- generated · wallet_issue · record_plaintext absent, csr 7
+- generated · wallet_issue · record_plaintext absent, now 7
+- generated · wallet_issue · record_plaintext absent, valid_days "7"
+- generated · wallet_issue · root_fingerprint absent, vault_plaintext "x"
+- generated · wallet_issue · root_fingerprint absent, record_plaintext "x"
+- generated · wallet_issue · csr absent, vault_plaintext "x"
+- generated · wallet_issue · csr absent, record_plaintext "x"
+- generated · wallet_issue · csr absent, root_fingerprint 7
+- generated · wallet_issue · now absent, vault_plaintext "x"
+- generated · wallet_issue · now absent, record_plaintext "x"
+- generated · wallet_issue · now absent, root_fingerprint 7
+- generated · wallet_issue · now absent, csr 7
+
+## The 463 known divergences
+
+Cases that FAIL today, each excused by `js/cases/known-divergences.json` only while it fails exactly
+as its entry says, and each waiting on the audit finding named beside it (the port-parity audit of
+2026-09-29). None of them is proven; they are here so that the list is read, not assumed.
+
+- a function nobody defines, with args that are a list — R34 (wasm off the contract, differ)
+- issue_from_csr of a request that is a truncated SEQUENCE — R27, T15 (differ)
+- issue_tbs_from_csr of a request that is a truncated SEQUENCE — R27, T15 (differ)
+- wallet_issue of a request that is a truncated SEQUENCE — F18, R31 (differ)
+- generated · generate_key · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · key_from_seed · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · key_from_seed · alg absent, seed 7 — R01 (go off the contract, differ)
+- generated · key_from_seed · seed absent, alg 7 — R01 (differ)
+- generated · prf_salt · the hostile object — T16 (wasm off the contract, go off the contract)
+- generated · prf_salt · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · derive_seed · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · derive_seed · prf absent, info 7 — F19 (differ)
+- generated · public_key · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · key_info · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · sign · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · sign · pkcs8 absent, data 7 — F19 (differ)
+- generated · verify · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · verify · spki absent, data 7 — F19 (differ)
+- generated · verify · spki absent, sig 7 — F19 (differ)
+- generated · verify · data absent, sig 7 — F19 (differ)
+- generated · build_root · cn absent — F2, R03 (go off the contract, go not as expected)
+- generated · build_root · cn null — F2, R03 (go off the contract, go not as expected)
+- generated · build_root · serial 7 — F5, R02 (wasm off the contract, differ)
+- generated · build_root · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · build_root · cn absent, not_before 7 — F19 (differ)
+- generated · build_root · cn absent, serial 7 — F5, F19 (differ)
+- generated · build_root · pkcs8 absent, cn 7 — F19 (differ)
+- generated · build_root · pkcs8 absent, not_before 7 — F19 (differ)
+- generated · build_root · pkcs8 absent, serial 7 — F5, F19 (differ)
+- generated · build_root · not_before absent, serial 7 — F5, F19 (differ)
+- generated · root_tbs · {} — F2, R03 (differ)
+- generated · root_tbs · the hostile object — F2, R03 (differ)
+- generated · root_tbs · cn absent — F2, R03 (go off the contract, go not as expected)
+- generated · root_tbs · cn null — F2, R03 (go off the contract, go not as expected)
+- generated · root_tbs · serial 7 — F5, R02 (wasm off the contract, differ)
+- generated · root_tbs · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · root_tbs · cn absent, spki 7 — F19 (differ)
+- generated · root_tbs · cn absent, not_before 7 — F19 (differ)
+- generated · root_tbs · cn absent, serial 7 — F5, F19 (differ)
+- generated · root_tbs · spki absent, not_before 7 — F19 (differ)
+- generated · root_tbs · spki absent, serial 7 — F5, F19 (differ)
+- generated · root_tbs · not_before absent, serial 7 — F5, F19 (differ)
+- generated · assemble_root · sig_alg 7 — F5, R02 (wasm off the contract, differ)
+- generated · assemble_root · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · assemble_root · tbs absent, sig 7 — R08 (differ)
+- generated · assemble_root · tbs absent, sig_alg 7 — F5, R08 (differ)
+- generated · assemble_root · sig absent, sig_alg 7 — F5, R08 (differ)
+- generated · build_leaf · cn absent — F2, R03 (go off the contract, go not as expected)
+- generated · build_leaf · cn null — F2, R03 (go off the contract, go not as expected)
+- generated · build_leaf · root_cn absent — F2, R03 (go off the contract, go not as expected)
+- generated · build_leaf · root_cn null — F2, R03 (go off the contract, go not as expected)
+- generated · build_leaf · endpoint absent — R04 (go not as expected)
+- generated · build_leaf · endpoint null — R04 (go not as expected)
+- generated · build_leaf · dns_name "" — R26, F4 (differ)
+- generated · build_leaf · dns_name 7 — F5, R02 (wasm off the contract, differ)
+- generated · build_leaf · serial 7 — F5, R02 (wasm off the contract, differ)
+- generated · build_leaf · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · build_leaf · cn absent, root_cn 7 — F19 (differ)
+- generated · build_leaf · cn absent, dns_name 7 — F5, F19 (differ)
+- generated · build_leaf · cn absent, serial 7 — F5, R05 (differ)
+- generated · build_leaf · root_cn absent, dns_name 7 — F5, F19 (differ)
+- generated · build_leaf · root_cn absent, serial 7 — F5, R05 (differ)
+- generated · build_leaf · host_spki absent, cn 7 — F19 (differ)
+- generated · build_leaf · host_spki absent, root_cn 7 — F19 (differ)
+- generated · build_leaf · host_spki absent, endpoint 7 — F19 (differ)
+- generated · build_leaf · host_spki absent, dns_name 7 — F5, F19 (differ)
+- generated · build_leaf · host_spki absent, not_before 7 — F19 (differ)
+- generated · build_leaf · host_spki absent, not_after 7 — F19 (differ)
+- generated · build_leaf · host_spki absent, serial 7 — F5, R05 (differ)
+- generated · build_leaf · endpoint absent, cn 7 — F19 (differ)
+- generated · build_leaf · endpoint absent, root_cn 7 — F19 (differ)
+- generated · build_leaf · endpoint absent, dns_name 7 — F5, F19 (differ)
+- generated · build_leaf · endpoint absent, not_before 7 — F19 (differ)
+- generated · build_leaf · endpoint absent, not_after 7 — F19 (differ)
+- generated · build_leaf · endpoint absent, serial 7 — F5, R05 (differ)
+- generated · build_leaf · not_before absent, cn 7 — F19 (differ)
+- generated · build_leaf · not_before absent, root_cn 7 — F19 (differ)
+- generated · build_leaf · not_before absent, dns_name 7 — F5, F19 (differ)
+- generated · build_leaf · not_before absent, not_after 7 — F19 (differ)
+- generated · build_leaf · not_before absent, serial 7 — F5, R05 (differ)
+- generated · build_leaf · not_after absent, cn 7 — F19 (differ)
+- generated · build_leaf · not_after absent, root_cn 7 — F19 (differ)
+- generated · build_leaf · not_after absent, dns_name 7 — F5, F19 (differ)
+- generated · build_leaf · not_after absent, serial 7 — F5, R05 (differ)
+- generated · build_leaf · root_pkcs8 absent, cn 7 — F19 (differ)
+- generated · build_leaf · root_pkcs8 absent, root_cn 7 — F19 (differ)
+- generated · build_leaf · root_pkcs8 absent, host_spki 7 — F19 (differ)
+- generated · build_leaf · root_pkcs8 absent, endpoint 7 — F19 (differ)
+- generated · build_leaf · root_pkcs8 absent, dns_name 7 — F5, F19 (differ)
+- generated · build_leaf · root_pkcs8 absent, not_before 7 — F19 (differ)
+- generated · build_leaf · root_pkcs8 absent, not_after 7 — F19 (differ)
+- generated · build_leaf · root_pkcs8 absent, serial 7 — F5, R05 (differ)
+- generated · leaf_tbs · cn absent — F2, R03 (go off the contract, go not as expected)
+- generated · leaf_tbs · cn null — F2, R03 (go off the contract, go not as expected)
+- generated · leaf_tbs · root_cn absent — F2, R03 (go off the contract, go not as expected)
+- generated · leaf_tbs · root_cn null — F2, R03 (go off the contract, go not as expected)
+- generated · leaf_tbs · endpoint absent — R04 (go not as expected)
+- generated · leaf_tbs · endpoint null — R04 (go not as expected)
+- generated · leaf_tbs · dns_name "" — R26, F4 (differ)
+- generated · leaf_tbs · dns_name 7 — F5, R02 (wasm off the contract, differ)
+- generated · leaf_tbs · serial 7 — F5, R02 (wasm off the contract, differ)
+- generated · leaf_tbs · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · leaf_tbs · cn absent, root_cn 7 — F19 (differ)
+- generated · leaf_tbs · cn absent, dns_name 7 — F5, F19 (differ)
+- generated · leaf_tbs · cn absent, serial 7 — F5, R05 (differ)
+- generated · leaf_tbs · root_cn absent, dns_name 7 — F5, F19 (differ)
+- generated · leaf_tbs · root_cn absent, serial 7 — F5, R05 (differ)
+- generated · leaf_tbs · host_spki absent, cn 7 — F19 (differ)
+- generated · leaf_tbs · host_spki absent, root_cn 7 — F19 (differ)
+- generated · leaf_tbs · host_spki absent, endpoint 7 — F19 (differ)
+- generated · leaf_tbs · host_spki absent, dns_name 7 — F5, F19 (differ)
+- generated · leaf_tbs · host_spki absent, not_before 7 — F19 (differ)
+- generated · leaf_tbs · host_spki absent, not_after 7 — F19 (differ)
+- generated · leaf_tbs · host_spki absent, serial 7 — F5, R05 (differ)
+- generated · leaf_tbs · endpoint absent, cn 7 — F19 (differ)
+- generated · leaf_tbs · endpoint absent, root_cn 7 — F19 (differ)
+- generated · leaf_tbs · endpoint absent, dns_name 7 — F5, F19 (differ)
+- generated · leaf_tbs · endpoint absent, not_before 7 — F19 (differ)
+- generated · leaf_tbs · endpoint absent, not_after 7 — F19 (differ)
+- generated · leaf_tbs · endpoint absent, serial 7 — F5, R05 (differ)
+- generated · leaf_tbs · not_before absent, cn 7 — F19 (differ)
+- generated · leaf_tbs · not_before absent, root_cn 7 — F19 (differ)
+- generated · leaf_tbs · not_before absent, dns_name 7 — F5, F19 (differ)
+- generated · leaf_tbs · not_before absent, not_after 7 — F19 (differ)
+- generated · leaf_tbs · not_before absent, serial 7 — F5, R05 (differ)
+- generated · leaf_tbs · not_after absent, cn 7 — F19 (differ)
+- generated · leaf_tbs · not_after absent, root_cn 7 — F19 (differ)
+- generated · leaf_tbs · not_after absent, dns_name 7 — F5, F19 (differ)
+- generated · leaf_tbs · not_after absent, serial 7 — F5, R05 (differ)
+- generated · leaf_tbs · root_spki absent, cn 7 — F19 (differ)
+- generated · leaf_tbs · root_spki absent, root_cn 7 — F19 (differ)
+- generated · leaf_tbs · root_spki absent, host_spki 7 — F19 (differ)
+- generated · leaf_tbs · root_spki absent, endpoint 7 — F19 (differ)
+- generated · leaf_tbs · root_spki absent, dns_name 7 — F5, F19 (differ)
+- generated · leaf_tbs · root_spki absent, not_before 7 — F19 (differ)
+- generated · leaf_tbs · root_spki absent, not_after 7 — F19 (differ)
+- generated · leaf_tbs · root_spki absent, serial 7 — F5, R05 (differ)
+- generated · assemble_leaf · sig_alg 7 — F5, R02 (wasm off the contract, differ)
+- generated · assemble_leaf · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · assemble_leaf · tbs absent, sig 7 — R08 (differ)
+- generated · assemble_leaf · tbs absent, sig_alg 7 — F5, R08 (differ)
+- generated · assemble_leaf · sig absent, sig_alg 7 — F5, R08 (differ)
+- generated · parse_certificate · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · profile_error · kind absent — F16, R06 (go off the contract, go not as expected)
+- generated · profile_error · kind null — F16, R06 (go off the contract, go not as expected)
+- generated · profile_error · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · profile_error · der absent, kind 7 — F19 (differ)
+- generated · validate_chain · expected_root "" — R07, F4, T14 (differ)
+- generated · validate_chain · expected_root 7 — F5, R02 (wasm off the contract, differ)
+- generated · validate_chain · expected_endpoint "" — R07, F4, T14 (differ)
+- generated · validate_chain · expected_endpoint 7 — F5, R02 (wasm off the contract, differ)
+- generated · validate_chain · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · validate_chain · chain absent, now 7 — F19 (differ)
+- generated · validate_chain · chain absent, expected_root 7 — F5, F19 (differ)
+- generated · validate_chain · chain absent, expected_endpoint 7 — F5, F19 (differ)
+- generated · validate_chain · now absent, expected_root 7 — F5, F19 (differ)
+- generated · validate_chain · now absent, expected_endpoint 7 — F5, F19 (differ)
+- generated · compare_leaves · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · compare_leaves · pinned absent, presented 7 — F19 (differ)
+- generated · is_normal_https · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · address_guard · self_endpoint 7 — F5, R02 (wasm off the contract, differ)
+- generated · address_guard · guest "yes" — F5, R02 (wasm off the contract, differ)
+- generated · address_guard · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · address_guard · endpoint absent, self_endpoint 7 — F5, F19 (differ)
+- generated · address_guard · endpoint absent, guest "yes" — F5, F19 (differ)
+- generated · ip_is_private · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · csr_new · dns_name "" — R26, F4 (differ)
+- generated · csr_new · dns_name 7 — F5, R02 (wasm off the contract, differ)
+- generated · csr_new · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · csr_new · cn absent, host_pkcs8 7 — F19 (differ)
+- generated · csr_new · cn absent, endpoint 7 — F19 (differ)
+- generated · csr_new · cn absent, dns_name 7 — F5, F19 (differ)
+- generated · csr_new · host_pkcs8 absent, endpoint 7 — F19 (differ)
+- generated · csr_new · host_pkcs8 absent, dns_name 7 — F5, F19 (differ)
+- generated · csr_new · endpoint absent, dns_name 7 — F5, F19 (differ)
+- generated · csr_check · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · csr_check · der absent, root_spkis "x" — F5, F19 (differ)
+- generated · issue_from_csr · csr absent — F3, R27 (go not as expected)
+- generated · issue_from_csr · csr null — F3, R27 (go not as expected)
+- generated · issue_from_csr · root_cn absent — F2, R03 (go off the contract, go not as expected)
+- generated · issue_from_csr · root_cn null — F2, R03 (go off the contract, go not as expected)
+- generated · issue_from_csr · previous_not_before 7 — F5, R02 (wasm off the contract, differ)
+- generated · issue_from_csr · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · issue_from_csr · csr absent, root_cn 7 — F19 (differ)
+- generated · issue_from_csr · csr absent, now 7 — F19 (differ)
+- generated · issue_from_csr · csr absent, previous_not_before 7 — F5, F19 (differ)
+- generated · issue_from_csr · csr absent, valid_days "7" — F5, F19 (differ)
+- generated · issue_from_csr · root_cn absent, now 7 — F19 (differ)
+- generated · issue_from_csr · root_cn absent, previous_not_before 7 — F5, F19 (differ)
+- generated · issue_from_csr · root_cn absent, valid_days "7" — F5, F19 (differ)
+- generated · issue_from_csr · root_pkcs8 absent, csr 7 — F19 (differ)
+- generated · issue_from_csr · root_pkcs8 absent, root_cn 7 — F19 (differ)
+- generated · issue_from_csr · root_pkcs8 absent, root_spkis "x" — F5, F19 (differ)
+- generated · issue_from_csr · root_pkcs8 absent, now 7 — F19 (differ)
+- generated · issue_from_csr · root_pkcs8 absent, previous_not_before 7 — F5, F19 (differ)
+- generated · issue_from_csr · root_pkcs8 absent, valid_days "7" — F5, F19 (differ)
+- generated · issue_from_csr · now absent, previous_not_before 7 — F5, F19 (differ)
+- generated · issue_from_csr · now absent, valid_days "7" — F5, F19 (differ)
+- generated · issue_tbs_from_csr · csr absent — F3, R27 (go not as expected)
+- generated · issue_tbs_from_csr · csr null — F3, R27 (go not as expected)
+- generated · issue_tbs_from_csr · root_cn absent — F2, R03 (go off the contract, go not as expected)
+- generated · issue_tbs_from_csr · root_cn null — F2, R03 (go off the contract, go not as expected)
+- generated · issue_tbs_from_csr · previous_not_before 7 — F5, R02 (wasm off the contract, differ)
+- generated · issue_tbs_from_csr · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · issue_tbs_from_csr · csr absent, root_cn 7 — F19 (differ)
+- generated · issue_tbs_from_csr · csr absent, now 7 — F19 (differ)
+- generated · issue_tbs_from_csr · csr absent, previous_not_before 7 — F5, F19 (differ)
+- generated · issue_tbs_from_csr · csr absent, valid_days "7" — F5, F19 (differ)
+- generated · issue_tbs_from_csr · root_cn absent, now 7 — F19 (differ)
+- generated · issue_tbs_from_csr · root_cn absent, previous_not_before 7 — F5, F19 (differ)
+- generated · issue_tbs_from_csr · root_cn absent, valid_days "7" — F5, F19 (differ)
+- generated · issue_tbs_from_csr · root_spki absent, csr 7 — F19 (differ)
+- generated · issue_tbs_from_csr · root_spki absent, root_cn 7 — F19 (differ)
+- generated · issue_tbs_from_csr · root_spki absent, root_spkis "x" — F5, F19 (differ)
+- generated · issue_tbs_from_csr · root_spki absent, now 7 — F19 (differ)
+- generated · issue_tbs_from_csr · root_spki absent, previous_not_before 7 — F5, F19 (differ)
+- generated · issue_tbs_from_csr · root_spki absent, valid_days "7" — F5, F19 (differ)
+- generated · issue_tbs_from_csr · now absent, previous_not_before 7 — F5, F19 (differ)
+- generated · issue_tbs_from_csr · now absent, valid_days "7" — F5, F19 (differ)
+- generated · card_encode · seal 7 — F5, R02 (wasm off the contract, differ)
+- generated · card_encode · extra "x" — T21 (wasm off the contract, differ)
+- generated · card_encode · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · card_encode · fn absent, cert 7 — F19 (go off the contract, differ)
+- generated · card_encode · fn absent, seal 7 — F5, F19 (differ)
+- generated · card_encode · fn absent, extra "x" — F5, F19 (differ)
+- generated · card_encode · cert absent, seal 7 — F5, F19 (differ)
+- generated · card_encode · cert absent, extra "x" — F5, F19 (differ)
+- generated · card_decode · {} — R25 (differ)
+- generated · card_decode · the hostile object — R25, R35 (wasm off the contract, differ)
+- generated · card_decode · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · card_decode · now absent, vcard 7 — R25 (differ)
+- generated · suite_for · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · hpke_seal · info absent — R15, F7 (go off the contract, go not as expected)
+- generated · hpke_seal · info null — R15, F7 (go off the contract, go not as expected)
+- generated · hpke_seal · plaintext absent — R15, F7 (go off the contract, go not as expected)
+- generated · hpke_seal · plaintext null — R15, F7 (go off the contract, go not as expected)
+- generated · hpke_seal · aad 7 — F5, R02 (wasm off the contract, differ)
+- generated · hpke_seal · ephemeral_seed "" — R16, T13 (differ)
+- generated · hpke_seal · ephemeral_seed 7 — F5, R02 (wasm off the contract, differ)
+- generated · hpke_seal · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · hpke_seal · suite absent, recipient_spki 7 — F19 (differ)
+- generated · hpke_seal · suite absent, info 7 — F19 (differ)
+- generated · hpke_seal · suite absent, aad 7 — F5, F19 (differ)
+- generated · hpke_seal · suite absent, plaintext 7 — F19 (differ)
+- generated · hpke_seal · suite absent, ephemeral_seed 7 — F5, F19 (differ)
+- generated · hpke_seal · recipient_spki absent, info 7 — F19 (differ)
+- generated · hpke_seal · recipient_spki absent, aad 7 — F5, F19 (differ)
+- generated · hpke_seal · recipient_spki absent, plaintext 7 — F19 (differ)
+- generated · hpke_seal · recipient_spki absent, ephemeral_seed 7 — F5, F19 (differ)
+- generated · hpke_seal · info absent, aad 7 — F5, F19 (differ)
+- generated · hpke_seal · info absent, plaintext 7 — F19 (differ)
+- generated · hpke_seal · info absent, ephemeral_seed 7 — F5, F19 (differ)
+- generated · hpke_seal · plaintext absent, aad 7 — F5, F19 (differ)
+- generated · hpke_seal · plaintext absent, ephemeral_seed 7 — F5, F19 (differ)
+- generated · hpke_open · info absent — R15, F7 (go not as expected)
+- generated · hpke_open · info null — R15, F7 (go not as expected)
+- generated · hpke_open · enc absent — R15, F7 (go not as expected)
+- generated · hpke_open · enc null — R15, F7 (go not as expected)
+- generated · hpke_open · ct absent — R15, F7 (go not as expected)
+- generated · hpke_open · ct null — R15, F7 (go not as expected)
+- generated · hpke_open · aad 7 — F5, R02 (differ)
+- generated · hpke_open · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · hpke_open · suite absent, recipient_pkcs8 7 — F19 (differ)
+- generated · hpke_open · suite absent, recipient_spki 7 — F19 (differ)
+- generated · hpke_open · suite absent, info 7 — F19 (differ)
+- generated · hpke_open · suite absent, aad 7 — F5, F19 (differ)
+- generated · hpke_open · suite absent, enc 7 — F19 (differ)
+- generated · hpke_open · suite absent, ct 7 — F19 (differ)
+- generated · hpke_open · recipient_pkcs8 absent, recipient_spki 7 — F19 (differ)
+- generated · hpke_open · recipient_pkcs8 absent, info 7 — F19 (differ)
+- generated · hpke_open · recipient_pkcs8 absent, aad 7 — F5, F19 (differ)
+- generated · hpke_open · recipient_pkcs8 absent, enc 7 — F19 (differ)
+- generated · hpke_open · recipient_pkcs8 absent, ct 7 — F19 (differ)
+- generated · hpke_open · recipient_spki absent, info 7 — F19 (differ)
+- generated · hpke_open · recipient_spki absent, aad 7 — F5, F19 (differ)
+- generated · hpke_open · recipient_spki absent, enc 7 — F19 (differ)
+- generated · hpke_open · recipient_spki absent, ct 7 — F19 (differ)
+- generated · hpke_open · info absent, aad 7 — F5, F19 (differ)
+- generated · hpke_open · info absent, enc 7 — F19 (differ)
+- generated · hpke_open · info absent, ct 7 — F19 (differ)
+- generated · hpke_open · enc absent, aad 7 — F5, F19 (differ)
+- generated · hpke_open · enc absent, ct 7 — F19 (differ)
+- generated · hpke_open · ct absent, aad 7 — F5, F19 (differ)
+- generated · seal_request · form "" — R18 (go off the contract, differ)
+- generated · seal_request · form 7 — F5, R02 (wasm off the contract, differ)
+- generated · seal_request · exp "7" — C3 (wasm off the contract, differ)
+- generated · seal_request · ephemeral_seed "" — R16, T13 (differ)
+- generated · seal_request · ephemeral_seed 7 — F5, R02 (wasm off the contract, differ)
+- generated · seal_request · method "" — R18 (differ)
+- generated · seal_request · method 7 — F5, R02 (wasm off the contract, differ)
+- generated · seal_request · cty "" — R18 (differ)
+- generated · seal_request · cty 7 — F5, R02 (wasm off the contract, differ)
+- generated · seal_request · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · seal_request · recipient_leaf absent, sender_pkcs8 7 — F10 (differ)
+- generated · seal_request · recipient_leaf absent, form 7 — F5, F10 (differ)
+- generated · seal_request · recipient_leaf absent, sender_chain "x" — F5, F10 (differ)
+- generated · seal_request · recipient_leaf absent, msg_id 7 — F10 (differ)
+- generated · seal_request · recipient_leaf absent, ts "7" — F10 (differ)
+- generated · seal_request · recipient_leaf absent, exp "7" — F5, F10 (differ)
+- generated · seal_request · recipient_leaf absent, ephemeral_seed 7 — F5, F10 (differ)
+- generated · seal_request · recipient_leaf absent, method 7 — F5, F10 (differ)
+- generated · seal_request · recipient_leaf absent, cty 7 — F5, F10 (differ)
+- generated · seal_request · sender_pkcs8 absent, form 7 — F5, F10 (differ)
+- generated · seal_request · sender_pkcs8 absent, sender_chain "x" — F5, F10 (differ)
+- generated · seal_request · sender_pkcs8 absent, msg_id 7 — F10 (differ)
+- generated · seal_request · sender_pkcs8 absent, ts "7" — F10 (differ)
+- generated · seal_request · sender_pkcs8 absent, exp "7" — F5, F10 (differ)
+- generated · seal_request · sender_pkcs8 absent, ephemeral_seed 7 — F5, F10 (differ)
+- generated · seal_request · sender_pkcs8 absent, method 7 — F5, F10 (differ)
+- generated · seal_request · sender_pkcs8 absent, cty 7 — F5, F10 (differ)
+- generated · seal_request · msg_id absent, form 7 — F5, F10 (differ)
+- generated · seal_request · msg_id absent, ts "7" — F10 (differ)
+- generated · seal_request · msg_id absent, exp "7" — F5, F10 (differ)
+- generated · seal_request · msg_id absent, ephemeral_seed 7 — F5, F10 (differ)
+- generated · seal_request · msg_id absent, method 7 — F5, F10 (differ)
+- generated · seal_request · msg_id absent, cty 7 — F5, F10 (differ)
+- generated · seal_request · ts absent, form 7 — F5, F10 (differ)
+- generated · seal_request · ts absent, exp "7" — F5, F10 (differ)
+- generated · seal_request · ts absent, ephemeral_seed 7 — F5, F10 (differ)
+- generated · seal_request · ts absent, method 7 — F5, F10 (differ)
+- generated · seal_request · ts absent, cty 7 — F5, F10 (differ)
+- generated · seal_result · form "" — R18 (go off the contract, differ)
+- generated · seal_result · form 7 — F5, R02 (wasm off the contract, differ)
+- generated · seal_result · exp "7" — C3 (wasm off the contract, differ)
+- generated · seal_result · ephemeral_seed "" — R16, T13 (differ)
+- generated · seal_result · ephemeral_seed 7 — F5, R02 (wasm off the contract, differ)
+- generated · seal_result · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · seal_result · recipient_spki absent, sender_pkcs8 7 — R19 (differ)
+- generated · seal_result · recipient_spki absent, form 7 — F5, R19 (differ)
+- generated · seal_result · recipient_spki absent, sender_chain "x" — F5, R19 (differ)
+- generated · seal_result · recipient_spki absent, msg_id 7 — R19 (differ)
+- generated · seal_result · recipient_spki absent, ts "7" — R19 (differ)
+- generated · seal_result · recipient_spki absent, exp "7" — F5, R19 (differ)
+- generated · seal_result · recipient_spki absent, ephemeral_seed 7 — F5, R19 (differ)
+- generated · seal_result · sender_pkcs8 absent, form 7 — F5, R19 (differ)
+- generated · seal_result · sender_pkcs8 absent, sender_chain "x" — F5, R19 (differ)
+- generated · seal_result · sender_pkcs8 absent, msg_id 7 — R19 (differ)
+- generated · seal_result · sender_pkcs8 absent, ts "7" — R19 (differ)
+- generated · seal_result · sender_pkcs8 absent, exp "7" — F5, R19 (differ)
+- generated · seal_result · sender_pkcs8 absent, ephemeral_seed 7 — F5, R19 (differ)
+- generated · seal_result · msg_id absent, form 7 — F5, R19 (differ)
+- generated · seal_result · msg_id absent, ts "7" — R19 (differ)
+- generated · seal_result · msg_id absent, exp "7" — F5, R19 (differ)
+- generated · seal_result · msg_id absent, ephemeral_seed 7 — F5, R19 (differ)
+- generated · seal_result · ts absent, form 7 — F5, R19 (differ)
+- generated · seal_result · ts absent, exp "7" — F5, R19 (differ)
+- generated · seal_result · ts absent, ephemeral_seed 7 — F5, R19 (differ)
+- generated · open_result · the hostile object — T9 (differ)
+- generated · open_result · envelope absent — S1-1 (wasm not as expected, go not as expected)
+- generated · open_result · envelope null — S1-1 (wasm not as expected, go not as expected)
+- generated · open_result · msg_id absent — F11, R20 (go not as expected)
+- generated · open_result · msg_id null — F11, R20 (go not as expected)
+- generated · open_result · pins "x" — R21, F11 (differ)
+- generated · open_result · expected_root "" — R07, F4, T14 (differ)
+- generated · open_result · expected_root 7 — F5, R02 (wasm off the contract, differ)
+- generated · open_result · expected_endpoint "" — R07, F4, T14 (differ)
+- generated · open_result · expected_endpoint 7 — F5, R02 (wasm off the contract, differ)
+- generated · open_result · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · open_result · envelope absent, my_pkcs8 7 — S1-1, F19 (differ)
+- generated · open_result · envelope absent, my_spki 7 — S1-1, F19 (differ)
+- generated · open_result · envelope absent, msg_id 7 — S1-1, F19 (differ)
+- generated · open_result · envelope absent, now 7 — S1-1, F19 (differ)
+- generated · open_result · envelope absent, pins "x" — S1-1, F19 (differ)
+- generated · open_result · envelope absent, expected_root 7 — S1-1, F19 (differ)
+- generated · open_result · envelope absent, expected_endpoint 7 — S1-1, F19 (differ)
+- generated · open_result · my_pkcs8 absent, envelope "x" — F11, F19 (differ)
+- generated · open_result · my_pkcs8 absent, my_spki 7 — F19 (differ)
+- generated · open_result · my_pkcs8 absent, msg_id 7 — F19 (differ)
+- generated · open_result · my_pkcs8 absent, now 7 — F19 (differ)
+- generated · open_result · my_pkcs8 absent, pins "x" — R21, F19 (differ)
+- generated · open_result · my_pkcs8 absent, expected_root 7 — F5, F19 (differ)
+- generated · open_result · my_pkcs8 absent, expected_endpoint 7 — F5, F19 (differ)
+- generated · open_result · my_spki absent, envelope "x" — F11, F19 (differ)
+- generated · open_result · my_spki absent, msg_id 7 — F19 (differ)
+- generated · open_result · my_spki absent, now 7 — F19 (differ)
+- generated · open_result · my_spki absent, pins "x" — R21, F19 (differ)
+- generated · open_result · my_spki absent, expected_root 7 — F5, F19 (differ)
+- generated · open_result · my_spki absent, expected_endpoint 7 — F5, F19 (differ)
+- generated · open_result · msg_id absent, envelope "x" — F11, F19 (differ)
+- generated · open_result · msg_id absent, now 7 — F19 (differ)
+- generated · open_result · msg_id absent, pins "x" — R21, F19 (differ)
+- generated · open_result · msg_id absent, expected_root 7 — F5, F19 (differ)
+- generated · open_result · msg_id absent, expected_endpoint 7 — F5, F19 (differ)
+- generated · open_result · now absent, envelope "x" — F11, F19 (differ)
+- generated · open_result · now absent, pins "x" — R21, F19 (differ)
+- generated · open_result · now absent, expected_root 7 — F5, F19 (differ)
+- generated · open_result · now absent, expected_endpoint 7 — F5, F19 (differ)
+- generated · follow_renewed · answer "" — R22, F14 (differ)
+- generated · follow_renewed · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · follow_renewed · pinned_root absent, pinned_leaf 7 — F19 (differ)
+- generated · follow_renewed · pinned_root absent, dialed 7 — F19 (differ)
+- generated · follow_renewed · pinned_root absent, now 7 — F19 (differ)
+- generated · follow_renewed · pinned_leaf absent, dialed 7 — F19 (differ)
+- generated · follow_renewed · pinned_leaf absent, now 7 — F19 (differ)
+- generated · follow_renewed · dialed absent, now 7 — F19 (differ)
+- generated · decide · the hostile object — T9 (differ)
+- generated · decide · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · decide · now absent, envelope "x" — F19 (differ)
+- generated · decide · now absent, node "x" — F19 (differ)
+- generated · decide · envelope absent, now 7 — F19 (differ)
+- generated · decide · envelope absent, node "x" — F19 (differ)
+- generated · decide · node absent, now 7 — F19 (differ)
+- generated · decide · node absent, envelope "x" — F19 (differ)
+- generated · vault_seal · kdf "x" — R28, C4 (wasm off the contract, go off the contract, differ)
+- generated · vault_seal · salt "" — R29, C6 (differ)
+- generated · vault_seal · salt 7 — F17 (wasm off the contract, go off the contract, differ)
+- generated · vault_seal · nonce 7 — F17 (wasm off the contract, go off the contract, differ)
+- generated · vault_seal · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · vault_seal · passphrase absent, kdf "x" — R28, F19 (go off the contract, differ)
+- generated · vault_seal · passphrase absent, salt 7 — F17, F19 (go off the contract, differ)
+- generated · vault_seal · passphrase absent, nonce 7 — F17, F19 (go off the contract, differ)
+- generated · vault_seal · plaintext absent, kdf "x" — R28, F19 (go off the contract, differ)
+- generated · vault_seal · plaintext absent, salt 7 — F17, F19 (go off the contract, differ)
+- generated · vault_seal · plaintext absent, nonce 7 — F17, F19 (go off the contract, differ)
+- generated · vault_open · passphrase absent — R30 (go not as expected)
+- generated · vault_open · passphrase null — R30 (go not as expected)
+- generated · vault_open · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · vault_open · vault absent, passphrase 7 — F19 (differ)
+- generated · wallet_issue · vault_plaintext absent — S1-2 (wasm not as expected, go not as expected)
+- generated · wallet_issue · vault_plaintext null — S1-2 (wasm not as expected, go not as expected)
+- generated · wallet_issue · record_plaintext absent — S1-2 (wasm not as expected, go not as expected)
+- generated · wallet_issue · record_plaintext null — S1-2 (wasm not as expected, go not as expected)
+- generated · wallet_issue · move "yes" — F5, R02 (wasm off the contract, differ)
+- generated · wallet_issue · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · wallet_issue · vault_plaintext absent, move "yes" — F5, F19 (differ)
+- generated · wallet_issue · record_plaintext absent, move "yes" — F5, F19 (differ)
+- generated · wallet_issue · root_fingerprint absent, csr 7 — F19 (differ)
+- generated · wallet_issue · root_fingerprint absent, now 7 — F19 (differ)
+- generated · wallet_issue · root_fingerprint absent, valid_days "7" — F5, F19 (differ)
+- generated · wallet_issue · root_fingerprint absent, move "yes" — F5, F19 (differ)
+- generated · wallet_issue · csr absent, now 7 — F19 (differ)
+- generated · wallet_issue · csr absent, valid_days "7" — F5, F19 (differ)
+- generated · wallet_issue · csr absent, move "yes" — F5, F19 (differ)
+- generated · wallet_issue · now absent, valid_days "7" — F5, F19 (differ)
+- generated · wallet_issue · now absent, move "yes" — F5, F19 (differ)
+- generated · ledger_check · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · ledger_check · root absent, endpoint 7 — R32 (differ)
+- generated · ledger_check · root absent, now 7 — R32 (differ)
+- generated · ledger_check · root absent, move "yes" — F5, R32 (differ)
+- generated · ledger_check · endpoint absent, now 7 — R32 (differ)
+- generated · ledger_check · endpoint absent, move "yes" — F5, R32 (differ)
+- generated · ledger_check · now absent, move "yes" — F5, R32 (differ)
+- generated · signing_request_check · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · signing_request_check · request absent, origin 7 — F19 (differ)
+- generated · signing_request_check · request absent, now 7 — F19 (differ)
+- generated · signing_request_check · request absent, root_spkis "x" — F5, F19 (differ)
+- generated · signing_request_check · origin absent, now 7 — F19 (differ)
+- generated · signing_request_check · origin absent, root_spkis "x" — F5, F19 (differ)
+- generated · signing_request_check · now absent, root_spkis "x" — F5, F19 (differ)
+- generated · export_read · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · export_read_messages · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · export_read_end · lines absent — S1-3 (wasm not as expected, go not as expected)
+- generated · export_read_end · lines null — S1-3 (wasm not as expected, go not as expected)
+- generated · export_read_end · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · export_write · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · export_write_messages · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · export_manifest · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · export_merge · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · book_rows · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · limits_rules_check · an undeclared member — T16 (wasm off the contract, go off the contract)
+- generated · limits_decide · now absent — S1-2 (wasm not as expected, go not as expected)
+- generated · limits_decide · now null — S1-2 (wasm not as expected, go not as expected)
+- generated · limits_decide · an undeclared member — T16 (wasm off the contract, go off the contract)

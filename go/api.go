@@ -243,10 +243,7 @@ func Call(name string, args json.RawMessage) (out json.RawMessage) {
 	// the struct it failed to fill — which leaks a Go type into an answer the Rust core gives in four
 	// words. `null` belongs with the rest: the Rust core's `call` matches an object or refuses, and an
 	// absent `args` is a zero-length message, still distinguishable, so nothing else moves.
-	//
-	// This one cannot be reached through `js/parity.mjs`: its port shim does `JSON.stringify(args ?? {})`,
-	// so a null never survives the trip. A case the harness cannot express lives in each port's own
-	// suite instead — here and in the Rust core's `api::tests`.
+	// js/parity.mjs holds the Rust core to the same answers (js/cases/dispatcher.mjs).
 	if t := bytes.TrimSpace(args); len(t) > 0 && t[0] != '{' {
 		return fail(codeArgs, "args is a JSON object")
 	}

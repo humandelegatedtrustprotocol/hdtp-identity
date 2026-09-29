@@ -27,7 +27,9 @@ export function adapterPort(bin, { callMs = CALL_MS } = {}) {
   const call = (fn, args) => {
     const id = ++next;
     let seen = Atomics.load(signal, 0);
-    worker.postMessage({ id, line: JSON.stringify({ fn, args: args ?? {} }) });
+    // `args` goes as it is given: `null`, a list or a scalar reach the port, which is what the
+    // dispatcher's cases ask it about. Only a call with no arguments at all is `{}`.
+    worker.postMessage({ id, line: JSON.stringify({ fn, args: args === undefined ? {} : args }) });
     const deadline = Date.now() + callMs;
     for (;;) {
       // Answers to calls that timed out earlier may still arrive; they carry an older id and are dropped.

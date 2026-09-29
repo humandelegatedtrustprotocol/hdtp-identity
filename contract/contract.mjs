@@ -48,16 +48,14 @@ export const isFailure = (answer) =>
   !!answer && typeof answer === 'object' && !Array.isArray(answer) && typeof answer.error === 'string' && 'why' in answer;
 
 /**
- * What is wrong with `answer`, as the contract sees it; `[]` when nothing is. `seen`, when given,
- * collects the error codes each function was observed to fail with, so a run can also say which
- * DECLARED codes it never saw.
+ * What is wrong with `answer`, as the contract sees it; `[]` when nothing is. (Which DECLARED codes a
+ * run produced is js/parity.mjs's to count, over the cases both ports answered alike.)
  */
-export function judge(contract, fn, args, answer, seen) {
+export function judge(contract, fn, args, answer) {
   const m = contract.methods[fn];
   if (isFailure(answer)) {
     const wrong = validate(contract.failure, answer, contract.root).map((w) => `failure ${w}`);
     if (m) {
-      if (seen) seen.set(fn, (seen.get(fn) ?? new Set()).add(answer.error));
       if (!m.errors.includes(answer.error)) wrong.push(`fails with ${JSON.stringify(answer.error)} (${JSON.stringify(answer.why)}), which the contract does not declare for it`);
     } else if (answer.error !== 'unsupported') {
       wrong.push(`a name the contract does not have answered ${JSON.stringify(answer.error)}, not "unsupported"`);
