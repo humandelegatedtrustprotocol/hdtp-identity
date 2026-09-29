@@ -14,6 +14,7 @@ pub mod export;
 pub mod hpke;
 pub mod keys;
 pub mod ledger;
+pub mod refresh;
 pub mod signing;
 pub mod time;
 pub mod util;

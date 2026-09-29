@@ -62,3 +62,55 @@ func callCardDecode(a args) json.RawMessage {
 	// no vector looks at, so nothing noticed.
 	return ok(map[string]any{"fn": c.FN, "version": 2, "seal": c.Seal, "cert": B64url(c.Cert), "root": c.Root, "endpoint": c.Endpoint, "expired": c.Expired, "ignored": ignored, "bytes": c.Bytes, "leaf": certOut(c.Leaf)})
 }
+
+// callRefreshCheck judges a peer's answer to get_card against the host's pin (RefreshCheck). Read in
+// the contract's order, as the core's refresh_check: the pin, whose members are the host's own and
+// named by their path; the answer, which must be there and is otherwise read as it was sent; the
+// instant.
+func callRefreshCheck(a args) json.RawMessage {
+	pin, isObj := a.value("pin").(map[string]any)
+	if !isObj {
+		return fail(codeArgs, "pin is required")
+	}
+	root, isText := pin["root"].(string)
+	if !isText {
+		return fail(codeArgs, "pin.root is required")
+	}
+	endpoint, isText := pin["endpoint"].(string)
+	if !isText {
+		return fail(codeArgs, "pin.endpoint is required")
+	}
+	var leaf []byte
+	switch l := pin["leaf"].(type) {
+	case nil:
+		return fail(codeArgs, "pin.leaf is required")
+	case string:
+		der, err := DecodeB64url(l)
+		if err != nil {
+			return failAs("parse", err)
+		}
+		leaf = der
+	default:
+		return fail("parse", "not base64url")
+	}
+	answer := a.present("answer")
+	if answer == nil {
+		return fail(codeArgs, "answer is required")
+	}
+	now, err := a.instant("now")
+	if err != nil {
+		return failAs("parse", err)
+	}
+	v, err := RefreshCheck(RefreshPin{Root: root, Endpoint: endpoint, Leaf: leaf}, answer, now)
+	if err != nil {
+		return failAs("parse", err)
+	}
+	if !v.OK {
+		return ok(map[string]any{"ok": false, "why": v.Why})
+	}
+	var renewed any
+	if v.Renewed != nil {
+		renewed = map[string]any{"leaf": B64url(v.Renewed.Leaf), "spki": B64url(v.Renewed.SPKI)}
+	}
+	return ok(map[string]any{"ok": true, "fn": v.FN, "renewed": renewed, "root_cert": B64url(v.RootCert)})
+}

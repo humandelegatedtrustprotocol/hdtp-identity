@@ -97,6 +97,7 @@ export const BASES = {
   signing_request_check: 'signing_request_check: a renewal from a localhost node',
   card_encode: 'card_encode',
   card_decode: 'card_decode of a real card',
+  refresh_check: 'refresh_check: the pinned leaf, unchanged',
   suite_for: 'suite_for an Ed25519 key',
   hpke_seal: 'hpke_seal',
   hpke_open: 'hpke_open of what hpke_seal made',
