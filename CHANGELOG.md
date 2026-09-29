@@ -192,6 +192,22 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 - **Removed public API** (cluster G): Go `AlgX25519`, `PublicKey.X`, `PublicKey.AlgOID`; Rust
   `Alg::X25519`, `keys::OID_X25519` and `keys::x25519_spki`. `Alg::sig_oid` returns the OID, not a
   `Result`: no algorithm left has none.
+- **Go: an open is by a key of the suite's own algorithm** (T5). Under PACT-SEAL-X25519 a P-256 key has
+  no seed, and the open used the empty seed's scalar — SHA-512 of nothing, clamped, a public constant —
+  so any P-256 key opened a seal to the Ed25519 key that maps to that constant's point, through `Open`,
+  `hpke_open` and `decide` (measured: two P-256 keys each opened one, and a node holding that key's leaf
+  beside a P-256 key decided on a stranger's call). The private key is held to the suite before its
+  material is read, as the core holds it: `does not open`.
+- **Go: a key that is not one is refused by name, never a panic** (T18, the plan's S7). Every exported
+  function that takes a key, or an options struct holding one — `BuildRoot`, `RootTBS`, `BuildLeaf`,
+  `LeafTBS`, `CSRNew`, `IssueFromCSR`, `IssueTBSFromCSR`, `SealRequest`, `SealResult`, `OpenResult`,
+  `Seal`, `Open`, `SignDetached`, `AlgorithmOf`, `SuiteForKey` — refuses a nil key, the zero value, or a
+  key given an `Alg` by hand without its material, before reading a field of it: `bad_request`, `<who>
+  is required` (`the root's key is required`, `the recipient's public key is required`). Each of these
+  panicked, and `PrivateKey{}.PKCS8()` wrote a P-256 key with an empty scalar and no error; it refuses
+  now. `PrivateKey.Public()` and `.Signer()`, which have no error to answer with, answer nil for such a
+  key; `Signer.Sign` on a nil or empty signer refuses, and `VerifyDetached` with such a key is false.
+  `AlgorithmOf(nil)` is `the key is required` (it said `unsupported key type`).
 - **JS loader:** `call(name, null)` hands `null` to the core, which answers `args is a JSON object`
   as the Go port does; it used to be made `{}` (`js/index.mjs`, `js/worker.mjs`). Only `args` left
   out is `{}`. The parity case `args that are null` sends `null` for the first time (TC-2).

@@ -8,9 +8,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 case can be listed as proven that did not pass. The cases that fail today are listed apart, at the
 end, each with the finding it waits on.
 
-Specification: **2.2.4**. **88** normative sentences, **2140** cross-port parity cases over **50** guarded functions, and **3** known divergences that fail today and are listed apart, at the end.
+Specification: **2.2.4**. **88** normative sentences, **2145** cross-port parity cases over **50** guarded functions, and **3** known divergences that fail today and are listed apart, at the end.
 
-Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **4286** answers, of which **2** do not hold to the shape it declares — **2** of them in a known divergence. Of **117** declared error codes, **117** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**51** functions, spec 2.2.4): **4296** answers, of which **2** do not hold to the shape it declares — **2** of them in a known divergence. Of **117** declared error codes, **117** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 88 normative sentences of the specification
 
@@ -203,7 +203,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 2140 cross-port parity cases
+## The 2145 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -211,7 +211,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **2140** cases (**1108** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
+At the run that generated this file: **2145** cases (**1108** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **50** of **50** functions compared whole on success.
 
 ### `address_guard` — 50 cases · whole on success
 
@@ -599,7 +599,7 @@ At the run that generated this file: **2140** cases (**1108** of the run's cases
 - generated · csr_new · endpoint absent, host_pkcs8 7
 - generated · csr_new · endpoint absent, dns_name 7
 
-### `decide` — 89 cases · whole on success
+### `decide` — 90 cases · whole on success
 
 - decide on an envelope from a pinned contact
 - decide on a pinned contact's call that names no tool
@@ -675,6 +675,7 @@ At the run that generated this file: **2140** cases (**1108** of the run's cases
 - decide on an envelope with a body holding the largest double
 - decide on an envelope with a body nested 127 deep
 - decide on an envelope whose header holds a ts past the largest double
+- decide on a call sealed to the empty seed's key, held beside a P-256 key
 - generated · decide · {}
 - generated · decide · the hostile object
 - generated · decide · now absent
@@ -1139,7 +1140,7 @@ At the run that generated this file: **2140** cases (**1108** of the run's cases
 - generated · generate_key · alg null
 - generated · generate_key · an undeclared member
 
-### `hpke_open` — 64 cases · whole on success
+### `hpke_open` — 68 cases · whole on success
 
 - hpke_open of a ciphertext that is not one
 - hpke_open with nothing to work from
@@ -1151,6 +1152,10 @@ At the run that generated this file: **2140** cases (**1108** of the run's cases
 - hpke_open as a key outside the profile: P-384
 - hpke_open as a key outside the profile: X25519
 - hpke_open as a key outside the profile: Ed25519 with a NULL
+- hpke_open of a seal to the empty seed's key, by a P-256 key
+- hpke_open of a seal to the empty seed's key, by another P-256 key
+- hpke_open under the P-256 suite by an Ed25519 key
+- hpke_open under the X25519 suite by a P-256 key
 - generated · hpke_open · {}
 - generated · hpke_open · suite absent
 - generated · hpke_open · suite null
