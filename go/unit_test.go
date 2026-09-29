@@ -737,3 +737,21 @@ func craftedEmptySeedRecipient(t *testing.T) *PublicKey {
 	}
 	return pub
 }
+
+// S4-1: 32 bytes that decode to no Ed25519 point are no key, as the core's from_spki refuses them; a
+// point of small order is a point (the seal refuses it later), and so is y = 3.
+func TestAnEd25519KeyThatIsNotAPointDoesNotRead(t *testing.T) {
+	spki := func(first byte) []byte {
+		key := make([]byte, 32)
+		key[0] = first
+		return concat(mustHex("302a300506032b6570032100"), key)
+	}
+	if _, err := ParseSPKI(spki(2)); err == nil || err.Error() != "Ed25519 key is not a point" {
+		t.Errorf("y = 2: %v", err)
+	}
+	for _, first := range []byte{1, 3} {
+		if _, err := ParseSPKI(spki(first)); err != nil {
+			t.Errorf("y = %d is a point: %v", first, err)
+		}
+	}
+}

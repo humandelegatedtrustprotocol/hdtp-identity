@@ -17,6 +17,8 @@ import (
 	"fmt"
 	"math/big"
 	"slices"
+
+	"filippo.io/edwards25519"
 )
 
 const (
@@ -232,6 +234,12 @@ func ParseSPKI(spki []byte) (*PublicKey, error) {
 	case oid == oidEd25519 && len(alg) == 1:
 		if len(key) != ed25519.PublicKeySize {
 			return nil, errors.New("Ed25519 key is not 32 bytes")
+		}
+		// 32 bytes that decode to no point are no key, as the core's from_spki refuses them. They were
+		// a key here: a leaf carrying one validated, where the core refused it at chain rule 1 (S4-1).
+		// Decoding only: a point of small order is a point (the seal refuses its all-zero DH).
+		if _, err := new(edwards25519.Point).SetBytes(key); err != nil {
+			return nil, errors.New("Ed25519 key is not a point")
 		}
 		out.Alg = AlgEd25519
 		out.Ed = ed25519.PublicKey(append([]byte(nil), key...))

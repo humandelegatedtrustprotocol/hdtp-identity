@@ -99,4 +99,12 @@ export default function keys({ add, expect }, f) {
     add(`verify with a key outside the profile: ${kind}`, 'verify', { spki: b64url(spki), data: b64url(new Uint8Array(4)), sig: b64url(new Uint8Array(64)) });
     expect(`verify with a key outside the profile: ${kind}`, refused);
   }
+
+  // An Ed25519 key of 32 bytes that decode to no point is no key (S4-1): the core refused it where it
+  // read it, and the Go port read it as a key. y = 2 has no x on the curve. The control, y = 3, does.
+  const ed25519Spki = (y) => b64url(Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), Buffer.from([y]), Buffer.alloc(31)]));
+  add('key_info of an Ed25519 key that is not a point', 'key_info', { spki: ed25519Spki(2) });
+  expect('key_info of an Ed25519 key that is not a point', { error: 'parse', why: 'Ed25519 key is not a point' });
+  add('key_info of an Ed25519 key that is a point (the control)', 'key_info', { spki: ed25519Spki(3) });
+  expect('key_info of an Ed25519 key that is a point (the control)', { alg: 'ed25519' });
 }
