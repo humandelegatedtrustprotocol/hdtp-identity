@@ -463,9 +463,7 @@ waiting requests.
    `<name> is required`; each optional string `""`; each optional member of the wrong type; a member
    the contract does not declare; and, for read order, each required member absent beside each other
    member of the wrong type. Each is varied from a call that succeeds on both ports, named per
-   function. Until the audit of 2026-09-29 is fixed, the cases that fail today are listed in
-   `js/cases/known-divergences.json`, each with the finding that closes it, and excused only while
-   they fail exactly as listed; the list can only shrink. It also fails when:
+   function. Every case must pass: nothing is excused. It also fails when:
    - the two dispatchers and `contract/contract.json` stop naming the same set of functions
      (`version` lived in one dispatcher and not the other until this check existed; a function
      described in the contract and dispatched by neither port would be prose nothing runs);

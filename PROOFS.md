@@ -5,12 +5,11 @@ regenerates and fails on any difference, which is what gate.sh runs. Both lists 
 that prove them rather than from prose beside them: the MUSTs from `pact-protocol/SPEC.md` through
 the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the parity cases from
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
-case can be listed as proven that did not pass. The cases that fail today are listed apart, at the
-end, each with the finding it waits on.
+case can be listed as proven that did not pass.
 
-Specification: **2.2.4**. **88** normative sentences, **2465** cross-port parity cases over **54** guarded functions, and **0** known divergences that fail today and are listed apart, at the end.
+Specification: **2.2.4**. **88** normative sentences, **2465** cross-port parity cases over **54** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 2.2.4): **4930** answers, of which **0** do not hold to the shape it declares — **0** of them in a known divergence. Of **127** declared error codes, **127** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 2.2.4): **4930** answers, of which **0** do not hold to the shape it declares. Of **127** declared error codes, **127** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 88 normative sentences of the specification
 
@@ -211,7 +210,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **2465** cases (**1149** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements besides the known ones, **54** of **54** functions compared whole on success.
+At the run that generated this file: **2465** cases (**1149** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
 
 ### `address_guard` — 50 cases · whole on success
 
@@ -2845,10 +2844,3 @@ At the run that generated this file: **2465** cases (**1149** of the run's cases
 - generated · wallet_issue · now absent, csr 7
 - generated · wallet_issue · now absent, valid_days "7"
 - generated · wallet_issue · now absent, move "yes"
-
-## The 0 known divergences
-
-Cases that FAIL today, each excused by `js/cases/known-divergences.json` only while it fails exactly
-as its entry says, and each waiting on the audit finding named beside it (the port-parity audit of
-2026-09-29). None of them is proven; they are here so that the list is read, not assumed.
-
