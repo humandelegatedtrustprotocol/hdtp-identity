@@ -554,6 +554,15 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   (N1); and §0's sentence that the seed refuses a key outside the profile in the ports' words names what
   pact-protocol b841dd3 made true of it: a padded P-256 curve OID, a SubjectPublicKeyInfo of another
   shape, a P-256 point off the curve (N2).
+- **Eight more intrusion scenarios, the seed's** (S5 and S6 of the review of 2026-09-30):
+  `js/intrude.mjs` gains, by the seed's names, an Ed25519 key BIT STRING with 1 and with 7 unused bits,
+  a SubjectPublicKeyInfo with a member after its key, a P-256 key BIT STRING with 1 unused bit (`DER:`,
+  rule 1), and endpoints with an underscore, a trailing dot, an empty label and an IPv4-mapped IPv6
+  literal (rule 5). Both ports refused all eight already; the seed accepted six until pact-protocol
+  b841dd3, with which this lands (146 scenarios, 146 verdicts alike on each port).
+- **`js/package.json` needs Node 22** (S8): the seed's envelope reader, which the gate runs, reads a
+  number's text through `JSON.parse`'s reviver (`context.source`, Node 21) and calls
+  `String.prototype.isWellFormed`; `engines` said `>=20`. pact-protocol declares the same.
 
 ## 0.4.1 — 2026-09-28
 

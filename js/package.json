@@ -20,5 +20,5 @@
     "record:check": "node record.mjs --check",
     "live": "node --test live.test.mjs"
   },
-  "engines": { "node": ">=20" }
+  "engines": { "node": ">=22" }
 }
