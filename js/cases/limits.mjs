@@ -2,8 +2,10 @@
 //
 // A fresh key for every kind of charge (the controls that must get through), every rule refusing
 // once its bucket is empty, the pending cap, a clock that went back, a stored aggregate over a burst
-// that shrank, and every argument that does not read. The sequences that hold the decision to the
-// cloud's TypeScript are js/cases/limits-vectors.json, replayed by js/limits.test.mjs.
+// that shrank, and every argument that does not read. The sequences that hold the decision to what the
+// cloud's TypeScript decided are js/cases/limits-vectors.json, a fixed record of it, replayed by
+// js/limits.test.mjs.
+import { RawArgs } from '../port.mjs';
 
 export default function limits({ add, expect }) {
   // Arbitrary numbers, unlike PACT's defaults; the guest total and the pending cap have no approved
@@ -107,7 +109,7 @@ export default function limits({ add, expect }) {
     ['a guest charge with no addressed', { charge: { kind: 'guest_in', root: 'rG', source: 's1' } }, 'charge.addressed is required'],
     ['an integration charge with no contact', { charge: { kind: 'integration', integration: 'i1' } }, 'charge.contact is required'],
     ['a pending count that is a string', { charge: { kind: 'pending_in', held: '2' } }, 'charge.held is a whole number'],
-    ['no now', { now: undefined }, 'now is a time in milliseconds'],
+    ['no now', { now: undefined }, 'now is required'],
     ['a negative now', { now: -1 }, 'now is a time in milliseconds'],
     ['a now with a fraction', { now: 1000.5 }, 'now is a time in milliseconds'],
     ['a now past 2^53', { now: 2 ** 53 }, 'now is a time in milliseconds'],
@@ -122,6 +124,45 @@ export default function limits({ add, expect }) {
     add(`limits_decide with ${what}`, 'limits_decide', decide({ kind: 'stranger_out' }, undefined, over));
     expect(`limits_decide with ${what}`, { error: 'bad_request', why });
   }
+  // -0 is not a whole number to the core's reader, which takes it for a float; the Go port read it
+  // as 0 and decided. Raw text: JSON.stringify writes -0 as 0.
+  add('limits_decide with a now of -0', 'limits_decide', RawArgs.edit(decide({ kind: 'stranger_out' }, undefined, { now: 1234567 }), '"now":1234567', '"now":-0'));
+  expect('limits_decide with a now of -0', { error: 'bad_request', why: 'now is a time in milliseconds' });
   add('limits_decide with nothing to work from', 'limits_decide', {});
   expect('limits_decide with nothing to work from', { error: 'bad_request', why: 'rules is required' });
+
+  // limits_buckets: the rows a charge reads, so a host can fetch them before limits_decide (X2). Each
+  // answer is held to the key scheme LimitsCharge describes and to rates worked out here from the rules
+  // — `n / 3600` an hour's budget, the identity's `max(1, min(cap × contact rate, capacity))` — so
+  // neither port's arithmetic is the expectation.
+  const perHour = (key, n) => ({ key, per_second: n / 3600, burst: n });
+  const identity = (key, cap) => {
+    const r = Math.max(1, Math.min(cap * rules.contact_calls_per_second, rules.identity_capacity_per_second));
+    return { key, per_second: r, burst: r };
+  };
+  const contact = (key) => ({ key, per_second: rules.contact_calls_per_second, burst: rules.contact_burst });
+  for (const [what, charge, buckets] of [
+    ['a contact in', { kind: 'contact_in', root: 'rA', contact_cap: 100 }, [contact('contact:rA'), identity('identity', 100)]],
+    ['a contact out', { kind: 'contact_out', root: 'rA', contact_cap: 100 }, [contact('out:contact:rA'), identity('out:identity', 100)]],
+    ['a contact in whose cap is 0', { kind: 'contact_in', root: 'rA', contact_cap: 0 }, [contact('contact:rA'), identity('identity', 0)]],
+    ['a contact in whose cap is 1', { kind: 'contact_in', root: 'rA', contact_cap: 1 }, [contact('contact:rA'), identity('identity', 1)]],
+    ['a guest with an address', { kind: 'guest_in', root: 'rG', source: 's1', addressed: true }, [perHour('guest:rG:s1', rules.guest_calls_per_hour)]],
+    ['a guest with no address', { kind: 'guest_in', root: 'rG', source: 's1', addressed: false }, [perHour('guest:rG', rules.guest_calls_per_hour)]],
+    ['a small form, no root', { kind: 'guest_in', root: null, source: 's1', addressed: true }, [perHour('source:s1', rules.guest_source_calls_per_hour)]],
+    ['a small form, an empty root', { kind: 'guest_in', root: '', source: 's1', addressed: false }, [perHour('source:s1', rules.guest_source_calls_per_hour)]],
+    ['the guest total', { kind: 'guest_total' }, [perHour('guest-total', rules.guest_total_calls_per_hour)]],
+    ['a stranger out', { kind: 'stranger_out' }, [perHour('out:stranger', rules.stranger_calls_out_per_hour)]],
+    ['an integration', { kind: 'integration', integration: 'i1', contact: 'rA' }, [perHour('integration:i1:rA', rules.integration_calls_per_hour)]],
+    ['a contact request, a count', { kind: 'pending_in', held: 1 }, []],
+  ]) {
+    add(`limits_buckets: ${what}`, 'limits_buckets', { rules, charge });
+    expect(`limits_buckets: ${what}`, { buckets });
+  }
+  // The rules and the charge are read as limits_decide reads them, by the same reader, in its words.
+  for (const [what, over, why] of bad.filter(([, o]) => 'rules' in o || 'charge' in o)) {
+    const args = { rules, charge: { kind: 'stranger_out' }, ...over };
+    for (const k of Object.keys(args)) if (args[k] === undefined) delete args[k];
+    add(`limits_buckets with ${what}`, 'limits_buckets', args);
+    expect(`limits_buckets with ${what}`, { error: 'bad_request', why });
+  }
 }

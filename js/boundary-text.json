@@ -1,0 +1,135 @@
+{
+  "about": "The arguments text both ports read alike, as one list of cases: text a JSON parser reads as it pleases, which the core's serde_json and the Go port's encoding/json read differently, and so neither port hands to its parser. The core's test the_arguments_text_is_read_as_the_go_port_reads_it (crates/pact-identity/src/api.rs) and the Go port's TestJSONTheCoreDoesNotReadIsNotReadHere and TestAnIntegerIsWhatTheCoreReadsAsOne (go/api_args_test.go) read it; each port's constant for the depth is held to `max_depth`. `calls` are key_info's answers to arguments given as text, which the parity harness cannot send when they do not parse (the Go adapter reads its request as one JSON line). `nested` builds arguments `{\"spki\": <arrays>}` nested `max_depth` deep with the arguments, and one deeper. `integers` are JSON number texts a member reads as an integer (serde_json's `as_i64`), and texts it does not. `unknown_name` are texts of arguments beside a name no function has, each answered `unsupported` `no function named no_such_function` whatever the text is: the name is judged before anything reads the arguments (R34).",
+  "max_depth": 127,
+  "nested": {
+    "within": {
+      "error": "parse",
+      "why": "not base64url"
+    },
+    "beyond": {
+      "error": "bad_request",
+      "why": "args: nested more than 127 deep"
+    }
+  },
+  "calls": [
+    {
+      "args": "",
+      "want": {
+        "error": "bad_request",
+        "why": "args is a JSON object"
+      }
+    },
+    {
+      "args": " \n",
+      "want": {
+        "error": "bad_request",
+        "why": "args is a JSON object"
+      }
+    },
+    {
+      "args": "{",
+      "want": {
+        "error": "bad_request",
+        "why": "args is a JSON object"
+      }
+    },
+    {
+      "args": "{\"spki\":\"x\"} x",
+      "want": {
+        "error": "bad_request",
+        "why": "args is a JSON object"
+      }
+    },
+    {
+      "args": "{\"spki\":\"\u0001\"}",
+      "want": {
+        "error": "bad_request",
+        "why": "args is a JSON object"
+      }
+    },
+    {
+      "args": "{\"spki\":\"\\q\"}",
+      "want": {
+        "error": "bad_request",
+        "why": "args is a JSON object"
+      }
+    },
+    {
+      "args": "{\"x\":1e400,\"manifest\":\"{}\"}",
+      "want": {
+        "error": "bad_request",
+        "why": "args: a number is outside the range of a double"
+      }
+    },
+    {
+      "args": "{\"x\":-1e400}",
+      "want": {
+        "error": "bad_request",
+        "why": "args: a number is outside the range of a double"
+      }
+    },
+    {
+      "args": "{\"x\":1.7976931348623159e308}",
+      "want": {
+        "error": "bad_request",
+        "why": "args: a number is outside the range of a double"
+      }
+    },
+    {
+      "args": "{\"x\":1.7976931348623158e308}",
+      "want": {
+        "error": "bad_request",
+        "why": "key_info takes no member \"x\""
+      }
+    },
+    {
+      "args": "{\"x\":1e-400}",
+      "want": {
+        "error": "bad_request",
+        "why": "key_info takes no member \"x\""
+      }
+    },
+    {
+      "args": "{\"x\":\"1e400\",\"y\":\"[[[[\",\"z\":\"\\\"1e400\"}",
+      "want": {
+        "error": "bad_request",
+        "why": "key_info takes no member \"x\""
+      }
+    }
+  ],
+  "integers": {
+    "read": [
+      "0",
+      "7",
+      "-7",
+      "9223372036854775807",
+      "-9223372036854775808"
+    ],
+    "refused": [
+      "-0",
+      "7.0",
+      "1.5",
+      "1e2",
+      "\"7\"",
+      "9223372036854775808",
+      "-9223372036854775809"
+    ]
+  },
+  "unknown_name": {
+    "fn": "no_such_function",
+    "want": {
+      "error": "unsupported",
+      "why": "no function named no_such_function"
+    },
+    "args": [
+      "{",
+      "",
+      "[]",
+      "null",
+      "3",
+      "{\"x\":\"\\ud800\"}",
+      "{\"x\":1e400}",
+      "{\"x\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[1]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}"
+    ]
+  }
+}

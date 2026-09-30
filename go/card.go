@@ -126,7 +126,13 @@ func DecodeCard(text string, now time.Time) (*Card, error) {
 	if len(certs) != 1 {
 		return nil, CardError{fmt.Sprintf("%d certificates", len(certs))}
 	}
-	leaf, err := Parse(FromB64url(certs[0]))
+	// Read strictly, as the core reads it and the seed's card.mjs now does: this port skipped a stray
+	// character, so a card whose certificate carried one was taken here and refused by the core (C7).
+	der, err := DecodeB64url(certs[0])
+	if err != nil {
+		return nil, CardError{"certificate does not parse: " + err.Error()}
+	}
+	leaf, err := Parse(der)
 	if err != nil {
 		return nil, CardError{"certificate does not parse: " + err.Error()}
 	}

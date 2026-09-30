@@ -3,6 +3,7 @@
 // One case per notice kind, the refusal that is the only thing `move` changes, an entry of another
 // root that must not move the answer, the live leaf as the NEWEST entry (never the newest unexpired
 // one), and every ledger that does not read. The last case is the control that must get through.
+import { ZONED } from './certificates.mjs';
 
 export default function ledger({ add, expect }, f) {
   const { now, ENDPOINT, rootFp } = f;
@@ -86,7 +87,17 @@ export default function ledger({ add, expect }, f) {
   expect('ledger_check: the newest leaf expired, an older one did not', { refusal: null, live: null });
   expect('ledger_check: another root\'s live leaf is not this root\'s', { refusal: null, previous_not_before: null });
 
+  // A null origin is no origin (CONTRACT §0: null is absent), as the ports now read every optional
+  // member of the wallet's documents; they read it as an origin of the wrong type.
+  add('ledger_check over a ledger whose origin is null', 'ledger_check', ask([{ ...here[0], origin: null }, good], { move: false }));
+  expect('ledger_check over a ledger whose origin is null', { refusal: null, known_endpoint: true, notice: { kind: 'renew' } });
   // The control that must get through: a ledger that reads, with an origin and another root's entry.
   add('ledger_check over a ledger that reads', 'ledger_check', ask([{ ...here[0], origin: 'https://app.example' }, good], { move: false }));
   expect('ledger_check over a ledger that reads', { refusal: null, known_endpoint: true, new_host: false });
+
+  // An endpoint that is an IPv6 literal with a zone id is not the normal form (T1, C1, R09).
+  for (const endpoint of ZONED.slice(0, 2)) {
+    add(`ledger_check for ${endpoint}`, 'ledger_check', ask(here, { endpoint }));
+    expect(`ledger_check for ${endpoint}`, { error: 'bad_request', why: 'endpoint is not an https URL in normal form' });
+  }
 }

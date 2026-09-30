@@ -4,14 +4,33 @@ use serde_json::Value;
 
 pub fn canonical(v: &Value) -> String {
     let mut out = String::new();
-    write(v, &mut out);
+    write(v, true, &mut out);
     out
 }
 
-fn write(v: &Value, out: &mut String) {
+/// A JSON value a caller handed in, as it is sealed into a plaintext (`params`, `result`, `error`, a
+/// vault's document): strings as RFC 8785 writes them; an integer serde_json holds as one (an i64, or
+/// a u64 past it) by its digits, and every other number as RFC 8785 writes it; and members in the
+/// order the value holds them — the order they were written in, a member written twice once, where it
+/// first appeared, with the value it was given last, as serde_json's `preserve_order` map reads it
+/// (and JSON.parse). Not sorted: Appendix B's plaintexts write `name` before `arguments`. serde_json's
+/// own writer printed `1e2` as `100.0` and `-0` as `-0.0`, and the Go port sealed the caller's text as
+/// it was written, duplicates and escapes and all: two plaintexts for one call. The digits are the
+/// owner's choice (M2 of the review of 2026-09-30): RFC 8785's double is the header's rule, and an
+/// id of 12345678901234567891 in a caller's `params` was sealed as 12345678901234567000 until then.
+pub fn in_order(v: &Value) -> String {
+    let mut out = String::new();
+    write(v, false, &mut out);
+    out
+}
+
+fn write(v: &Value, sorted: bool, out: &mut String) {
     match v {
         Value::Null => out.push_str("null"),
         Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+        // An integer serde holds as one keeps its digits in a sealed value; `-0`, a fraction and an
+        // exponent it holds as a double, as RFC 8785 does.
+        Value::Number(n) if !sorted && (n.is_i64() || n.is_u64()) => out.push_str(&n.to_string()),
         Value::Number(n) => out.push_str(&number(n)),
         Value::String(s) => out.push_str(&string(s)),
         Value::Array(a) => {
@@ -20,13 +39,15 @@ fn write(v: &Value, out: &mut String) {
                 if i > 0 {
                     out.push(',');
                 }
-                write(x, out);
+                write(x, sorted, out);
             }
             out.push(']');
         }
         Value::Object(o) => {
             let mut keys: Vec<&String> = o.keys().collect();
-            keys.sort_by(|a, b| a.encode_utf16().cmp(b.encode_utf16()));
+            if sorted {
+                keys.sort_by(|a, b| a.encode_utf16().cmp(b.encode_utf16()));
+            }
             out.push('{');
             for (i, k) in keys.iter().enumerate() {
                 if i > 0 {
@@ -34,7 +55,7 @@ fn write(v: &Value, out: &mut String) {
                 }
                 out.push_str(&string(k));
                 out.push(':');
-                write(&o[*k], out);
+                write(&o[*k], sorted, out);
             }
             out.push('}');
         }
@@ -109,33 +130,31 @@ mod tests {
             serde_json::from_str(r#"{"v":2,"suite":"PACT-SEAL-P256","kid":"k","ts":1,"exp":2,"cty":"c","msg_id":"m\n"}"#).unwrap();
         assert_eq!(canonical(&v), r#"{"cty":"c","exp":2,"kid":"k","msg_id":"m\n","suite":"PACT-SEAL-P256","ts":1,"v":2}"#);
     }
+    /// A sealed value keeps its members in the order it holds them, where `canonical` sorts them; a
+    /// member read twice is held once, where it first appeared, with its last value.
+    #[test]
+    fn in_order_keeps_the_order_written() {
+        let v: Value = serde_json::from_str(r#"{"name":"x","arguments":{"b":1,"a":[2.50,-0,1e2]},"name":"y"}"#).unwrap();
+        assert_eq!(in_order(&v), r#"{"name":"y","arguments":{"b":1,"a":[2.5,0,100]}}"#);
+        assert_eq!(canonical(&v), r#"{"arguments":{"a":[2.5,0,100],"b":1},"name":"y"}"#);
+        // An i64 or a u64 keeps its digits in a sealed value, and is RFC 8785's double in `canonical`.
+        let v: Value = serde_json::from_str(r#"{"u":12345678901234567891,"i":-9223372036854775808,"f":9007199254740993.0}"#).unwrap();
+        assert_eq!(in_order(&v), r#"{"u":12345678901234567891,"i":-9223372036854775808,"f":9007199254740992}"#);
+        assert_eq!(canonical(&v), r#"{"f":9007199254740992,"i":-9223372036854776000,"u":12345678901234567000}"#);
+    }
+    /// The rows are contract/contract.json's `CanonicalNumbers`, one list, which go/review_test.go's
+    /// TestNumbersAsECMAScriptPrintsThem runs through the Go port too. (Each port carried its own copy
+    /// of the table until 2026-09-29, held to the other by nothing but a comment saying so.)
     #[test]
     fn numbers_as_ecmascript_prints_them() {
-        let cases: &[(&str, &str)] = &[
-            ("1e21", "1e+21"),
-            ("1.5e300", "1.5e+300"),
-            ("1e-7", "1e-7"),
-            ("0.000001", "0.000001"),
-            ("100.0", "100"),
-            ("9223372036854775808.0", "9223372036854776000"), // the shortest round-trip form, as ECMAScript prints 2^63
-            ("1e20", "100000000000000000000"),
-            ("0.1", "0.1"),
-            ("-0.0", "0"),
-            ("42", "42"),
-            // …and the rows the Go port's table has carried since 2026-09-21: the two are one list.
-            ("1e-5", "0.00001"),
-            ("0.0000001", "1e-7"),
-            ("1.25e-9", "1.25e-9"),
-            ("-1e-7", "-1e-7"),
-            ("1e100", "1e+100"),
-            ("9007199254740992", "9007199254740992"),
-            ("9007199254740993", "9007199254740992"),
-            ("-9007199254740993", "-9007199254740992"),
-            ("12345678901234567890", "12345678901234567000"),
-        ];
-        for (input, want) in cases {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../contract/contract.json");
+        let contract: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let rows = contract["$defs"]["CanonicalNumbers"]["const"].as_array().unwrap();
+        assert!(rows.len() >= 19, "the contract carries {} rows", rows.len());
+        for row in rows {
+            let (input, want) = (row[0].as_str().unwrap(), row[1].as_str().unwrap());
             let v: Value = serde_json::from_str(input).unwrap();
-            assert_eq!(canonical(&v), *want, "{input}");
+            assert_eq!(canonical(&v), want, "{input}");
         }
     }
 }

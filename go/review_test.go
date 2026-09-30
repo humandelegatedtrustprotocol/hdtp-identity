@@ -8,6 +8,7 @@ package pactidentity
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -135,10 +136,10 @@ func TestDERDeviationsAreRefused(t *testing.T) {
 		// credential through `Decide` -> `ValidateChain` -> `Parse`, before any signature is verified.
 		// Rust put the length first in a short-circuiting `||`, so only this port could be reached.
 		{"an empty attribute in the Name", 5, seq(tlv(0x31, seq())), "name is not a UTF-8 commonName"},
-		// An X25519 key. `AlgorithmOf` errors only on an EMPTY Alg, and `ParseSPKI` names X25519, so
-		// this leaf was inside the profile here and outside it in Rust — a chain this port validated
-		// and the wallet refused.
-		{"a key algorithm outside the profile", 6, seq(seq(oidBytes(oidX25519)), bitstr(make([]byte, 32), 0)), "key algorithm not in the profile"},
+		// An X25519 key. It was a third algorithm to this port, and this leaf was once inside the
+		// profile here and outside it in Rust — a chain this port validated and the wallet refused. A
+		// key outside the profile is refused where it is read now, in the core's words (R12, T2).
+		{"a key algorithm outside the profile", 6, seq(seq(oidBytes("1.3.101.110")), bitstr(make([]byte, 32), 0)), "unsupported key type 1.3.101.110"},
 	}
 	for _, c := range cases {
 		cert := withField(t, p.root, c.index, c.field, p.rootKey)
@@ -174,6 +175,61 @@ func TestAddressGuardRefusesEverySpellingOfLoopback(t *testing.T) {
 	}
 	if ok, why := AddressGuard(reviewEndpoint, "", true); !ok {
 		t.Error(why)
+	}
+}
+
+// §13.1#1: `enc` is exactly the suite's Npk, under each suite, in both directions. `sig` covers
+// protected ‖ enc ‖ ct with nothing between them, so a byte moved across the enc/ct boundary leaves
+// the signed bytes as they were: the forgery is signed, and the length is the one thing that refuses
+// it. crates/pact-identity/tests/review.rs's an_encapsulated_key_of_the_wrong_length_is_refused_under_each_suite
+// is the core's twin, and js/parity.mjs holds both ports to it through decide and open_result.
+func TestAnEncapsulatedKeyOfTheWrongLengthIsRefused(t *testing.T) {
+	alina := reviewIdentity(t, "ed25519", reviewEndpoint)
+	chain := []string{B64url(alina.leaf), B64url(alina.root)}
+	for _, c := range []struct {
+		alg string
+		npk int
+	}{{"ed25519", 32}, {"p256", 65}} {
+		me, _ := GenerateKey(c.alg)
+		pkcs8, err := me.PKCS8()
+		if err != nil {
+			t.Fatal(err)
+		}
+		mine := map[string]any{"my_pkcs8": B64url(pkcs8), "my_spki": B64url(me.Public().SPKI), "msg_id": "r-1", "now": "2026-09-13T12:00:00Z", "pins": []any{}}
+		var sealed Envelope
+		leafPKCS8, _ := alina.leafKey.PKCS8()
+		out := Call("seal_result", mustJSON(map[string]any{
+			"recipient_spki": B64url(me.Public().SPKI), "sender_pkcs8": B64url(leafPKCS8), "form": "chain", "sender_chain": chain,
+			"result": map[string]any{"ok": true}, "msg_id": "r-1", "ts": mustTime(t, "2026-09-13T12:00:00Z").Unix(),
+		}))
+		if err := json.Unmarshal(out, &sealed); err != nil {
+			t.Fatalf("%s: %s", c.alg, out)
+		}
+		enc, _ := wireB64url(sealed.Enc)
+		ct, _ := wireB64url(sealed.Ct)
+		if len(enc) != c.npk {
+			t.Fatalf("%s: enc is %d bytes", c.alg, len(enc))
+		}
+		open := func(enc, ct []byte) string {
+			args := map[string]any{"envelope": Envelope{Protected: sealed.Protected, Enc: B64url(enc), Ct: B64url(ct), Sig: sealed.Sig}}
+			for k, v := range mine {
+				args[k] = v
+			}
+			return string(Call("open_result", mustJSON(args)))
+		}
+		var opened struct {
+			OK bool `json:"ok"`
+		}
+		if got := open(enc, ct); json.Unmarshal([]byte(got), &opened) != nil || !opened.OK {
+			t.Fatalf("%s: the envelope as sealed does not open, so the harness is not sound: %s", c.alg, got)
+		}
+		short := open(enc[:c.npk-1], append(append([]byte{}, enc[c.npk-1:]...), ct...))
+		long := open(append(append([]byte{}, enc...), ct[0]), ct[1:])
+		for what, got := range map[string]string{"one byte short": short, "one byte long": long} {
+			if got != `{"error":"envelope_invalid","why":"encapsulated key is not the suite's length"}` {
+				t.Errorf("%s, %s: %s", c.alg, what, got)
+			}
+		}
 	}
 }
 
@@ -375,32 +431,23 @@ func TestEveryP256SignatureIsTheLowSTwin(t *testing.T) {
 	}
 }
 
-// RFC 8785 prints a number as ECMAScript's Number does. The first ten rows are `canonical.rs`'s own
-// table, so the two ports are held to one list; the rest are where this port used to differ from it
-// and from the seed — Go's `%g` writes a two-digit exponent and turns to one at 1e-5, negative zero
-// printed as `-0`, and an integer past 2^53 kept digits a double does not have.
+// RFC 8785 prints a number as ECMAScript's Number does. The rows are contract/contract.json's
+// CanonicalNumbers, one list, which canonical.rs's numbers_as_ecmascript_prints_them runs through the
+// Rust core too (each port carried its own copy of the table until 2026-09-29, held to the other by
+// nothing but a comment saying so). Among them are where this port used to differ from the core and
+// the seed: Go's `%g` writes a two-digit exponent and turns to one at 1e-5, negative zero printed as
+// `-0`, and an integer past 2^53 kept digits a double does not have.
 func TestNumbersAsECMAScriptPrintsThem(t *testing.T) {
-	for _, c := range [][2]string{
-		{"1e21", "1e+21"},
-		{"1.5e300", "1.5e+300"},
-		{"1e-7", "1e-7"},
-		{"0.000001", "0.000001"},
-		{"100.0", "100"},
-		{"9223372036854775808.0", "9223372036854776000"},
-		{"1e20", "100000000000000000000"},
-		{"0.1", "0.1"},
-		{"-0.0", "0"},
-		{"42", "42"},
-		{"1e-5", "0.00001"},
-		{"0.0000001", "1e-7"},
-		{"1.25e-9", "1.25e-9"},
-		{"-1e-7", "-1e-7"},
-		{"1e100", "1e+100"},
-		{"9007199254740992", "9007199254740992"},
-		{"9007199254740993", "9007199254740992"},
-		{"-9007199254740993", "-9007199254740992"},
-		{"12345678901234567890", "12345678901234567000"},
-	} {
+	var table struct {
+		Const [][2]string `json:"const"`
+	}
+	if err := json.Unmarshal(contractDefs(t)["CanonicalNumbers"], &table); err != nil {
+		t.Fatal(err)
+	}
+	if len(table.Const) < 19 {
+		t.Fatalf("the contract carries %d rows", len(table.Const))
+	}
+	for _, c := range table.Const {
 		v, err := decodeJSON([]byte(c[0]))
 		if err != nil {
 			t.Fatalf("%s: %v", c[0], err)
@@ -411,10 +458,64 @@ func TestNumbersAsECMAScriptPrintsThem(t *testing.T) {
 	}
 }
 
+// An integer a Go caller hands Canonical is written as the double it is, as a json.Number is and as
+// the core and the seed write every number (RFC 8785): the int and int64 arms wrote the digits, so a
+// header's ts of 2^53 + 1 was 9007199254740993 here and 9007199254740992 there. The CanonicalNumbers
+// rows above reach Canonical as json.Number only.
+func TestAnIntegerIsWrittenAsTheDoubleItIs(t *testing.T) {
+	for _, c := range []struct {
+		v    any
+		want string
+	}{
+		{int64(1<<53 + 1), "9007199254740992"},
+		{int64(-(1<<53 + 1)), "-9007199254740992"},
+		{int64(math.MaxInt64), "9223372036854776000"},
+		{int64(math.MinInt64), "-9223372036854776000"},
+		{int(1<<53 + 1), "9007199254740992"},
+		{int64(1<<53 - 1), "9007199254740991"},
+		{int(-7), "-7"},
+	} {
+		if got := string(Canonical(map[string]any{"n": c.v})); got != `{"n":`+c.want+`}` {
+			t.Errorf("%T %v canonicalises to %s, and ECMAScript prints %s", c.v, c.v, got, c.want)
+		}
+	}
+}
+
+// The typed API holds a header's integers as the JSON boundary does: the check is in the seal itself
+// (headerTimes), below both, and TS is judged before the Exp a zero asks to be TS + 600.
+func TestTheTypedSealRefusesAHeaderIntegerItCannotCarry(t *testing.T) {
+	alina := reviewIdentity(t, "ed25519", reviewEndpoint)
+	o := SealOpts{RecipientKey: alina.leafKey.Public(), Sender: alina.leafKey, Form: "chain", SenderChain: [][]byte{alina.leaf, alina.root}, MsgID: "m"}
+	for _, c := range []struct {
+		ts, exp int64
+		want    string
+	}{
+		{1 << 53, 0, "ts is an integer from -(2^53 - 1) to 2^53 - 1"},
+		{math.MaxInt64, 0, "ts is an integer from -(2^53 - 1) to 2^53 - 1"},
+		{1<<53 - 1, 0, "exp is an integer from -(2^53 - 1) to 2^53 - 1"},
+		{1, 1 << 53, "exp is an integer from -(2^53 - 1) to 2^53 - 1"},
+	} {
+		o.TS, o.Exp = c.ts, c.exp
+		if _, err := SealRequest(o); err == nil || err.Error() != c.want {
+			t.Errorf("SealRequest ts %d exp %d: %v, want %q", c.ts, c.exp, err, c.want)
+		}
+		o.Result = json.RawMessage(`{}`)
+		if _, err := SealResult(o); err == nil || err.Error() != c.want {
+			t.Errorf("SealResult ts %d exp %d: %v, want %q", c.ts, c.exp, err, c.want)
+		}
+		o.Result = nil
+	}
+	o.TS, o.Exp = 1<<53-1, 1<<53-1
+	if _, err := SealRequest(o); err != nil {
+		t.Errorf("the largest ts a header carries: %v", err)
+	}
+}
+
 // A four-octet DER length reaches 2^32-1. Folded into a 32-bit `int` it wrapped negative, `at+l`
 // stayed inside the buffer, and the slice panicked — from six bytes of anybody's certificate. This
-// runs on any word size; the 32-bit one is where the old reader fell over, and it is cross-compiled
-// and run under linux/386 to show so (see the review-findings plan, B8).
+// runs on any word size. The 32-bit one is where the old reader fell over, and the test was
+// cross-compiled for linux/386 and run under Docker once, by hand, to show so (pact-gateway's
+// docs/release/review-findings-2026-09-21-plan.md, B8); no gate runs it on 32 bits.
 func TestAFourOctetLengthIsRefusedOnAnyWordSize(t *testing.T) {
 	for _, in := range [][]byte{
 		{0x30, 0x84, 0xFF, 0xFF, 0xFF, 0xFF},
@@ -518,5 +619,66 @@ func TestAPendingContactsSealedListingAnswersAtThePendingTier(t *testing.T) {
 		if d = decide(s.leaf, s.key, "tools/call", `{}`); d.Result["code"] != "pending_approval" {
 			t.Errorf("%s, a call that names no tool: %v", s.what, d.Result)
 		}
+	}
+}
+
+// The typed RefreshCheck, which the node calls, refuses a pin whose root is not a fingerprint before
+// it reads the pinned leaf or the answer, as the JSON boundary does: compared with the card's root it
+// was the peer's fault (`the card names another root`), where it is the host's.
+func TestTheTypedRefreshRefusesAPinRootThatIsNotAFingerprint(t *testing.T) {
+	alina := reviewIdentity(t, "ed25519", reviewEndpoint)
+	for _, root := range []string{"abc", "", alina.rootFP[:len(alina.rootFP)-1]} {
+		_, err := RefreshCheck(RefreshPin{Root: root, Endpoint: reviewEndpoint, Leaf: alina.leaf}, json.RawMessage(`{}`), time.Now())
+		if err == nil || err.Error() != "pin.root is not a fingerprint" {
+			t.Errorf("a pin whose root is %q: %v", root, err)
+		}
+	}
+	// The control: a fingerprint gets past the pin, to the answer, which is refused as the peer's.
+	v, err := RefreshCheck(RefreshPin{Root: alina.rootFP, Endpoint: reviewEndpoint, Leaf: alina.leaf}, json.RawMessage(`{}`), time.Now())
+	if err != nil || v.OK || v.Why != "the answer to get_card carries no signed card" {
+		t.Errorf("a pin that reads: %+v, %v", v, err)
+	}
+}
+
+// The typed Decide, DecideChain and OpenResult, which the node calls with structs that never pass
+// through the JSON reader, refuse a root the host holds that is not a fingerprint, by its path, before
+// anything else: read as a string it was a root nothing matched, and a pin or a former endpoint whose
+// root was "abc" came back as an address_claim of "abc".
+func TestTheTypedDecisionsRefuseAHostRootThatIsNotAFingerprint(t *testing.T) {
+	alina := reviewIdentity(t, "ed25519", reviewEndpoint)
+	fp := alina.rootFP
+	for _, c := range []struct {
+		node NodeState
+		want string
+	}{
+		{NodeState{Pins: []Pin{{Root: fp}, {Root: "abc"}}}, "node.pins[1].root is not a fingerprint"},
+		{NodeState{Tombstones: []TombstoneRec{{Root: ""}}}, "node.tombstones[0].root is not a fingerprint"},
+		{NodeState{FormerEndpoints: []FormerEndpoint{{Root: fp[:len(fp)-1]}}}, "node.former_endpoints[0].root is not a fingerprint"},
+		// And, in the reader's order, a held key's kid first, then each pin's state and leaf fingerprint
+		// beside its root (the review of 2026-09-30: S1, S2, and the kid). A zero value is none.
+		{NodeState{Keys: []HeldKey{{Kid: "abc"}}, Pins: []Pin{{Root: "abc"}}}, "node.keys[0].kid is not a fingerprint"},
+		{NodeState{Pins: []Pin{{Root: fp, State: "Blocked"}}}, "node.pins[0].state is active, pending_out or blocked"},
+		{NodeState{Pins: []Pin{{Root: fp, LeafFingerprint: "abc"}}}, "node.pins[0].leaf_fingerprint is not a fingerprint"},
+	} {
+		if _, err := Decide(time.Now(), Envelope{}, c.node); err == nil || err.Error() != c.want {
+			t.Errorf("Decide: %v, want %q", err, c.want)
+		}
+		if _, err := DecideChain(time.Now(), [][]byte{alina.leaf, alina.root}, c.node); err == nil || err.Error() != c.want {
+			t.Errorf("DecideChain: %v, want %q", err, c.want)
+		}
+	}
+	for pin, want := range map[Pin]string{
+		{Root: "abc"}:                    "pins[0].root is not a fingerprint",
+		{Root: fp, State: "removed"}:     "pins[0].state is active, pending_out or blocked",
+		{Root: fp, LeafFingerprint: "x"}: "pins[0].leaf_fingerprint is not a fingerprint",
+	} {
+		_, err := OpenResult(Envelope{}, OpenOpts{Recipient: alina.leafKey, RecipientPublic: alina.leafKey.Public(), Pins: []Pin{pin}})
+		if err == nil || err.Error() != want {
+			t.Errorf("OpenResult %+v: %v, want %q", pin, err, want)
+		}
+	}
+	// The control: fingerprints get past the roots, to what is wrong with the rest.
+	if _, err := Decide(time.Now(), Envelope{}, NodeState{Pins: []Pin{{Root: fp}}}); err != nil && strings.Contains(err.Error(), "fingerprint") {
+		t.Errorf("a node whose roots are fingerprints: %v", err)
 	}
 }

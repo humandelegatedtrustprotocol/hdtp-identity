@@ -103,18 +103,16 @@ func SuiteForKey(pub *PublicKey) (string, error) {
 }
 
 // recipientPublic is the KEM public key bytes for a leaf key: the uncompressed P-256 point, or the
-// Ed25519 key mapped to X25519.
+// Ed25519 key mapped to X25519. A suite that is not the key's is the envelope's refusal, in the
+// envelope layer's words, as the core's `recipient_public` answers it (F6, R14).
 func recipientPublic(id string, pub *PublicKey) ([]byte, error) {
-	if id == SuiteP256 {
-		if pub.EC == nil {
-			return nil, errors.New("suite does not fit the key")
-		}
+	switch {
+	case id == SuiteP256 && pub.Alg == AlgP256 && pub.EC != nil:
 		return p256Uncompressed(pub.EC), nil
+	case id == SuiteX25519 && pub.Alg == AlgEd25519 && len(pub.Ed) == ed25519.PublicKeySize:
+		return ed25519PublicToX25519(pub.Ed), nil
 	}
-	if pub.Ed == nil {
-		return nil, errors.New("suite does not fit the key")
-	}
-	return ed25519PublicToX25519(pub.Ed), nil
+	return nil, errors.New("suite does not fit the key")
 }
 
 func encap(id string, pub *PublicKey, seed []byte) (enc, ss []byte, err error) {
@@ -164,8 +162,17 @@ func encap(id string, pub *PublicKey, seed []byte) (enc, ss []byte, err error) {
 // decap takes the recipient's public key as the host holds it in its leaf, as the Rust core does
 // (hpke.rs): it goes into the KEM context, and a key that is not the private key's gives another
 // context, another AEAD key, and an open that fails.
+//
+// The private key must be the suite's own algorithm, and is asked before its material is read: a
+// P-256 key has no seed, and under PACT-SEAL-X25519 the empty seed's scalar — SHA-512 of nothing,
+// clamped, a public constant — stood in for one. So any P-256 key opened a seal addressed to the
+// Ed25519 key whose X25519 form is that constant times the base point: an admit (T5), where the core's
+// `key.x25519()` refuses a P-256 key. It panicked in 0.4.0; 0.4.1 removed the panic, not the cause.
 func decap(id string, priv *PrivateKey, pub *PublicKey, enc []byte) ([]byte, error) {
 	s := suites[id]
+	if (id == SuiteP256 && priv.Alg != AlgP256) || (id == SuiteX25519 && priv.Alg != AlgEd25519) {
+		return nil, errors.New("the key is not the suite's")
+	}
 	pkR, err := recipientPublic(id, pub)
 	if err != nil {
 		return nil, err
@@ -231,6 +238,9 @@ func sealWith(id string, pub *PublicKey, info, aad, plaintext, seed []byte) (enc
 // Seal draws a fresh ephemeral every time. A reused ephemeral repeats the key and the nonce, and two
 // ciphertexts under them leak the XOR of their plaintexts — so no seed can be passed here.
 func Seal(id string, pub *PublicKey, info, aad, plaintext []byte) (enc, ct []byte, err error) {
+	if err := needPublic(pub, "the recipient's public key"); err != nil {
+		return nil, nil, err
+	}
 	seed := make([]byte, 32)
 	if _, err := rand.Read(seed); err != nil {
 		return nil, nil, err
@@ -241,12 +251,13 @@ func Seal(id string, pub *PublicKey, info, aad, plaintext []byte) (enc, ct []byt
 // Open is the recipient side: priv is the recipient's key and pub its public key, from its leaf.
 func Open(id string, priv *PrivateKey, pub *PublicKey, info, aad, enc, ct []byte) ([]byte, error) {
 	// A caller's mistake, named, before anything: a nil key was a panic in 0.4.0 (dereferenced in
-	// decap). The Rust API's types cannot be nil; the JSON boundary of both ports names the member.
-	if priv == nil {
-		return nil, errArg("the recipient's key is required")
+	// decap), and a zero-value one still was. The Rust API's types cannot be nil; the JSON boundary of
+	// both ports names the member.
+	if err := needPrivate(priv, "the recipient's key"); err != nil {
+		return nil, err
 	}
-	if pub == nil {
-		return nil, errArg("the recipient's public key is required")
+	if err := needPublic(pub, "the recipient's public key"); err != nil {
+		return nil, err
 	}
 	s, ok := suites[id]
 	if !ok {
@@ -274,11 +285,18 @@ func Open(id string, priv *PrivateKey, pub *PublicKey, info, aad, enc, ct []byte
 
 // SignDetached is §13.1: Ed25519 pure, or ECDSA P-256/SHA-256 in DER, by the signer's own algorithm.
 func SignDetached(priv *PrivateKey, data []byte) ([]byte, error) {
+	if err := needPrivate(priv, "the signer's key"); err != nil {
+		return nil, err
+	}
 	return priv.Signer().Sign(data)
 }
 
-// Sign is SignDetached with the key already expanded.
+// Sign is SignDetached with the key already expanded. A Signer that is none — nil, as Signer answers
+// for a key that is not one, or the zero value — refuses.
 func (s *Signer) Sign(data []byte) ([]byte, error) {
+	if s == nil || (s.ed == nil && s.ec == nil) {
+		return nil, errArg("the signer's key is required")
+	}
 	if s.ed != nil {
 		return ed25519.Sign(s.ed, data), nil
 	}
@@ -344,6 +362,10 @@ func EcdsaLowS(sig []byte) ([]byte, error) {
 
 // VerifyDetached checks a detached signature under the key's own algorithm.
 func VerifyDetached(pub *PublicKey, data, sig []byte) bool {
+	// A key that is not one verifies nothing; it panicked here (T18).
+	if !pub.usable() {
+		return false
+	}
 	switch pub.Alg {
 	case AlgEd25519:
 		// crypto/ed25519 accepts a public key or an R of small order; the Rust core's verify_strict

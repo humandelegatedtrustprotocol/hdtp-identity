@@ -107,6 +107,9 @@ func rootTBS(cn string, pub *PublicKey, notBefore time.Time, serial []byte) (tbs
 
 // RootTBS is the external-signing seam: the bytes a root key must sign, and the algorithm identifier.
 func RootTBS(cn string, pub *PublicKey, notBefore time.Time, serial []byte) (tbs []byte, alg []byte, err error) {
+	if err := needPublic(pub, "the root's public key"); err != nil {
+		return nil, nil, err
+	}
 	return rootTBS(cn, pub, notBefore, serial)
 }
 
@@ -127,6 +130,9 @@ func Assemble(tbs, alg, sig []byte) []byte {
 
 // BuildRoot signs a root with its own key.
 func BuildRoot(o RootOpts) ([]byte, error) {
+	if err := needPrivate(o.Key, "the root's key"); err != nil {
+		return nil, err
+	}
 	signer := o.Key.Signer()
 	tbs, alg, err := rootTBS(o.CN, signer.Public, o.NotBefore, o.Serial)
 	if err != nil {
@@ -139,15 +145,11 @@ func BuildRoot(o RootOpts) ([]byte, error) {
 	return Assemble(tbs, alg, sig), nil
 }
 
-// ExtraExtension is a knob for the intrusion suite: an extension a wallet never writes.
-type ExtraExtension struct {
-	OID      string
-	Critical bool
-	Value    []byte
-}
-
-// LeafOpts builds a leaf. URIs, CA, Usage, AKI, Extra and AlgOID exist so the intrusion suite can build
-// what a wallet never would; a wallet sets Endpoint, DNSName and the dates.
+// LeafOpts builds a leaf: a wallet sets the names, the keys, Endpoint, DNSName and the dates. URIs, when
+// set, are the subjectAltName's URIs in place of Endpoint alone. It carried a CA flag, key usages, an
+// authority key id, extra extensions and a signature algorithm OID "so the intrusion suite can build
+// what a wallet never would"; nothing set them — the suite builds with the seed — so they went, as the
+// core's LeafSpec lost its own (standing rule 2).
 type LeafOpts struct {
 	CN, RootCN string
 	RootKey    *PrivateKey // for BuildLeaf
@@ -159,11 +161,6 @@ type LeafOpts struct {
 	NotBefore  time.Time
 	NotAfter   time.Time
 	Serial     []byte
-	CA         bool
-	Usage      []int
-	AKI        []byte
-	Extra      []ExtraExtension
-	AlgOID     string
 }
 
 func leafTBS(o LeafOpts, rootPub *PublicKey) (tbs, alg []byte, err error) {
@@ -174,17 +171,10 @@ func leafTBS(o LeafOpts, rootPub *PublicKey) (tbs, alg []byte, err error) {
 		}
 	}
 	id := KeyID(o.HostPub.SPKI)
-	issuerID := o.AKI
-	if issuerID == nil {
-		issuerID = KeyID(rootPub.SPKI)
-	}
-	bits := o.Usage
-	if bits == nil {
-		if o.HostPub.Alg == AlgP256 {
-			bits = []int{0, 4}
-		} else {
-			bits = []int{0}
-		}
+	issuerID := KeyID(rootPub.SPKI)
+	bits := []int{0}
+	if o.HostPub.Alg == AlgP256 {
+		bits = []int{0, 4}
 	}
 	uris := o.URIs
 	if uris == nil {
@@ -197,27 +187,14 @@ func leafTBS(o LeafOpts, rootPub *PublicKey) (tbs, alg []byte, err error) {
 	if o.DNSName != "" {
 		san = append(san, implicit(2, []byte(o.DNSName)))
 	}
-	if o.AlgOID != "" {
-		alg = seq(oidBytes(o.AlgOID))
-	} else {
-		alg = sigAlgFor(rootPub.Alg)
-	}
-	var bc []byte
-	if o.CA {
-		bc = seq(derBool(true))
-	} else {
-		bc = seq()
-	}
+	alg = sigAlgFor(rootPub.Alg)
 	exts := [][]byte{
-		extension(OIDBasicConstraints, true, bc),
+		extension(OIDBasicConstraints, true, seq()),
 		extension(OIDKeyUsage, true, keyUsageBits(bits)),
 		extension(OIDExtKeyUsage, false, seq(oidBytes(OIDServerAuth), oidBytes(OIDClientAuth))),
 		extension(OIDSubjectAltName, false, seq(san...)),
 		extension(OIDSubjectKeyID, false, octet(id)),
 		extension(OIDAuthorityKeyID, false, seq(implicit(0, issuerID))),
-	}
-	for _, e := range o.Extra {
-		exts = append(exts, extension(e.OID, e.Critical, e.Value))
 	}
 	tbs = seq(
 		explicit(0, derIntN(2)), derInt(serial), alg, nameCN(o.RootCN), seq(derTime(o.NotBefore), derTime(o.NotAfter)), nameCN(o.CN), o.HostPub.SPKI,
@@ -227,10 +204,24 @@ func leafTBS(o LeafOpts, rootPub *PublicKey) (tbs, alg []byte, err error) {
 }
 
 // LeafTBS is the seam for a leaf: what the root must sign, from the root's public key alone.
-func LeafTBS(o LeafOpts) (tbs, alg []byte, err error) { return leafTBS(o, o.RootPub) }
+func LeafTBS(o LeafOpts) (tbs, alg []byte, err error) {
+	if err := needPublic(o.RootPub, "the root's public key"); err != nil {
+		return nil, nil, err
+	}
+	if err := needPublic(o.HostPub, "the host's public key"); err != nil {
+		return nil, nil, err
+	}
+	return leafTBS(o, o.RootPub)
+}
 
 // BuildLeaf issues a leaf under the root key.
 func BuildLeaf(o LeafOpts) ([]byte, error) {
+	if err := needPrivate(o.RootKey, "the root's key"); err != nil {
+		return nil, err
+	}
+	if err := needPublic(o.HostPub, "the host's public key"); err != nil {
+		return nil, err
+	}
 	signer := o.RootKey.Signer()
 	tbs, alg, err := leafTBS(o, signer.Public)
 	if err != nil {
@@ -346,23 +337,34 @@ func Parse(der []byte) (*Cert, error) {
 	if !derIntMinimal(f[1].content) {
 		return nil, errors.New("INTEGER not minimal")
 	}
+	// In the core's order, each reader's own error kept, so a certificate with two faults is named for
+	// the same one by both ports (R33): the validity's count, the outer algorithm's shape and its
+	// equality with the inner one, the key, the signature algorithm, the names, then the times. This
+	// read the times and the names before the key, and the algorithm before the validity, and answered
+	// `certificate shape` or `time not in the DER form` for a SEQUENCE whose contents did not read.
+	validity, err := derChildren(f[4])
+	if err != nil {
+		return nil, err
+	}
+	if len(validity) != 2 {
+		return nil, errors.New("time not in the DER form")
+	}
 	algParts, err := derChildren(alg)
-	if err != nil || len(algParts) != 1 || algParts[0].tag != 0x06 {
+	if err != nil {
+		return nil, err
+	}
+	if len(algParts) != 1 || algParts[0].tag != 0x06 {
 		return nil, errors.New("certificate shape")
 	}
 	// RFC 5280 §4.1.1.2: the algorithm inside the TBS and the one outside are the same field twice.
 	if !bytes.Equal(f[2].raw, alg.raw) {
 		return nil, errors.New("signature algorithm inside and outside differ")
 	}
-	validity, err := derChildren(f[4])
-	if err != nil || len(validity) != 2 {
-		return nil, errors.New("time not in the DER form")
-	}
-	notBefore, err := readTime(validity[0])
+	pub, err := ParseSPKI(f[6].raw)
 	if err != nil {
 		return nil, err
 	}
-	notAfter, err := readTime(validity[1])
+	sigAlgOid, err := readOidStrict(algParts[0])
 	if err != nil {
 		return nil, err
 	}
@@ -374,11 +376,11 @@ func Parse(der []byte) (*Cert, error) {
 	if err != nil {
 		return nil, err
 	}
-	pub, err := ParseSPKI(f[6].raw)
+	notBefore, err := readTime(validity[0])
 	if err != nil {
 		return nil, err
 	}
-	sigAlgOid, err := readOidStrict(algParts[0])
+	notAfter, err := readTime(validity[1])
 	if err != nil {
 		return nil, err
 	}
@@ -388,9 +390,14 @@ func Parse(der []byte) (*Cert, error) {
 		NotBefore: notBefore, NotAfter: notAfter, TimeTags: [2]byte{validity[0].tag, validity[1].tag},
 		SPKI: f[6].raw, PublicKey: pub, KeyID: sha256Sum(f[6].raw),
 	}
+	// An [3] with nothing in it holds no extensions: the core's words, where this said `certificate
+	// shape` (R33).
 	extWrap, err := derChildren(f[7])
-	if err != nil || len(extWrap) < 1 {
-		return nil, errors.New("certificate shape")
+	if err != nil {
+		return nil, err
+	}
+	if len(extWrap) < 1 {
+		return nil, errors.New("not a v3 certificate with extensions")
 	}
 	exts, err := derChildren(extWrap[0])
 	if err != nil {
@@ -407,9 +414,8 @@ func Parse(der []byte) (*Cert, error) {
 		if len(parts) < 2 || len(parts) > 3 || parts[0].tag != 0x06 || parts[len(parts)-1].tag != 0x04 {
 			return nil, errors.New("certificate shape")
 		}
-		if !derOidMinimal(parts[0]) {
-			return nil, errors.New("OID not in the DER form")
-		}
+		// The criticality before the OID, as the core reads them: this judged the OID first, so an
+		// extension with both faults was named for the other one (R33).
 		critical := false
 		if len(parts) == 3 {
 			if !derBoolTrue(parts[1]) {
@@ -480,7 +486,7 @@ func Parse(der []byte) (*Cert, error) {
 		case OIDKeyUsage:
 			// BIT STRING: the first byte says how many trailing bits of the last byte are unused;
 			// every named bit of every byte counts, so a second byte (decipherOnly) is seen.
-			if len(value.content) < 1 || !derNamedBitsOK(value.content) {
+			if !derNamedBitsOK(value.content) {
 				return nil, errors.New("BIT STRING not in the DER form")
 			}
 			unused := int(value.content[0])
@@ -592,14 +598,6 @@ func ProfileError(c *Cert, kind string) string {
 			return "ECDSA signature not in the low-S form"
 		}
 	}
-	// The ADMITTED set, not the excluded one. This asked `AlgorithmOf`, which errors only on an
-	// EMPTY `Alg` — and `ParseSPKI` sets `Alg = AlgX25519` for OID 1.3.101.110, so an X25519-keyed
-	// leaf was inside the profile to this port and outside it to Rust (x509.rs: an explicit X25519
-	// refusal). The node pins on this verdict, so it would pin a chain every Wasm host (a wallet, a
-	// Worker) refuses, leaving the peer stuck rather than cleanly rejected.
-	if c.PublicKey == nil || (c.PublicKey.Alg != AlgEd25519 && c.PublicKey.Alg != AlgP256) {
-		return "key algorithm not in the profile"
-	}
 	if c.TimeTags[0] != timeTagFor(c.NotBefore) || c.TimeTags[1] != timeTagFor(c.NotAfter) {
 		return "time encoding not per RFC 5280"
 	}
@@ -680,6 +678,12 @@ type ChainOpts struct {
 	Now              time.Time
 	ExpectedRoot     string
 	ExpectedEndpoint string
+	// A Go caller that leaves ExpectedRoot or ExpectedEndpoint empty has not given it: the node's
+	// first certification passes an empty root (pact-gateway internal/identity/leaf.go, installLeaf's
+	// ValidateChain, before the account has a root). The JSON boundary has: a member present as "" is
+	// a value there (CONTRACT §0), compared and refused like any other, as the core's Option compares
+	// it (F4, R07, T14). It sets these.
+	rootGiven, endpointGiven bool
 }
 
 // ChainResult is the verdict of ValidateChain: accepted with the proven facts, or refused by a rule.
@@ -722,7 +726,7 @@ func ValidateChain(chain [][]byte, o ChainOpts) ChainResult {
 		return refuse(2, "root is not self-signed")
 	}
 	rootFingerprint := FingerprintOf(root)
-	if o.ExpectedRoot != "" && o.ExpectedRoot != rootFingerprint {
+	if (o.ExpectedRoot != "" || o.rootGiven) && o.ExpectedRoot != rootFingerprint {
 		return refuse(2, "root is not the one expected")
 	}
 	if !verifyCert(leaf, root.PublicKey) {
@@ -744,7 +748,7 @@ func ValidateChain(chain [][]byte, o ChainOpts) ChainResult {
 	if !IsNormalHTTPS(endpoint) {
 		return refuse(5, "endpoint is not an https URL in normal form")
 	}
-	if o.ExpectedEndpoint != "" && o.ExpectedEndpoint != endpoint {
+	if (o.ExpectedEndpoint != "" || o.endpointGiven) && o.ExpectedEndpoint != endpoint {
 		return refuse(5, "endpoint differs from the one in question")
 	}
 	host := hostOf(endpoint)
@@ -779,8 +783,9 @@ func hostOf(endpoint string) string {
 }
 
 // IsNormalHTTPS is the normal form of §14.1: what the string must already be, so nothing is normalised
-// at comparison time — https, lowercase host, no userinfo, no DEFAULT port, no query or fragment, a non-empty path
-// with no trailing slash, no dot segments, and percent-encoding uppercase and minimal.
+// at comparison time — https, lowercase host, no userinfo, no DEFAULT port, no query or fragment, an
+// IPv6 literal with no zone id, a non-empty path with no trailing slash, no dot segments, and
+// percent-encoding uppercase and minimal.
 func IsNormalHTTPS(s string) bool {
 	if !strings.HasPrefix(s, "https://") {
 		return false
@@ -858,6 +863,13 @@ func normalHost(h string) bool {
 			if rest[0] != ':' || !normalPort(rest[1:]) {
 				return false
 			}
+		}
+		// No zone id, in any spelling: RFC 3986 has none in an IPv6 literal, and WHATWG's URL, which the
+		// seed parses with, refuses a `%` inside the brackets. netip reads `%` as the start of one and
+		// takes any text after it (`%eth0`, `%25eth0`, `%x@evil.example`), and printed it back, so the
+		// comparison below held and a zoned literal was the normal form here and nowhere else.
+		if strings.IndexByte(h[1:end], '%') >= 0 {
+			return false
 		}
 		ip := parseIP(h[1:end])
 		return ip.IsValid() && ip.Is6() && !ip.Is4In6() && ip.String() == h[1:end]

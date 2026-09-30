@@ -72,7 +72,8 @@ func ReadLedger(ledger any) error {
 				return unread(m)
 			}
 		}
-		if origin, has := o["origin"]; has {
+		// Null is absent (CONTRACT §0): a null origin is no origin, where it read as one of the wrong type.
+		if origin, has := member(o, "origin"); has {
 			if _, isText := origin.(string); !isText {
 				return unread("origin")
 			}

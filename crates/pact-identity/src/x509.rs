@@ -102,7 +102,7 @@ pub fn assemble_raw(tbs: &[u8], alg_der: &[u8], sig: &[u8]) -> Vec<u8> {
 }
 
 pub fn root_tbs(cn: &str, key: &PublicKey, not_before: i64, serial: &[u8]) -> Result<Unsigned> {
-    let alg_oid = key.alg().sig_oid()?;
+    let alg_oid = key.alg().sig_oid();
     let id = key.key_id();
     let tbs = der::seq(&[
         der::explicit(0, &der::int(2)),
@@ -130,15 +130,10 @@ pub fn build_root(cn: &str, key: &PrivateKey, not_before: i64, serial: &[u8]) ->
     Ok(assemble(&u.tbs, &u.sig_alg, &signer.sign(&u.tbs)))
 }
 
-/// An extension outside the profile, which only the intrusion suite builds.
-pub struct Extra {
-    pub oid: String,
-    pub critical: bool,
-    pub value: Vec<u8>,
-}
-
-/// Everything a leaf carries. `uris`, `ca`, `usage`, `aki`, `extra` and `alg_oid` exist so the
-/// intrusion suite can build what a wallet never would; a wallet leaves them at their defaults.
+/// Everything a leaf carries. `ca` and `usage` exist so the CLI's intrusion builder
+/// (crates/pact/src/vectors/intrude.rs) can make a CA leaf a wallet never would, and `aki` so a test
+/// can name another issuer (tests/findings.rs); a wallet leaves them at their defaults. `extra` and
+/// `alg_oid` went with the JSON boundary's reading of them (T16): nothing else ever set them.
 pub struct LeafSpec<'a> {
     pub cn: &'a str,
     pub root_cn: &'a str,
@@ -152,8 +147,6 @@ pub struct LeafSpec<'a> {
     pub ca: bool,
     pub usage: Option<Vec<u8>>,
     pub aki: Option<Vec<u8>>,
-    pub extra: Vec<Extra>,
-    pub alg_oid: Option<String>,
 }
 
 pub fn leaf_tbs(s: &LeafSpec<'_>) -> Result<Unsigned> {
@@ -164,11 +157,8 @@ pub fn leaf_tbs(s: &LeafSpec<'_>) -> Result<Unsigned> {
     if let Some(d) = &s.dns_name {
         san.push(der::implicit(2, d.as_bytes()));
     }
-    let alg_oid = match &s.alg_oid {
-        Some(o) => o.clone(),
-        None => s.issuer.alg().sig_oid()?.to_string(),
-    };
-    let mut exts = vec![
+    let alg_oid = s.issuer.alg().sig_oid().to_string();
+    let exts = [
         ext(OID_BASIC_CONSTRAINTS, true, &if s.ca { der::seq(&[der::boolean(true)]) } else { der::seq(&[]) }),
         ext(OID_KEY_USAGE, true, &key_usage(&bits)),
         ext(OID_EKU, false, &der::seq(&[der::oid(OID_SERVER_AUTH), der::oid(OID_CLIENT_AUTH)])),
@@ -176,9 +166,6 @@ pub fn leaf_tbs(s: &LeafSpec<'_>) -> Result<Unsigned> {
         ext(OID_SKI, false, &der::octet(&id)),
         ext(OID_AKI, false, &der::seq(&[der::implicit(0, &issuer_id)])),
     ];
-    for e in &s.extra {
-        exts.push(ext(&e.oid, e.critical, &e.value));
-    }
     let tbs = der::seq(&[
         der::explicit(0, &der::int(2)),
         der::int_bytes(&s.serial),
@@ -436,9 +423,6 @@ pub fn profile_error(c: &Cert, kind: &str) -> Option<String> {
     if c.sig_alg == OID_ECDSA_SHA256 && crate::keys::ecdsa_is_low_s(&c.sig) == Some(false) {
         return Some("ECDSA signature not in the low-S form".into());
     }
-    if c.public_key.alg() == Alg::X25519 {
-        return Some("key algorithm not in the profile".into());
-    }
     if c.time_tags[0] != time::tag_for(c.not_before) || c.time_tags[1] != time::tag_for(c.not_after) {
         return Some("time encoding not per RFC 5280".into());
     }
@@ -506,10 +490,7 @@ pub fn profile_error(c: &Cert, kind: &str) -> Option<String> {
 
 /// The declared algorithm must be the issuer key's own; a verifier never picks it from the certificate.
 pub fn verify_cert(cert: &Cert, issuer: &PublicKey) -> bool {
-    match issuer.alg().sig_oid() {
-        Ok(oid) => cert.sig_alg == oid && issuer.verify(&cert.tbs, &cert.sig),
-        Err(_) => false,
-    }
+    cert.sig_alg == issuer.alg().sig_oid() && issuer.verify(&cert.tbs, &cert.sig)
 }
 
 pub fn fingerprint_of(cert: &Cert) -> String {
@@ -812,6 +793,10 @@ mod tests {
             "https://a.example:65536/mcp",
             "https://a.example:/mcp",
             "https://[2001:db8::1]8443/mcp",
+            // No zone id in an IPv6 literal, in any spelling: `std` cannot parse one, and that is the rule.
+            "https://[2001:db8::1%eth0]/mcp",
+            "https://[2001:db8::1%25eth0]/mcp",
+            "https://[fe80::1%eth0]/mcp",
         ] {
             assert!(!is_normal_https(bad), "{bad}");
         }

@@ -46,7 +46,7 @@ impl<'a> Lookup<'a> {
 /// One message, its members held to §9.2; `names` absent skips the references (a writer's check).
 /// The refusal is the member and why.
 pub fn message(doc: &Map<String, Value>, names: Option<&Lookup<'_>>) -> std::result::Result<Value, (Option<&'static str>, String)> {
-    if let Some(k) = crate::ledger::stranger(doc, &MEMBERS) {
+    if let Some(k) = crate::util::stranger(doc, &MEMBERS) {
         return Err((None, format!("{} is not a member of a message", crate::canonical::string(&k))));
     }
     if let Some(k) = MEMBERS.iter().find(|m| !doc.contains_key(**m)) {
@@ -100,7 +100,7 @@ pub fn message(doc: &Map<String, Value>, names: Option<&Lookup<'_>>) -> std::res
     for a in attachments {
         let at = |why: String| Err((Some("attachments"), why));
         let Some(o) = a.as_object() else { return at("an attachment is an object".into()) };
-        if let Some(k) = crate::ledger::stranger(o, &ATTACHMENT) {
+        if let Some(k) = crate::util::stranger(o, &ATTACHMENT) {
             return at(format!("{} is not a member of an attachment", crate::canonical::string(&k)));
         }
         if let Some(k) = ATTACHMENT.iter().find(|m| !o.contains_key(**m)) {

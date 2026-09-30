@@ -15,6 +15,13 @@
 // node's — but it must then say WHO and WHY, and the run prints the count. A silent
 // allowlist is the thing this replaces.
 //
+// Two more things are printed, because each was a silence a reader had to find by hand (TC-8 of the
+// port-parity audit, 2026-09-29):
+//   ONE PORT  a MUST whose tests are in one port only, and no intrusion scenario (which runs on
+//             both): it must say why, in `why`, or name what it leaves unheld, in `gap`;
+//   GAP       `gap` names a part of the MUST nothing here holds, and where. A MUST not implemented is a
+//             named, tracked gap, never a citation that reads as if it were held.
+//
 // An "elsewhere" entry names its holder in `elsewhere_names`, and those are checked
 // too whenever the sibling repository is on disk. They were prose for exactly one
 // revision, and in that revision two of eleven were wrong: 3.#1 named a
@@ -79,6 +86,16 @@ export function extract(markdown) {
     }
   }
   return out;
+}
+
+/**
+ * The one port a MUST's tests are in, or null: `rust` or `go` when every test it cites is in that port
+ * and it cites no intrusion scenario (a scenario runs against both).
+ */
+export function onePort(heldBy) {
+  if (heldBy.some((n) => n.startsWith('scenario:'))) return null;
+  const ports = new Set(heldBy.map((n) => n.split(':')[0]).filter((p) => p === 'rust' || p === 'go'));
+  return ports.size === 1 ? [...ports][0] : null;
 }
 
 /** Names this repository can actually check: scenarios, Rust tests, Go tests. */
@@ -190,6 +207,9 @@ for (const m of musts) {
   if (by.length) held++;
   else if (e.elsewhere && e.why) elsewhere++;
   else problems.push(`MISSING  ${m.id}  an entry with neither a test nor an "elsewhere" + "why"`);
+  if (e.gap !== undefined && (typeof e.gap !== 'string' || !e.gap.trim())) problems.push(`MISSING  ${m.id}  a "gap" that names nothing`);
+  const ports = onePort(by);
+  if (ports && !e.why && !e.gap) problems.push(`ONEPORT  ${m.id}  held by ${ports} tests alone and no scenario, with neither a "why" nor a "gap"`);
 }
 for (const id of Object.keys(manifest)) {
   if (!byId.has(id)) problems.push(`DANGLING ${id}  the specification no longer has this MUST`);
@@ -213,6 +233,12 @@ console.log(`  ${elsewhere} held elsewhere by declaration (a wallet's, a host's,
 for (const [id, e] of Object.entries(manifest)) {
   if (!e.held_by?.length && e.elsewhere) console.log(`      ${id.padEnd(9)} ${e.elsewhere.padEnd(8)} ${e.why}`);
 }
+const oneOnly = musts.filter((m) => onePort(manifest[m.id]?.held_by ?? []));
+console.log(`  ${oneOnly.length} held by the tests of one port alone, each saying why or naming its gap:`);
+for (const m of oneOnly) console.log(`      ${m.id.padEnd(9)} ${onePort(manifest[m.id].held_by).padEnd(8)} ${manifest[m.id].gap ? 'gap' : 'why'}`);
+const gaps = musts.filter((m) => manifest[m.id]?.gap);
+console.log(`  ${gaps.length} with a named gap, a part nothing here holds:`);
+for (const m of gaps) console.log(`      ${m.id.padEnd(9)} ${manifest[m.id].gap}`);
 const crossRepo = Object.values(manifest).reduce((n, e) => n + (e.elsewhere_names?.length ?? 0), 0);
 console.log(`  ${crossRepo - unverified} of ${crossRepo} cross-repo holders confirmed on disk` +
   (sibling.looked.length ? ` (looked in: ${sibling.looked.join(', ')})` : '') +

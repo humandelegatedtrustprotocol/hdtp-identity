@@ -1,6 +1,6 @@
 //! `decide`: the receiving side of §13.3, §6.1, §5.3 and §14.4 as one pure function over the state
 //! the host supplies (`state.rs`). `envelope.mjs receive()` is its specification, line for line.
-use super::state::{DecideInput, DecideOutput};
+use super::state::{host_roots, DecideInput, DecideOutput, NodeState};
 use super::{
     chain_of, decode_header, header_checks, members, pin_holding, timing, Timing, CLAIM_WINDOW_S, CTY_CALL, GUEST_TOOLS, INFO_V2,
     PENDING_TOOLS, TOMBSTONE_S,
@@ -58,8 +58,9 @@ impl Freshness<'_> {
 /// The receiving rules over the state the host supplies. Changes nothing; returns the decision and
 /// the effects to apply. `why` strings are the seed's, verbatim.
 pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
-    let now = parse_rfc3339(&input.now)?;
     let node = &input.node;
+    host_roots(node)?;
+    let now = parse_rfc3339(&input.now)?;
     let e = &input.envelope;
 
     let (aad, h) = match decode_header(&e.protected) {
@@ -159,17 +160,30 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
         eff.push(json!({ "op": "seen", "msg_id": msg_id }));
         DecideOutput { result: Value::Object(r), effects: eff }
     };
+    // A call that waits for the owner's approval names what the signature proved — the root decided,
+    // the address, the leaf it verified under and the form — and the request's msg_id, which no `seen`
+    // carries here, so a host can seal the refusal back to the caller (§13.2: an error past the open is
+    // sealed) without opening the envelope again. It answered the code alone, and a host that could not
+    // seal it answered something else in the clear (the port-parity lead 2). The pin's own moves stand;
+    // the envelope's `seen` does not, since the call was not taken.
+    let waits = |r: DecideOutput| -> DecideOutput {
+        let mut w = Map::new();
+        w.insert("code".into(), json!("pending_approval"));
+        for k in ["root", "endpoint", "leaf", "form"] {
+            w.insert(k.into(), r.result[k].clone());
+        }
+        w.insert("msg_id".into(), json!(msg_id));
+        DecideOutput { result: Value::Object(w), effects: r.effects.into_iter().filter(|e| e["op"] != "seen").collect() }
+    };
     let pending_or = |tier_ok: DecideOutput, state: &str| -> DecideOutput {
-        if state == "pending_out" {
-            if pending_allows {
-                let mut r = tier_ok;
-                r.result["tier"] = json!("pending");
-                r
-            } else {
-                done(json!({ "code": "pending_approval" }))
-            }
-        } else {
+        if state != "pending_out" {
             tier_ok
+        } else if pending_allows {
+            let mut r = tier_ok;
+            r.result["tier"] = json!("pending");
+            r
+        } else {
+            waits(tier_ok)
         }
     };
 
@@ -213,90 +227,165 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
     let leaf_b64 = b64u(&chain[0]);
     let endpoint = v.endpoint.clone();
 
-    let as_guest = |why: &str| -> DecideOutput {
-        if method != "tools/call" || !tool_ref.map(|t| GUEST_TOOLS.contains(&t)).unwrap_or(false) {
-            // Refused as a guest — with the root and the leaf named, so a host holding an older pin of
-            // this leaf's key learns the root above it and decides again.
-            let mut d = invalid("guest may only redeem or request");
-            d.result["root"] = json!(root);
-            d.result["leaf"] = json!(b64u(&chain[0]));
-            return d;
+    Ok(match pinned(node, now, &root, &endpoint, &chain[0])? {
+        Pinned::Refused(why) => invalid(why),
+        // The guest binding is the call's: the method and tool, the card, and the receiver's own address
+        // (§14.5), judged here for the sealed door, per call.
+        Pinned::Guest { why, demote, address_claim } => {
+            if method != "tools/call" || !tool_ref.map(|t| GUEST_TOOLS.contains(&t)).unwrap_or(false) {
+                // Refused as a guest — with the root and the leaf named, so a host holding an older pin
+                // of this leaf's key learns the root above it and decides again.
+                let mut d = invalid("guest may only redeem or request");
+                d.result["root"] = json!(root);
+                d.result["leaf"] = json!(leaf_b64);
+                return Ok(d);
+            }
+            let card_text = body["params"].get("arguments").and_then(|a| a.get("card")).and_then(|c| c.as_str()).unwrap_or("");
+            let card = match card::decode(card_text, now) {
+                Ok(c) => c,
+                Err(e) => return Ok(invalid(&format!("guest card: {}", e.why))),
+            };
+            if card.cert != chain[0] {
+                return Ok(invalid("guest card certificate is not the chain's leaf"));
+            }
+            // §14.5: a guest's endpoint never equals the receiver's own. Otherwise a stranger is pinned
+            // to this node's own address and every reply it is sent comes straight back here.
+            if endpoint == node.endpoint {
+                return Ok(invalid("guest endpoint is this node's own address"));
+            }
+            ok("guest", &root, &endpoint, "chain", &leaf_b64, guest_members(why, demote, address_claim), Vec::new())
         }
-        let card_text = body["params"].get("arguments").and_then(|a| a.get("card")).and_then(|c| c.as_str()).unwrap_or("");
-        let card = match card::decode(card_text, now) {
-            Ok(c) => c,
-            Err(e) => return invalid(&format!("guest card: {}", e.why)),
-        };
-        if card.cert != chain[0] {
-            return invalid("guest card certificate is not the chain's leaf");
+        Pinned::NewAddress { forced, effects } => {
+            ok("pending_new_address", &root, &endpoint, "chain", &leaf_b64, new_address_members(forced), effects)
         }
-        // §14.5: a guest's endpoint never equals the receiver's own. Otherwise a stranger is pinned
-        // to this node's own address and every reply it is sent comes straight back here.
-        if endpoint == node.endpoint {
-            return invalid("guest endpoint is this node's own address");
+        Pinned::Contact { pending_out, effects } => {
+            // The pin may move (a peer may move between my request and their answer) while the call waits.
+            let r = ok("contact", &root, &endpoint, "chain", &leaf_b64, Map::new(), effects);
+            pending_or(r, if pending_out { "pending_out" } else { "active" })
         }
+    })
+}
+
+/// `decide_chain`: a chain proven outside an envelope — at the TLS layer, where the handshake is the
+/// leaf key's signature — decided by the pins alone, exactly as `decide` decides a chain inside one
+/// (`pinned`, below; N1, N2). The chain is validated at `now` with no expectation, as `decide` validates
+/// a peer's, and one that fails is `envelope_invalid` `chain rule <n>: <reason>`, `decide`'s words for
+/// the same chain. What is the call's and not the chain's — a guest's tools and card, the receiver's own
+/// address, what a `pending_out` pin may call — the host applies to each call, as `decide` applies it
+/// to the envelope's. No `seen`: there is no envelope.
+pub fn decide_chain(node: &NodeState, chain: &[Vec<u8>], now: i64) -> Result<DecideOutput> {
+    host_roots(node)?;
+    let v = match validate_chain(chain, now, None, None) {
+        ChainResult::Ok(v) => v,
+        ChainResult::Refused { rule, reason } => return Ok(invalid(&format!("chain rule {rule}: {reason}"))),
+    };
+    let (root, endpoint, leaf_b64) = (v.root_fingerprint.clone(), v.endpoint.clone(), b64u(&chain[0]));
+    let answer = |tier: &str, extra: Map<String, Value>, effects: Vec<Value>| {
+        let mut r = Map::new();
+        r.insert("code".into(), json!("ok"));
+        r.insert("tier".into(), json!(tier));
+        r.insert("root".into(), json!(root));
+        r.insert("endpoint".into(), json!(endpoint));
+        r.insert("leaf".into(), json!(leaf_b64));
+        r.extend(extra);
+        DecideOutput { result: Value::Object(r), effects }
+    };
+    Ok(match pinned(node, now, &root, &endpoint, &chain[0])? {
+        Pinned::Refused(why) => invalid(why),
+        Pinned::Guest { why, demote, address_claim } => answer("guest", guest_members(why, demote, address_claim), Vec::new()),
+        Pinned::NewAddress { forced, effects } => answer("pending_new_address", new_address_members(forced), effects),
+        Pinned::Contact { pending_out, effects } => answer(if pending_out { "pending" } else { "contact" }, Map::new(), effects),
+    })
+}
+
+/// What the pins decide about a chain proven at `now` — validated, and signed for by its leaf's key in
+/// an envelope or in a TLS handshake: the chain half of `decide`, which `decide_chain` answers on its
+/// own for a host's TLS door. The node's TLS door made this decision itself and parted from the
+/// envelope's on a removal tombstone and on a conflicting leaf (N1, N2); both doors now take it from
+/// here. Changes nothing: the effects are the pin's moves, and `decide` adds the envelope's `seen`.
+enum Pinned {
+    /// The pin stands, or renewed, or moved under `auto`: tier `contact`, or `pending` while the pin is
+    /// `pending_out`, whose calls wait for the answer save the pending tier's own (`decide` judges the
+    /// call; a TLS door judges each call).
+    Contact { pending_out: bool, effects: Vec<Value> },
+    /// A new address for the owner to decide: under `ask`, or forced to `ask` by a removal tombstone
+    /// within its window.
+    NewAddress { forced: bool, effects: Vec<Value> },
+    /// A guest, with the reason, whether a pin stands behind it, and the root that claims its address.
+    Guest { why: &'static str, demote: bool, address_claim: Option<String> },
+    /// Refused: a different leaf with the pinned one's notBefore (§14.3).
+    Refused(&'static str),
+}
+
+fn pinned(node: &NodeState, now: i64, root: &str, endpoint: &str, leaf: &[u8]) -> Result<Pinned> {
+    // The root that claims this address, for a guest: a pin at it, or a former endpoint within the
+    // claim window (§5.2).
+    let claim = || {
         let held = node.pins.iter().find(|p| p.root != root && p.endpoint == endpoint).map(|p| p.root.clone());
         let former = node
             .former_endpoints
             .iter()
             .find(|f| f.endpoint == endpoint && f.root != root && parse_rfc3339(&f.at).map(|at| now - at < CLAIM_WINDOW_S).unwrap_or(false))
             .map(|f| f.root.clone());
-        let mut extra = Map::new();
-        extra.insert("why".into(), json!(why));
-        extra.insert("address_claim".into(), held.or(former).map(Value::String).unwrap_or(Value::Null));
-        ok("guest", &root, &endpoint, "chain", &leaf_b64, extra, Vec::new())
+        held.or(former)
     };
-
+    let guest = |why, demote| Ok(Pinned::Guest { why, demote, address_claim: claim() });
     let Some(p) = node.pins.iter().find(|p| p.root == root) else {
+        // The FIRST tombstone for this root, as the seed keeps one per root.
         if let Some(t) = node.tombstones.iter().find(|t| t.root == root) {
             let at = parse_rfc3339(&t.at)?;
-            if now - at < TOMBSTONE_S && compare_leaves(&from_b64u(&t.leaf)?, &chain[0])? == "newer" {
-                let mut extra = Map::new();
-                extra.insert("forced".into(), json!("tombstone"));
-                extra.insert("decision".into(), json!("ask"));
+            if now - at < TOMBSTONE_S && compare_leaves(&from_b64u(&t.leaf)?, leaf)? == "newer" {
                 let effects = vec![
-                    json!({ "op": "pending", "root": root, "endpoint": endpoint, "why": "returned after removal", "leaf": b64u(&chain[0]) }),
+                    json!({ "op": "pending", "root": root, "endpoint": endpoint, "why": "returned after removal", "leaf": b64u(leaf) }),
                 ];
-                return Ok(ok("pending_new_address", &root, &endpoint, "chain", &leaf_b64, extra, effects));
+                return Ok(Pinned::NewAddress { forced: true, effects });
             }
         }
-        return Ok(as_guest("unknown root"));
+        return guest("unknown root", false);
     };
     if p.state == "blocked" {
-        return Ok(as_guest("blocked"));
+        return guest("blocked", true);
     }
-    let cmp = compare_leaves(&from_b64u(&p.leaf)?, &chain[0])?;
+    let cmp = compare_leaves(&from_b64u(&p.leaf)?, leaf)?;
     if cmp == "superseded" {
-        return Ok(as_guest("superseded leaf"));
+        return guest("superseded leaf", true);
     }
     if cmp == "conflict" {
-        return Ok(invalid("a different leaf with the same notBefore"));
+        return Ok(Pinned::Refused("a different leaf with the same notBefore"));
     }
-
     // §14.3 is absolute: a newer leaf from the root takes priority the instant it is seen, whatever
     // the validity of the older one. At another address it is a new address; under `ask` the owner decides.
     let mut effects = Vec::new();
     if endpoint != p.endpoint {
         if node.accept_new_hosts != "auto" {
-            let mut extra = Map::new();
-            extra.insert("decision".into(), json!("ask"));
-            let effects = vec![json!({ "op": "pending", "root": root, "endpoint": endpoint, "why": "ask", "leaf": b64u(&chain[0]) })];
-            return Ok(ok("pending_new_address", &root, &endpoint, "chain", &leaf_b64, extra, effects));
+            let effects = vec![json!({ "op": "pending", "root": root, "endpoint": endpoint, "why": "ask", "leaf": b64u(leaf) })];
+            return Ok(Pinned::NewAddress { forced: false, effects });
         }
         effects.push(json!({ "op": "former_endpoint", "root": root, "endpoint": p.endpoint, "at": format_rfc3339(now) }));
-        effects.push(json!({ "op": "pin_update", "root": root, "endpoint": endpoint, "leaf": b64u(&chain[0]) }));
+        effects.push(json!({ "op": "pin_update", "root": root, "endpoint": endpoint, "leaf": b64u(leaf) }));
         effects.push(json!({ "op": "event", "event": "new_address", "root": root, "endpoint": endpoint }));
     } else if cmp == "newer" {
-        effects.push(json!({ "op": "pin_update", "root": root, "endpoint": endpoint, "leaf": b64u(&chain[0]) }));
+        effects.push(json!({ "op": "pin_update", "root": root, "endpoint": endpoint, "leaf": b64u(leaf) }));
         effects.push(json!({ "op": "event", "event": "renewal", "root": root }));
     }
-    let r = ok("contact", &root, &endpoint, "chain", &leaf_b64, Map::new(), effects);
-    if p.state == "pending_out" && !pending_allows {
-        // The pin moved (a peer may move between my request and their answer) but the call waits.
-        return Ok(DecideOutput {
-            result: json!({ "code": "pending_approval" }),
-            effects: r.effects.into_iter().filter(|e| e["op"] != "seen").collect(),
-        });
+    Ok(Pinned::Contact { pending_out: p.state == "pending_out", effects })
+}
+
+/// A guest answer's own members: the reason, `demote` (CW-11) and the address claim.
+fn guest_members(why: &str, demote: bool, address_claim: Option<String>) -> Map<String, Value> {
+    let mut extra = Map::new();
+    extra.insert("why".into(), json!(why));
+    extra.insert("demote".into(), json!(demote));
+    extra.insert("address_claim".into(), address_claim.map(Value::String).unwrap_or(Value::Null));
+    extra
+}
+
+/// A new address's own members: forced by a tombstone, and in every case the owner's to decide.
+fn new_address_members(forced: bool) -> Map<String, Value> {
+    let mut extra = Map::new();
+    if forced {
+        extra.insert("forced".into(), json!("tombstone"));
     }
-    Ok(pending_or(r, &p.state))
+    extra.insert("decision".into(), json!("ask"));
+    extra
 }

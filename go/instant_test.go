@@ -1,11 +1,14 @@
 package pactidentity
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 // One grammar for every instant both ports read (SPEC 2.2.2): `YYYY-MM-DDTHH:MM:SS`, an optional
 // `.` and digits (dropped), and `Z`. Upper-case T and Z only, no offset, no `,` before a fraction.
-// parseInstantZ is the one reader (timeIn, parseInstant and the export's instants all go through
-// it); the Rust core's instants_have_one_grammar holds parse_rfc3339 to the same list.
+// parseInstantZ is the one reader (the boundary's `instant` in api_args.go, parseInstant and the
+// export's instants all go through it); the Rust core's instants_have_one_grammar holds parse_rfc3339 to the same list.
 func TestInstantsHaveOneGrammar(t *testing.T) {
 	for _, good := range []string{"2026-09-13T12:00:00Z", "2026-09-13T12:00:00.5Z", "2026-09-13T12:00:00.123456789Z", "2024-02-29T23:59:59Z"} {
 		if _, ok := parseInstantZ(good); !ok {
@@ -28,8 +31,9 @@ func TestInstantsHaveOneGrammar(t *testing.T) {
 		if _, ok := parseInstant(bad); ok {
 			t.Errorf("%s: read by parseInstant", bad)
 		}
-		if _, err := timeIn(&bad, "now"); err == nil {
-			t.Errorf("%s: read by timeIn", bad)
+		raw, _ := json.Marshal(bad)
+		if _, err := (args{"now": raw}).instant("now"); err == nil {
+			t.Errorf("%s: read by the boundary", bad)
 		}
 	}
 }

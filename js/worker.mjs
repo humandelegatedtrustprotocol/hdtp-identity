@@ -12,7 +12,8 @@ import wasmModule from './pkg-web/pact_identity_wasm_bg.wasm';
 initSync({ module: wasmModule });
 
 export function call(name, args) {
-  return JSON.parse(rawCall(name, JSON.stringify(args ?? {})));
+  // As js/index.mjs: `args` left out is `{}`; anything else, `null` included, is the core's to judge.
+  return JSON.parse(rawCall(name, JSON.stringify(args === undefined ? {} : args)));
 }
 
 export function version() {

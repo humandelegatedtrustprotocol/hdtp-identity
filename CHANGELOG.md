@@ -10,6 +10,560 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+- **The parity gate generates its own cases** (the port-parity plan of 2026-09-29, S1): for every
+  function the contract declares, `{}`, the hostile object, each required member absent and `null`
+  (held to CONTRACT §0's `<name> is required`), each member that takes a string as `""`, each
+  optional member of the wrong type, an undeclared member, and each required member absent beside
+  each other member of the wrong type (read order), and each member that holds a key holding one
+  outside the profile — 1302 cases at the last count (1103 when written; the hostile object is now
+  sent only to the 17 functions that declare one of its members, the key outside the profile came
+  with cluster G, the functions added since have their own, and the 112 required strings' `""` and
+  the 41 members undeclared inside a member came on 2026-09-30), varied from one named hand-written case per function
+  that succeeds on both ports. 463 cases failed when they were written (459 generated, and 4 written
+  beside them). While they were fixed, each was listed with the audit finding that closed it and
+  excused only while it failed exactly as listed; every fix emptied the list, and the list and its
+  mechanism are gone: every case must pass.
+- The coverage gate fails when a declared error code is not produced by both ports in one case they
+  answered alike (S2, TC-1); all 128 are. It used to print the count and pass. The 128th is
+  `card_decode`'s `parse`: both ports answer it for a `now` that is not an instant, and the contract
+  did not declare it until a required string's `""` case sent one.
+- `js/cases/hostile.json` is the one hostile object: the generated cases send it to both ports, Go's
+  `TestCallNeverPanics` reads it and now fails on an answer of `internal` (its `recover()` turned a
+  panic into a JSON object, which the sweep accepted), and the core has the same sweep
+  (`tests/boundary.rs`) (TC-14). Since a member a function does not declare is refused before any is
+  read, each function is sent the hostile members it declares (the whole object reached no body),
+  and both sweeps fail on the undeclared-member refusal and when fewer than ten functions are reached.
+- **One copy of each duplicated constant** (S6): `contract/contract.json` carries `Windows` (the
+  skew, the envelope lifetime, the tombstone and claim windows, the leaf ceiling, how far ahead a
+  signing request may expire), `KdfDefault` beside `Kdf`/`KdfArgs`'s bounds, `CanonicalNumbers`
+  (the 19-row ECMAScript number table each port's test carried a copy of, C11) and `LimitsIdle`; a
+  test in each port holds its constants to them (`tests/constants.rs`, `vault.rs`, `canonical.rs`;
+  `go/constants_test.go`, `review_test.go`). Parity cases sit at the edges they read: the tombstone
+  and claim windows a second inside and exactly at the end (C13), and the most passes and lanes, one
+  lane more and one KiB less than `Kdf` allows (C12).
+- §13.1#1 (`enc` is exactly the suite's Npk) has holders that build an `enc`: parity cases one byte
+  short and one byte long under both suites, through `decide` and `open_result` (a byte moved across
+  the enc/ct boundary, so the forgery is signed), and a test in each port (TC-3). It cited a Go test
+  about small-order Ed25519 points. 13.3#2 cites the Go twin of its Rust test and says what the
+  library holds of it (TC-7).
+- `js/musts.mjs` prints the MUSTs held by one port's tests alone and fails one that says neither why
+  nor what it leaves unheld; a `gap` names that part, and is printed and counted (TC-8). §2.2's
+  software path was a named gap until `wallet_issue` checked it (below). 2.2#1 and 2.2#4 no longer
+  cite Go tests that do not test them.
+- The four Appendix B readers here (`js/seed.mjs`, the CLI's `pact vectors check`, the core's
+  vector tests, the Go port's) are held to one list of cases, `js/appendix-b-reader.json`, refusals
+  word for word (TC-12). The core tests' reader found the end marker from the start of the file and
+  had no test; the CLI says `the document has no Appendix B` and `Appendix B block <n> is not JSON`,
+  as the others do, where it said `no Appendix B in the document` and serde's words.
+- **A member a function does not declare is refused** (CONTRACT §0; T16, F1), in both ports, before
+  any member is read: `{"error": "bad_request", "why": "<fn> takes no member \"<m>\""}`, the first
+  such member in sorted order. Both ports accepted one and went on; the Rust core read six that
+  `build_leaf` and `leaf_tbs` never declared (`uris`, `usage`, `extra`, `ca`, `aki`, `alg_oid`), so
+  the Wasm built a CA leaf, a leaf with no URI or one under another algorithm's name where the Go port
+  built a profile leaf. They are gone from the boundary, and `extra` and `alg_oid` from the typed
+  `LeafSpec`, which nothing else ever set. Each port's dispatcher lists every function's members, held
+  to `contract/contract.json` by a test in each (`every_function_declares_the_contracts_members`,
+  `TestEveryFunctionDeclaresTheContractsMembers`). The Go port reads a call's arguments once, into a
+  map by exact name: its struct decoding matched `{"CN": …}` to `cn`, a member the core never saw.
+- **The Go port reads every member where the core reads it** (S3; clusters A and J of the port-parity
+  audit), for the keys, certificates, CSR, signing request, card, vault and ledger functions. It
+  decoded the arguments into a struct first: a required member left out was its zero value (a root
+  built with an empty commonName, a leaf issued under an empty issuer, a profile judged as a leaf with
+  no `kind`, a vault opened with the empty passphrase), and a member of the wrong type was named
+  before any member was read, so two missing members were named differently by the two ports. Each
+  body now reads its members in the core's order with readers that answer as the core's do
+  (go/api_args.go), and names an absent one `<name> is required`. `issue_from_csr` and
+  `issue_tbs_from_csr` check the request before `root_cn`, `now` and `valid_days`, and answer bytes
+  that do not read as `parse`, as the core does, where this port said `bad_request` for everything
+  (R27, T15, F3).
+- **A zero value is a value at the envelope boundary too** (cluster B): the Go port's `seal_request`
+  and `seal_result` seal `ts: 0`, `exp: 0`, `method: ""` and `cty: ""` as given, as the core and the
+  seed do, where it read them as absent (a `ts` of 0 refused, an `exp` of 0 made ts+600, an empty
+  method or cty replaced by its default); an absent `params` is `{}`, as the contract's note says,
+  where it was refused as not JSON (T7, F8, R17, R18, C2, F9). `hpke_seal` and `hpke_open` require
+  `info`, `plaintext`, `enc` and `ct`, which were read as empty (R15, F7); `ephemeral_seed` of any
+  length but 32, `""` included, is `bad_request` `ephemeral_seed is 32 bytes` in both functions,
+  where it was `parse` in one and a fresh seal in the other (R16, T13). The members are read in the
+  core's order, the chain judged when the proof member is made, before the result (F10, R19). The
+  typed `SealRequest` and `SealResult` keep their zero-value defaults (the node sets `Exp` and never
+  `Cty`); an absent `Params` there is `{}` too.
+- **The objects inside a member are read by hand, in both ports, and named by their path** (T9, F11,
+  F12, F13, R20, R22): `decide`'s node state and envelope, `open_result`'s envelope and pins. A member
+  one lacks, or holds of the wrong type, is `<path> is required` (`node.pins[0].leaf`,
+  `envelope.sig`), `bad_request` to `decide` and, for the envelope, `envelope_invalid` to
+  `open_result`. The core said `decide input does not read`, `envelope members` or serde's own words
+  (`pins: missing field root`) for every fault, and the Go port decided or opened on the zero value
+  (a node with no endpoint was `ok`; a pin with no root opened an answer). `pins: null` is no pins,
+  as §0 says of null (the core refused it); an absent `envelope` to `open_result` is `bad_request`
+  `envelope is required`, where both ports said `envelope_invalid` (S1-1). A node state that says no
+  `accept_new_hosts` is `auto`, as the contract says (the Go port held a moved contact, T8), and one
+  that says anything but `auto` or `ask` is refused. `follow_renewed` reads the peer's answer as it
+  was sent: a code or data of the wrong type is `{follow: false}`, as the core answers, not a
+  refusal of the call (F14).
+- **An empty string is a value at the boundary** (cluster D; F4, R07, T14, R26): `expected_root` or
+  `expected_endpoint` given as `""` to `validate_chain` or `open_result` is compared and refused, as
+  the core compares it, where the Go port read it as not given and accepted any root or address.
+  The typed `ChainOpts` and `OpenOpts` keep `""` as not given for a Go caller (the node's first
+  certification passes an empty root). `FollowRenewed` holds a renewed chain to its pinned root and
+  dialed address even when they are empty, as the core does; it followed one from any root. Three
+  parity cases hold `follow_renewed` to it word for word (lead 5): `pinned_root` `""` is `chain rule
+  2: root is not the one expected`, `dialed` `""` is `chain rule 5: endpoint differs from the one in
+  question`, both is rule 2; the same leaf at the real root and address is the control, followed. A
+  `dns_name` given as `""` to `csr_new`, `build_leaf` or `leaf_tbs` is refused in both ports,
+  `dns_name is empty`: the core wrote an empty dNSName, which rule 5 then refuses, and the Go port
+  wrote none.
+- **`export_read`'s `owner` of `""` is compared, and a required string is sent `""`** (the hunt of
+  2026-09-30): `""` meant "no owner to compare" inside the Go port's manifest check, so `export_read`
+  with an owner of `""` read another identity's file whole, and the typed `ReadExportZip(zr, "", …)`
+  did too, where the core refuses (`manifest.json: owner: the file is <owner>'s, not this identity's
+  ()`). "No owner" is now `nil`, as the core's is `None`, and a given owner is always compared. The
+  entry above read as closing this; nothing had sent a required string `""`, because the generated
+  cases sent it to optional members only. Every required member that takes a string is now sent `""`
+  (112 cases). Each must refuse, unless `js/cases/generated.mjs`'s `EMPTY_IS_A_VALUE` names it with
+  the reason `""` is a value there (25 members, such as a commonName, the bytes to sign, a card's
+  `FN`). A name on that list that is no required string member fails the run.
+- **CONTRACT §0 says which objects inside a member are held to their members, and a case holds each**
+  (the hunt of 2026-09-30): §0 said the objects inside a member are "not held to their schemas'
+  `additionalProperties`", while both ports refused an undeclared member inside every document
+  (`wallet_issue`'s plaintexts and what they hold, a vault's `kdf`, a ledger entry, a signing request,
+  an export's manifest and rows, a wallet contact, the limits rules and a charge). §0 now names the two
+  kinds: a document, held to its members, and what a host hands in of its own state or of what a peer
+  sent it (an envelope, a node state, a pin, the answer to `get_card`, a directory entry, held pins and
+  rows, media), with the JSON a seal carries, read for the members they need. The generated cases add
+  an undeclared member to each object nested in every base (41 cases) and judge it: refused for a
+  document, read past for one that `js/cases/generated.mjs`'s `READ_FOR_WHAT_IT_NEEDS` names (20); a
+  name there that no case reaches fails the run. Both ports already answered each as §0 now says; no
+  code changed.
+- **`decide`'s `pending_approval` names what the signature proved** (the port-parity lead 2): `root`,
+  `endpoint`, the `leaf` the signature verified under, `form`, and the request's `msg_id`, in both
+  ports and the contract's `Decision`. It answered `{"code": "pending_approval"}` alone, so a host had
+  nothing to seal the refusal back to (§13.2: an error past the open is sealed): the node answered
+  `envelope_invalid` in the clear instead, where the cloud reads the signer again from the envelope. Its
+  effects are unchanged: the pin's own moves, never `seen`. A host that compares the whole answer with
+  `{"code": "pending_approval"}` now sees five more members.
+- **`refresh_check`: a pinned leaf that is a CA certificate is an error of the call** (the hunt of
+  2026-09-30), `bad_request` `pin.leaf is a CA certificate, not a leaf`, in both ports and in the typed
+  `refresh::check` and `RefreshCheck`. A root pinned as the leaf read, so it was compared with the
+  chain's leaf and answered `ok: false`, `two different leaves claim the same notBefore (§14.3)`: the
+  host's damaged pin, reported as the peer's fault, the defect the `pin.root` entry below fixed for the
+  root.
+- **The core's typed `decide`, `decide_chain` and `open_result` refuse a host root that is not a
+  fingerprint first** (the hunt of 2026-09-30), as the Go port's typed `Decide`, `DecideChain` and
+  `OpenResult` do, in the same words (`node.pins[0].root is not a fingerprint`, `pins[0].root is not a
+  fingerprint`). The "every root a host holds" entry below said "in both ports", which held at the JSON
+  boundary only: the core's typed `decide_chain` of a pin whose root was `abc` answered `chain rule 1`
+  where Go's answered `bad_request`. `tests/review.rs` holds the three typed functions, with a state of
+  real fingerprints as the control. Nothing outside the tests calls them typed today.
+- **Comments made true** (the hunt of 2026-09-30): a request's `params` and a result's `result` are
+  sealed as the value each reads as (`in_order`, `inOrder`), not "as given", in `go/envelope.go`,
+  `go/api_envelopes.go` and the core's `api/envelopes.rs`; the node's empty-root `ValidateChain` is
+  cited by function (`installLeaf`), not by a line that moved.
+- **Three required members absent are `<name> is required`, as §0 says every one is** (S1-2, S1-3,
+  which the generated cases found): `wallet_issue`'s `vault_plaintext` and `record_plaintext` (they
+  said `…: the root lives there` and `…: the ledger lives there`, which a document that is not an
+  object still says), `limits_decide`'s `now` (it said `now is a time in milliseconds`, which a
+  `now` that is not one still says), and `export_read_end`'s `lines`, which both ports read as 0
+  lines and refused the file for its count instead. The contract's notes said the other words, and
+  say these now.
+- The core reads three functions in the contract's order where the Go port already did: `card_decode`
+  reads `vcard` before `now` (R25); `key_from_seed` reads `alg` before the seed (T21, R01; the Go port's
+  `KeyFromSeed` also judges the algorithm first now); `vault_seal` answers `empty passphrase` before a
+  missing plaintext, as its note says (T21).
+- `version` and `prf_salt` declare `bad_request`: they refuse a member they do not declare, like every
+  function.
+- **A member of the wrong type is refused, never read as absent** (cluster C; F5, R02, C3, T21), in
+  both ports, as CONTRACT §0 now says: a base64url member that is not a string answers `parse`
+  `not base64url`, and any other `bad_request` in words that name it (`<name> is required`, or the
+  function's own). The core read an optional one of the wrong type as absent: a `serial` of 7 built a
+  root with a random serial, `guest: "yes"` let a guest name this host, `expected_root: 7` accepted
+  any root, `exp: "7"` sealed ts + 600, an `aad` of 7 sealed with none. `card_encode` refuses an
+  `extra` item that is not a string, `null` included (the core dropped it and wrote the card
+  without it); `key_from_seed` answers a `seed` that is not a string as bytes that do not decode, and
+  `export_read` refuses a `manifest`, `contacts_csv` or `threads_csv` that is not a string, in both
+  ports, where both read them as absent. `key_from_seed`, `card_encode` and `vault_seal` declare
+  `parse`, which the bytes rule gives them and both ports answered. Generated cases hold every
+  optional member of the wrong type to that answer.
+- **An integer is one the core reads as an integer** (S3-1): the Go port read `-0` as 0 — it sealed
+  an `exp` of -0, decided a limits `now` of -0 and judged `valid_days: -0` out of range — where the
+  core refuses it, as serde_json reads -0 as a float. A vault document whose KDF numbers are spelled
+  `1.0`, `8192.0` or `1e0` has the canonical header the whole numbers have, and opened in the Go port;
+  it is `kdf parameters out of range` there too, as is an `m_kib` of 8192.5, which the Go port cut to
+  8192 and refused as a wrong passphrase (C5). Parity sends these as raw text (`RawArgs`, js/port.mjs),
+  which `JSON.stringify` cannot write.
+- **What one JSON parser refuses and the other reads is refused by both** (cluster K; R40, F21, and
+  S3-2): a number infinite as a double (`1e400`) and containers nested more than 127 deep. The core's
+  serde_json refused both in its own words (`args: number out of range at line 1 column 10`,
+  `args: recursion limit exceeded …`); the Go port's encoding/json read them, so the Go port decided
+  `ok` on a sealed call whose body held `1e400` where the Wasm said `does not open`, opened such a
+  result, and read such a manifest or line. Both ports scan the arguments first, after half a
+  surrogate pair, and answer `args: a number is outside the range of a double` or `args: nested more
+  than 127 deep`, the first in the text; the Go port's JSON text readers (an envelope's header and
+  body, a manifest, a line of messages.jsonl, a vault's plaintext) refuse the same. They also refuse
+  bytes that are not UTF-8 and half a surrogate pair, both of which encoding/json reads as U+FFFD: this
+  entry said the readers answered as the core's did before they did, and an envelope whose header
+  `msg_id` was `"\ud800"`, or whose body held one or a byte 0xFF, was `ok` to the Go port and
+  `protected is not JSON` or `does not open` to the core, and a vault whose plaintext held one opened
+  in the Go port and was damaged to the core (the review of 2026-09-30, M1; a manifest and a line
+  already refused both). Arguments that do not parse
+  are `args is a JSON object` in the core too, as in the Go port's `Call`; `why` never carries serde's
+  or encoding/json's words, internal answers included.
+- Go, typed (T21): `SigningRequestCheck(nil, …)` is `request is required`, as the core answers a
+  request that is not an object (it named the first member, `csr is required`); `LimitsRules.Check`
+  answers a member the map does not hold `<name> is a number`, as a document without it is answered
+  (it read 0 and said `is at least 1`); `LimitsDecide` refuses a `Kind` nobody has, `Which`
+  `charge.kind` (it charged no bucket and allowed the call). The crate's types cannot hold either.
+- **An IPv6 literal with a zone id is not the normal form** (cluster F; T1, C1, R09): the Go port read
+  `https://[2001:db8::1%eth0]/mcp` — and `%25eth0`, `%x@evil.example`, `%x?y` — with netip, which
+  takes any zone and prints it back, so it was normal https there: a leaf naming one passed chain
+  rule 5, a request naming one was issued, `address_guard` passed a zoned global address, and a
+  zoned private one was refused for being private where the core refused it as not the normal form.
+  Every reader of an endpoint now refuses a `%` inside the brackets, as the core and the seed do.
+  `ip_is_private` answers `true` for an IPv6 literal with a zone (R10, F15): the core could not read
+  one and answered `false`, and the Go port judged the address and ignored the zone, so
+  `2001:db8::1%eth0` was public to both and `fe80::1%eth0` to the core. It drops one `[` and one `]`
+  and no more (R11): the core dropped every bracket, so `[[::1]]` was loopback there.
+- **A key outside the profile is refused where it is read** (cluster G; R12, T2, R13, T3, T4, F6,
+  R14): Ed25519 with no parameters and uncompressed P-256 are the profile's two algorithms, and any
+  other key — RSA, P-384, a bare X25519 key, an Ed25519 key with a NULL after its OID — is
+  `unsupported`, `unsupported key type <OID>`, in both ports and the seed, whether it arrives as a key,
+  in a certificate or in a request. The Go port read one as a key with no algorithm, so
+  `parse_certificate` answered an `alg` the contract does not have, `compare_leaves` compared,
+  `card_decode` took the card, chain rule 1 said `key algorithm not in the profile`, `csr_check` said
+  `request key algorithm not in the profile`, `issue_from_csr` answered that as `bad_request`, and
+  `root_tbs` declared ECDSA over an X25519 key. Both ports read a bare X25519 key as a third
+  algorithm: `key_info` named `x25519`, which the contract's Alg does not have, `build_leaf` built a
+  leaf around one, `verify` answered `valid: false`, and the core sealed to one where the Go port
+  refused it and refused a request carrying one for its signature. Sixteen functions that answered
+  `unsupported` without declaring it, in one port or both, declare it: the certificate builders and
+  readers, the request functions, `hpke_seal` and `hpke_open`, `seal_request` and `seal_result`,
+  `open_result` and `wallet_issue`; `decide` too, whose node state's held and pinned leaves are read the
+  same way (the Go port made their error `parse`), as are `open_result`'s pins in the leaf form. The
+  parity gate puts such a key into every top-level member that holds one.
+- An Ed25519 key whose 32 bytes decode to no point is `parse` `Ed25519 key is not a point` in the Go
+  port and the seed, as the core answers (S4-1, found here): both read it as a key, so a leaf
+  carrying one validated there and was refused at chain rule 1 by the core. A point of small order is
+  a point, and a non-canonical spelling of one reads as the libraries of both ports read it (410
+  inputs, every one answered alike by both ports and the seed).
+- A suite that is not the recipient key's is `envelope_invalid` `suite does not fit the key` at
+  `hpke_seal`, as the Go port and the core's own `open_result` say it; the core said `unsupported`
+  (F6, R14). A seal to an Ed25519 key of small order meets an all-zero DH output and is
+  `envelope_invalid` `all-zero DH output: low-order point` in both ports, through `hpke_seal`,
+  `seal_request` and `seal_result`; the core said `internal`, a code no input is to reach, and a leaf
+  holding such a key validates (T4). `seal_request` and `seal_result` declare `envelope_invalid`.
+- `wallet_issue` answers a request refused by its reader with the reader's class, as the core does:
+  `unsupported` for a key outside the profile, `parse` for bytes that do not read, where the Go port
+  said `bad_request` for both.
+- **Removed public API** (cluster G): Go `AlgX25519`, `PublicKey.X`, `PublicKey.AlgOID`; Rust
+  `Alg::X25519`, `keys::OID_X25519` and `keys::x25519_spki`. `Alg::sig_oid` returns the OID, not a
+  `Result`: no algorithm left has none.
+- **Go: an open is by a key of the suite's own algorithm** (T5). Under PACT-SEAL-X25519 a P-256 key has
+  no seed, and the open used the empty seed's scalar — SHA-512 of nothing, clamped, a public constant —
+  so any P-256 key opened a seal to the Ed25519 key that maps to that constant's point, through `Open`,
+  `hpke_open` and `decide` (measured: two P-256 keys each opened one, and a node holding that key's leaf
+  beside a P-256 key decided on a stranger's call). The private key is held to the suite before its
+  material is read, as the core holds it: `does not open`.
+- **Go: a key that is not one is refused by name, never a panic** (T18, the plan's S7). Every exported
+  function that takes a key, or an options struct holding one — `BuildRoot`, `RootTBS`, `BuildLeaf`,
+  `LeafTBS`, `CSRNew`, `IssueFromCSR`, `IssueTBSFromCSR`, `SealRequest`, `SealResult`, `OpenResult`,
+  `Seal`, `Open`, `SignDetached`, `AlgorithmOf`, `SuiteForKey` — refuses a nil key, the zero value, or a
+  key given an `Alg` by hand without its material, before reading a field of it: `bad_request`, `<who>
+  is required` (`the root's key is required`, `the recipient's public key is required`). Measured
+  before, per entry point: a nil key panicked in `BuildRoot`, `BuildLeaf`, `RootTBS`, `LeafTBS`,
+  `CSRNew`, `IssueFromCSR`, `IssueTBSFromCSR`, `Seal`, `SignDetached`, `VerifyDetached`, `PKCS8`,
+  `Public` and `Signer`, and each options struct but `SealOpts` and `OpenOpts` panicked at its zero
+  value; a zero-value or `Alg`-only private key panicked in the builders, `CSRNew`, `SignDetached`,
+  `Public`, `Signer`, and as the sender of `SealRequest` and `SealResult`. The rest answered as if a
+  key were there: `RootTBS`, `LeafTBS`, `BuildLeaf` and `IssueTBSFromCSR` built around a zero-value
+  public key's empty SubjectPublicKeyInfo, `PKCS8()` wrote a key with an empty scalar, `AlgorithmOf`
+  and `SuiteForKey` named an `Alg` with no key behind it, and `Open` and `OpenResult` answered for the
+  envelope. `PrivateKey.Public()` and `.Signer()`, which have no error to answer with, answer nil for
+  such a key; `Signer.Sign` on a nil or empty signer refuses, and `VerifyDetached` with such a key is
+  false. `AlgorithmOf(nil)` is `the key is required` (it said `unsupported key type`).
+- **Bytes a port did not write are read by one rule, and it forgives no whitespace** (cluster H;
+  X9, T10, R23, R24, T11, C7, C8, C9, C10): base64url, forgiving the padding and the standard
+  alphabet's `+` and `/`, and nothing else (CONTRACT §0), in the arguments and in every string a
+  port reads that it did not write — a card's certificate, the chain in a peer's plaintext, a pin's
+  leaf, a held key, a vault's salt, nonce and ciphertext. `js/b64url-arguments.json` is the one list
+  of cases, read by both ports' tests. The core forgave every Unicode whitespace character and the
+  Go port space, tab, CR and LF, so a key with a vertical tab in it was a key to the Wasm and `parse`
+  to the Go port; the contract forgives neither. The Go port read the strings it did not write with
+  `FromB64url`, which skipped any character it did not know: a card whose certificate carried a
+  stray `!` was taken by the Go port and refused by the core (and the cloud, which runs it); a chain
+  member in a peer's plaintext with one validated, where the core refused it; a vault whose `ct`
+  carried one opened; a pin that did not read was `superseded leaf`, and a held key that did not
+  read was `does not open`, told to the peer where the core refuses the call as the host's state
+  that does not read (`parse`, or `unsupported` for a key outside the profile). A chain member in
+  the plaintext that does not read is `envelope_invalid` `plaintext shape` from `open_result` too,
+  where the core answered a `parse` error of the call. An empty `X-PACT-VERSION` is `no
+  X-PACT-VERSION` in the core, as the seed and the Go port say it (it said `version not
+  implemented`). The seed's card.mjs and envelope.mjs read by the same rule (pact-protocol PR #10).
+- `open_result` reads the first pin for the chain's root, as the core does and as `decide` reads a
+  node's pins in both ports (S5-2, found here): the Go port read every pin for the root, so a second
+  one newer than the chain, or one that did not read, refused an answer the first accepted.
+- **Removed public API** (cluster H): Go `FromB64url`, which could not fail. `DecodeB64url`, the
+  strict reader the port's boundary used unexported, is exported in its place.
+- **Removed public API** (S3; dbc1170): Go `B64` and its methods `Bytes`, `MarshalJSON` and
+  `UnmarshalJSON`, the decoder type the Go adapter read a request's byte members through, which the
+  members read by hand replaced. No entry named them until 2026-09-30 (the hunt of that day); a grep
+  of pact-gateway and of pact-cloud's conformance battery finds no use of them.
+- **One KDF reader in each port, shared by `vault_seal` and `vault_open`** (cluster I; S5, R28,
+  R30, T12, C4, C5, F17): never truncating, members by their exact names and no others (`kdf holds
+  name, m_kib, t and p, and nothing else: <member>`). A caller's `kdf` that is not an object is
+  `bad_request` `kdf is required` (the core sealed under the default; the Go port answered `parse`
+  `kdf does not read`, before the passphrase and the plaintext); a `name` that is not a string is
+  `unknown kdf` (the core read it as `argon2id`); a parameter of another type or spelling is
+  `kdf parameters out of range` (the Go port said `parse`). A document's `kdf` has all four members:
+  one with no `kdf`, a `kdf` that is not an object or has no `name` is `unknown kdf`, where the core
+  opened it under the default; a parameter it lacks is `kdf parameters out of range`, where the core
+  took the default and the Go port zero. A document that is not an object is `not a pact-vault/1
+  document` in both (the core said the passphrase was wrong). The Go port reads the header in the
+  core's order: `salt`, `nonce` and `ct` before the key is derived.
+- **The salt floor has one sentence, the ports' own** (R29, C6): `vault` `salt is at least 8
+  bytes`, at both ends, before Argon2id is asked; `contract/contract.json`'s new `VaultSaltMin` is
+  the number, held by a test in each port. The core answered Argon2id's `salt is too short`, the Go
+  port `not a pact-vault/1 document`. Argon2id's own errors, which no argument now reaches, are
+  `internal` in fixed words.
+- **Every derivation is held to the range** (T19): the core's typed `vault::seal` handed any `Kdf` to
+  Argon2id, so a typed caller could write a document both ports refuse; the Go port's typed
+  `VaultSeal` refuses an empty passphrase, as the core's does and only the Go boundary did.
+- **`wallet_issue` holds both documents to their schemas** (F18, R31): the vault's `roots` (a list,
+  each entry a `VaultRoot`: `the vault's root <i> does not read: <member>`), `prf` and `passkey`; the
+  record's `roots`, `contacts` (each a `VaultContact`), `passkey` and `backup_verified_at`, beside
+  the ledger it already held. The Go port decoded the documents into typed structs, so a member of
+  the wrong type anywhere was `arguments do not read`, and a `pkcs8` of `""` was a card-held root;
+  the core read a wrong type as absent, skipped an entry that was not an object, and carried the
+  rest. A root key that does not read is refused in its reader's class (`parse`; `unsupported` for a
+  key outside the profile), where the Go port said `bad_request` `the root key does not parse`. The
+  CLI reads a record through the same `check_record`, so a record it opens is held the same way.
+- **A certificate is read in one order and refused in one set of words** (R33): a `keyUsage` BIT
+  STRING with no initial octet (`03 00`, which X.690 §8.6.2 says is no BIT STRING) is refused by the
+  core as the Go port refused it (the core read it as a keyUsage of no bits); an `[3]` with nothing in
+  it is `not a v3 certificate with extensions` in both (the Go port said `certificate shape`); the Go
+  port reads the fields in the core's order (the validity's count before the outer algorithm, the
+  key before the names and the times, an extension's criticality before its OID) and keeps each
+  reader's own error where it answered `certificate shape` or `time not in the DER form` for a
+  SEQUENCE whose contents did not read. The seed refuses the three alike (pact-protocol PR #10).
+- Removed (cluster I): Go's `KDF.UnmarshalJSON`. A Go caller that decodes a vault document into
+  `Vault` with encoding/json gets encoding/json's reading of `kdf`; the port reads one with
+  `VaultOpenDoc`.
+- **JS loader:** `call(name, null)` hands `null` to the core, which answers `args is a JSON object`
+  as the Go port does; it used to be made `{}` (`js/index.mjs`, `js/worker.mjs`). Only `args` left
+  out is `{}`. The parity case `args that are null` sends `null` for the first time (TC-2).
+- **A guest's answer says whether a pin stands behind it** (CW-11): `decide`'s guest answer carries
+  `demote`, true when the root is pinned and the caller is a guest anyway (the pin is blocked, or the
+  leaf is older than the pinned one), and its `why` is one of `unknown root`, `blocked` and
+  `superseded leaf` (`GuestWhy` in the contract). The node demoted a caller by matching those words
+  and the cloud re-derived the fact from its rows; both can read the member. The contract gives the
+  guest answer its own shape (`method` `tools/call`, a guest tool, `form` `chain`, and `why`,
+  `demote` and `address_claim` always present) and the other `ok` answers none of the three.
+- `parse_certificate` judges a certificate that is neither a root nor a leaf as a root only when it is
+  a CA and self-issued, as the contract says and the core did; the Go port judged every CA as a root,
+  so a CA-flagged leaf under another name got a root's refusal there and a leaf's in the core (T17).
+- **A name the contract does not have is `unsupported`, whatever the arguments are** (R34): the name is
+  judged first, in both ports, before half a surrogate pair, a number past the largest double or
+  arguments that are not an object. The core read the arguments first, so `nope([])` was
+  `bad_request` `args is a JSON object` there and `unsupported` in the Go port, and both answered a
+  surrogate or `1e400` beside an unknown name as a refusal of the arguments. CONTRACT §0 says so, and
+  `js/boundary-text.json`'s `unknown_name` holds both ports' tests to it for text parity cannot send.
+- CONTRACT §0's list of failure codes is rendered from the contract's `ErrorCode` (R35): it named
+  `chain_required`, `certificate_renewed` and `pending_approval`, which are codes of `decide`'s
+  answer and never a failure, and `profile`, which is no code at all. It no longer says the Go port
+  exposes every function as a typed Go function: the export section is `Call` and the two whole-file
+  conveniences.
+- A header whose `ts` or `exp` is written `-0` is `header member types` in both ports, as the core
+  reads it (S3-1, in the header): the Go port read it as 0 and went on to the time window. Parity
+  cases hold `-0` in `ts` and `exp`, and a `ts` written with a fraction, through `decide` and
+  `open_result`.
+- `pact id ledger` marks as current the entry the ledger rules call live (X8): each root's newest by
+  notBefore, the first of equals, and none when that one has expired. It marked the newest of the
+  unexpired entries and the last of equals. The rule is written once, `ledger::live_entry`, which
+  `ledger_check` uses too.
+- Removed, no caller (standing rule 2): Rust `der::ia5`, and `export::csv::read` outside the tests
+  (X12; Go's `csvRead` moved into its tests the same way); Go `LeafOpts`'s `CA`, `Usage`, `AKI`,
+  `Extra` and `AlgOID`, and the `ExtraExtension` type — they existed "so the intrusion suite can build
+  what a wallet never would", and nothing in this repository, the node or the cloud's battery set
+  them. `LeafOpts.URIs` stays; the node's tests set it.
+- Parity cases put a leaf at exactly `max_leaf_days` and one second past it (C15's residual).
+- **`limits_buckets`, a contract function** (X2): the buckets a charge is charged to, in charge order,
+  each with its key, rate and burst — the rows `limits_decide` reads, which a host fetches first. The
+  Wasm could decide a charge and not say which rows it reads, so a host on it had to derive the key
+  scheme and the identity rate a second time. It reads `rules` and `charge` as `limits_decide` does,
+  by the same reader, in its words.
+- **`media_holds_private_key`, a contract function** (CW-07, R38): whether a media file's bytes are key
+  material, by the rule both ports' export readers apply to a media file. A host that streams media
+  asks it; the cloud kept a third copy in TypeScript. **Key material is read leniently now, in both
+  ports**, wherever it is looked for (cells, message bodies, manifest members, media): a base64 word
+  forgives a last character whose spare bits are set, and a DER length may take any definite form of
+  up to four octets, minimal or not. SPEC §9.2 refuses anything "that decodes as a private key", and
+  a key spelled so decodes to the key under atob, Node's Buffer and OpenSSL; the ports read it as no
+  key where the cloud's copy refused it. So an export or an import holding such a spelling is refused
+  (a message leaves with its file) where the node and the CLI passed it. `js/key-material.json` is
+  the one list of cases. Every other reader stays strict: an argument's bytes are still base64url by
+  CONTRACT §0's rule.
+- **`refresh_check`, a contract function** (CW-08): what a peer's answer to `get_card` proves about a
+  pinned contact — the card, its signature and the chain, judged against the host's pin — and what the
+  pin should become (`renewed`, and the pinned root's certificate). The node's `verifyRefreshedCard`
+  and the cloud's ran the same checks in different orders, refused in different words, and the node
+  verified the card signature with its own verifier. One order and one set of words now, the cloud's
+  where the two differed; the answer is read as it was sent (anything wrong with it is `ok: false`),
+  the pin is the host's (a fault is an error of the call). Typed: `refresh::check` (Rust),
+  `RefreshCheck` (Go).
+- **`decide_chain`, a contract function** (N1, N2, the port's side): the pin decision of `decide`,
+  answered on its own for a chain proven at the TLS layer, so a host's TLS door decides a caller as
+  its sealed door does. The node's TLS door decided client chains by hand and parted from `decide` on
+  a removal tombstone and on a conflicting leaf. `decide` and `decide_chain` take the decision from one
+  function in each port (`pinned` / `pinDecision`); `decide`'s answers did not change (every `decide`
+  and `open_result` case answered byte for byte as before the change). The answer is `decide`'s less
+  what is the call's; its effects are the pin's moves (`PinEffect`, the contract's `Effect` less
+  `seen`). Typed: `envelope::decide_chain` (Rust), `DecideChain` (Go).
+- **`wallet_issue` proves the root before it signs** (SPEC §2.2; TC-8's behaviour half), in both
+  ports: the vault's root key is the root it is filed under (`the vault's root key is not the root it
+  is filed under`); the entry's certificate reads and holds that key (`the vault's root certificate is
+  not its key's`); the key signs `PACT root proof v1`, a newline and 32 random bytes, verified under
+  the certificate's key; and the chain of the leaf and that certificate is validated against the root
+  and the endpoint before it is answered (`the chain it issued does not validate: …`). Both ports
+  signed with whatever key sat beside the fingerprint, and a vault entry holding another key's PKCS #8
+  got a leaf that failed chain rule 3. MUSTs 2.2#1, #2 and #4 are held on the software path, by a
+  test in each port.
+- **`null` is absent in a sealed body's members too** (CONTRACT §0): `seal_request`'s `params: null`
+  is `{}`, and `seal_result`'s `result: null` or `error: null` is no result or no error — alone, it is
+  refused (`a result carries exactly one of result and error`); beside the other, the other is sealed.
+  Both ports sealed a `null` as present.
+- **A header's `ts` and `exp` are integers it carries as themselves** (a lead of the port-parity
+  verification, 2026-09-30): from −(2^53 − 1) to 2^53 − 1, `ts` first, then `exp` with its default
+  (`ts + 600`), in `seal_request` and `seal_result`, in the seal itself so the typed APIs hold it
+  too: `bad_request` `<ts|exp> is an integer from -(2^53 - 1) to 2^53 - 1`. RFC 8785 writes a number
+  as the double it is, so the core sealed a `ts` of 2^53 + 1 as 2^53, and the Go port, whose
+  `Canonical` wrote an int64's digits, as 2^53 + 1: two headers for one call, and the core's not the
+  one asked for. A `ts` of the largest i64 with no `exp` overflowed computing the default (a panic
+  in a debug build). Go's `Canonical` now writes an `int` or `int64` as the double it is, as it
+  writes every other number. The Go port named a chain form with no `sender_chain` in its adapter,
+  before the seal; it is named in the seal now, after the header's times, as the core names it.
+- **A JSON value a caller hands in is sealed as the value it is** (a lead of the port-parity
+  verification, 2026-09-30): `seal_request`'s `params`, `seal_result`'s `result` and `error`, and
+  `vault_seal`'s document, in both ports and the typed APIs: strings as RFC 8785 writes them; an
+  integer the core holds as one (an i64, or a u64 past it) by its digits, and every other number as
+  RFC 8785 writes it; members in the order written, a member written twice once, where it first
+  appeared, with its last value (the core's `canonical::in_order`, Go's `inOrder`). The core sealed
+  what serde_json wrote (`1e2` as `100.0`, `-0` as `-0.0`, a 30-digit integer as
+  `1.2345678901234568e+29`), and the Go port the caller's text as written (`{"a":1,"a":2}`, `"\/"`,
+  `1.50`): one call, two plaintexts, and one vault document, two ciphertexts under one salt and nonce.
+  What they seal now is what the seed seals from `JSON.parse` of the same text, but where `JSON.parse`
+  moves a member (it enumerates integer-like names first, and the ports keep the order written) and
+  where it cannot hold an integer past 2^53.
+  **Integers keep their digits** (the owner's choice (a) on M2 of the review of 2026-09-30): the
+  writer as first committed printed every number as RFC 8785's double, so both ports sealed an `id`
+  of 12345678901234567891 as 12345678901234567000, where the core had sealed it exactly before (serde's
+  writer). Only an integer serde holds as one keeps its digits: `-0`, a fraction, an exponent and an
+  integer past 64 bits are still the double RFC 8785 writes (`9007199254740993.0` is
+  `9007199254740992`). A header is RFC 8785 and unchanged: its integers are bounded to 2^53 − 1
+  (above). Parity opens each envelope with the seed's HPKE and holds its plaintext's bytes.
+- **`null` is absent inside the wallet's documents too** (CONTRACT §0; a lead of the port-parity
+  verification, 2026-09-30): `wallet_issue`'s readers of the vault and the record, and a ledger
+  entry's `origin` (`ledger_check` too), read a `null` member the document declares as absent, in both
+  ports. Since the documents were first held to their schemas (836d080, in this Unreleased section)
+  both ports read it as a member of the wrong type: a root's `pkcs8: null` was `the vault's root 0
+  does not read: pkcs8` where its absence is a card-held root, and a record's `ledger: null` or
+  `contacts: null`, or a vault's `prf: null`, refused a document their absence lets through. A member
+  a document does not declare is still refused whatever it holds, `null` included, as a function's
+  arguments are.
+- **`refresh_check`: a pin whose root is not a fingerprint is an error of the call** (a lead of the
+  port-parity verification, 2026-09-30), `bad_request` `pin.root is not a fingerprint`, read with the
+  pin and before the answer, in both ports and in the typed `refresh::check` and `RefreshCheck`. Both
+  compared it with the card's root and answered `ok: false`, `the card names another root, not the
+  pinned one`: the host's damaged pin, reported as the peer's fault. The contract already typed
+  `pin.root` as a `Fingerprint`, and an answer to one that was not was off the contract.
+- **Every root a host holds is a fingerprint** (the same lead, followed): a pin's (`decide`,
+  `decide_chain`, `open_result`), a tombstone's and a former endpoint's `root` that is not one is
+  `bad_request` `<path>.root is not a fingerprint` (`node.pins[0].root is not a fingerprint`), where
+  the reader reads the root, in both ports, and first in the typed Go `Decide`, `DecideChain` and
+  `OpenResult`, whose structs never pass through the reader. Both ports read it as a root nothing
+  matched: a pin or a former endpoint whose root was `abc` came back as the answer's
+  `address_claim: "abc"`, which the contract types as a fingerprint, and a tombstone whose root was
+  `abc` was skipped, whatever else in it did not read. The contract's `Pin`, `Tombstone` and
+  `FormerEndpoint` type `root` as a `Fingerprint`. A host whose rows carry a made-up root gets an
+  error from every decision until the row is repaired.
+- **Go: arguments with no text at all are not an object** (a lead of the port-parity verification,
+  2026-09-30): `Call(name, nil)` and `Call(name, "")` answer `bad_request` `args is a JSON object`,
+  as the core's `call(name, "")` does; they read as `{}`. The line adapter sends `{}` for a request
+  with no `args`, as the JS loader does. `js/boundary-text.json` holds both ports to it.
+- **Removed: `js/limits-vectors.mjs`** (TC-13), the generator of `js/cases/limits-vectors.json`. It
+  ran the cloud's `RateLimiter.take`, which the cloud removed at pact-cloud ba68f9c when it moved its
+  budgets onto `limits_decide`; its compare mode threw against the cloud's main, and nothing ran it.
+  The vectors stay, a fixed record whose `about` and `source` say what made them (pact-cloud 6c771f7,
+  `limits.ts` sha256 85e3ff79…), replayed as before by the crate, the Wasm and the Go port. The
+  contract's §6.3 and `limits_decide` note, and the crate's and the tests' headers, say "was".
+- **The two copies of the Appendix B case list are held to each other** (TC-12's protocol half):
+  `js/seed.test.mjs` compares `js/appendix-b-reader.json` with pact-protocol's
+  `vectors/appendix-b-reader.json`, byte for byte, from the pact-protocol beside this repository, as
+  the gate reads it. pact-protocol's copy arrives with its PR #10, so this lands with it.
+- **The seed is held to the ports where they read alike** (R33's seed half, and clusters G and H):
+  33 parity expectations for `parse_certificate` and `card_decode` now come from the seed's own
+  `parse` and `decodeCard` at run time, where a fixed string stood: an empty keyUsage BIT STRING, an
+  empty `[3]`, three validity times and one, a keyUsage whose OID is padded and whose criticality is
+  spelled `0x01`, an extension of four parts, an extnValue that is not an OCTET STRING, an extnValue
+  OCTET STRING holding two TLVs, a keyUsage with an unused bit set, a P-256 key written as its
+  compressed point, a key outside the profile (four, in a certificate and on a card), a card's
+  certificate with a stray character (nine), and the controls. On pact-protocol main the seed read 20
+  of the first 26 differently; at PR #10's a5a3e57 it still read three of the seven added on
+  2026-09-30 differently (the extnValue and the compressed point it took; four parts it called
+  `extension shape`). The gate passes against PR #10 from df57707, with which this lands.
+- **Every fault the contract lists among what parsing refuses is an intrusion scenario** (lead 6):
+  `parse_certificate`'s notes said so of all of them, and five had none. `js/intrude.mjs` gains the
+  seed's six: `DER:` a validity with three times, an extension of four parts, an extnValue that is not
+  an OCTET STRING, an extnValue OCTET STRING holding two TLVs, keyUsage with an unused bit set, and a
+  P-256 key written as its compressed point, each built by the seed before it is signed. Both ports
+  refuse all six, as the seed does from pact-protocol df57707 (138 scenarios, 138 verdicts alike on
+  each port). The notes now name the extnValue that is not an OCTET STRING (`certificate shape`), which
+  both ports refused and the list left out.
+- **MUST 13.3#2 names its gap** (CW-06): `js/musts.json` says what nothing here holds — keeping a
+  seen `msg_id`'s record until `min(exp, ts + 300 s)` — and that both hosts keep it until `exp`
+  alone, CW-06's fix being the node's and the cloud's; PROOFS.md marks the row. It cited the tests of
+  the skew window and the thirty-day cap alone, which read in PROOFS.md as holding the retention.
+- **The order `build_leaf` and `leaf_tbs` read `serial` in** is held by two parity cases (a serial
+  too short and no `cn`: `serial is 8 to 20 bytes`), both ports already agreeing.
+- **A pin's `state` is one of three, and its `leaf_fingerprint` a fingerprint** (S1 and S2 of the
+  review of 2026-09-30), in `decide`, `decide_chain` and `open_result`, where each is read, and first
+  in the typed APIs: `bad_request` `<path>.state is active, pending_out or blocked` and `<path>.leaf_fingerprint
+  is not a fingerprint`. Both ports read any other state as `active`, so a blocked contact whose host
+  wrote `Blocked`, `blocked ` or `removed` was a full contact; and a `leaf_fingerprint` of `""` was a
+  claim matching no leaf to the core (`chain_required`, `unknown leaf`) and no claim at all to the Go
+  port (`ok`). A Go caller's zero values, a `State` or a `LeafFingerprint` of `""`, are still `active`
+  and none; the core's typed `Pin` refuses a `leaf_fingerprint` of `Some("")`.
+- **A held key's `kid` is a fingerprint** (found by parity's nested `""` cases, below): `decide` and
+  `decide_chain` answer `bad_request` `node.keys[<i>].kid is not a fingerprint` where the kid is read,
+  and the typed APIs first. Both ports held a key whose kid was `""` without a word, a key no envelope
+  could name.
+- **`export_merge` holds a row's `status` and `added`, and `book_rows` a contact's `root` and
+  `added`** (found the same way): `<held|rows>[<i>]: status is not active, blocked or pending_out`,
+  `<held|rows>[<i>]: added is not an RFC 3339 instant`, `contacts[<i>]: root is not a fingerprint` and
+  `contacts[<i>]: added is not an RFC 3339 instant`, export_read's words. A held row whose status was
+  `Blocked` was read as not blocked, so an import did not keep the person's block; and `book_rows`
+  answered a row whose `root` or `added` was `""`, off the contract it types them by.
+- **Parity sends `""` to every string inside a member** (S1's harness half): `js/cases/generated.mjs`
+  varies each string member of an object nested in a function's base arguments, where it varied
+  top-level members only, so no pin's `leaf_fingerprint` of `""` was ever sent. It found the three
+  entries above. Two small-form cases whose names said an unreadable pin was never parsed had tested,
+  since e49ef50, only that a root which is no fingerprint is refused; their pin's root is now one, and
+  they hold what their names say.
+- **The contract says four more things the code does** (the review of 2026-09-30): `refresh_check`'s
+  note names `pin.leaf is a CA certificate, not a leaf` and where it is asked (S3); `parse_certificate`'s
+  names the order the seed reads a certificate's fields in, which is not the ports', and that nothing
+  compares the seed's words for a certificate with two faults (S7, R33's seed half); `card_encode`'s
+  names `extra is required` for a list holding a non-string, §0's words for a member of the wrong type
+  (N1); and §0's sentence that the seed refuses a key outside the profile in the ports' words names what
+  pact-protocol b841dd3 made true of it: a padded P-256 curve OID, a SubjectPublicKeyInfo of another
+  shape, a P-256 point off the curve (N2).
+- **Eight more intrusion scenarios, the seed's** (S5 and S6 of the review of 2026-09-30):
+  `js/intrude.mjs` gains, by the seed's names, an Ed25519 key BIT STRING with 1 and with 7 unused bits,
+  a SubjectPublicKeyInfo with a member after its key, a P-256 key BIT STRING with 1 unused bit (`DER:`,
+  rule 1), and endpoints with an underscore, a trailing dot, an empty label and an IPv4-mapped IPv6
+  literal (rule 5). Both ports refused all eight already; the seed accepted six until pact-protocol
+  b841dd3, with which this lands (146 scenarios, 146 verdicts alike on each port).
+- **`js/package.json` needs Node 22** (S8): the seed's envelope reader, which the gate runs, reads a
+  number's text through `JSON.parse`'s reviver (`context.source`, Node 21) and calls
+  `String.prototype.isWellFormed`; `engines` said `>=20`. pact-protocol declares the same.
+
 ## 0.4.1 — 2026-09-28
 
 - **Correction to 0.4.0.** Its entry, and commit 3746e32, said the open no longer derives the

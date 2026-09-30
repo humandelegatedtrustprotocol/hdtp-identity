@@ -7,11 +7,12 @@ pub(super) fn generate_key(a: &Value) -> Result<Value> {
     Ok(key_json(&PrivateKey::generate(Alg::parse(s(a, "alg")?)?)?))
 }
 
+/// `alg` first, as CONTRACT §1 lists it, then the seed read for it: the seed's length was judged
+/// before a missing algorithm here, and after it in the Go port (T21, R01).
 pub(super) fn key_from_seed(a: &Value) -> Result<Value> {
-    Ok({
-        let seed = seed32(a, "seed")?.ok_or_else(|| Error::new("bad_request", "seed is required"))?;
-        key_json(&PrivateKey::from_seed(Alg::parse(s(a, "alg")?)?, &seed)?)
-    })
+    let alg = Alg::parse(s(a, "alg")?)?;
+    let seed = seed32(a, "seed")?.ok_or_else(|| Error::new("bad_request", "seed is required"))?;
+    Ok(key_json(&PrivateKey::from_seed(alg, &seed)?))
 }
 
 // §2.1. Two calls rather than one so a wallet never hardcodes the salt: the constant lives
