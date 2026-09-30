@@ -50,7 +50,8 @@ pub(super) fn seal_request(a: &Value) -> Result<Value> {
             form: Form::parse(opt_s(a, "form")?.unwrap_or("chain"))?,
             sender_chain: sender_chain.as_deref(),
             method: opt_s(a, "method")?.unwrap_or("tools/call").to_string(),
-            // Absent or null is `{}` (CONTRACT §0: null is absent); present, sealed as given.
+            // Absent or null is `{}` (CONTRACT §0: null is absent); present, sealed as the value it reads as
+            // (seal_request's in_order), not as the text it was written in.
             params: a.get("params").filter(|v| !v.is_null()).cloned().unwrap_or(json!({})),
             msg_id: id(a, "msg_id")?.to_string(),
             ts: int(a, "ts")?,

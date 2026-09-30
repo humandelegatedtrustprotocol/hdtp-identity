@@ -116,7 +116,7 @@ func callSealRequest(a args) json.RawMessage {
 			o.Method = *method
 		}
 		// `params` absent or null is {} (the contract's note; CONTRACT §0: null is absent); present, it is
-		// sealed as given.
+		// sealed as the value it reads as (sealRequest's inOrder), not as the text it was written in.
 		o.Params = a.present("params")
 		if o.Params == nil {
 			o.Params = json.RawMessage(`{}`)

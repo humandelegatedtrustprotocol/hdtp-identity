@@ -64,8 +64,15 @@ func RefreshCheck(pin RefreshPin, answer json.RawMessage, now time.Time) (Refres
 	if err := refreshPinRoot(pin.Root); err != nil {
 		return RefreshVerdict{}, err
 	}
-	if _, err := Parse(pin.Leaf); err != nil {
+	// The pinned leaf reads and is a leaf: a CA certificate pinned as the leaf (the pinned root's own,
+	// say) is the host's damaged pin, and it read, so it was compared with the chain's leaf and
+	// answered as the peer's fault (the hunt of 2026-09-30).
+	pinned, err := Parse(pin.Leaf)
+	if err != nil {
 		return RefreshVerdict{}, classed(err)
+	}
+	if pinned.CA {
+		return RefreshVerdict{}, errArg("pin.leaf is a CA certificate, not a leaf")
 	}
 	refused := func(why string) (RefreshVerdict, error) { return RefreshVerdict{Why: why}, nil }
 	var doc map[string]any

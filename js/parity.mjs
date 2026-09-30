@@ -131,7 +131,7 @@ for (const c of cases) {
   for (const [port, got] of [['wasm', raw], ['go', rawGo]]) {
     if (got?.threw) { fails.push(`${port} threw`); said.push(`  THREW  ${id}  (${port}): ${got.threw}`); continue; }
     held++;
-    const wrong = judge(contract, fn, args instanceof RawArgs ? args.value : args, got);
+    const wrong = judge(contract, fn, c.described ?? (args instanceof RawArgs ? args.value : args), got);
     if (wrong.length) {
       offContract++;
       fails.push(`${port} off the contract`);

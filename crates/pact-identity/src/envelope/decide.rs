@@ -1,6 +1,6 @@
 //! `decide`: the receiving side of §13.3, §6.1, §5.3 and §14.4 as one pure function over the state
 //! the host supplies (`state.rs`). `envelope.mjs receive()` is its specification, line for line.
-use super::state::{DecideInput, DecideOutput, NodeState};
+use super::state::{host_roots, DecideInput, DecideOutput, NodeState};
 use super::{
     chain_of, decode_header, header_checks, members, pin_holding, timing, Timing, CLAIM_WINDOW_S, CTY_CALL, GUEST_TOOLS, INFO_V2,
     PENDING_TOOLS, TOMBSTONE_S,
@@ -58,8 +58,9 @@ impl Freshness<'_> {
 /// The receiving rules over the state the host supplies. Changes nothing; returns the decision and
 /// the effects to apply. `why` strings are the seed's, verbatim.
 pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
-    let now = parse_rfc3339(&input.now)?;
     let node = &input.node;
+    host_roots(node)?;
+    let now = parse_rfc3339(&input.now)?;
     let e = &input.envelope;
 
     let (aad, h) = match decode_header(&e.protected) {
@@ -159,17 +160,30 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
         eff.push(json!({ "op": "seen", "msg_id": msg_id }));
         DecideOutput { result: Value::Object(r), effects: eff }
     };
+    // A call that waits for the owner's approval names what the signature proved — the root decided,
+    // the address, the leaf it verified under and the form — and the request's msg_id, which no `seen`
+    // carries here, so a host can seal the refusal back to the caller (§13.2: an error past the open is
+    // sealed) without opening the envelope again. It answered the code alone, and a host that could not
+    // seal it answered something else in the clear (the port-parity lead 2). The pin's own moves stand;
+    // the envelope's `seen` does not, since the call was not taken.
+    let waits = |r: DecideOutput| -> DecideOutput {
+        let mut w = Map::new();
+        w.insert("code".into(), json!("pending_approval"));
+        for k in ["root", "endpoint", "leaf", "form"] {
+            w.insert(k.into(), r.result[k].clone());
+        }
+        w.insert("msg_id".into(), json!(msg_id));
+        DecideOutput { result: Value::Object(w), effects: r.effects.into_iter().filter(|e| e["op"] != "seen").collect() }
+    };
     let pending_or = |tier_ok: DecideOutput, state: &str| -> DecideOutput {
-        if state == "pending_out" {
-            if pending_allows {
-                let mut r = tier_ok;
-                r.result["tier"] = json!("pending");
-                r
-            } else {
-                done(json!({ "code": "pending_approval" }))
-            }
-        } else {
+        if state != "pending_out" {
             tier_ok
+        } else if pending_allows {
+            let mut r = tier_ok;
+            r.result["tier"] = json!("pending");
+            r
+        } else {
+            waits(tier_ok)
         }
     };
 
@@ -245,14 +259,8 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
             ok("pending_new_address", &root, &endpoint, "chain", &leaf_b64, new_address_members(forced), effects)
         }
         Pinned::Contact { pending_out, effects } => {
+            // The pin may move (a peer may move between my request and their answer) while the call waits.
             let r = ok("contact", &root, &endpoint, "chain", &leaf_b64, Map::new(), effects);
-            if pending_out && !pending_allows {
-                // The pin moved (a peer may move between my request and their answer) but the call waits.
-                return Ok(DecideOutput {
-                    result: json!({ "code": "pending_approval" }),
-                    effects: r.effects.into_iter().filter(|e| e["op"] != "seen").collect(),
-                });
-            }
             pending_or(r, if pending_out { "pending_out" } else { "active" })
         }
     })
@@ -266,6 +274,7 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
 /// address, what a `pending_out` pin may call — the host applies to each call, as `decide` applies it
 /// to the envelope's. No `seen`: there is no envelope.
 pub fn decide_chain(node: &NodeState, chain: &[Vec<u8>], now: i64) -> Result<DecideOutput> {
+    host_roots(node)?;
     let v = match validate_chain(chain, now, None, None) {
         ChainResult::Ok(v) => v,
         ChainResult::Refused { rule, reason } => return Ok(invalid(&format!("chain rule {rule}: {reason}"))),

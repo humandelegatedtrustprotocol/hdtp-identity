@@ -15,10 +15,10 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   (held to CONTRACT §0's `<name> is required`), each member that takes a string as `""`, each
   optional member of the wrong type, an undeclared member, and each required member absent beside
   each other member of the wrong type (read order), and each member that holds a key holding one
-  outside the profile — 1261 cases at the last count (1103 when written; the hostile object is now
+  outside the profile — 1302 cases at the last count (1103 when written; the hostile object is now
   sent only to the 17 functions that declare one of its members, the key outside the profile came
-  with cluster G, the functions added since have their own, and the 112 required strings' `""` came
-  on 2026-09-30), varied from one named hand-written case per function
+  with cluster G, the functions added since have their own, and the 112 required strings' `""` and
+  the 41 members undeclared inside a member came on 2026-09-30), varied from one named hand-written case per function
   that succeeds on both ports. 463 cases failed when they were written (459 generated, and 4 written
   beside them). While they were fixed, each was listed with the audit finding that closed it and
   excused only while it failed exactly as listed; every fix emptied the list, and the list and its
@@ -122,6 +122,42 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   (112 cases). Each must refuse, unless `js/cases/generated.mjs`'s `EMPTY_IS_A_VALUE` names it with
   the reason `""` is a value there (25 members, such as a commonName, the bytes to sign, a card's
   `FN`). A name on that list that is no required string member fails the run.
+- **CONTRACT §0 says which objects inside a member are held to their members, and a case holds each**
+  (the hunt of 2026-09-30): §0 said the objects inside a member are "not held to their schemas'
+  `additionalProperties`", while both ports refused an undeclared member inside every document
+  (`wallet_issue`'s plaintexts and what they hold, a vault's `kdf`, a ledger entry, a signing request,
+  an export's manifest and rows, a wallet contact, the limits rules and a charge). §0 now names the two
+  kinds: a document, held to its members, and what a host hands in of its own state or of what a peer
+  sent it (an envelope, a node state, a pin, the answer to `get_card`, a directory entry, held pins and
+  rows, media), with the JSON a seal carries, read for the members they need. The generated cases add
+  an undeclared member to each object nested in every base (41 cases) and judge it: refused for a
+  document, read past for one that `js/cases/generated.mjs`'s `READ_FOR_WHAT_IT_NEEDS` names (20); a
+  name there that no case reaches fails the run. Both ports already answered each as §0 now says; no
+  code changed.
+- **`decide`'s `pending_approval` names what the signature proved** (the port-parity lead 2): `root`,
+  `endpoint`, the `leaf` the signature verified under, `form`, and the request's `msg_id`, in both
+  ports and the contract's `Decision`. It answered `{"code": "pending_approval"}` alone, so a host had
+  nothing to seal the refusal back to (§13.2: an error past the open is sealed): the node answered
+  `envelope_invalid` in the clear instead, where the cloud reads the signer again from the envelope. Its
+  effects are unchanged: the pin's own moves, never `seen`. A host that compares the whole answer with
+  `{"code": "pending_approval"}` now sees five more members.
+- **`refresh_check`: a pinned leaf that is a CA certificate is an error of the call** (the hunt of
+  2026-09-30), `bad_request` `pin.leaf is a CA certificate, not a leaf`, in both ports and in the typed
+  `refresh::check` and `RefreshCheck`. A root pinned as the leaf read, so it was compared with the
+  chain's leaf and answered `ok: false`, `two different leaves claim the same notBefore (§14.3)`: the
+  host's damaged pin, reported as the peer's fault, the defect the `pin.root` entry below fixed for the
+  root.
+- **The core's typed `decide`, `decide_chain` and `open_result` refuse a host root that is not a
+  fingerprint first** (the hunt of 2026-09-30), as the Go port's typed `Decide`, `DecideChain` and
+  `OpenResult` do, in the same words (`node.pins[0].root is not a fingerprint`, `pins[0].root is not a
+  fingerprint`). The "every root a host holds" entry below said "in both ports", which held at the JSON
+  boundary only: the core's typed `decide_chain` of a pin whose root was `abc` answered `chain rule 1`
+  where Go's answered `bad_request`. `tests/review.rs` holds the three typed functions, with a state of
+  real fingerprints as the control. Nothing outside the tests calls them typed today.
+- **Comments made true** (the hunt of 2026-09-30): a request's `params` and a result's `result` are
+  sealed as the value each reads as (`in_order`, `inOrder`), not "as given", in `go/envelope.go`,
+  `go/api_envelopes.go` and the core's `api/envelopes.rs`; the node's empty-root `ValidateChain` is
+  cited by function (`installLeaf`), not by a line that moved.
 - **Three required members absent are `<name> is required`, as §0 says every one is** (S1-2, S1-3,
   which the generated cases found): `wallet_issue`'s `vault_plaintext` and `record_plaintext` (they
   said `…: the root lives there` and `…: the ledger lives there`, which a document that is not an
@@ -260,6 +296,10 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   one newer than the chain, or one that did not read, refused an answer the first accepted.
 - **Removed public API** (cluster H): Go `FromB64url`, which could not fail. `DecodeB64url`, the
   strict reader the port's boundary used unexported, is exported in its place.
+- **Removed public API** (S3; dbc1170): Go `B64` and its methods `Bytes`, `MarshalJSON` and
+  `UnmarshalJSON`, the decoder type the Go adapter read a request's byte members through, which the
+  members read by hand replaced. No entry named them until 2026-09-30 (the hunt of that day); a grep
+  of pact-gateway and of pact-cloud's conformance battery finds no use of them.
 - **One KDF reader in each port, shared by `vault_seal` and `vault_open`** (cluster I; S5, R28,
   R30, T12, C4, C5, F17): never truncating, members by their exact names and no others (`kdf holds
   name, m_kib, t and p, and nothing else: <member>`). A caller's `kdf` that is not an object is

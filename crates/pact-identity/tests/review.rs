@@ -414,3 +414,83 @@ fn an_open_with_no_public_key_is_refused_by_name() {
     );
     assert_eq!(r, json!({ "error": "bad_request", "why": "my_spki is required" }));
 }
+
+/// The typed `decide`, `decide_chain` and `open_result` hold every root the host hands them to a
+/// fingerprint first, as the Go port's typed `Decide`, `DecideChain` and `OpenResult` do (its
+/// `hostRoots`), in the same words. Only the JSON reader asked it here, so a typed caller's pin whose
+/// root was `abc` was a root nothing matched: `decide_chain` answered `chain rule 1` where Go answered
+/// `node.pins[0].root is not a fingerprint` (the hunt of 2026-09-30). The control, the same state with
+/// a real fingerprint, gets past the check to the chain.
+#[test]
+fn typed_decisions_refuse_a_host_root_that_is_not_a_fingerprint() {
+    use pact_identity::envelope::{self, CallerPin, DecideInput, FormerEndpoint, NodeState, OpenResultArgs, Pin, Tombstone, Wire};
+    let fp = format!("sha256:{}", "A".repeat(43));
+    let pin =
+        |root: &str| Pin { root: root.into(), endpoint: E_A.into(), leaf: String::new(), state: "active".into(), leaf_fingerprint: None };
+    let node = |pins: Vec<Pin>, tombstones: Vec<Tombstone>, former_endpoints: Vec<FormerEndpoint>| NodeState {
+        endpoint: E_A.into(),
+        accept_new_hosts: "auto".into(),
+        chain: vec![],
+        keys: vec![],
+        former: vec![],
+        sibling_kids: vec![],
+        pins,
+        tombstones,
+        former_endpoints,
+        seen: vec![],
+    };
+    let why = |r: pact_identity::Result<envelope::DecideOutput>| match r {
+        Err(e) => format!("{}: {}", e.code, e.why),
+        Ok(d) => d.result.to_string(),
+    };
+    let stone = |root: &str| Tombstone { root: root.into(), leaf: String::new(), at: NOW_RFC.into() };
+    let former = |root: &str| FormerEndpoint { root: root.into(), endpoint: E_A.into(), at: NOW_RFC.into() };
+    for (state, want) in [
+        (node(vec![pin(&fp), pin("abc")], vec![], vec![]), "bad_request: node.pins[1].root is not a fingerprint"),
+        (node(vec![], vec![stone("")], vec![]), "bad_request: node.tombstones[0].root is not a fingerprint"),
+        (node(vec![pin(&fp)], vec![stone(&fp)], vec![former("abc")]), "bad_request: node.former_endpoints[0].root is not a fingerprint"),
+        // pins before tombstones, as the reader and the Go port read them
+        (node(vec![pin("abc")], vec![stone("abc")], vec![]), "bad_request: node.pins[0].root is not a fingerprint"),
+    ] {
+        assert_eq!(why(envelope::decide_chain(&state, &[], now_s())), want);
+        let input = DecideInput {
+            now: NOW_RFC.into(),
+            envelope: Wire { protected: String::new(), enc: String::new(), ct: String::new(), sig: String::new() },
+            node: state,
+        };
+        assert_eq!(why(envelope::decide(&input)), want, "decide asks it before anything else");
+    }
+    // The control: every root a fingerprint, and the call reaches what it was asked.
+    let good = node(vec![pin(&fp)], vec![stone(&fp)], vec![former(&fp)]);
+    assert_eq!(
+        why(envelope::decide_chain(&good, &[], now_s())),
+        json!({ "code": "envelope_invalid", "why": "chain rule 1: chain of 0" }).to_string()
+    );
+
+    let me = PrivateKey::generate(Alg::Ed25519).unwrap();
+    let me_pub = me.public();
+    let wire = Wire { protected: String::new(), enc: String::new(), ct: String::new(), sig: String::new() };
+    let open = |pins: &[CallerPin]| match envelope::open_result(OpenResultArgs {
+        envelope: &wire,
+        my_key: &me,
+        my_public: &me_pub,
+        msg_id: "m",
+        now: now_s(),
+        pins,
+        expected_root: None,
+        expected_endpoint: None,
+    }) {
+        Err(e) => format!("{}: {}", e.code, e.why),
+        Ok(v) => v.to_string(),
+    };
+    let caller = |root: &str| CallerPin {
+        root: root.into(),
+        endpoint: E_A.into(),
+        leaf: String::new(),
+        state: "active".into(),
+        leaf_fingerprint: None,
+    };
+    assert_eq!(open(&[caller(&fp), caller("abc")]), "bad_request: pins[1].root is not a fingerprint");
+    // The control: past the pins, the empty envelope is refused for itself.
+    assert!(!open(&[caller(&fp)]).contains("root is not a fingerprint"));
+}

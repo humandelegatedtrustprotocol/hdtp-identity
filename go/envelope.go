@@ -39,7 +39,10 @@ type Envelope struct {
 }
 
 // SealOpts is what a sender decides. Form is "chain" (the sender's leaf and root inside) or "leaf" (the
-// sender's leaf fingerprint). Params, Result and Error are raw JSON, embedded as given.
+// sender's leaf fingerprint). Params, Result and Error are raw JSON, sealed as the value each reads as
+// and not as the text it was written in (inOrder, the core's canonical::in_order): numbers as RFC 8785
+// writes them, so an integer past 2^53 or a long decimal is sealed as the double it reads as, and a
+// member written twice once, with its last value.
 type SealOpts struct {
 	RecipientKey *PublicKey
 	Sender       *PrivateKey
@@ -140,7 +143,8 @@ func headerTimes(ts, exp int64) error {
 	return nil
 }
 
-// sealRequest seals exactly what it is given.
+// sealRequest seals what it is given, with no default filled in: Params as the value it reads as
+// (inOrder), not as the text it was written in.
 func sealRequest(o SealOpts) (*Envelope, error) {
 	if err := headerTimes(o.TS, o.Exp); err != nil {
 		return nil, err
@@ -174,7 +178,8 @@ func SealResult(o SealOpts) (*Envelope, error) {
 	return sealResult(o)
 }
 
-// sealResult seals exactly what it is given. The proof member is judged before the result, as the
+// sealResult seals what it is given, with no default filled in: Result or Error as the value it reads
+// as (inOrder), not as the text it was written in. The proof member is judged before the result, as the
 // core's seal_result judges them: a chain of one beside no result was named for the result here and
 // for the chain there (R19).
 func sealResult(o SealOpts) (*Envelope, error) {
@@ -597,8 +602,14 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 		}
 		return Decision{Result: r, Effects: effects}
 	}
-	pendingApproval := func() Decision {
-		return Decision{Result: map[string]any{"code": "pending_approval"}, Effects: effects}
+	// A call that waits for the owner's approval names what the signature proved — the root decided,
+	// the address, the leaf it verified under and the form — and the request's msg_id, which no `seen`
+	// carries here, so a host can seal the refusal back to the caller (§13.2: an error past the open is
+	// sealed) without opening the envelope again. It answered the code alone, and the node, which could
+	// not seal it, answered envelope_invalid in the clear (the port-parity lead 2). The pin's own moves
+	// stand; the envelope's `seen` is never added, since the call was not taken.
+	pendingApproval := func(root, endpoint, form string) Decision {
+		return Decision{Result: map[string]any{"code": "pending_approval", "root": root, "endpoint": endpoint, "leaf": leafB64, "form": form, "msg_id": msgID}, Effects: effects}
 	}
 
 	// The small form: the sender names a leaf this node already holds. Anything that cannot be verified
@@ -630,7 +641,7 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 			if pendingAllows {
 				return result("pending", hit.Root, hit.Endpoint, "leaf", nil)
 			}
-			return pendingApproval()
+			return pendingApproval(hit.Root, hit.Endpoint, "leaf")
 		}
 		return result("contact", hit.Root, hit.Endpoint, "leaf", nil)
 	}
@@ -710,7 +721,7 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 		if pendingAllows {
 			return result("pending", root, endpoint, "chain", nil)
 		}
-		return pendingApproval()
+		return pendingApproval(root, endpoint, "chain")
 	}
 	return result("contact", root, endpoint, "chain", nil)
 }
