@@ -23,7 +23,7 @@ mod vault;
 /// It read `2.0.0-draft` for days after the draft shipped as 2.0.0, and through 2.1.0, because a
 /// literal in a dispatch arm has nothing to fail against. `tests/vectors.rs` now compares it with
 /// the version line of the document the vectors are read from, so the two cannot part quietly.
-pub const SPEC_VERSION: &str = "2.2.4";
+pub const SPEC_VERSION: &str = "2.2.5";
 
 /// A required string member that carries an identifier: present, and not empty. §13's `msg_id` is
 /// what pairs a result with its request, so the empty string is not a value it can take — one port
