@@ -652,7 +652,7 @@
     ]
   },
   "13.3#1": {
-    "hash": "7ed6133d64f1",
+    "hash": "40021258d5cc",
     "text": "Receivers MUST validate in this order, rejecting at the first failure: decode `protected`; check `v` and `suit",
     "held_by": [
       "go:TestDecideOnVectors",
