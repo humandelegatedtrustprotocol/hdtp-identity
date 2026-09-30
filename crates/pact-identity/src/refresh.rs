@@ -47,6 +47,18 @@ pub fn pin_root(root: &str) -> Result<()> {
     Ok(())
 }
 
+/// The pinned leaf reads and is a leaf, or the call is refused: a pinned "leaf" that is a CA
+/// certificate (the pinned root's own, say) is the host's damaged pin. It read, so it was compared with
+/// the chain's leaf and answered as the peer's fault (`two different leaves claim the same notBefore`,
+/// when it was the root the chain carries), as a root that was not a fingerprint was (the hunt of
+/// 2026-09-30).
+fn pin_leaf(leaf: &[u8]) -> Result<()> {
+    if parse(leaf)?.ca {
+        return err("bad_request", "pin.leaf is a CA certificate, not a leaf");
+    }
+    Ok(())
+}
+
 fn refused(why: impl Into<String>) -> Result<Verdict> {
     Ok(Verdict::Refused(why.into()))
 }
@@ -60,7 +72,7 @@ pub fn check(pin: &Pin<'_>, answer: &Value, now: i64) -> Result<Verdict> {
     // The host's own pin first, whatever the peer sent: a pin that does not read is the host's to
     // hear about, and a refresh that cannot compare against it has nothing to decide.
     pin_root(pin.root)?;
-    parse(pin.leaf)?;
+    pin_leaf(pin.leaf)?;
     let text = |k: &str| answer.get(k).and_then(Value::as_str).filter(|s| !s.is_empty());
     let (Some(card_text), Some(card_sig)) = (text("card"), text("card_sig")) else {
         return refused("the answer to get_card carries no signed card");

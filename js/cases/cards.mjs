@@ -173,6 +173,11 @@ export default function cards({ add, expect }, f) {
     ['a pin whose root is a character short', { pin: { ...pin(), root: rootFp.slice(0, -1) }, answer: good, now }, { error: 'bad_request', why: 'pin.root is not a fingerprint' }],
     ['a pin whose root is not a fingerprint and no endpoint', { pin: { root: 'abc', leaf: leafDer }, answer: good, now }, { error: 'bad_request', why: 'pin.root is not a fingerprint' }],
     ['a pin whose root is not a fingerprint and no answer', { pin: { ...pin(), root: 'abc' }, now }, { error: 'bad_request', why: 'pin.root is not a fingerprint' }],
+    // The pinned leaf is a leaf: a CA certificate pinned in its place (the root the chain carries) read,
+    // so both ports compared it with the chain's leaf and answered `ok: false`, `two different leaves
+    // claim the same notBefore`: the host's damaged pin, blamed on the peer, as a root that was not a
+    // fingerprint was (the hunt of 2026-09-30). `the pinned leaf, unchanged` is the control that reads.
+    ['a pinned leaf that is the root', { pin: pin(rootDer), answer: good, now }, { error: 'bad_request', why: 'pin.leaf is a CA certificate, not a leaf' }],
     ['no answer', { pin: pin(), now }, { error: 'bad_request', why: 'answer is required' }],
     ['no now', { pin: pin(), answer: good }, { error: 'bad_request', why: 'now is required' }],
   ]) {

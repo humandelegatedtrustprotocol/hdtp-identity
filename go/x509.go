@@ -679,9 +679,10 @@ type ChainOpts struct {
 	ExpectedRoot     string
 	ExpectedEndpoint string
 	// A Go caller that leaves ExpectedRoot or ExpectedEndpoint empty has not given it: the node's
-	// first certification passes an empty root (pact-gateway internal/identity/leaf.go:561). The JSON
-	// boundary has: a member present as "" is a value there (CONTRACT §0), compared and refused like
-	// any other, as the core's Option compares it (F4, R07, T14). It sets these.
+	// first certification passes an empty root (pact-gateway internal/identity/leaf.go, installLeaf's
+	// ValidateChain, before the account has a root). The JSON boundary has: a member present as "" is
+	// a value there (CONTRACT §0), compared and refused like any other, as the core's Option compares
+	// it (F4, R07, T14). It sets these.
 	rootGiven, endpointGiven bool
 }
 

@@ -7,9 +7,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed as proven that did not pass.
 
-Specification: **2.2.4**. **88** normative sentences, **2652** cross-port parity cases over **54** guarded functions.
+Specification: **2.2.4**. **88** normative sentences, **2694** cross-port parity cases over **54** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 2.2.4): **5304** answers, of which **0** do not hold to the shape it declares. Of **128** declared error codes, **128** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 2.2.4): **5388** answers, of which **0** do not hold to the shape it declares. Of **128** declared error codes, **128** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 88 normative sentences of the specification
 
@@ -202,7 +202,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 2652 cross-port parity cases
+## The 2694 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -210,7 +210,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **2652** cases (**1261** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
+At the run that generated this file: **2694** cases (**1302** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
 
 ### `address_guard` — 51 cases · whole on success
 
@@ -309,7 +309,7 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · assemble_root · sig absent, tbs 7
 - generated · assemble_root · sig absent, sig_alg 7
 
-### `book_rows` — 17 cases · whole on success
+### `book_rows` — 18 cases · whole on success
 
 - book_rows: a contact with everything, one with the least
 - book_rows: an empty book
@@ -326,6 +326,7 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · book_rows · exported_at null
 - generated · book_rows · exported_at ""
 - generated · book_rows · an undeclared member
+- generated · book_rows · an undeclared member in contacts.0
 - generated · book_rows · contacts absent, exported_at 7
 - generated · book_rows · exported_at absent, contacts "x"
 
@@ -640,7 +641,7 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · csr_new · endpoint absent, host_pkcs8 7
 - generated · csr_new · endpoint absent, dns_name 7
 
-### `decide` — 118 cases · whole on success
+### `decide` — 122 cases · whole on success
 
 - decide on an envelope from a pinned contact
 - decide on a pinned contact's call that names no tool
@@ -754,6 +755,10 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · decide · node absent
 - generated · decide · node null
 - generated · decide · an undeclared member
+- generated · decide · an undeclared member in envelope
+- generated · decide · an undeclared member in node
+- generated · decide · an undeclared member in node.keys.0
+- generated · decide · an undeclared member in node.pins.0
 - generated · decide · now absent, envelope "x"
 - generated · decide · now absent, node "x"
 - generated · decide · envelope absent, now 7
@@ -761,7 +766,7 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · decide · node absent, now 7
 - generated · decide · node absent, envelope "x"
 
-### `decide_chain` — 44 cases · whole on success
+### `decide_chain` — 47 cases · whole on success
 
 - decide_chain: a root nobody pins
 - decide_chain: a root nobody pins, at an address another root is pinned at
@@ -800,6 +805,9 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · decide_chain · now null
 - generated · decide_chain · now ""
 - generated · decide_chain · an undeclared member
+- generated · decide_chain · an undeclared member in node
+- generated · decide_chain · an undeclared member in node.keys.0
+- generated · decide_chain · an undeclared member in node.pins.0
 - generated · decide_chain · chain holding a key outside the profile
 - generated · decide_chain · node absent, chain "x"
 - generated · decide_chain · node absent, now 7
@@ -831,7 +839,7 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · derive_seed · prf absent, info 7
 - generated · derive_seed · info absent, prf 7
 
-### `export_manifest` — 15 cases · whole on success
+### `export_manifest` — 19 cases · whole on success
 
 - export_manifest: finished with the messages
 - export_manifest: a book
@@ -846,10 +854,14 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · export_manifest · hashes "x"
 - generated · export_manifest · messages "7"
 - generated · export_manifest · an undeclared member
+- generated · export_manifest · an undeclared member in partial
+- generated · export_manifest · an undeclared member in partial.counts
+- generated · export_manifest · an undeclared member in partial.files
+- generated · export_manifest · an undeclared member in hashes
 - generated · export_manifest · partial absent, hashes "x"
 - generated · export_manifest · partial absent, messages "7"
 
-### `export_merge` — 11 cases · whole on success
+### `export_merge` — 13 cases · whole on success
 
 - export_merge: a held pin is never replaced
 - export_merge with rows whose root is no fingerprint
@@ -860,10 +872,12 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · export_merge · rows absent
 - generated · export_merge · rows null
 - generated · export_merge · an undeclared member
+- generated · export_merge · an undeclared member in held.0
+- generated · export_merge · an undeclared member in rows.0
 - generated · export_merge · held absent, rows "x"
 - generated · export_merge · rows absent, held "x"
 
-### `export_read` — 93 cases · whole on success
+### `export_read` — 94 cases · whole on success
 
 - export_read: what export_write wrote
 - export_read at an instant that does not read
@@ -943,6 +957,7 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · export_read · threads_csv ""
 - generated · export_read · threads_csv 7
 - generated · export_read · an undeclared member
+- generated · export_read · an undeclared member in directory.0
 - generated · export_read · directory absent, manifest 7
 - generated · export_read · directory absent, contacts_csv 7
 - generated · export_read · directory absent, threads_csv 7
@@ -1118,7 +1133,7 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · export_read_messages · media absent, contacts "x"
 - generated · export_read_messages · media absent, first_line "7"
 
-### `export_write` — 67 cases · whole on success
+### `export_write` — 70 cases · whole on success
 
 - export_write: every formula prefix, quoting and line breaks, sorted rows
 - export_write: a book
@@ -1157,6 +1172,9 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · export_write · threads "x"
 - generated · export_write · media "x"
 - generated · export_write · an undeclared member
+- generated · export_write · an undeclared member in contacts.0
+- generated · export_write · an undeclared member in threads.0
+- generated · export_write · an undeclared member in media.0
 - generated · export_write · owner absent, owner_name 7
 - generated · export_write · owner absent, exported_at 7
 - generated · export_write · owner absent, tool 7
@@ -1188,7 +1206,7 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · export_write · contacts absent, threads "x"
 - generated · export_write · contacts absent, media "x"
 
-### `export_write_messages` — 14 cases · whole on success
+### `export_write_messages` — 15 cases · whole on success
 
 - export_write_messages: a text, a file and a link
 - export_write_messages: a dangling reply, a key in a body, a reply to what was left out
@@ -1203,9 +1221,10 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · export_write_messages · messages null
 - generated · export_write_messages · msg_ids "x"
 - generated · export_write_messages · an undeclared member
+- generated · export_write_messages · an undeclared member in messages.0
 - generated · export_write_messages · messages absent, msg_ids "x"
 
-### `follow_renewed` — 52 cases · whole on success
+### `follow_renewed` — 54 cases · whole on success
 
 - follow_renewed on a chain to another root
 - follow_renewed on a chain that is not one
@@ -1246,6 +1265,8 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · follow_renewed · now ""
 - generated · follow_renewed · answer ""
 - generated · follow_renewed · an undeclared member
+- generated · follow_renewed · an undeclared member in answer
+- generated · follow_renewed · an undeclared member in answer.data
 - generated · follow_renewed · pinned_leaf holding a key outside the profile
 - generated · follow_renewed · pinned_root absent, pinned_leaf 7
 - generated · follow_renewed · pinned_root absent, dialed 7
@@ -1770,7 +1791,7 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · leaf_tbs · root_spki absent, not_after 7
 - generated · leaf_tbs · root_spki absent, serial 7
 
-### `ledger_check` — 62 cases · whole on success
+### `ledger_check` — 63 cases · whole on success
 
 - ledger_check: a renewal where the live leaf is
 - ledger_check: a move, not chosen
@@ -1822,6 +1843,7 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · ledger_check · ledger "x"
 - generated · ledger_check · move "yes"
 - generated · ledger_check · an undeclared member
+- generated · ledger_check · an undeclared member in ledger.0
 - generated · ledger_check · root absent, ledger "x"
 - generated · ledger_check · root absent, endpoint 7
 - generated · ledger_check · root absent, now 7
@@ -1835,7 +1857,7 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · ledger_check · now absent, endpoint 7
 - generated · ledger_check · now absent, move "yes"
 
-### `limits_buckets` — 36 cases · whole on success
+### `limits_buckets` — 38 cases · whole on success
 
 - limits_buckets: a contact in
 - limits_buckets: a contact out
@@ -1871,10 +1893,12 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · limits_buckets · charge absent
 - generated · limits_buckets · charge null
 - generated · limits_buckets · an undeclared member
+- generated · limits_buckets · an undeclared member in rules
+- generated · limits_buckets · an undeclared member in charge
 - generated · limits_buckets · rules absent, charge "x"
 - generated · limits_buckets · charge absent, rules "x"
 
-### `limits_decide` — 76 cases · whole on success
+### `limits_decide` — 78 cases · whole on success
 
 - limits_decide: a contact in, fresh
 - limits_decide: a contact in, empty
@@ -1943,6 +1967,8 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · limits_decide · now null
 - generated · limits_decide · state "x"
 - generated · limits_decide · an undeclared member
+- generated · limits_decide · an undeclared member in rules
+- generated · limits_decide · an undeclared member in charge
 - generated · limits_decide · rules absent, charge "x"
 - generated · limits_decide · rules absent, now "7"
 - generated · limits_decide · rules absent, state "x"
@@ -1953,7 +1979,7 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · limits_decide · now absent, charge "x"
 - generated · limits_decide · now absent, state "x"
 
-### `limits_rules_check` — 23 cases · whole on success
+### `limits_rules_check` — 24 cases · whole on success
 
 - limits_rules_check: a document that can be enforced
 - limits_rules_check: not an object
@@ -1978,6 +2004,7 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · limits_rules_check · rules null
 - generated · limits_rules_check · rules ""
 - generated · limits_rules_check · an undeclared member
+- generated · limits_rules_check · an undeclared member in rules
 
 ### `media_holds_private_key` — 29 cases · whole on success
 
@@ -2019,7 +2046,7 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - a function nobody defines, with args holding half a surrogate pair
 - a function nobody defines, with args holding a number past the largest double
 
-### `open_result` — 117 cases · whole on success
+### `open_result` — 119 cases · whole on success
 
 - open_result of a request envelope
 - open_result with nothing to work from
@@ -2101,6 +2128,8 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · open_result · expected_endpoint ""
 - generated · open_result · expected_endpoint 7
 - generated · open_result · an undeclared member
+- generated · open_result · an undeclared member in envelope
+- generated · open_result · an undeclared member in pins.0
 - generated · open_result · my_pkcs8 holding a key outside the profile
 - generated · open_result · my_spki holding a key outside the profile
 - generated · open_result · envelope absent, my_pkcs8 7
@@ -2246,7 +2275,7 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · public_key · an undeclared member
 - generated · public_key · pkcs8 holding a key outside the profile
 
-### `refresh_check` — 49 cases · whole on success
+### `refresh_check` — 52 cases · whole on success
 
 - refresh_check: the pinned leaf, unchanged
 - refresh_check: a newer leaf than the pinned one
@@ -2280,6 +2309,7 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - refresh_check with a pin whose root is a character short
 - refresh_check with a pin whose root is not a fingerprint and no endpoint
 - refresh_check with a pin whose root is not a fingerprint and no answer
+- refresh_check with a pinned leaf that is the root
 - refresh_check with no answer
 - refresh_check with no now
 - generated · refresh_check · {}
@@ -2293,6 +2323,8 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · refresh_check · now null
 - generated · refresh_check · now ""
 - generated · refresh_check · an undeclared member
+- generated · refresh_check · an undeclared member in pin
+- generated · refresh_check · an undeclared member in answer
 - generated · refresh_check · pin absent, now 7
 - generated · refresh_check · answer absent, pin "x"
 - generated · refresh_check · answer absent, now 7
@@ -2331,7 +2363,7 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · root_tbs · not_before absent, spki 7
 - generated · root_tbs · not_before absent, serial 7
 
-### `seal_request` — 103 cases · whole on success
+### `seal_request` — 104 cases · whole on success
 
 - seal_request with no recipient
 - seal_request with a form nobody has
@@ -2397,6 +2429,7 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · seal_request · cty ""
 - generated · seal_request · cty 7
 - generated · seal_request · an undeclared member
+- generated · seal_request · an undeclared member in params
 - generated · seal_request · recipient_leaf holding a key outside the profile
 - generated · seal_request · sender_pkcs8 holding a key outside the profile
 - generated · seal_request · sender_chain holding a key outside the profile
@@ -2437,7 +2470,7 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · seal_request · ts absent, method 7
 - generated · seal_request · ts absent, cty 7
 
-### `seal_result` — 83 cases · whole on success
+### `seal_result` — 84 cases · whole on success
 
 - seal_result
 - seal_result with no recipient
@@ -2491,6 +2524,7 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · seal_result · result ""
 - generated · seal_result · error ""
 - generated · seal_result · an undeclared member
+- generated · seal_result · an undeclared member in result
 - generated · seal_result · recipient_spki holding a key outside the profile
 - generated · seal_result · sender_pkcs8 holding a key outside the profile
 - generated · seal_result · sender_chain holding a key outside the profile
@@ -2543,7 +2577,7 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · sign · pkcs8 absent, data 7
 - generated · sign · data absent, pkcs8 7
 
-### `signing_request_check` — 102 cases · whole on success
+### `signing_request_check` — 103 cases · whole on success
 
 - signing_request_check: a renewal from a localhost node
 - signing_request_check: a move from an https host, without root_cert
@@ -2637,6 +2671,7 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · signing_request_check · now ""
 - generated · signing_request_check · root_spkis "x"
 - generated · signing_request_check · an undeclared member
+- generated · signing_request_check · an undeclared member in request
 - generated · signing_request_check · root_spkis holding a key outside the profile
 - generated · signing_request_check · request absent, origin 7
 - generated · signing_request_check · request absent, now 7
@@ -2733,7 +2768,7 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · validate_chain · now absent, expected_root 7
 - generated · validate_chain · now absent, expected_endpoint 7
 
-### `vault_open` — 49 cases · whole on success
+### `vault_open` — 51 cases · whole on success
 
 - vault_open of what vault_seal made
 - vault_open of what vault_seal made, with t spelled 1.0
@@ -2783,9 +2818,11 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · vault_open · vault null
 - generated · vault_open · vault ""
 - generated · vault_open · an undeclared member
+- generated · vault_open · an undeclared member in vault
+- generated · vault_open · an undeclared member in vault.kdf
 - generated · vault_open · vault absent, passphrase 7
 
-### `vault_seal` — 65 cases · whole on success
+### `vault_seal` — 67 cases · whole on success
 
 - vault_seal
 - vault_seal of a record
@@ -2845,6 +2882,8 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · vault_seal · nonce ""
 - generated · vault_seal · nonce 7
 - generated · vault_seal · an undeclared member
+- generated · vault_seal · an undeclared member in plaintext
+- generated · vault_seal · an undeclared member in kdf
 - generated · vault_seal · passphrase absent, kdf "x"
 - generated · vault_seal · passphrase absent, salt 7
 - generated · vault_seal · passphrase absent, nonce 7
@@ -2898,7 +2937,7 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - version with a number past the largest double before containers nested 129 deep
 - version with containers nested 129 deep before a number past the largest double
 
-### `wallet_issue` — 131 cases · whole on success
+### `wallet_issue` — 134 cases · whole on success
 
 - wallet_issue
 - wallet_issue from a vault that carries a ledger
@@ -3000,6 +3039,9 @@ At the run that generated this file: **2652** cases (**1261** of the run's cases
 - generated · wallet_issue · valid_days "7"
 - generated · wallet_issue · move "yes"
 - generated · wallet_issue · an undeclared member
+- generated · wallet_issue · an undeclared member in vault_plaintext
+- generated · wallet_issue · an undeclared member in vault_plaintext.roots.0
+- generated · wallet_issue · an undeclared member in record_plaintext
 - generated · wallet_issue · csr holding a key outside the profile
 - generated · wallet_issue · vault_plaintext absent, record_plaintext "x"
 - generated · wallet_issue · vault_plaintext absent, root_fingerprint 7

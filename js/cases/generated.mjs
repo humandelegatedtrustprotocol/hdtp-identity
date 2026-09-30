@@ -30,7 +30,13 @@
 //                bytes are `{"error": "parse", "why": "not base64url"}`, as bytes that will not decode
 //                are, and any other member is `bad_request` in words that name it. An optional member
 //                of the wrong type is a caller's mistake, never a member left out;
-//   undeclared   one member the contract does not declare, on a call that succeeds;
+//   undeclared   one member the contract does not declare, on a call that succeeds; and, inside it,
+//                the same member added to each object nested in the base's arguments (the first
+//                entry of a list), one at a time. CONTRACT §0 says which of those are documents, held
+//                to their members, and which are a host's own state, read for the members they need
+//                (READ_FOR_WHAT_IT_NEEDS below); each case is judged by that: a document must refuse
+//                it and a host's state must be read past (the hunt of 2026-09-30 found the prose said
+//                "none are held" while both ports held every document);
 //   read order   for each ordered pair (a, b) of members where a is required: a left out AND b of the
 //                wrong type. The member named is the one the function reads first (CONTRACT §0: "both
 //                ports read them in the same order"); a port that judges b's type at decode, before it
@@ -112,6 +118,40 @@ export const EMPTY_IS_A_VALUE = {
 
 /** The member no function declares, for the undeclared-member case. */
 export const UNDECLARED = 'not_a_member';
+
+/** The paths of the objects nested in a value — `[key, …]`, a list's first entry by index 0 — outermost first. */
+export function nestedObjects(value, path = []) {
+  if (Array.isArray(value)) return value.length ? nestedObjects(value[0], [...path, 0]) : [];
+  if (!value || typeof value !== 'object') return [];
+  return [...(path.length ? [path] : []), ...Object.entries(value).flatMap(([k, v]) => nestedObjects(v, [...path, k]))];
+}
+
+/** `args` with UNDECLARED added to the object at `path`. */
+export function undeclaredAt(args, path) {
+  const out = structuredClone(args);
+  let at = out;
+  for (const k of path) at = at[k];
+  at[UNDECLARED] = 1;
+  return out;
+}
+
+/**
+ * The objects inside a member that CONTRACT §0 says are read for the members they need, not held to
+ * their schemas' `additionalProperties`: what a host hands in of its own state or of what a peer sent
+ * it, and the JSON a seal carries. Named `<fn> <path>`, a list's first entry as 0, as the generated
+ * ids name them. A member undeclared inside one of these must be read past; one inside any other
+ * nested object (a document, CONTRACT §0's first kind) must be refused. A name here that no generated
+ * case reaches fails the run. The list is §0's second bullet, written out per function.
+ */
+export const READ_FOR_WHAT_IT_NEEDS = new Set([
+  'refresh_check pin', 'refresh_check answer',
+  'seal_request params', 'seal_result result', 'vault_seal plaintext',
+  'open_result envelope', 'open_result pins.0',
+  'follow_renewed answer', 'follow_renewed answer.data',
+  'decide envelope', 'decide node', 'decide node.keys.0', 'decide node.pins.0',
+  'decide_chain node', 'decide_chain node.keys.0', 'decide_chain node.pins.0',
+  'export_read directory.0', 'export_write media.0', 'export_merge held.0', 'export_merge rows.0',
+]);
 
 /** Each function's base: the hand-written case, by id, whose arguments the generated cases vary. */
 export const BASES = {
@@ -264,9 +304,12 @@ export function generate(contract, bases, outside) {
     const m = contract.methods[fn];
     if (!m?.params.required?.includes(name) || !admitted(m.params.properties[name], root).has('string')) problems.push(`js/cases/generated.mjs's EMPTY_IS_A_VALUE names ${key}, which is not a required member that takes a string`);
   }
-  const add = (what, fn, args, how, kind, want) => {
+  const readPast = judge('an answer: CONTRACT §0 reads this object for the members it needs (READ_FOR_WHAT_IT_NEEDS)', (a) => !refuses(a));
+  const heldToItsMembers = judge('a refusal: CONTRACT §0 holds this document to its members', refuses);
+  const reached = new Set();
+  const add = (what, fn, args, how, kind, want, described) => {
     const id = `generated · ${fn} · ${what}`;
-    cases.push({ id, fn, args, how, kind, file: 'generated' });
+    cases.push({ id, fn, args, how, kind, file: 'generated', ...(described ? { described } : {}) });
     if (want) expected.set(id, want);
   };
   for (const [fn, m] of Object.entries(contract.methods)) {
@@ -293,6 +336,14 @@ export function generate(contract, bases, outside) {
       if (wrong !== undefined) add(`${name} ${show(wrong)}`, fn, { ...base.args, [name]: wrong }, how, 'an optional member of the wrong type', wrongTypeAnswer(name, schema, root));
     }
     add('an undeclared member', fn, { ...base.args, [UNDECLARED]: 1 }, how, 'an undeclared member');
+    for (const path of nestedObjects(base.args)) {
+      const at = `${fn} ${path.join('.')}`;
+      const loose = READ_FOR_WHAT_IT_NEEDS.has(at);
+      if (loose) reached.add(at);
+      // Read past, the call is held to the contract as the base's arguments: the one member added is
+      // the one §0 says is not held, and everything else must still be described.
+      add(`an undeclared member in ${path.join('.')}`, fn, undeclaredAt(base.args, path), how, 'an undeclared member inside a member', loose ? readPast : heldToItsMembers, loose ? base.args : undefined);
+    }
     for (const [name, schema] of outside ? members : []) {
       const keyed = keyedOf(schema, root);
       if (!keyed) continue;
@@ -307,6 +358,11 @@ export function generate(contract, bases, outside) {
         if (wrong !== undefined) add(`${a} absent, ${b} ${show(wrong)}`, fn, { ...without(a), [b]: wrong }, how, 'read order');
       }
     }
+  }
+  for (const at of READ_FOR_WHAT_IT_NEEDS) {
+    const fn = at.split(' ')[0];
+    if (!contract.methods[fn]) problems.push(`js/cases/generated.mjs's READ_FOR_WHAT_IT_NEEDS names ${at}, and the contract has no ${fn}`);
+    else if (bases.has(fn) && !reached.has(at)) problems.push(`js/cases/generated.mjs's READ_FOR_WHAT_IT_NEEDS names ${at}, which no generated case reaches`);
   }
   return { cases, expected, problems };
 }
