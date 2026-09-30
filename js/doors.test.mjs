@@ -78,8 +78,10 @@ for (const [kind, port] of [['wasm', wasm], ['go', go]]) {
       reached.add(t.tier);
       if (t.tier === 'pending') {
         // The pin is pending_out, and request_contact is not one of the pending tier's calls: the call
-        // waits, and the pin's moves are applied all the same.
-        assert.deepEqual(s, { code: 'pending_approval' }, what);
+        // waits, and the pin's moves are applied all the same. The answer names what the signature
+        // proved, as decide_chain names it, so a host can seal the refusal back (lead 2 of the
+        // port-parity audit): the root, the address and the leaf, and the envelope's form and msg_id.
+        assert.deepEqual(s, { code: 'pending_approval', root: t.root, endpoint: t.endpoint, leaf: t.leaf, form: 'chain', msg_id: `doors-${i}` }, what);
       } else {
         assert.equal(s.code, 'ok', what);
         assert.equal(s.tier, t.tier, what);
