@@ -14,6 +14,8 @@ import (
 	"time"
 )
 
+// SkewSeconds, ClaimWindow and Tombstone are contract/contract.json's `Windows`, which
+// constants_test.go holds them to (and tests/constants.rs the Rust core's).
 const (
 	HeaderMembers = "cty,exp,kid,msg_id,suite,ts,v"
 	SkewSeconds   = 300
@@ -37,7 +39,10 @@ type Envelope struct {
 }
 
 // SealOpts is what a sender decides. Form is "chain" (the sender's leaf and root inside) or "leaf" (the
-// sender's leaf fingerprint). Params, Result and Error are raw JSON, embedded as given.
+// sender's leaf fingerprint). Params, Result and Error are raw JSON, sealed as the value each reads as
+// and not as the text it was written in (inOrder, the core's canonical::in_order): numbers as RFC 8785
+// writes them, so an integer past 2^53 or a long decimal is sealed as the double it reads as, and a
+// member written twice once, with its last value.
 type SealOpts struct {
 	RecipientKey *PublicKey
 	Sender       *PrivateKey
@@ -63,6 +68,9 @@ func headerJSON(suite, kid, msgID string, ts, exp int64, cty string) []byte {
 func proofMember(o SealOpts, signer *Signer) ([]byte, error) {
 	switch o.Form {
 	case "chain":
+		if o.SenderChain == nil {
+			return nil, errArg("the chain form needs sender_chain")
+		}
 		if len(o.SenderChain) != 2 {
 			return nil, errArg("sender_chain must be the leaf and the root")
 		}
@@ -78,11 +86,7 @@ func sealBody(o SealOpts, signer *Signer, body []byte) (*Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	exp := o.Exp
-	if exp == 0 {
-		exp = o.TS + 600
-	}
-	aad := headerJSON(suite, Fingerprint(o.RecipientKey.SPKI), o.MsgID, o.TS, exp, o.Cty)
+	aad := headerJSON(suite, Fingerprint(o.RecipientKey.SPKI), o.MsgID, o.TS, o.Exp, o.Cty)
 	var enc, ct []byte
 	if o.Seed != nil {
 		enc, ct, err = sealWith(suite, o.RecipientKey, []byte(InfoV2), aad, body, o.Seed)
@@ -100,6 +104,11 @@ func sealBody(o SealOpts, signer *Signer, body []byte) (*Envelope, error) {
 }
 
 // SealRequest seals a call to a recipient leaf key: plaintext {method, params, chain|leaf}.
+//
+// A field left at its zero value takes the default a Go caller means by leaving it out: Method
+// tools/call, Cty application/pact-call+json, Exp TS+600, Params {}. The JSON boundary cannot mean
+// that — `exp: 0` and `method: ""` are values there, sealed as given, as the core and the seed seal
+// them (CONTRACT §0; C2, T7, R18) — so it resolves its own defaults and calls sealRequest.
 func SealRequest(o SealOpts) (*Envelope, error) {
 	if o.Method == "" {
 		o.Method = "tools/call"
@@ -107,12 +116,48 @@ func SealRequest(o SealOpts) (*Envelope, error) {
 	if o.Cty == "" {
 		o.Cty = CtyCall
 	}
-	params, err := compactJSON(o.Params)
+	if o.Exp == 0 {
+		o.Exp = o.TS + 600
+	}
+	if o.Params == nil {
+		o.Params = json.RawMessage(`{}`)
+	}
+	return sealRequest(o)
+}
+
+// headerIntMax is the largest integer a header carries as itself: 2^53 - 1, the core's
+// HEADER_INT_MAX. RFC 8785 writes a number as the double it is, so a TS of 9007199254740993 was
+// sealed as itself here, where Canonical wrote an int64 exactly, and as 9007199254740992 by the core.
+const headerIntMax = 1<<53 - 1
+
+// headerTimes holds a header's TS and Exp to the integers it carries as themselves, TS first, as the
+// core's header_times does: the one that is not is named.
+func headerTimes(ts, exp int64) error {
+	carried := func(n int64) bool { return n >= -headerIntMax && n <= headerIntMax }
+	if !carried(ts) {
+		return errArg("ts is an integer from -(2^53 - 1) to 2^53 - 1")
+	}
+	if !carried(exp) {
+		return errArg("exp is an integer from -(2^53 - 1) to 2^53 - 1")
+	}
+	return nil
+}
+
+// sealRequest seals what it is given, with no default filled in: Params as the value it reads as
+// (inOrder), not as the text it was written in.
+func sealRequest(o SealOpts) (*Envelope, error) {
+	if err := headerTimes(o.TS, o.Exp); err != nil {
+		return nil, err
+	}
+	params, err := inOrder(o.Params)
 	if err != nil {
 		return nil, errors.New("params is not JSON")
 	}
-	if o.Sender == nil {
-		return nil, errArg("the sender's key is required")
+	if err := needPrivate(o.Sender, "the sender's key"); err != nil {
+		return nil, err
+	}
+	if err := needPublic(o.RecipientKey, "the recipient's public key"); err != nil {
+		return nil, err
 	}
 	// One expansion of the sender's key for the leaf form's fingerprint and the signature.
 	signer := o.Sender.Signer()
@@ -125,33 +170,51 @@ func SealRequest(o SealOpts) (*Envelope, error) {
 }
 
 // SealResult seals a result back: plaintext {result|error, chain|leaf}, cty application/pact-result+json.
+// An Exp left at zero is TS+600, as SealRequest's is; the JSON boundary calls sealResult with its own.
 func SealResult(o SealOpts) (*Envelope, error) {
-	o.Cty = CtyResult
-	var lead []byte
-	switch {
-	case o.Result != nil && o.Error == nil:
-		r, err := compactJSON(o.Result)
-		if err != nil {
-			return nil, errors.New("result is not JSON")
-		}
-		lead = concat([]byte(`{"result":`), r)
-	case o.Error != nil && o.Result == nil:
-		e, err := compactJSON(o.Error)
-		if err != nil {
-			return nil, errors.New("error is not JSON")
-		}
-		lead = concat([]byte(`{"error":`), e)
-	default:
-		return nil, errArg("a result carries exactly one of result and error")
+	if o.Exp == 0 {
+		o.Exp = o.TS + 600
 	}
-	if o.Sender == nil {
-		return nil, errArg("the sender's key is required")
+	return sealResult(o)
+}
+
+// sealResult seals what it is given, with no default filled in: Result or Error as the value it reads
+// as (inOrder), not as the text it was written in. The proof member is judged before the result, as the
+// core's seal_result judges them: a chain of one beside no result was named for the result here and
+// for the chain there (R19).
+func sealResult(o SealOpts) (*Envelope, error) {
+	if err := headerTimes(o.TS, o.Exp); err != nil {
+		return nil, err
+	}
+	o.Cty = CtyResult
+	if err := needPrivate(o.Sender, "the sender's key"); err != nil {
+		return nil, err
+	}
+	if err := needPublic(o.RecipientKey, "the recipient's public key"); err != nil {
+		return nil, err
 	}
 	// One expansion of the sender's key for the leaf form's fingerprint and the signature.
 	signer := o.Sender.Signer()
 	proof, err := proofMember(o, signer)
 	if err != nil {
 		return nil, err
+	}
+	var lead []byte
+	switch {
+	case o.Result != nil && o.Error == nil:
+		r, err := inOrder(o.Result)
+		if err != nil {
+			return nil, errors.New("result is not JSON")
+		}
+		lead = concat([]byte(`{"result":`), r)
+	case o.Error != nil && o.Result == nil:
+		e, err := inOrder(o.Error)
+		if err != nil {
+			return nil, errors.New("error is not JSON")
+		}
+		lead = concat([]byte(`{"error":`), e)
+	default:
+		return nil, errArg("a result carries exactly one of result and error")
 	}
 	return sealBody(o, signer, concat(lead, proof, []byte("}")))
 }
@@ -180,13 +243,13 @@ func pinHolding(pins []Pin, named string) (*Pin, *Cert, error) {
 		if p.State == "blocked" || (p.LeafFingerprint != "" && p.LeafFingerprint != named) {
 			continue
 		}
-		leafDER, err := decodeB64url(p.Leaf)
+		leafDER, err := DecodeB64url(p.Leaf)
 		if err != nil {
 			return nil, nil, err
 		}
 		leaf, err := Parse(leafDER)
 		if err != nil {
-			return nil, nil, parseError{err.Error()}
+			return nil, nil, classed(err)
 		}
 		actual := Fingerprint(leaf.SPKI)
 		if p.LeafFingerprint != "" && actual != named {
@@ -219,6 +282,85 @@ type FormerEndpoint struct {
 	Root     string `json:"root"`
 	Endpoint string `json:"endpoint"`
 	At       string `json:"at"`
+}
+
+// hostRoot holds a root the host keeps — a pin's, a tombstone's, a former endpoint's — to the
+// contract's Fingerprint, naming the member by its path. Read as any string, it was a root nothing
+// matched, and a pin or a former endpoint whose root was "abc" came back as the answer's
+// address_claim "abc", which the contract types as a fingerprint.
+func hostRoot(root, path string) error {
+	if !IsFingerprint(root) {
+		return errArg(path + ".root is not a fingerprint")
+	}
+	return nil
+}
+
+// hostKid holds a held key's kid to the contract's Fingerprint (HeldKey), as the core's host_kid:
+// read as any string, a key whose kid was "" was a key no envelope named, held by both ports without
+// a word (the review of 2026-09-30, found by parity's nested "" cases).
+func hostKid(kid, path string) error {
+	if !IsFingerprint(kid) {
+		return errArg(path + ".kid is not a fingerprint")
+	}
+	return nil
+}
+
+// hostState holds a pin's state to the three the contract names (Pin). Any other was read as active,
+// so a blocked contact whose host wrote "Blocked", "blocked " or "removed" was a full contact (S2 of
+// the review of 2026-09-30). A typed Pin's zero value, "", never reaches it: hostPin reads it as
+// active, and the JSON reader reads an absent state as active and refuses a present "".
+func hostState(state, path string) error {
+	switch state {
+	case "active", "pending_out", "blocked":
+		return nil
+	}
+	return errArg(path + ".state is active, pending_out or blocked")
+}
+
+// hostPin holds a typed caller's pin as the reader holds one, in the reader's order: its root, its
+// state ("" is the zero value, active) and its leaf fingerprint ("" is the zero value, none), as the
+// core's host_pin does.
+func hostPin(p Pin, path string) error {
+	if err := hostRoot(p.Root, path); err != nil {
+		return err
+	}
+	if p.State != "" {
+		if err := hostState(p.State, path); err != nil {
+			return err
+		}
+	}
+	if p.LeafFingerprint != "" && !IsFingerprint(p.LeafFingerprint) {
+		return errArg(path + ".leaf_fingerprint is not a fingerprint")
+	}
+	return nil
+}
+
+// hostRoots is hostKid over the node's held keys, then hostRoot over its pins, tombstones and former
+// endpoints, in the order the reader reads them, with each pin's state and leaf fingerprint beside its
+// root (hostPin): what the typed Decide and DecideChain ask first, since a Go caller's NodeState never
+// passed through the JSON reader.
+func hostRoots(node NodeState) error {
+	for i, k := range node.Keys {
+		if err := hostKid(k.Kid, "node.keys["+itoa(i)+"]"); err != nil {
+			return err
+		}
+	}
+	for i, p := range node.Pins {
+		if err := hostPin(p, "node.pins["+itoa(i)+"]"); err != nil {
+			return err
+		}
+	}
+	for i, t := range node.Tombstones {
+		if err := hostRoot(t.Root, "node.tombstones["+itoa(i)+"]"); err != nil {
+			return err
+		}
+	}
+	for i, f := range node.FormerEndpoints {
+		if err := hostRoot(f.Root, "node.former_endpoints["+itoa(i)+"]"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // NodeState is everything Decide reads.
@@ -277,12 +419,14 @@ func numberOf(v any) (float64, bool) {
 func headerTypesOK(h map[string]any) bool {
 	for _, k := range []string{"v", "ts", "exp"} {
 		// decodeJSON keeps numbers as json.Number, which a JSON string never becomes: a `"1757000000"`
-		// arrives as a Go string and is refused here rather than coerced downstream.
+		// arrives as a Go string and is refused here rather than coerced downstream. An integer is what
+		// the core reads as one (integerText): `-0` is not, where n.Int64() read it as 0 and the header
+		// went on to the time window while the core refused its types (S3-1).
 		n, ok := h[k].(json.Number)
 		if !ok {
 			return false
 		}
-		if _, err := n.Int64(); err != nil {
+		if _, isInt := integerText(string(n)); !isInt {
 			return false
 		}
 	}
@@ -302,6 +446,9 @@ func headerTypesOK(h map[string]any) bool {
 // after removal into a plain guest, and one unparseable pin answered `chain_required` to a contact.
 // A decision made on state the node could not read is not a decision; the host is told instead.
 func Decide(now time.Time, env Envelope, node NodeState) (Decision, error) {
+	if err := hostRoots(node); err != nil {
+		return Decision{}, err
+	}
 	var unreadable error
 	d := decide(now.Truncate(time.Second), env, node, &unreadable)
 	if unreadable != nil {
@@ -313,18 +460,24 @@ func Decide(now time.Time, env Envelope, node NodeState) (Decision, error) {
 // unreadableState records the first piece of host state that would not read, in the words the core
 // uses for the same bytes (CONTRACT §0: both are `parse`).
 func unreadableState(into *error, err error) Decision {
-	var p parseError
-	if !errors.As(err, &p) {
-		err = parseError{err.Error()}
-	}
-	*into = err
+	*into = classed(err)
 	return Decision{}
+}
+
+// classed is a reader's error with the class it was given, and `parse` where it names none: a held leaf
+// or a pinned one carrying a key outside the profile is `unsupported`, as the core propagates its
+// reader's error, where this made every such error `parse`.
+func classed(err error) error {
+	if codeFor(err, "") == "" {
+		return parseError{err.Error()}
+	}
+	return err
 }
 
 func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Decision {
 	effects := []map[string]any{}
-	// Every member is base64url and nothing else. The lenient reader skips what it does not know, so
-	// `protected` with a stray character decoded to the same bytes, the signature — which covers the
+	// Every member is base64url and nothing else. The lenient reader this port had skipped what it did
+	// not know, so `protected` with a stray character decoded to the same bytes, the signature — which covers the
 	// DECODED bytes — still verified, and this port accepted a second spelling of an envelope the core
 	// refuses.
 	aad, err := wireB64url(env.Protected)
@@ -356,7 +509,7 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 		if k.Kid != kid {
 			continue
 		}
-		leafDER, err := decodeB64url(k.Leaf)
+		leafDER, err := DecodeB64url(k.Leaf)
 		if err != nil {
 			return unreadableState(unreadable, err)
 		}
@@ -389,9 +542,16 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 	if s, _ := SuiteForKey(heldLeaf.PublicKey); s != suite {
 		return invalid("suite does not fit the leaf")
 	}
-	priv, err := ParsePKCS8(FromB64url(held.PKCS8))
+	// The held key is the node's own state: one that does not read is an error of the call, in its
+	// reader's class, as the core's `?` has it — never `does not open`, which told the peer about the
+	// host's damaged state and skipped the host's own audit of it (R23).
+	heldDER, err := DecodeB64url(held.PKCS8)
 	if err != nil {
-		return invalid("does not open")
+		return unreadableState(unreadable, err)
+	}
+	priv, err := ParsePKCS8(heldDER)
+	if err != nil {
+		return unreadableState(unreadable, err)
 	}
 	enc, errEnc := wireB64url(env.Enc)
 	ct, errCt := wireB64url(env.Ct)
@@ -488,8 +648,14 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 		}
 		return Decision{Result: r, Effects: effects}
 	}
-	pendingApproval := func() Decision {
-		return Decision{Result: map[string]any{"code": "pending_approval"}, Effects: effects}
+	// A call that waits for the owner's approval names what the signature proved — the root decided,
+	// the address, the leaf it verified under and the form — and the request's msg_id, which no `seen`
+	// carries here, so a host can seal the refusal back to the caller (§13.2: an error past the open is
+	// sealed) without opening the envelope again. It answered the code alone, and the node, which could
+	// not seal it, answered envelope_invalid in the clear (the port-parity lead 2). The pin's own moves
+	// stand; the envelope's `seen` is never added, since the call was not taken.
+	pendingApproval := func(root, endpoint, form string) Decision {
+		return Decision{Result: map[string]any{"code": "pending_approval", "root": root, "endpoint": endpoint, "leaf": leafB64, "form": form, "msg_id": msgID}, Effects: effects}
 	}
 
 	// The small form: the sender names a leaf this node already holds. Anything that cannot be verified
@@ -521,7 +687,7 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 			if pendingAllows {
 				return result("pending", hit.Root, hit.Endpoint, "leaf", nil)
 			}
-			return pendingApproval()
+			return pendingApproval(hit.Root, hit.Endpoint, "leaf")
 		}
 		return result("contact", hit.Root, hit.Endpoint, "leaf", nil)
 	}
@@ -533,11 +699,14 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 	}
 	chain := make([][]byte, 0, len(chainAny))
 	for _, c := range chainAny {
+		// A member that does not read is the plaintext's shape, as the core answers it: read leniently,
+		// a stray character was skipped and the chain validated here (T10).
 		s, ok := c.(string)
-		if !ok {
+		der, err := DecodeB64url(s)
+		if !ok || err != nil {
 			return invalid("plaintext shape")
 		}
-		chain = append(chain, FromB64url(s))
+		chain = append(chain, der)
 	}
 	vr := ValidateChain(chain, ChainOpts{Now: now})
 	if !vr.OK {
@@ -552,13 +721,22 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 	root, endpoint := vr.RootFingerprint, vr.Endpoint
 	leafB64 = B64url(chain[0])
 
-	asGuest := func(why string) Decision {
+	out, err := pinDecision(node, now, root, endpoint, chain[0])
+	if err != nil {
+		return unreadableState(unreadable, err)
+	}
+	switch out.kind {
+	case pinRefused:
+		return invalid(out.why)
+	case pinGuest:
+		// The guest binding is the call's: the method and tool, the card, and the receiver's own
+		// address (§14.5), judged here for the sealed door, per call.
 		if method != "tools/call" || !guestTools[tool] {
 			// Refused as a guest — with the root and the leaf named, so a host
 			// holding an older pin of this leaf's key learns the root above it (§14.3
 			// row 6) and decide again.
 			d := invalid("guest may only redeem or request")
-			d.Result["root"], d.Result["leaf"] = root, B64url(chain[0])
+			d.Result["root"], d.Result["leaf"] = root, leafB64
 			return d
 		}
 		cardText := ""
@@ -579,25 +757,119 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 		if endpoint == node.Endpoint {
 			return invalid("guest endpoint is this node's own address")
 		}
-		var claim any
+		return result("guest", root, endpoint, "chain", guestMembers(out))
+	case pinNewAddress:
+		effects = append(effects, out.effects...)
+		return result("pending_new_address", root, endpoint, "chain", newAddressMembers(out))
+	}
+	effects = append(effects, out.effects...)
+	if out.pendingOut {
+		if pendingAllows {
+			return result("pending", root, endpoint, "chain", nil)
+		}
+		return pendingApproval(root, endpoint, "chain")
+	}
+	return result("contact", root, endpoint, "chain", nil)
+}
+
+// DecideChain is a chain proven outside an envelope — at the TLS layer, where the handshake is the leaf
+// key's signature — decided by the pins alone, exactly as Decide decides a chain inside one
+// (pinDecision; N1, N2). The chain is validated at now with no expectation, as Decide validates a
+// peer's, and one that fails is envelope_invalid `chain rule <n>: <reason>`, Decide's words for the
+// same chain. What is the call's and not the chain's — a guest's tools and card, the receiver's own
+// address, what a pending_out pin may call — the host applies to each call, as Decide applies it to
+// the envelope's. No `seen`: there is no envelope. The error is the node's own state that will not
+// read, as Decide's is.
+func DecideChain(now time.Time, chain [][]byte, node NodeState) (Decision, error) {
+	if err := hostRoots(node); err != nil {
+		return Decision{}, err
+	}
+	now = now.Truncate(time.Second)
+	vr := ValidateChain(chain, ChainOpts{Now: now})
+	if !vr.OK {
+		return invalid("chain rule " + itoa(vr.Rule) + ": " + vr.Reason), nil
+	}
+	root, endpoint := vr.RootFingerprint, vr.Endpoint
+	out, err := pinDecision(node, now, root, endpoint, chain[0])
+	if err != nil {
+		return Decision{}, classed(err)
+	}
+	answer := func(tier string, extra map[string]any) Decision {
+		r := map[string]any{"code": "ok", "tier": tier, "root": root, "endpoint": endpoint, "leaf": B64url(chain[0])}
+		for k, v := range extra {
+			r[k] = v
+		}
+		effects := out.effects
+		if effects == nil {
+			effects = []map[string]any{}
+		}
+		return Decision{Result: r, Effects: effects}
+	}
+	switch out.kind {
+	case pinRefused:
+		return invalid(out.why), nil
+	case pinGuest:
+		return answer("guest", guestMembers(out)), nil
+	case pinNewAddress:
+		return answer("pending_new_address", newAddressMembers(out)), nil
+	}
+	if out.pendingOut {
+		return answer("pending", nil), nil
+	}
+	return answer("contact", nil), nil
+}
+
+// The kinds of pinOutcome.
+const (
+	pinContact    = "contact"
+	pinNewAddress = "new_address"
+	pinGuest      = "guest"
+	pinRefused    = "refused"
+)
+
+// pinOutcome is what the pins decide about a chain proven at now — validated, and signed for by its
+// leaf's key in an envelope or in a TLS handshake: the chain half of Decide, which DecideChain answers
+// on its own for a host's TLS door, as the core's `pinned`. The node's TLS door made this decision
+// itself and parted from the envelope's on a removal tombstone and on a conflicting leaf (N1, N2). The
+// effects are the pin's moves; Decide adds the envelope's `seen`.
+//
+//	contact      the pin stands, renewed, or moved under auto; pendingOut while the pin is pending_out,
+//	             whose calls wait for the answer save the pending tier's own
+//	new_address  a new address for the owner: under ask, or forced to ask by a removal tombstone
+//	guest        why, whether a pin stands behind it (demote), and the root claiming its address
+//	refused      a different leaf with the pinned one's notBefore (§14.3)
+type pinOutcome struct {
+	kind       string
+	pendingOut bool
+	forced     bool
+	why        string
+	demote     bool
+	claim      any
+	effects    []map[string]any
+}
+
+// pinDecision decides a proven chain by the pins. The error is the node's own state that will not read,
+// in its reader's class: a pinned leaf, a tombstone's instant or its leaf.
+func pinDecision(node NodeState, now time.Time, root, endpoint string, leaf []byte) (pinOutcome, error) {
+	// The root that claims this address, for a guest: a pin at it, or a former endpoint within the
+	// claim window (§5.2).
+	claim := func() any {
 		for _, p := range node.Pins {
 			if p.Root != root && p.Endpoint == endpoint {
-				claim = p.Root
-				break
+				return p.Root
 			}
 		}
-		if claim == nil {
-			for _, f := range node.FormerEndpoints {
-				at, ok := parseInstant(f.At)
-				if f.Endpoint == endpoint && f.Root != root && ok && now.Sub(at) < ClaimWindow {
-					claim = f.Root
-					break
-				}
+		for _, f := range node.FormerEndpoints {
+			at, ok := parseInstant(f.At)
+			if f.Endpoint == endpoint && f.Root != root && ok && now.Sub(at) < ClaimWindow {
+				return f.Root
 			}
 		}
-		return result("guest", root, endpoint, "chain", map[string]any{"why": why, "address_claim": claim})
+		return nil
 	}
-
+	guest := func(why string, demote bool) (pinOutcome, error) {
+		return pinOutcome{kind: pinGuest, why: why, demote: demote, claim: claim()}, nil
+	}
 	var pin *Pin
 	for i := range node.Pins {
 		if node.Pins[i].Root == root {
@@ -607,78 +879,86 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 	}
 	if pin == nil {
 		// The FIRST tombstone for this root, as the core reads it; the seed keeps one per root, so a
-		// second is a host's mistake and not a second chance. This loop used to try every one.
+		// second is a host's mistake and not a second chance.
 		for _, t := range node.Tombstones {
 			if t.Root != root {
 				continue
 			}
 			at, ok := parseInstant(t.At)
 			if !ok {
-				return unreadableState(unreadable, parseError{"not an RFC 3339 instant: " + t.At})
+				return pinOutcome{}, parseError{"not an RFC 3339 instant: " + t.At}
 			}
 			if now.Sub(at) < Tombstone {
-				was, err := decodeB64url(t.Leaf)
+				was, err := DecodeB64url(t.Leaf)
 				if err != nil {
-					return unreadableState(unreadable, err)
+					return pinOutcome{}, err
 				}
-				cmp, err := CompareLeaves(was, chain[0])
+				cmp, err := CompareLeaves(was, leaf)
 				if err != nil {
-					return unreadableState(unreadable, err)
+					return pinOutcome{}, err
 				}
 				if cmp == "newer" {
-					effects = append(effects, map[string]any{"op": "pending", "root": root, "endpoint": endpoint, "why": "returned after removal", "leaf": B64url(chain[0])})
-					return result("pending_new_address", root, endpoint, "chain", map[string]any{"forced": "tombstone", "decision": "ask"})
+					return pinOutcome{kind: pinNewAddress, forced: true, effects: []map[string]any{
+						{"op": "pending", "root": root, "endpoint": endpoint, "why": "returned after removal", "leaf": B64url(leaf)},
+					}}, nil
 				}
 			}
 			break
 		}
-		return asGuest("unknown root")
+		return guest("unknown root", false)
 	}
 	if pin.State == "blocked" {
-		return asGuest("blocked")
+		return guest("blocked", true)
 	}
-	pinnedDER, err := decodeB64url(pin.Leaf)
+	pinnedDER, err := DecodeB64url(pin.Leaf)
 	if err != nil {
-		return unreadableState(unreadable, err)
+		return pinOutcome{}, err
 	}
-	cmp, err := CompareLeaves(pinnedDER, chain[0])
+	cmp, err := CompareLeaves(pinnedDER, leaf)
 	if err != nil {
-		return unreadableState(unreadable, err)
+		return pinOutcome{}, err
 	}
 	if cmp == "superseded" {
-		return asGuest("superseded leaf")
+		return guest("superseded leaf", true)
 	}
 	if cmp == "conflict" {
-		return invalid("a different leaf with the same notBefore")
+		return pinOutcome{kind: pinRefused, why: "a different leaf with the same notBefore"}, nil
 	}
-
 	// §14.3 is absolute: a newer leaf from the root takes priority the instant it is seen, whatever the
 	// validity of the older one. At another address it is a new address; under `ask` the owner decides.
-	pinnedEndpoint := pin.Endpoint
+	effects := []map[string]any{}
 	if endpoint != pin.Endpoint {
 		if node.AcceptNewHosts != "auto" {
-			effects = append(effects, map[string]any{"op": "pending", "root": root, "endpoint": endpoint, "why": "ask", "leaf": B64url(chain[0])})
-			return result("pending_new_address", root, endpoint, "chain", map[string]any{"decision": "ask"})
+			return pinOutcome{kind: pinNewAddress, effects: []map[string]any{
+				{"op": "pending", "root": root, "endpoint": endpoint, "why": "ask", "leaf": B64url(leaf)},
+			}}, nil
 		}
 		effects = append(effects,
 			map[string]any{"op": "former_endpoint", "root": root, "endpoint": pin.Endpoint, "at": now.UTC().Format(time.RFC3339)},
-			map[string]any{"op": "pin_update", "root": root, "endpoint": endpoint, "leaf": B64url(chain[0])},
+			map[string]any{"op": "pin_update", "root": root, "endpoint": endpoint, "leaf": B64url(leaf)},
 			map[string]any{"op": "event", "event": "new_address", "root": root, "endpoint": endpoint},
 		)
-		pinnedEndpoint = endpoint
 	} else if cmp == "newer" {
 		effects = append(effects,
-			map[string]any{"op": "pin_update", "root": root, "endpoint": pin.Endpoint, "leaf": B64url(chain[0])},
+			map[string]any{"op": "pin_update", "root": root, "endpoint": endpoint, "leaf": B64url(leaf)},
 			map[string]any{"op": "event", "event": "renewal", "root": root},
 		)
 	}
-	if pin.State == "pending_out" {
-		if pendingAllows {
-			return result("pending", root, pinnedEndpoint, "chain", nil)
-		}
-		return pendingApproval()
+	return pinOutcome{kind: pinContact, pendingOut: pin.State == "pending_out", effects: effects}, nil
+}
+
+// guestMembers is a guest answer's own members: the reason, demote (CW-11) and the address claim.
+func guestMembers(out pinOutcome) map[string]any {
+	return map[string]any{"why": out.why, "demote": out.demote, "address_claim": out.claim}
+}
+
+// newAddressMembers is a new address's own members: forced by a tombstone, and the owner's to decide.
+func newAddressMembers(out pinOutcome) map[string]any {
+	extra := map[string]any{"decision": "ask"}
+	if out.forced {
+		extra["forced"] = "tombstone"
 	}
-	return result("contact", root, pinnedEndpoint, "chain", nil)
+	return extra
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
@@ -694,6 +974,8 @@ type OpenOpts struct {
 	Pins             []Pin
 	ExpectedRoot     string
 	ExpectedEndpoint string
+	// As ChainOpts's: set by the JSON boundary, where an expectation present as "" is a value.
+	rootGiven, endpointGiven bool
 }
 
 // Opened is a verified result: the result or error object, who answered, and a newer leaf if one rode along.
@@ -710,12 +992,17 @@ type Opened struct {
 // among its pins, verify the signature and correlate. Every failure is envelope_invalid.
 func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 	// Named, never a panic: in 0.4.0 a caller that left RecipientPublic out compiled, and the kid
-	// check dereferenced nil.
-	if o.Recipient == nil {
-		return nil, errArg("the recipient's key is required")
+	// check dereferenced nil; a zero-value key still panicked at the open.
+	if err := needPrivate(o.Recipient, "the recipient's key"); err != nil {
+		return nil, err
 	}
-	if o.RecipientPublic == nil {
-		return nil, errArg("the recipient's public key is required")
+	if err := needPublic(o.RecipientPublic, "the recipient's public key"); err != nil {
+		return nil, err
+	}
+	for i, p := range o.Pins {
+		if err := hostPin(p, "pins["+itoa(i)+"]"); err != nil {
+			return nil, err
+		}
 	}
 	o.Now = o.Now.Truncate(time.Second)
 	aad, err := wireB64url(env.Protected)
@@ -814,10 +1101,10 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 		if !VerifyDetached(leaf.PublicKey, signed, sig) {
 			return nil, errors.New("signature is not the held leaf's key")
 		}
-		if o.ExpectedRoot != "" && p.Root != o.ExpectedRoot {
+		if (o.ExpectedRoot != "" || o.rootGiven) && p.Root != o.ExpectedRoot {
 			return nil, errors.New("root is not the one expected")
 		}
-		if o.ExpectedEndpoint != "" && p.Endpoint != o.ExpectedEndpoint {
+		if (o.ExpectedEndpoint != "" || o.endpointGiven) && p.Endpoint != o.ExpectedEndpoint {
 			return nil, errors.New("endpoint differs from the one in question")
 		}
 		out.Root, out.Endpoint = p.Root, p.Endpoint
@@ -830,12 +1117,13 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 	chain := make([][]byte, 0, len(chainAny))
 	for _, c := range chainAny {
 		s, ok := c.(string)
-		if !ok {
+		der, err := DecodeB64url(s)
+		if !ok || err != nil {
 			return nil, errors.New("plaintext shape")
 		}
-		chain = append(chain, FromB64url(s))
+		chain = append(chain, der)
 	}
-	vr := ValidateChain(chain, ChainOpts{Now: o.Now, ExpectedRoot: o.ExpectedRoot, ExpectedEndpoint: o.ExpectedEndpoint})
+	vr := ValidateChain(chain, ChainOpts{Now: o.Now, ExpectedRoot: o.ExpectedRoot, ExpectedEndpoint: o.ExpectedEndpoint, rootGiven: o.rootGiven, endpointGiven: o.endpointGiven})
 	if !vr.OK {
 		return nil, errors.New("chain rule " + itoa(vr.Rule) + ": " + vr.Reason)
 	}
@@ -843,14 +1131,26 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 		return nil, errors.New("signature is not the chain's leaf key")
 	}
 	out.Form, out.Root, out.Endpoint = "chain", vr.RootFingerprint, vr.Endpoint
+	// The first pin for the chain's root is the one read, as the core reads it and as decide reads the
+	// node's pins in both ports: this read every pin for the root, so a second one newer than the
+	// chain refused a result the first accepted, and a second that did not read refused it too (S5-2).
 	pinned := false
 	for _, p := range o.Pins {
 		if p.Root != vr.RootFingerprint {
 			continue
 		}
 		pinned = true
-		cmp, err := CompareLeaves(FromB64url(p.Leaf), chain[0])
-		if err != nil || cmp == "superseded" {
+		// The caller's pin is the caller's state: one that does not read is an error of the call in its
+		// reader's class, as the core's `?` has it, never `superseded leaf` (T10).
+		pinDER, err := DecodeB64url(p.Leaf)
+		if err != nil {
+			return nil, err
+		}
+		cmp, err := CompareLeaves(pinDER, chain[0])
+		if err != nil {
+			return nil, classed(err)
+		}
+		if cmp == "superseded" {
 			return nil, errors.New("superseded leaf")
 		}
 		if cmp == "conflict" {
@@ -859,6 +1159,7 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 		if cmp == "newer" {
 			out.LeafUpdate = chain[0]
 		}
+		break
 	}
 	// No pin for this root is first contact, and the leaf that rode along is what a caller pins.
 	// Handing it back only from inside the loop meant a caller holding no pins was never told what to
@@ -873,7 +1174,10 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 // validates to the pinned root at the dialed address and is newer than or equal to the pin.
 func FollowRenewed(answerChain [][]byte, pinnedRoot string, pinnedLeaf []byte, dialed string, now time.Time) (bool, string, []byte) {
 	now = now.Truncate(time.Second)
-	vr := ValidateChain(answerChain, ChainOpts{Now: now, ExpectedRoot: pinnedRoot, ExpectedEndpoint: dialed})
+	// The pinned root and the dialed address are what the chain is held to, always: "" is compared
+	// like any other value, as the core compares it. Read as "not given", "" followed a renewed
+	// chain from any root at any address (T14's corrected text).
+	vr := ValidateChain(answerChain, ChainOpts{Now: now, ExpectedRoot: pinnedRoot, ExpectedEndpoint: dialed, rootGiven: true, endpointGiven: true})
 	if !vr.OK {
 		return false, "chain rule " + itoa(vr.Rule) + ": " + vr.Reason, nil
 	}

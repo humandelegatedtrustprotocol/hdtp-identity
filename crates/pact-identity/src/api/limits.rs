@@ -2,18 +2,12 @@
 //! declares, which `api.rs`'s `dispatch` names. The rules and the decision are the `pact-limits`
 //! crate's; this file only reads JSON into them and writes the answer back.
 use super::*;
+use crate::util::stranger;
 use pact_limits::{decide, Charge, Decision, Level, MemoryStore, Rules, StateStore, RULE_MEMBERS};
 
 /// The largest integer every host reads exactly (2^53 - 1): times, counts and contact caps above it
 /// are refused rather than rounded.
 const MAX_EXACT: i64 = 9_007_199_254_740_991;
-
-/// The first member of `o`, in sorted order, that `allowed` does not name.
-fn stranger<'a>(o: &'a Map<String, Value>, allowed: &[&str]) -> Option<&'a str> {
-    let mut keys: Vec<&str> = o.keys().map(String::as_str).collect();
-    keys.sort_unstable();
-    keys.into_iter().find(|k| !allowed.contains(k))
-}
 
 /// An integer member from 0 to 2^53 - 1, written without a fraction or an exponent.
 fn whole(v: Option<&Value>) -> Option<i64> {
@@ -103,7 +97,7 @@ fn read_state(v: Option<&Value>) -> Result<MemoryStore> {
         let bad = |m: &str| Error::new("bad_request", format!("the state's row {key} does not read: {m}"));
         let row = o[key].as_object().ok_or_else(|| bad("a row is an object"))?;
         if let Some(k) = stranger(row, &["tokens", "updated_at"]) {
-            return Err(bad(k));
+            return Err(bad(&k));
         }
         let tokens = row.get("tokens").and_then(Value::as_f64).filter(|t| t.is_finite()).ok_or_else(|| bad("tokens"))?;
         let updated_at = whole(row.get("updated_at")).ok_or_else(|| bad("updated_at"))?;
@@ -112,11 +106,31 @@ fn read_state(v: Option<&Value>) -> Result<MemoryStore> {
     Ok(store)
 }
 
-pub(super) fn limits_decide(a: &Value) -> Result<Value> {
-    // In the order the function needs them (CONTRACT §0): the rules, what is charged, when, the rows.
+/// The rules and the charge, in that order and in these words: what `limits_decide` and
+/// `limits_buckets` both read first, by one reader.
+fn rules_and_charge(a: &Value) -> Result<(Rules, Charge)> {
     let Some(doc) = a.get("rules").filter(|v| !v.is_null()) else { return err("bad_request", "rules is required") };
     let rules = read_rules(doc).map_err(|why| Error::new("bad_request", format!("the limits rules cannot be enforced: {why}")))?;
-    let charge = read_charge(a.get("charge"))?;
+    Ok((rules, read_charge(a.get("charge"))?))
+}
+
+/// The buckets a charge is charged to, in charge order, each with its key, rate and burst: the rows a
+/// host holds for `limits_decide`'s `state`, from the one place the key scheme is written
+/// (`Charge::buckets`). The Wasm could decide a charge and not say which rows it reads, so a host on
+/// it derived the keys a second time (X2).
+pub(super) fn limits_buckets(a: &Value) -> Result<Value> {
+    let (rules, charge) = rules_and_charge(a)?;
+    let buckets: Vec<Value> =
+        charge.buckets(&rules).into_iter().map(|b| json!({ "key": b.key, "per_second": b.per_second, "burst": b.burst })).collect();
+    Ok(json!({ "buckets": buckets }))
+}
+
+pub(super) fn limits_decide(a: &Value) -> Result<Value> {
+    // In the order the function needs them (CONTRACT §0): the rules, what is charged, when, the rows.
+    let (rules, charge) = rules_and_charge(a)?;
+    if a.get("now").is_none_or(Value::is_null) {
+        return err("bad_request", "now is required");
+    }
     let now = whole(a.get("now")).ok_or_else(|| Error::new("bad_request", "now is a time in milliseconds"))?;
     let mut store = read_state(a.get("state"))?;
     let decision = decide(&rules, &charge, now, &mut store);

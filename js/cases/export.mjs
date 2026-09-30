@@ -13,6 +13,7 @@ import { createHash } from 'node:crypto';
 import { readZip } from '../zip.mjs';
 import readerCases from './export-reader.mjs';
 import exportInstants from './export-instants.mjs';
+import { ZONED } from './certificates.mjs';
 
 const CORPUS = new URL('../../go/exportcorpus/', import.meta.url);
 const sha = (b) => createHash('sha256').update(b).digest('hex');
@@ -63,6 +64,8 @@ export default function exportCases({ add, expect }, f) {
   ];
   const readArgs = { directory, manifest, contacts_csv: written.contacts_csv, threads_csv: written.threads_csv, owner, now };
   add('export_read: what export_write wrote', 'export_read', readArgs);
+  // `export_read` declares `parse`, and nothing produced it until the coverage gate asked (TC-1).
+  add('export_read at an instant that does not read', 'export_read', { ...readArgs, now: 'nope' });
   const read = wasm.call('export_read', readArgs);
   const names = { threads: read.threads.map((t) => t.id), contacts: read.contacts.map((c) => c.root), media: read.media.map((m) => m.hash) };
   add('export_read_messages: what export_write_messages wrote', 'export_read_messages', { lines, ...names });
@@ -121,6 +124,21 @@ export default function exportCases({ add, expect }, f) {
   add('export_read_messages: a line with a lone low surrogate escape', 'export_read_messages', { lines: [lineWith('a\\udc00b')], ...lineNames });
   expect('export_read_messages: a line with a lone low surrogate escape', { error: 'bad_request', why: 'messages.jsonl: line 1: not a JSON object' });
   add('export_read_messages: a line with a surrogate pair', 'export_read_messages', { lines: [lineWith('\\ud83d\\ude00 \\\\ud800')], ...lineNames });
+  // And what serde refuses and encoding/json read (R40, S3-2): a number infinite as a double, and
+  // containers nested more than 127 deep. The Go port read the manifest and named a member; it is not
+  // JSON to either port now. 127 deep reads, and is refused for what it holds.
+  const nested = (n) => '['.repeat(n) + '1' + ']'.repeat(n);
+  const notJSON = { error: 'bad_request', why: 'manifest.json: not a JSON object' };
+  add('export_read_end: a manifest with a count past the largest double', 'export_read_end', end(manifestWith('x').replace('"messages":0', '"messages":1e400')));
+  expect('export_read_end: a manifest with a count past the largest double', notJSON);
+  add('export_read_end: a manifest nested 128 deep', 'export_read_end', end(manifestWith('x').replace('"tool":"t"', `"tool":${nested(127)}`)));
+  expect('export_read_end: a manifest nested 128 deep', notJSON);
+  add('export_read_end: a manifest nested 127 deep', 'export_read_end', end(manifestWith('x').replace('"tool":"t"', `"tool":${nested(126)}`)));
+  const lineNotJSON = { error: 'bad_request', why: 'messages.jsonl: line 1: not a JSON object' };
+  add('export_read_messages: a line with a number past the largest double', 'export_read_messages', { lines: [lineWith('x').replace('"attachments":[]', '"attachments":[1e400]')], ...lineNames });
+  expect('export_read_messages: a line with a number past the largest double', lineNotJSON);
+  add('export_read_messages: a line nested 128 deep', 'export_read_messages', { lines: [lineWith('x').replace('"attachments":[]', `"attachments":${nested(127)}`)], ...lineNames });
+  expect('export_read_messages: a line nested 128 deep', lineNotJSON);
 
   // export_read_end reads its lists straight from the argument text (0.3.2): every shape a list can
   // take, answered as the parsed arguments were.
@@ -153,6 +171,19 @@ export default function exportCases({ add, expect }, f) {
   ];
   add('export_merge: a held pin is never replaced', 'export_merge', { held, rows });
   add('export_merge with rows whose root is no fingerprint', 'export_merge', { held, rows: [{ root: 'alina' }] });
+  // A row's status and added are what ContactRow says they are, in export_read's words: a held
+  // `Blocked` was read as not blocked, so the import did not keep the person's block, and an added of
+  // "" was carried into the rows the host writes (the review of 2026-09-30, found by parity's nested ""
+  // cases). The controls are the case above and the one below.
+  for (const [what, over, where, why] of [
+    ['a held row whose status is "Blocked"', { held: [row({ status: 'Blocked' })] }, 'held[0]', 'status is not active, blocked or pending_out'],
+    ['a row whose status is ""', { rows: [row({ status: '' })] }, 'rows[0]', 'status is not active, blocked or pending_out'],
+    ['a held row whose added is ""', { held: [row({ added: '' })] }, 'held[0]', 'added is not an RFC 3339 instant'],
+    ['a row whose added is a date', { rows: [row({ added: '2026-09-02' })] }, 'rows[0]', 'added is not an RFC 3339 instant'],
+  ]) {
+    add(`export_merge with ${what}`, 'export_merge', { held, rows, ...over });
+    expect(`export_merge with ${what}`, { error: 'bad_request', why: `${where}: ${why}` });
+  }
   // What the person decided about a held contact outlives an export that says otherwise (SPEC 9.2#16):
   // a blocked contact stays blocked and keeps its permissions even when the row is written for its
   // leaf, and each disagreement is a conflict. Permissions are a set: an order is no disagreement.
@@ -211,6 +242,17 @@ export default function exportCases({ add, expect }, f) {
   const bookRows = wasm.call('book_rows', { contacts: [kept, { root: other('B'), endpoint: 'https://b.example/mcp' }], exported_at: now }).rows;
   add('export_write: the rows book_rows made', 'export_write', { owner, owner_name: 'Olive', exported_at: now, tool: 'parity', contacts: bookRows });
   expect('book_rows: a contact with a member a book does not keep', { error: 'bad_request', why: 'contacts[0]: "preset" is not a member of a wallet contact' });
+  // A book's root and added reach the rows as the contract types them: a root that is no fingerprint
+  // or an added that is no instant came back in a row off the contract (the review of 2026-09-30).
+  for (const [what, over, why] of [
+    ['a root that is no fingerprint', { root: 'alina' }, 'contacts[0]: root is not a fingerprint'],
+    ['a root of ""', { root: '' }, 'contacts[0]: root is not a fingerprint'],
+    ['an added of ""', { added: '' }, 'contacts[0]: added is not an RFC 3339 instant'],
+    ['an added with an offset', { added: '2026-09-02T09:00:00+01:00' }, 'contacts[0]: added is not an RFC 3339 instant'],
+  ]) {
+    add(`book_rows: a contact with ${what}`, 'book_rows', { contacts: [{ ...kept, ...over }], exported_at: now });
+    expect(`book_rows: a contact with ${what}`, { error: 'bad_request', why });
+  }
 
   // ── the arguments and the writers' refusals ─────────────────────────────────────────────────
   add('export_read with nothing to work from', 'export_read', {});
@@ -256,8 +298,31 @@ export default function exportCases({ add, expect }, f) {
   add('export_manifest: 5000 media files, the manifest under 64 KiB', 'export_manifest', { partial: manyWritten.partial });
   if (Buffer.byteLength(wasm.call('export_manifest', { partial: manyWritten.partial }).manifest) >= 64 * 1024) throw new Error('export_manifest: 5000 media files make a manifest of 64 KiB or more');
 
+  // A contact row naming an IPv6 literal with a zone id (T1, C1, R09): a row whose endpoint is not the
+  // normal form is refused by the writer, as every other one is.
+  for (const endpoint of ZONED.slice(0, 2)) {
+    add(`export_write of a row naming ${endpoint}`, 'export_write', { owner, owner_name: 'Olive', exported_at: now, tool: 'parity', contacts: [row({ endpoint })] });
+    expect(`export_write of a row naming ${endpoint}`, { error: 'bad_request', why: 'contacts[0], column endpoint: not an https URL in normal form' });
+  }
   // The reader's refusals, one per rule §9.2 names (SPEC 9.2#10, #13, #15): js/cases/export-reader.mjs.
   readerCases({ add, expect }, f);
   // One instant grammar in the export (SPEC 2.2.2): js/cases/export-instants.mjs.
   exportInstants({ add, expect });
+
+  // media_holds_private_key: SPEC §9.2's key material over a media file, from js/key-material.json, the
+  // list both ports' own tests read (CW-07, R38). Each case is compared whole and held to the list's
+  // answer; the lenient spellings (a spare bit, a length in a longer form) are the ones the cloud's copy
+  // read as a key and the ports did not.
+  const material = JSON.parse(readFileSync(new URL('../key-material.json', import.meta.url), 'utf8'));
+  for (const c of material.cases) {
+    const bytes = c.hex !== undefined ? Buffer.from(c.hex, 'hex') : Buffer.from(c.text, 'utf8');
+    add(`media_holds_private_key: ${c.what}`, 'media_holds_private_key', { bytes: bytes.toString('base64url') });
+    expect(`media_holds_private_key: ${c.what}`, { holds_private_key: c.holds });
+  }
+  add('media_holds_private_key of no bytes', 'media_holds_private_key', { bytes: '' });
+  expect('media_holds_private_key of no bytes', { holds_private_key: false });
+  // The argument is read strictly, as every argument's bytes are (CONTRACT §0): only the file's
+  // contents are read leniently.
+  add('media_holds_private_key of bytes that are not base64url', 'media_holds_private_key', { bytes: 'a b' });
+  expect('media_holds_private_key of bytes that are not base64url', { error: 'parse', why: 'not base64url' });
 }

@@ -8,17 +8,19 @@ use sha2::{Digest, Sha256, Sha512};
 use zeroize::Zeroizing;
 
 pub const OID_ED25519: &str = "1.3.101.112";
-pub const OID_X25519: &str = "1.3.101.110";
 pub const OID_EC_PUBLIC_KEY: &str = "1.2.840.10045.2.1";
 pub const OID_PRIME256V1: &str = "1.2.840.10045.3.1.7";
 pub const OID_ECDSA_SHA256: &str = "1.2.840.10045.4.3.2";
 
+/// The two key algorithms of the profile (§14.1). Every other one is refused where a key is read —
+/// `unsupported`, `unsupported key type <OID>` — X25519 included: a bare X25519 key was read as a
+/// third algorithm here, and so `key_info` named an algorithm the contract does not have, a leaf was
+/// built around one, and a seal went to one (T4), where CONTRACT §5 and the SPEC's suite table say
+/// the X25519 suite is for an Ed25519 recipient, converted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Alg {
     Ed25519,
     P256,
-    /// A bare X25519 key: never a certificate key, only an HPKE recipient (the seed accepts one too).
-    X25519,
 }
 
 impl Alg {
@@ -26,7 +28,6 @@ impl Alg {
         match self {
             Alg::Ed25519 => "ed25519",
             Alg::P256 => "p256",
-            Alg::X25519 => "x25519",
         }
     }
     pub fn parse(s: &str) -> Result<Alg> {
@@ -37,11 +38,10 @@ impl Alg {
         }
     }
     /// The signature algorithm OID a key of this algorithm signs with (§14.1: the issuer key's own).
-    pub fn sig_oid(self) -> Result<&'static str> {
+    pub fn sig_oid(self) -> &'static str {
         match self {
-            Alg::Ed25519 => Ok(OID_ED25519),
-            Alg::P256 => Ok(OID_ECDSA_SHA256),
-            Alg::X25519 => err("unsupported", "an X25519 key does not sign"),
+            Alg::Ed25519 => OID_ED25519,
+            Alg::P256 => OID_ECDSA_SHA256,
         }
     }
 }
@@ -50,7 +50,6 @@ impl Alg {
 enum Public {
     Ed25519(ed25519_dalek::VerifyingKey),
     P256(p256::PublicKey),
-    X25519([u8; 32]),
 }
 
 /// A public key with the exact SubjectPublicKeyInfo bytes it was read from (the fingerprint hashes those).
@@ -84,10 +83,6 @@ impl PublicKey {
                 let k: [u8; 32] = key.try_into().map_err(|_| Error::new("parse", "Ed25519 key is not 32 bytes"))?;
                 Public::Ed25519(ed25519_dalek::VerifyingKey::from_bytes(&k).map_err(|_| Error::new("parse", "Ed25519 key is not a point"))?)
             }
-            OID_X25519 if alg.len() == 1 => {
-                let k: [u8; 32] = key.try_into().map_err(|_| Error::new("parse", "X25519 key is not 32 bytes"))?;
-                Public::X25519(k)
-            }
             OID_EC_PUBLIC_KEY
                 if alg.len() == 2 && alg[1].tag == 0x06 && der::oid_minimal(&alg[1]) && read_oid(&alg[1]) == OID_PRIME256V1 =>
             {
@@ -98,6 +93,10 @@ impl PublicKey {
                 }
                 Public::P256(p256::PublicKey::from_sec1_bytes(key).map_err(|_| Error::new("parse", "P-256 key is not a point"))?)
             }
+            // Every other key is outside the profile and refused here, where it is read: RSA, X25519,
+            // P-384 (named by its ecPublicKey OID), and an Ed25519 key whose AlgorithmIdentifier
+            // carries parameters (RFC 8410 has none). The Go port and the seed read these as keys
+            // and refused them later, or not at all (R12, T2).
             other => return err("unsupported", format!("unsupported key type {other}")),
         };
         Ok(PublicKey { spki: bytes.to_vec(), inner })
@@ -110,7 +109,6 @@ impl PublicKey {
         match self.inner {
             Public::Ed25519(_) => Alg::Ed25519,
             Public::P256(_) => Alg::P256,
-            Public::X25519(_) => Alg::X25519,
         }
     }
     pub fn key_id(&self) -> [u8; 32] {
@@ -131,7 +129,6 @@ impl PublicKey {
                 Ok(s) => p256::ecdsa::VerifyingKey::from(k).verify(data, &s).is_ok(),
                 Err(_) => false,
             },
-            Public::X25519(_) => false,
         }
     }
 
@@ -139,7 +136,6 @@ impl PublicKey {
     pub fn x25519(&self) -> Result<[u8; 32]> {
         match &self.inner {
             Public::Ed25519(k) => Ok(k.to_montgomery().to_bytes()),
-            Public::X25519(k) => Ok(*k),
             Public::P256(_) => err("unsupported", "a P-256 key has no X25519 form"),
         }
     }
@@ -198,7 +194,6 @@ impl PrivateKey {
                 let nz = p256::NonZeroScalar::new(s).into_option().ok_or_else(|| Error::new("key", "zero scalar"))?;
                 Ok(PrivateKey::P256(p256::SecretKey::from(nz)))
             }
-            Alg::X25519 => err("unsupported", "unsupported key type x25519"),
         }
     }
 
@@ -373,11 +368,6 @@ pub fn ecdsa_is_low_s(sig_der: &[u8]) -> Option<bool> {
 pub fn ecdsa_low_s(sig_der: &[u8]) -> Result<Vec<u8>> {
     let sig = p256::ecdsa::Signature::from_der(sig_der).map_err(|_| Error::new("bad_request", "sig is not a DER ECDSA signature"))?;
     Ok(sig.normalize_s().unwrap_or(sig).to_der().as_bytes().to_vec())
-}
-
-/// An X25519 SubjectPublicKeyInfo, for a raw recipient key (the seed builds these for its low-order test).
-pub fn x25519_spki(raw: &[u8; 32]) -> Vec<u8> {
-    spki_of(der::seq(&[der::oid(OID_X25519)]), raw)
 }
 
 // ── §2.1: a root derived from a passkey ──────────────────────────────────────────────────

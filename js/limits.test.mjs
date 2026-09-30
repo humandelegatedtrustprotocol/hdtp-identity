@@ -1,6 +1,7 @@
-// The cloud's TypeScript and both ports decide alike, through the contract function a host calls:
-// every step of js/cases/limits-vectors.json (made by js/limits-vectors.mjs from the cloud's
-// RateLimiter.take over SQLite), sent to `limits_decide` in the Wasm and in the Go adapter, each
+// Both ports decide as the vectors of pact-cloud 6c771f7 say, through the contract function a host
+// calls: every step of js/cases/limits-vectors.json (a fixed record of the cloud's RateLimiter.take
+// over SQLite, which the cloud removed at ba68f9c; its `about` says how it was made), sent to
+// `limits_decide` in the Wasm and in the Go adapter, each
 // port carrying its own state from its own `writes`. Rows idle past the hour are dropped after every
 // step, where the TypeScript swept at most once a minute: the decisions must not care.
 // `node --test js/limits.test.mjs` (the Go adapter must be built: `make build` in go/).

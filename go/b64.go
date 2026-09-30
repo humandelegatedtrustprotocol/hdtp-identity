@@ -1,31 +1,33 @@
 package pactidentity
 
-// A base64url member of a request, decoded strictly.
+// Bytes as base64url, read by one of two rules and never by a third.
 //
-// `FromB64url` is lenient, as the seed library's `Buffer.from(s, 'base64url')` is: it skips every
-// character outside the alphabet and cannot fail. That is the right reading for bytes already on the
-// wire, where the seed is the authority. It is the wrong reading for an argument a caller hands the
-// boundary, and the difference was a hole: `csr_check`'s `root_spkis` decoded "!!!" to no bytes at
-// all, so §9's root-key refusal — which matches the request's key against every root it was given —
-// had nothing to match and accepted a CSR carrying the root's own key. The Rust core's `from_b64u`
-// refuses the same input, so the two ports answered differently on the same call, which CONTRACT §0
-// forbids.
+// DecodeB64url is for bytes a caller hands the boundary, and for every string this port reads that
+// it did not write itself: a card's certificate, a peer's plaintext chain, a pin, a held key, a
+// vault's salt, nonce and ciphertext (CONTRACT §0). It forgives the padding and the standard
+// alphabet's `+` and `/`, and refuses everything else as `parse`, `not base64url`: a character
+// outside the alphabet, whitespace of any kind included, and a last character with a spare bit set.
+// js/b64url-arguments.json is the list of cases it and the Rust core's `from_b64u` are held to. This
+// port forgave space, tab, CR and LF and the core every Unicode whitespace character, so a key with a
+// vertical tab in it was a key to one and `parse` to the other (C10); the contract forgives padding
+// and alphabet, and no whitespace.
 //
-// Declaring a request field as B64 makes that impossible to reintroduce: a member that is not
-// base64url is a caller's mistake reported as `parse`, never an empty byte string.
+// wireB64url is for the four members of an envelope that travelled (CONTRACT §5), and forgives
+// nothing.
 //
-// A B64 also carries whether the member was there at all. An absent member leaves the field nil; a
-// member present as `""` decodes to a non-nil empty slice. The Rust core draws exactly that line —
-// absent answers "<name> is required", present-but-empty falls through to the parser, which says
-// what is wrong with no bytes — so every required-member check below asks `== nil`, never `len()`.
-// The literal `null` is the trap in the middle: encoding/json calls UnmarshalJSON for it rather than
-// leaving the field alone, so it is caught here and treated as absent, which is what it means.
+// There was a third: `FromB64url`, lenient as Node's `Buffer.from(s, 'base64url')` is, which skipped
+// every character outside the alphabet and could not fail. This port read a card's certificate, a
+// peer's plaintext chain, a pin's leaf, a held key and a vault's ciphertext with it, so a stray `!`
+// in any of them was a card, a chain, a key or a vault this port took and the Rust core refused (X9,
+// C7, C8, T10, R23), and `csr_check`'s `root_spkis` once decoded "!!!" to no bytes at all, so §9's
+// root-key refusal had nothing to match. It is gone; nothing reads bytes that way now.
+//
+// Absent and present-but-empty stay apart at the boundary (api_args.go's `bytes`, `optBytes` and
+// `chain`): absent is `<name> is required`, `""` is no bytes, which the parser then says is wrong —
+// as the core draws the line.
 
 import (
-	"bytes"
 	"encoding/base64"
-	"encoding/json"
-	"errors"
 	"strings"
 )
 
@@ -34,34 +36,15 @@ type parseError struct{ why string }
 
 func (e parseError) Error() string { return e.why }
 
-// B64 is a base64url byte string in a request. Padding and the standard alphabet's `+/` are accepted
-// (the Rust core accepts both too); anything else is refused.
-type B64 []byte
-
-func (b *B64) UnmarshalJSON(p []byte) error {
-	if string(bytes.TrimSpace(p)) == "null" {
-		return nil // an explicit null is an absent member, and stays nil
+// DecodeB64url reads bytes this port did not write: base64url, forgiving the padding and the standard
+// alphabet, and nothing else. What does not read is a parse error, `not base64url`.
+func DecodeB64url(s string) ([]byte, error) {
+	// encoding/base64 skips CR and LF even in strict mode, so they are refused by hand.
+	if strings.ContainsAny(s, "\r\n") {
+		return nil, parseError{"not base64url"}
 	}
-	var s string
-	if err := json.Unmarshal(p, &s); err != nil {
-		return parseError{"not base64url"}
-	}
-	out, err := decodeB64url(s)
-	if err != nil {
-		return err
-	}
-	*b = out
-	return nil
-}
-
-// MarshalJSON keeps a B64 field printable in the same form it arrives in, for any struct reused as output.
-func (b B64) MarshalJSON() ([]byte, error) { return json.Marshal(B64url(b)) }
-
-func decodeB64url(s string) ([]byte, error) {
 	cleaned := strings.Map(func(r rune) rune {
 		switch r {
-		case ' ', '\t', '\n', '\r':
-			return -1
 		case '+':
 			return '-'
 		case '/':
@@ -80,8 +63,8 @@ func decodeB64url(s string) ([]byte, error) {
 }
 
 // wireB64url reads a member of an envelope as it travels: unpadded base64url in its ONE canonical
-// spelling (§13.1), as the core's `wire_b64u` does. decodeB64url is for what a caller hands the
-// boundary and forgives padding, the standard alphabet and whitespace; none of that may be forgiven
+// spelling (§13.1), as the core's `wire_b64u` does. DecodeB64url is for what a caller hands the
+// boundary and forgives padding and the standard alphabet; none of that may be forgiven
 // on the wire, because `sig` covers the DECODED bytes and every spelling a reader accepts is another
 // envelope that verifies. encoding/base64 silently skips CR and LF even in strict mode, so they are
 // refused by hand.
@@ -95,17 +78,3 @@ func wireB64url(s string) ([]byte, error) {
 	}
 	return out, nil
 }
-
-// Bytes is the decoded value; a nil B64 is an absent member, which each function judges for itself.
-func (b B64) Bytes() []byte { return []byte(b) }
-
-// chainOf turns a list of base64url members into DER, having already decoded them strictly.
-func chainOf(list []B64) [][]byte {
-	out := make([][]byte, 0, len(list))
-	for _, c := range list {
-		out = append(out, []byte(c))
-	}
-	return out
-}
-
-var errNotB64 = errors.New("not base64url")

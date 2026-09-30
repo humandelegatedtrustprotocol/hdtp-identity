@@ -37,9 +37,9 @@
     "B64url": {
       "type": "string",
       "pattern": "^[A-Za-z0-9_-]*$",
-      "description": "Bytes, as base64url without padding. An ANSWER always spells them this way. An ARGUMENT is read forgivingly about padding and alphabet (§0); the members of an envelope that travelled are not (§5)."
+      "description": "Bytes, as base64url without padding. An ANSWER always spells them this way. An ARGUMENT is read forgivingly about padding and the standard alphabet, and about nothing else: whitespace of any kind is refused (§0). The members of an envelope that travelled are not read forgivingly at all (§5)."
     },
-    "Alg": { "enum": ["ed25519", "p256"], "description": "A key algorithm." },
+    "Alg": { "enum": ["ed25519", "p256"], "description": "A key algorithm. A key of any other is refused where it is read (CONTRACT §0)." },
     "Fingerprint": {
       "type": "string",
       "pattern": "^sha256:[A-Za-z0-9_-]{43}$",
@@ -201,7 +201,7 @@
     "Pin": {
       "type": "object",
       "properties": {
-        "root": { "type": "string" },
+        "root": { "$ref": "#/$defs/Fingerprint" },
         "endpoint": { "type": "string" },
         "leaf": { "type": "string", "description": "The pinned leaf, base64url DER." },
         "state": { "enum": ["active", "pending_out", "blocked"] },
@@ -212,7 +212,7 @@
       },
       "required": ["root", "endpoint", "leaf"],
       "additionalProperties": false,
-      "description": "A contact as the host holds it. `state` absent is `active`."
+      "description": "A contact as the host holds it. `state` absent is `active`; any other value but the three is refused, as is a `leaf_fingerprint` that is not a fingerprint (NodeState)."
     },
     "HeldKey": {
       "type": "object",
@@ -227,15 +227,29 @@
     },
     "Tombstone": {
       "type": "object",
-      "properties": { "root": { "type": "string" }, "leaf": { "type": "string" }, "at": { "type": "string" } },
+      "properties": { "root": { "$ref": "#/$defs/Fingerprint" }, "leaf": { "type": "string" }, "at": { "type": "string" } },
       "required": ["root", "leaf", "at"],
       "additionalProperties": false
     },
     "FormerEndpoint": {
       "type": "object",
-      "properties": { "root": { "type": "string" }, "endpoint": { "type": "string" }, "at": { "type": "string" } },
+      "properties": { "root": { "$ref": "#/$defs/Fingerprint" }, "endpoint": { "type": "string" }, "at": { "type": "string" } },
       "required": ["root", "endpoint", "at"],
       "additionalProperties": false
+    },
+    "Windows": {
+      "description": "The protocol's windows, in seconds unless named otherwise, as both ports hold them (a test in each holds its constants to these, and a host that needs one reads it here): `skew_s`, how far a received envelope's `ts` may be from now, and `max_lifetime_s`, the most `exp − ts` may be (SPEC §13.3); `tombstone_s`, how long a removal tombstone holds a returning root at `ask` (§5.3), and `claim_window_s`, how long an endpoint stays claimed by the root that was pinned at it (§5.2) — each an age strictly under the window; `max_leaf_days`, the longest leaf a verifier accepts (§14.2); `signing_max_ahead_s`, the furthest ahead a signing request may expire (§9.1).",
+      "const": { "skew_s": 300, "max_lifetime_s": 2592000, "tombstone_s": 2592000, "claim_window_s": 2592000, "max_leaf_days": 398, "signing_max_ahead_s": 600 }
+    },
+    "CanonicalNumbers": {
+      "description": "How the canonical JSON of an envelope header and a vault's authenticated data writes a number (RFC 8785 §3.2.2.3: as ECMAScript's Number prints it). Each row is a JSON number as a caller may write it and the text both ports canonicalise it to; a test in each port runs every row.",
+      "const": [
+        ["1e21", "1e+21"], ["1.5e300", "1.5e+300"], ["1e-7", "1e-7"], ["0.000001", "0.000001"], ["100.0", "100"],
+        ["9223372036854775808.0", "9223372036854776000"], ["1e20", "100000000000000000000"], ["0.1", "0.1"], ["-0.0", "0"], ["42", "42"],
+        ["1e-5", "0.00001"], ["0.0000001", "1e-7"], ["1.25e-9", "1.25e-9"], ["-1e-7", "-1e-7"], ["1e100", "1e+100"],
+        ["9007199254740992", "9007199254740992"], ["9007199254740993", "9007199254740992"], ["-9007199254740993", "-9007199254740992"],
+        ["12345678901234567890", "12345678901234567000"]
+      ]
     },
     "NodeState": {
       "type": "object",
@@ -253,16 +267,20 @@
       },
       "required": ["endpoint"],
       "additionalProperties": false,
-      "description": "What the host knows, handed to `decide` whole. Every list absent is empty; `accept_new_hosts` absent is `auto`."
+      "description": "What the host knows, handed to `decide` whole. Every list absent is empty; `accept_new_hosts` absent is `auto`, and anything but `auto` or `ask` is refused (`node.accept_new_hosts is auto or ask`). Read member by member in this order, a held key as `kid`, `leaf`, `pkcs8`, `current`, a pin as `root`, `endpoint`, `leaf`, `state`, `leaf_fingerprint`, a tombstone as `root`, `leaf`, `at`, a former endpoint as `root`, `endpoint`, `at`: a member absent, null or of the wrong type where one is required is `bad_request` naming it by its path (`node.endpoint is required`, `node.keys[0].kid is required`, `node.seen[1] is required`), and a pin's, a tombstone's or a former endpoint's `root` that is not a fingerprint is `bad_request` `<path>.root is not a fingerprint` (`node.pins[0].root is not a fingerprint`), read where the root is: the host's damaged state, which read as a root nothing matched came back as an `address_claim` that was not a fingerprint. So, each where it is read, is a held key's `kid` that is not a fingerprint (`<path>.kid is not a fingerprint`), a pin's `state` other than `active`, `pending_out` or `blocked` (`<path>.state is active, pending_out or blocked`; one was read as `active`, so a blocked contact whose host wrote `Blocked` was a full contact), and a pin's `leaf_fingerprint` that is not a fingerprint (`<path>.leaf_fingerprint is not a fingerprint`; `\"\"` was a claim matching no leaf in one port and no claim in the other). The typed `decide` and `decide_chain` ask the same of a typed caller's state first, in the reader's order, where a Go caller's zero values, a `state` or a `leaf_fingerprint` of `\"\"`, are `active` and none."
+    },
+    "GuestWhy": {
+      "description": "Why a caller proven by a chain is a guest: its root is not pinned (`unknown root`), its pin is blocked (`blocked`), or the leaf it signed with is older than the pinned one (`superseded leaf`, §14.3). The words are the seed's `receive()`'s.",
+      "enum": ["unknown root", "blocked", "superseded leaf"]
     },
     "Decision": {
-      "description": "What `decide` decided. `code` says which shape this is.",
+      "description": "What `decide` decided. `code` says which shape this is, and for `ok`, `tier`: a guest is answered with the reason it is one and whether a pin stands behind it.",
       "oneOf": [
         {
           "type": "object",
           "properties": {
             "code": { "const": "ok" },
-            "tier": { "enum": ["contact", "pending", "guest", "pending_new_address"] },
+            "tier": { "enum": ["contact", "pending", "pending_new_address"] },
             "root": { "$ref": "#/$defs/Fingerprint" },
             "endpoint": { "type": "string" },
             "method": { "enum": ["tools/call", "tools/list"] },
@@ -270,12 +288,29 @@
             "params": true,
             "form": { "$ref": "#/$defs/Form" },
             "leaf": { "$ref": "#/$defs/CertDer" },
-            "why": { "type": "string" },
-            "address_claim": { "anyOf": [{ "$ref": "#/$defs/Fingerprint" }, { "type": "null" }] },
             "forced": { "const": "tombstone" },
             "decision": { "const": "ask" }
           },
           "required": ["code", "tier", "root", "endpoint", "method", "tool", "params", "form", "leaf"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "code": { "const": "ok" },
+            "tier": { "const": "guest" },
+            "root": { "$ref": "#/$defs/Fingerprint" },
+            "endpoint": { "type": "string" },
+            "method": { "const": "tools/call" },
+            "tool": { "enum": ["redeem_invite", "request_contact"] },
+            "params": true,
+            "form": { "const": "chain" },
+            "leaf": { "$ref": "#/$defs/CertDer" },
+            "why": { "$ref": "#/$defs/GuestWhy" },
+            "demote": { "type": "boolean", "description": "True exactly when a pin for `root` stands in the node state and the caller is served as a guest anyway (`why` `blocked` or `superseded leaf`): nothing the call does is the contact's, and a host resolves the caller to no contact row. A host reads this member, never the words of `why`." },
+            "address_claim": { "anyOf": [{ "$ref": "#/$defs/Fingerprint" }, { "type": "null" }] }
+          },
+          "required": ["code", "tier", "root", "endpoint", "method", "tool", "params", "form", "leaf", "why", "demote", "address_claim"],
           "additionalProperties": false
         },
         {
@@ -317,14 +352,22 @@
         },
         {
           "type": "object",
-          "properties": { "code": { "const": "pending_approval" } },
-          "required": ["code"],
+          "description": "A `pending_out` pin calling anything but the pending tier's tools: the call waits for the owner's approval. It names what the signature proved — `root`, `endpoint`, the `leaf` it verified under and the `form` — and the request's `msg_id`, which no `seen` effect carries here, so a host can seal the refusal back to the caller (§13.2) without opening the envelope again. The pin's own moves are effects; `seen` is not one, since the call was not taken.",
+          "properties": {
+            "code": { "const": "pending_approval" },
+            "root": { "$ref": "#/$defs/Fingerprint" },
+            "endpoint": { "type": "string" },
+            "leaf": { "$ref": "#/$defs/CertDer" },
+            "form": { "$ref": "#/$defs/Form" },
+            "msg_id": { "type": "string" }
+          },
+          "required": ["code", "root", "endpoint", "leaf", "form", "msg_id"],
           "additionalProperties": false
         }
       ]
     },
     "Effect": {
-      "description": "Something the host must apply. `decide` changes nothing itself.",
+      "description": "Something the host must apply. `decide` changes nothing itself. `seen` is the envelope's; the rest are the pins' (`PinEffect`).",
       "oneOf": [
         {
           "type": "object",
@@ -332,6 +375,12 @@
           "required": ["op", "msg_id"],
           "additionalProperties": false
         },
+        { "$ref": "#/$defs/PinEffect" }
+      ]
+    },
+    "PinEffect": {
+      "description": "What the pins decided a host must apply — the moves of a pin, a former endpoint, an event, a new address waiting for the owner: what `decide` and `decide_chain` both answer. `decide` changes nothing itself, and neither does `decide_chain`.",
+      "oneOf": [
         {
           "type": "object",
           "properties": {
@@ -379,6 +428,46 @@
         }
       ]
     },
+    "ChainDecision": {
+      "description": "What `decide_chain` decided about a chain proven outside an envelope: `decide`'s answer to the same chain and node, less what is the call's (`method`, `tool`, `params`, `form`) and less the envelope's own refusals. A guest carries its reason, `demote` and the address claim; a chain that fails a rule, or a leaf of the pinned one's notBefore that is not it, is `envelope_invalid` in `decide`'s words.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "code": { "const": "ok" },
+            "tier": { "enum": ["contact", "pending", "pending_new_address"] },
+            "root": { "$ref": "#/$defs/Fingerprint" },
+            "endpoint": { "type": "string" },
+            "leaf": { "$ref": "#/$defs/CertDer" },
+            "forced": { "const": "tombstone" },
+            "decision": { "const": "ask" }
+          },
+          "required": ["code", "tier", "root", "endpoint", "leaf"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "code": { "const": "ok" },
+            "tier": { "const": "guest" },
+            "root": { "$ref": "#/$defs/Fingerprint" },
+            "endpoint": { "type": "string" },
+            "leaf": { "$ref": "#/$defs/CertDer" },
+            "why": { "$ref": "#/$defs/GuestWhy" },
+            "demote": { "type": "boolean" },
+            "address_claim": { "anyOf": [{ "$ref": "#/$defs/Fingerprint" }, { "type": "null" }] }
+          },
+          "required": ["code", "tier", "root", "endpoint", "leaf", "why", "demote", "address_claim"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": { "code": { "const": "envelope_invalid" }, "why": { "type": "string" } },
+          "required": ["code", "why"],
+          "additionalProperties": false
+        }
+      ]
+    },
     "Kdf": {
       "type": "object",
       "properties": {
@@ -401,7 +490,15 @@
       },
       "required": [],
       "additionalProperties": false,
-      "description": "The same, as an ARGUMENT to `vault_seal`: every member may be left out and takes the default (64 MiB, t 3, p 1), and what is given is held to the same range as a document's."
+      "description": "The same, as an ARGUMENT to `vault_seal`: every member may be left out and takes `KdfDefault`'s, and what is given is held to the same range as a document's."
+    },
+    "KdfDefault": {
+      "description": "The key derivation `vault_seal` uses for a member its caller leaves out: 64 MiB, three passes, one lane. A test in each port holds its default to this, and its bounds to `Kdf`'s and `KdfArgs`'s.",
+      "const": { "name": "argon2id", "m_kib": 65536, "t": 3, "p": 1 }
+    },
+    "VaultSaltMin": {
+      "description": "The shortest salt, in bytes, that a vault document or `vault_seal`'s `salt` may carry: Argon2id's own floor, named by both ports before Argon2id is asked for anything (`vault`, `salt is at least 8 bytes`), at both ends. A test in each port holds its constant to this.",
+      "const": 8
     },
     "VaultDocument": {
       "type": "object",
@@ -829,6 +926,10 @@
         "updated_at"
       ],
       "additionalProperties": false
+    },
+    "LimitsIdle": {
+      "description": "How long, in milliseconds, a bucket's row may sit untouched before it is full whatever it budgets: a host may delete a row older than this, and `limits_rules_check` refuses rules whose contact bucket takes longer to refill from empty (crates/pact-limits `IDLE_MS`, go/limits.go `LimitsIdleMS`; a test in each holds it to this).",
+      "const": 3600000
     }
   },
   "methods": {
@@ -841,7 +942,7 @@
         "required": ["spec"],
         "additionalProperties": false
       },
-      "errors": [],
+      "errors": ["bad_request"],
       "notes": "The build, not a rule: `spec` is the version of `pact-protocol/SPEC.md` the port implements and is the same everywhere; the other member names the port's own release, so the answers differ and nothing compares them."
     },
     "generate_key": {
@@ -864,7 +965,7 @@
         "additionalProperties": false
       },
       "result": { "$ref": "#/$defs/Key" },
-      "errors": ["bad_request", "unsupported"],
+      "errors": ["bad_request", "parse", "unsupported"],
       "notes": "An Ed25519 seed is used directly; a P-256 scalar is the seed mod n, with 0 → 1 (the seed library's `keys.mjs`). Written for the vectors, and production API since SPEC §2.1: it is how a wallet turns a derived seed into its root."
     },
     "prf_salt": {
@@ -879,7 +980,7 @@
         "required": ["salt", "infos"],
         "additionalProperties": false
       },
-      "errors": [],
+      "errors": ["bad_request"],
       "notes": "SPEC §2.1's fixed PRF input, `SHA-256(\"pact/vault/1\")`, and the three `info` strings. A call rather than a constant a caller copies, so the bytes live in one place and the vectors prove them."
     },
     "derive_seed": {
@@ -996,7 +1097,7 @@
         "required": ["der", "fingerprint"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "parse"]
+      "errors": ["bad_request", "parse", "unsupported"]
     },
     "root_tbs": {
       "section": "certificates",
@@ -1017,7 +1118,7 @@
         "required": ["tbs", "sig_alg"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "parse"],
+      "errors": ["bad_request", "parse", "unsupported"],
       "notes": "The external-signing seam: a root in a passkey or a security key signs `tbs` in the host, and `assemble_root` builds the certificate from the signature handed back."
     },
     "assemble_root": {
@@ -1050,7 +1151,7 @@
           "root_cn": { "type": "string" },
           "host_spki": { "$ref": "#/$defs/Spki" },
           "endpoint": { "type": "string" },
-          "dns_name": { "type": "string" },
+          "dns_name": { "type": "string", "minLength": 1, "description": "The endpoint's host as a dNSName beside its URI. Absent or null is none; present and empty is refused (`dns_name is empty`)." },
           "not_before": { "$ref": "#/$defs/InstantIn" },
           "not_after": { "$ref": "#/$defs/InstantIn" },
           "serial": { "$ref": "#/$defs/Serial" },
@@ -1065,7 +1166,7 @@
         "required": ["der"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "parse"],
+      "errors": ["bad_request", "parse", "unsupported"],
       "notes": "Refuses a validity over 398 days and an endpoint that is not an https URL in normal form."
     },
     "leaf_tbs": {
@@ -1077,7 +1178,7 @@
           "root_cn": { "type": "string" },
           "host_spki": { "$ref": "#/$defs/Spki" },
           "endpoint": { "type": "string" },
-          "dns_name": { "type": "string" },
+          "dns_name": { "type": "string", "minLength": 1, "description": "The endpoint's host as a dNSName beside its URI. Absent or null is none; present and empty is refused (`dns_name is empty`)." },
           "not_before": { "$ref": "#/$defs/InstantIn" },
           "not_after": { "$ref": "#/$defs/InstantIn" },
           "serial": { "$ref": "#/$defs/Serial" },
@@ -1092,7 +1193,7 @@
         "required": ["tbs", "sig_alg"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "parse"],
+      "errors": ["bad_request", "parse", "unsupported"],
       "notes": "The same seam for leaves: `build_leaf` with the root's public key in place of its private one."
     },
     "assemble_leaf": {
@@ -1125,8 +1226,8 @@
         "additionalProperties": false
       },
       "result": { "$ref": "#/$defs/Certificate" },
-      "errors": ["bad_request", "parse"],
-      "notes": "Parsing itself refuses, with a `parse` error, what DER has one encoding for and the certificate spells another way: the AlgorithmIdentifier inside the TBS differing from the one outside (`signature algorithm inside and outside differ`), a BOOLEAN that is not `0xFF` or is an explicit FALSE, a non-minimal INTEGER, an OBJECT IDENTIFIER with a padded subidentifier, a `keyUsage` BIT STRING whose unused bits are set or whose trailing zero bits are not removed, a validity of other than two times, an extension of other than two or three parts or whose OCTET STRING holds more than one TLV, a P-256 key that is not the uncompressed point. Every one of these is a scenario in `vectors/intrude.mjs`, which the seed and both ports answer alike — the seed's strictness and the ports' are one rule, proven rather than asserted."
+      "errors": ["bad_request", "parse", "unsupported"],
+      "notes": "Parsing itself refuses, with a `parse` error, what DER has one encoding for and the certificate spells another way: the AlgorithmIdentifier inside the TBS differing from the one outside (`signature algorithm inside and outside differ`), a BOOLEAN that is not `0xFF` or is an explicit FALSE, a non-minimal INTEGER, an OBJECT IDENTIFIER with a padded subidentifier, a `keyUsage` BIT STRING whose unused bits are set or whose trailing zero bits are not removed, a validity of other than two times, an extension of other than two or three parts or whose value is not an OCTET STRING (`certificate shape`) or whose OCTET STRING holds more than one TLV, a P-256 key that is not the uncompressed point. Every one of these is a scenario in `vectors/intrude.mjs`, which the seed and both ports answer alike — the seed's strictness and the ports' are one rule, proven rather than asserted. A `keyUsage` BIT STRING with no initial octet (`03 00`; X.690 §8.6.2) is `BIT STRING not in the DER form`, and an `[3]` with nothing in it `not a v3 certificate with extensions`, in the seed and both ports. Both ports read a certificate's fields in one order, so one with two faults is named for the same one: the version, the serial, the validity's count, the outer algorithm's shape and its equality with the inner one, the key, the signature algorithm, the issuer, the subject, the two times, then the extensions, each extension's criticality before its OID. The seed's `parse` reads them in another order — the two algorithms' equality before the serial and the validity's count, and the key after the names and the two times — so there a certificate with two faults can be named for the other one. Nothing compares the seed's words for a certificate with two faults: each scenario carries one (R33's seed half, recorded here rather than changed)."
     },
     "profile_error": {
       "section": "certificates",
@@ -1148,7 +1249,7 @@
         "required": ["error"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "parse"],
+      "errors": ["bad_request", "parse", "unsupported"],
       "notes": "The exact strings of the seed's `x509.mjs profileError`; `null` when the certificate is inside the profile. This is an ANSWER whose one member happens to be called `error`: a failure of the call carries `why` beside it (§0), and this never does."
     },
     "validate_chain": {
@@ -1182,7 +1283,7 @@
         "required": ["order"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "parse"]
+      "errors": ["bad_request", "parse", "unsupported"]
     },
     "is_normal_https": {
       "section": "certificates",
@@ -1198,7 +1299,8 @@
         "required": ["normal"],
         "additionalProperties": false
       },
-      "errors": ["bad_request"]
+      "errors": ["bad_request"],
+      "notes": "An IPv6 literal carries no zone id, in any spelling (`[fe80::1%eth0]`, `[2001:db8::1%25eth0]`): RFC 3986 has none, and the WHATWG parser the seed's `isNormalHttps` uses refuses a `%` inside the brackets. So `address_guard`, chain rule 5, `csr_check`, `ledger_check` and the export's endpoint column refuse one as not the normal form."
     },
     "address_guard": {
       "section": "certificates",
@@ -1241,7 +1343,8 @@
         "required": ["private"],
         "additionalProperties": false
       },
-      "errors": ["bad_request"]
+      "errors": ["bad_request"],
+      "notes": "The predicate `address_guard` applies to a literal host, for the host to apply to what it resolves. One leading `[` and one trailing `]` are dropped, as a URL writes an IPv6 host, and no more. An IPv6 literal with a zone id (`fe80::1%eth0`) is private whatever its address: a zone is an interface scope (RFC 4007 §6), which no global address carries. Text that is no address is not private: an empty zone, and a zone on an IPv4 address, are no address, as Go's `netip` reads them."
     },
     "csr_new": {
       "section": "csr",
@@ -1251,7 +1354,7 @@
           "cn": { "type": "string" },
           "host_pkcs8": { "$ref": "#/$defs/Pkcs8" },
           "endpoint": { "type": "string" },
-          "dns_name": { "type": "string" }
+          "dns_name": { "type": "string", "minLength": 1, "description": "The endpoint's host as a dNSName beside its URI. Absent or null is none; present and empty is refused (`dns_name is empty`)." }
         },
         "required": ["cn", "host_pkcs8", "endpoint"],
         "additionalProperties": false
@@ -1262,7 +1365,7 @@
         "required": ["der"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "parse"]
+      "errors": ["bad_request", "parse", "unsupported"]
     },
     "csr_check": {
       "section": "csr",
@@ -1326,7 +1429,7 @@
         "required": ["der", "endpoint", "not_before", "not_after"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "parse"],
+      "errors": ["bad_request", "parse", "unsupported"],
       "notes": "`csr_check` first — with the issuing root added to `root_spkis` — then `build_leaf` under the monotonic rule. `valid_days` absent is 365; an explicit 0 is refused."
     },
     "issue_tbs_from_csr": {
@@ -1357,7 +1460,7 @@
         "required": ["tbs", "sig_alg", "endpoint", "not_before", "not_after"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "parse"],
+      "errors": ["bad_request", "parse", "unsupported"],
       "notes": "As `issue_from_csr`, for the seam: assembled with `assemble_leaf`."
     },
     "card_encode": {
@@ -1386,8 +1489,8 @@
         "required": ["vcard"],
         "additionalProperties": false
       },
-      "errors": ["bad_request"],
-      "notes": "Folded per RFC 6350 at 75 octets, CRLF, exactly as the seed's `card.mjs`. Refuses `<fn|seal|extra> carries a control character`: a card is lines, and a line break in anything a caller supplies writes a property of the caller's choosing (SPEC §3)."
+      "errors": ["bad_request", "parse"],
+      "notes": "Folded per RFC 6350 at 75 octets, CRLF, exactly as the seed's `card.mjs`. `extra` present and not a list of strings — a list holding a number or a `null`, or a value that is not a list — is `extra is required`, §0's words for a member of the wrong type. Refuses `<fn|seal|extra> carries a control character`: a card is lines, and a line break in anything a caller supplies writes a property of the caller's choosing (SPEC §3)."
     },
     "card_decode": {
       "section": "cards",
@@ -1418,8 +1521,60 @@
         "required": ["fn", "version", "seal", "cert", "root", "endpoint", "expired", "ignored", "bytes", "leaf"],
         "additionalProperties": false
       },
-      "errors": ["bad_request"],
-      "notes": "Every refusal is `bad_request` with the exact `why` strings of `card.mjs`."
+      "errors": ["bad_request", "parse"],
+      "notes": "Every refusal of a card is `bad_request` with the exact `why` strings of `card.mjs`. A `now` that is not an instant is `parse`, `not an RFC 3339 instant: <now>`, as every function that reads an instant answers it (`\"\"` included). An empty `X-PACT-VERSION` names no version (`no X-PACT-VERSION`). `X-PACT-CERT` is read as every string a port did not write is read (§0), so a stray character, whitespace or a spare bit set is `certificate does not parse: not base64url`."
+    },
+    "refresh_check": {
+      "section": "cards",
+      "params": {
+        "type": "object",
+        "properties": {
+          "pin": {
+            "type": "object",
+            "description": "The half of the host's pin a refresh is judged against.",
+            "properties": {
+              "root": { "$ref": "#/$defs/Fingerprint" },
+              "endpoint": { "type": "string" },
+              "leaf": { "$ref": "#/$defs/CertDer" }
+            },
+            "required": ["root", "endpoint", "leaf"],
+            "additionalProperties": false
+          },
+          "answer": { "description": "The peer's answer to `get_card`, `{card, card_sig, chain}`, as it was sent: whatever is wrong with it is a refusal of the refresh, never a fault of the call." },
+          "now": { "$ref": "#/$defs/InstantIn" }
+        },
+        "required": ["pin", "answer", "now"],
+        "additionalProperties": false
+      },
+      "result": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "ok": { "const": true },
+              "fn": { "type": "string", "description": "The card's name." },
+              "renewed": {
+                "description": "The newer leaf the chain proved, and its key, for the pin to become (§14.3); null when the leaf is the pinned one.",
+                "oneOf": [
+                  { "type": "object", "properties": { "leaf": { "$ref": "#/$defs/CertDer" }, "spki": { "$ref": "#/$defs/Spki" } }, "required": ["leaf", "spki"], "additionalProperties": false },
+                  { "type": "null" }
+                ]
+              },
+              "root_cert": { "$ref": "#/$defs/CertDer", "description": "The pinned root's certificate, proved by the chain: what a pin made over a sealed call never had." }
+            },
+            "required": ["ok", "fn", "renewed", "root_cert"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": { "ok": { "const": false }, "why": { "type": "string" } },
+            "required": ["ok", "why"],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "errors": ["bad_request", "parse", "unsupported"],
+      "notes": "Refreshing ONE contact's card (SPEC §3, §14.3), the trust decision both hosts made separately (CW-08): what a peer's answer to `get_card` proves about a pinned contact. A refresh can move a leaf and never a root or an address: the chain is validated against the pinned root and the pinned endpoint. The pin is the host's: `pin` absent or null, or not an object, is `pin is required`, a member absent or of the wrong type is `pin.<member> is required` (`pin.leaf` of the wrong type is `parse` `not base64url`), a `pin.root` that is not a fingerprint is `pin.root is not a fingerprint`, judged as the root is read, before `pin.endpoint`, and a pinned leaf that does not read is an error in its reader's class — read before the answer. `answer` absent or null is `answer is required`; then `now`; then the pinned leaf is parsed, and one that is a CA certificate is `bad_request` `pin.leaf is a CA certificate, not a leaf`: the host's pin, never the peer's answer. The answer is then judged in this order, each refusal `{\"ok\": false, \"why\"}`: a `card` and a `card_sig` that are non-empty strings (`the answer to get_card carries no signed card`, an answer that is not an object included); a `chain` of exactly two non-empty strings (`the answer carries <n> certificate(s); get_card answers with the chain, leaf then root (§6.1)`, `n` the length of the list, 0 when it is not one); each member base64url (`a chain member is not base64url`); the card decodes at `now` (`the card does not decode: <card_decode's why>`); it names the pinned root (`the card names another root, not the pinned one`); the chain validates at `now` to the pinned root and endpoint (`the chain it answered with fails rule <n>: <reason>`); its leaf is not older than the pinned one (`the leaf it answered with is superseded by the pinned one (§14.3)`) nor another of the same notBefore (`two different leaves claim the same notBefore (§14.3)`); the card carries that leaf (`the card's certificate is not the leaf the chain proved`); `card_sig` is base64url (`the card signature is not base64url`) and verifies over the card's text under the leaf's key, by `verify`'s rules (`the card signature does not verify under the proven leaf key`)."
     },
     "suite_for": {
       "section": "envelopes",
@@ -1458,7 +1613,7 @@
         "required": ["enc", "ct"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "envelope_invalid", "parse"],
+      "errors": ["bad_request", "envelope_invalid", "parse", "unsupported"],
       "notes": "`ephemeral_seed` exists for vectors and the intrusion suite; production callers omit it and the core draws 32 fresh bytes. `aad` absent is empty."
     },
     "hpke_open": {
@@ -1483,7 +1638,7 @@
         "required": ["plaintext"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "envelope_invalid", "parse"]
+      "errors": ["bad_request", "envelope_invalid", "parse", "unsupported"]
     },
     "seal_request": {
       "section": "envelopes",
@@ -1495,8 +1650,8 @@
           "form": { "$ref": "#/$defs/Form" },
           "sender_chain": { "$ref": "#/$defs/Chain" },
           "msg_id": { "type": "string", "minLength": 1 },
-          "ts": { "type": "integer" },
-          "exp": { "type": "integer" },
+          "ts": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
+          "exp": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
           "ephemeral_seed": { "$ref": "#/$defs/Seed32" },
           "method": { "type": "string" },
           "params": true,
@@ -1506,8 +1661,8 @@
         "additionalProperties": false
       },
       "result": { "$ref": "#/$defs/Envelope" },
-      "errors": ["bad_request", "parse"],
-      "notes": "`form` absent is `chain`, which needs `sender_chain`; `method` absent is `tools/call`; `params` absent is `{}`; `exp` absent is `ts + 600`; `cty` absent is a call."
+      "errors": ["bad_request", "envelope_invalid", "parse", "unsupported"],
+      "notes": "`form` absent is `chain`, which needs `sender_chain`; `method` absent is `tools/call`; `params` absent is `{}`; `exp` absent is `ts + 600`; `cty` absent is a call. `params` is sealed as the value it is, not as the text it was written in: strings as RFC 8785 writes them, an integer the core holds as one (an i64, or a u64 past it) by its digits and every other number as RFC 8785 writes it, members in the order they were written, and a member written twice once, where it first appeared, with the value it was given last (as serde_json's ordered map and `JSON.parse` read it; the core's `canonical::in_order`, Go's `inOrder`). Not sorted: Appendix B's plaintexts write `name` before `arguments`. `ts` and `exp` are integers a header carries as themselves, from −(2^53 − 1) to 2^53 − 1: RFC 8785 writes a number as the double it is, so one past that would be sealed as another. `ts` is judged first, then `exp`, the default included, each `bad_request` `<ts|exp> is an integer from -(2^53 - 1) to 2^53 - 1`; both after the members are read (a 31-byte `ephemeral_seed` is named before them) and before the proof member (a chain of one, or none in the chain form, is named after them)."
     },
     "seal_result": {
       "section": "envelopes",
@@ -1519,8 +1674,8 @@
           "form": { "$ref": "#/$defs/Form" },
           "sender_chain": { "$ref": "#/$defs/Chain" },
           "msg_id": { "type": "string", "minLength": 1 },
-          "ts": { "type": "integer" },
-          "exp": { "type": "integer" },
+          "ts": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
+          "exp": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
           "ephemeral_seed": { "$ref": "#/$defs/Seed32" },
           "result": true,
           "error": true
@@ -1529,8 +1684,8 @@
         "additionalProperties": false
       },
       "result": { "$ref": "#/$defs/Envelope" },
-      "errors": ["bad_request", "parse"],
-      "notes": "Exactly one of `result` and `error`. `cty` is `application/pact-result+json`."
+      "errors": ["bad_request", "envelope_invalid", "parse", "unsupported"],
+      "notes": "Exactly one of `result` and `error`, sealed as `seal_request` seals `params`. `cty` is `application/pact-result+json`. `ts` and `exp` (absent: `ts + 600`) are held as `seal_request` holds them, first."
     },
     "open_result": {
       "section": "envelopes",
@@ -1563,8 +1718,8 @@
         "required": ["ok", "root", "endpoint", "form"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "envelope_invalid", "parse"],
-      "notes": "The caller side of §13.2: opens, requires `result` xor `error` plus one of `chain`/`leaf`, validates the chain to `expected_root` and `expected_endpoint` or finds the named leaf among `pins`, refuses a superseded leaf, verifies `sig`, checks `cty` and `msg_id`. Every refusal of the ENVELOPE is `{\"error\": \"envelope_invalid\", \"why\"}`. `leaf_update` is a leaf newer than the pin, for the host to store."
+      "errors": ["bad_request", "envelope_invalid", "parse", "unsupported"],
+      "notes": "The caller side of §13.2: opens, requires `result` xor `error` plus one of `chain`/`leaf`, validates the chain to `expected_root` and `expected_endpoint` or finds the named leaf among `pins`, refuses a superseded leaf, verifies `sig`, checks `cty` and `msg_id`. Every refusal of the ENVELOPE is `{\"error\": \"envelope_invalid\", \"why\"}`. `leaf_update` is a leaf newer than the pin, for the host to store. An absent or null `envelope` is the caller's omission, `bad_request` `envelope is required` (CONTRACT §0); a present one is read for its four members in order (`protected`, `enc`, `ct`, `sig`), and one that is not an object, or lacks a member or holds one that is not a string, is `envelope_invalid` naming it (`envelope is required`, `envelope.sig is required`). `pins` absent or null is none; a pin is read for `root`, `endpoint`, `leaf`, `state` and `leaf_fingerprint` in that order, and one that is not an object or lacks a required member, or holds one of the wrong type, is `bad_request` naming it by its path (`pins[0] is required`, `pins[0].root is required`), and a `root` that is not a fingerprint is `pins[<i>].root is not a fingerprint`, a `state` other than the three `pins[<i>].state is active, pending_out or blocked`, and a `leaf_fingerprint` that is not a fingerprint `pins[<i>].leaf_fingerprint is not a fingerprint`, as a node's pin is. A chain in the plaintext with a member that is not a string, or does not read as base64url, is `envelope_invalid` `plaintext shape`, as in `decide`. The first pin for the chain's root is the one read, as `decide` reads a node's pins; a pin whose leaf does not read is an error of the call in its reader's class (`parse`; `unsupported` for a key outside the profile), never `superseded leaf`."
     },
     "follow_renewed": {
       "section": "envelopes",
@@ -1620,8 +1775,32 @@
         "required": ["result", "effects"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "parse"],
+      "errors": ["bad_request", "parse", "unsupported"],
       "notes": "§5.1 below."
+    },
+    "decide_chain": {
+      "section": "envelopes",
+      "params": {
+        "type": "object",
+        "properties": {
+          "node": { "$ref": "#/$defs/NodeState" },
+          "chain": { "$ref": "#/$defs/Chain", "description": "The chain the caller proved outside an envelope — at the TLS layer, where the handshake is its leaf key's signature: leaf, then root." },
+          "now": { "$ref": "#/$defs/InstantIn" }
+        },
+        "required": ["node", "chain", "now"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "result": { "$ref": "#/$defs/ChainDecision" },
+          "effects": { "type": "array", "items": { "$ref": "#/$defs/PinEffect" } }
+        },
+        "required": ["result", "effects"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "parse", "unsupported"],
+      "notes": "§5.1's pin decision on its own, for a host's TLS door: the part of `decide` after the chain is validated and signed for, written once in each port and taken by both functions, so a chain presented at the TLS layer earns exactly what an envelope carrying it would (N1, N2: the node's TLS door read the removal tombstone in the states `decide` does not, and served a conflicting leaf as a guest). Read as `decide` reads its arguments: `node`, `chain` and `now` absent or null, in that order; the node whole, as `decide` reads it; the chain, as every function reads one (not a list: `chain is required`; a member that is not a base64url string: `parse` `not base64url`); `now`. The chain is validated at `now` with no expectation; one that fails is `envelope_invalid` `chain rule <n>: <reason>`. Then the pins, in `decide`'s order: no pin for the root — a tombstone for it (the first) within 30 days whose leaf the chain's is newer than is `pending_new_address` forced `ask` with a `pending` effect (`returned after removal`), and otherwise a guest (`unknown root`); a blocked pin is a guest (`blocked`); a leaf older than the pinned one a guest (`superseded leaf`); a different leaf of the pinned one's notBefore `envelope_invalid` (`a different leaf with the same notBefore`); another endpoint is `pending_new_address` under `ask` and, under `auto`, a re-pin with the former endpoint recorded and a `new_address` event; a newer leaf at the pinned endpoint a `pin_update` and a `renewal` event; then `pending` for a `pending_out` pin and `contact` otherwise. A guest carries `why`, `demote` and `address_claim`, as `decide`'s does. What is the call's — a guest's tools and card, the receiver's own address (§14.5), what a `pending_out` pin may call — the host applies to each call, as `decide` applies it to the envelope's. There is no `seen`. Node state that does not read is an error of the call in its reader's class, as in `decide`."
     },
     "vault_seal": {
       "section": "vault",
@@ -1643,8 +1822,8 @@
         "required": ["vault"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "vault"],
-      "notes": "`plaintext` is a VaultPlaintext or a RecordPlaintext, and its `v` is 2: anything else is `bad_request` (`a vault plaintext is v 2: the root, or the record`). That generation is all `vault_seal` checks of the plaintext (and `vault_open` of what it opens): the two shapes are held by `wallet_issue`, where the rules read them, so a stricter seal or open cannot lock a person out of a document a wallet already keeps. Read in this order: `passphrase` (absent: `passphrase is required`; empty: `empty passphrase`), `plaintext` and its generation, then `kdf`. `salt` and `nonce` are for tests only."
+      "errors": ["bad_request", "parse", "vault"],
+      "notes": "`plaintext` is a VaultPlaintext or a RecordPlaintext, and its `v` is 2: anything else is `bad_request` (`a vault plaintext is v 2: the root, or the record`). The plaintext is sealed as `seal_request` seals `params`, as the value it is. That generation is all `vault_seal` checks of the plaintext (and `vault_open` of what it opens): the two shapes are held by `wallet_issue`, where the rules read them, so a stricter seal or open cannot lock a person out of a document a wallet already keeps. Read in this order: `passphrase` (absent: `passphrase is required`; empty: `empty passphrase`), `plaintext` and its generation, then `kdf`, `salt` and `nonce`, then the nonce's length (`vault`, `nonce is 12 bytes`) and the salt's (`vault`, `salt is at least 8 bytes`: `VaultSaltMin`). `kdf` absent or null is `KdfDefault`, and one that is not an object is `bad_request` `kdf is required`. An object is read by the one reader `vault_open` reads a document's `kdf` with, except that a member left out takes the default: a `name` other than `argon2id`, or one that is not a string, is `vault` `unknown kdf`; a parameter that is not a whole number written as one (`1.0`, `-0`, `\"8192\"`), or is outside its range, is `vault` `kdf parameters out of range`, never truncated; and a member other than those four, named in any case but theirs, is `vault` `kdf holds name, m_kib, t and p, and nothing else: <member>`. `salt` and `nonce` are for tests only."
     },
     "vault_open": {
       "section": "vault",
@@ -1661,7 +1840,7 @@
         "additionalProperties": false
       },
       "errors": ["bad_request", "vault"],
-      "notes": "A wrong passphrase and a tampered document are one message. A document that opens to a plaintext whose `v` is not 2 was written by an earlier wallet and is refused (`vault`, `this vault was written by an earlier wallet and is not opened: there is no conversion`); nothing converts."
+      "notes": "Read in this order: `vault` (absent or null: `vault is required`), `passphrase` (absent: `passphrase is required`), then the document's header, where it does not read, all `vault`: a document that is not an object, or whose `format` is not `pact-vault/1`, is `not a pact-vault/1 document`; its `kdf` is read by the one reader `vault_seal`'s is, with all four members (`Kdf`): one that is not an object, or whose `name` is absent, not a string or not `argon2id`, is `unknown kdf`, a parameter that is absent, not a whole number written as one, or outside its range is `kdf parameters out of range`, and another member is `kdf holds name, m_kib, t and p, and nothing else: <member>`; `salt`, `nonce` and `ct` that are absent or not strings are no bytes, and one that is not base64url, or a nonce that is not 12 bytes, is the one message below; then a salt under `VaultSaltMin` bytes is `salt is at least 8 bytes`. A wrong passphrase and a tampered document are one message (`the passphrase is wrong or the vault is damaged`). A document that opens to a plaintext whose `v` is not 2 was written by an earlier wallet and is refused (`vault`, `this vault was written by an earlier wallet and is not opened: there is no conversion`); nothing converts."
     },
     "wallet_issue": {
       "section": "vault",
@@ -1693,8 +1872,8 @@
         "required": ["der", "endpoint", "not_before", "not_after", "ledger_entry", "new_host", "warnings"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "parse"],
-      "notes": "Two documents, as \u00a79 keeps them: the vault is the root and nothing else, the record holds the ledger this reads and the entry answered is appended to. A vault carrying `ledger` or `contacts` is refused (`bad_request`, `a vault holds the root and nothing else: its ledger and contacts belong in the record`); a missing record is refused (`record_plaintext is required: the ledger lives there`). After `root_fingerprint`, `csr`, `now` and `valid_days` (present and not an integer: `valid_days is required`), each document is held to its schema before anything in it is read: the vault (not an object: `vault_plaintext is required: the root lives there`; then its `v`; then the first member, in sorted order, it does not hold: `vault_plaintext holds v, roots, prf and passkey, and nothing else: <member>`), then the record (likewise, `record_plaintext holds v, roots, ledger, contacts, passkey and backup_verified_at, and nothing else: <member>`; a `ledger` that is not a list: `the record's ledger is a list`), and every ledger entry, every root's: an entry that is not an object, lacks a required member, has one of the wrong type, a `root` that is not a fingerprint, an empty `endpoint` or an instant that does not parse, or carries one it does not hold is refused (`the record's ledger entry <i> does not read: <member>`), never skipped — skipped, it could be the live leaf. A root with no `pkcs8` is refused (`this root is held on a card: wallet_issue signs only with a key the vault holds`). The entry answered is the endpoint and the dates, never the leaf. The wallet's rules: `csr_check` with the vault's roots as `root_spkis`; then `ledger_check`'s rules over the record's ledger (a record with no `ledger` has no entry to read): `new_host` true when no ledger entry names that endpoint's host, with the warning `new host: this endpoint's host has never been issued to`; the **live leaf is the newest one issued** (§14.3) and a second endpoint while it is unexpired is refused unless `move: true`, which instead warns `move: the live leaf at the previous endpoint is superseded once contacts see this one` (a `move` or a `move_back`); `not_before` monotonic over the ledger; `valid_days` absent means 365 and an explicit 0 is refused."
+      "errors": ["bad_request", "parse", "unsupported"],
+      "notes": "Two documents, as \u00a79 keeps them: the vault is the root and nothing else, the record holds the ledger this reads and the entry answered is appended to. A vault carrying `ledger` or `contacts` is refused (`bad_request`, `a vault holds the root and nothing else: its ledger and contacts belong in the record`); an absent or null document is `vault_plaintext is required` or `record_plaintext is required` (CONTRACT §0), and a record that is not an object `record_plaintext is required: the ledger lives there`. After `root_fingerprint`, `csr`, `now` and `valid_days` (present and not an integer: `valid_days is required`), each document is held to its schema before anything in it is read, as follows. Inside both documents, as in the arguments (CONTRACT §0), a member the document declares that is `null` is absent — an optional one is not there, a required one is named as a missing one is — and a member it does not declare is refused whatever it holds, `null` included (a vault's `ledger: null` is a vault carrying a ledger). The vault: not an object, `vault_plaintext is required: the root lives there`; then its `v`; then the first member, in sorted order, it does not hold, `vault_plaintext holds v, roots, prf and passkey, and nothing else: <member>`; then its `roots` (absent or not a list: `the vault's roots is a list`), each entry a `VaultRoot` (`the vault's root <i> does not read: <member>`: the first of `fingerprint`, `cn`, `cert` and `created` that is absent, not a string, not a fingerprint or not an instant, then an `alg`, `pkcs8`, `holder` or `rebound_at` of the wrong type, then the first member, in sorted order, it does not hold; an entry that is not an object, `the vault's root <i> does not read`); then its `prf` (32 bytes, or `the vault's prf does not read`) and its `passkey` (an object holding `credential_id`, a string, and nothing else, or `the vault's passkey does not read`). Then the record, likewise: `record_plaintext holds v, roots, ledger, contacts, passkey and backup_verified_at, and nothing else: <member>`; its `roots` where present, as the vault's (`the record's roots is a list`, `the record's root <i> does not read: <member>`); its `ledger` (not a list: `the record's ledger is a list`) and every ledger entry, every root's: an entry that is not an object, lacks a required member, has one of the wrong type, a `root` that is not a fingerprint, an empty `endpoint` or an instant that does not parse, or carries one it does not hold is refused (`the record's ledger entry <i> does not read: <member>`), never skipped — skipped, it could be the live leaf; its `contacts` (not a list: `the record's contacts is a list`), each entry a `VaultContact` (`the record's contact <i> does not read: <member>`: `root` absent or not a fingerprint, `endpoint` absent or not a string, a `name`, `leaf`, `root_cert` or `added` that is not a string or, for `added`, not an instant, then the first member, in sorted order, it does not hold; an entry that is not an object, `the record's contact <i> does not read`); its `passkey` (`the record's passkey does not read`) and its `backup_verified_at`, a whole number (`the record's backup_verified_at does not read`). A root with no `pkcs8` is refused (`this root is held on a card: wallet_issue signs only with a key the vault holds`), and one whose `pkcs8` does not read is refused in its reader's class (`parse`; `unsupported` for a key outside the profile). Then SPEC §2.2, before anything is signed: the key's fingerprint is `root_fingerprint` (`the vault's root key is not the root it is filed under`); the entry's `cert` reads (in its reader's class) and holds the key (`the vault's root certificate is not its key's`); and the key signs `PACT root proof v1`, a newline and 32 random bytes, verified under the certificate's key (`the vault's root key does not sign for its certificate`). After issuing, the chain of the leaf and that certificate is validated at `now` against `root_fingerprint` and the request's endpoint before it is answered (`the chain it issued does not validate: chain rule <n>: <reason>`). The entry answered is the endpoint and the dates, never the leaf. The wallet's rules: `csr_check` with the vault's roots as `root_spkis`; then `ledger_check`'s rules over the record's ledger (a record with no `ledger` has no entry to read): `new_host` true when no ledger entry names that endpoint's host, with the warning `new host: this endpoint's host has never been issued to`; the **live leaf is the newest one issued** (§14.3) and a second endpoint while it is unexpired is refused unless `move: true`, which instead warns `move: the live leaf at the previous endpoint is superseded once contacts see this one` (a `move` or a `move_back`); `not_before` monotonic over the ledger; `valid_days` absent means 365 and an explicit 0 is refused."
     },
     "ledger_check": {
       "section": "ledger",
@@ -1856,7 +2035,7 @@
       },
       "result": { "type": "object", "properties": { "ok": { "const": true } }, "required": ["ok"], "additionalProperties": false },
       "errors": ["bad_request"],
-      "notes": "SPEC §9.2's rules across the whole of messages.jsonl, once it is streamed: the line count against `counts.messages`, the member's sha256 against `files`, `id` unique in the file, every `reply_to` naming a `msg_id` in the file, and every media member (`media`, the hashes export_read answered) named by some attachment (`media/<h>: nothing names it`)."
+      "notes": "SPEC §9.2's rules across the whole of messages.jsonl, once it is streamed: the line count against `counts.messages`, the member's sha256 against `files`, `id` unique in the file, every `reply_to` naming a `msg_id` in the file, and every media member (`media`, the hashes export_read answered) named by some attachment (`media/<h>: nothing names it`). `lines` absent or null is `lines is required`, and one that is not a whole number `lines is a whole number`."
     },
     "export_write": {
       "section": "export",
@@ -1952,7 +2131,7 @@
         "additionalProperties": false
       },
       "errors": ["bad_request"],
-      "notes": "SPEC §9.2's import step 2: an imported leaf never replaces a pin the host validated itself (§14.5). A row whose root is not held is written; a row whose root is held WITHOUT a leaf is written when the row carries one (export_read kept it only because it validated); and what the person decided about that contact stays as held: a blocked contact stays blocked, and its `permissions` stay the ones granted. Every other held root is kept as held. Each of the endpoint, leaf and root certificate a row would change, and each of the `status` and `permissions` (a list compared as a set), is a conflict for the host to show."
+      "notes": "SPEC §9.2's import step 2: an imported leaf never replaces a pin the host validated itself (§14.5). A row whose root is not held is written; a row whose root is held WITHOUT a leaf is written when the row carries one (export_read kept it only because it validated); and what the person decided about that contact stays as held: a blocked contact stays blocked, and its `permissions` stay the ones granted. Every other held root is kept as held. Each of the endpoint, leaf and root certificate a row would change, and each of the `status` and `permissions` (a list compared as a set), is a conflict for the host to show. A held row or a row is refused, `bad_request` naming it, for a `root` that is not a fingerprint (`held[<i>]: root is not a fingerprint`), a `status` other than the three (`rows[<i>]: status is not active, blocked or pending_out`: a held `Blocked` was read as not blocked, so the import did not keep the block) and an `added` that is not an instant (`held[<i>]: added is not an RFC 3339 instant`), export_read's words; the rows' other members are read for what the merge needs."
     },
     "book_rows": {
       "section": "export",
@@ -1972,7 +2151,28 @@
         "additionalProperties": false
       },
       "errors": ["bad_request", "parse"],
-      "notes": "The wallet's book as rows of contacts.csv, the one mapping every wallet uses (SPEC §9.2: a book is an export of contacts only). Each contact, in order: an object (`contacts[<i>] is an object`), no member but `root`, `endpoint`, `name`, `leaf`, `root_cert` and `added` (the first other, in sorted order: `contacts[<i>]: \"<m>\" is not a member of a wallet contact`), `root` and `endpoint` strings (`contacts[<i>]: <m> is required`), the rest strings when present (`contacts[<i>]: <m> is a string`). A row carries the root, the endpoint, the name (empty when absent), the leaf and the root certificate (null when absent), and `added` (the export's time when absent); its other columns are what a contact the wallet keeps is: an empty `display_name`, `status` `active`, `was_active` true, and nothing granted either way. The rows are not checked here: export_write holds each to the reader's rules."
+      "notes": "The wallet's book as rows of contacts.csv, the one mapping every wallet uses (SPEC §9.2: a book is an export of contacts only). Each contact, in order: an object (`contacts[<i>] is an object`), no member but `root`, `endpoint`, `name`, `leaf`, `root_cert` and `added` (the first other, in sorted order: `contacts[<i>]: \"<m>\" is not a member of a wallet contact`), `root` and `endpoint` strings (`contacts[<i>]: <m> is required`), the rest strings when present (`contacts[<i>]: <m> is a string`), then a `root` that is a fingerprint (`contacts[<i>]: root is not a fingerprint`) and an `added`, when present, that is an instant (`contacts[<i>]: added is not an RFC 3339 instant`): both reach the row as its root and its `added`, which the contract types. A row carries the root, the endpoint, the name (empty when absent), the leaf and the root certificate (null when absent), and `added` (the export's time when absent); its other columns are what a contact the wallet keeps is: an empty `display_name`, `status` `active`, `was_active` true, and nothing granted either way. The rows are not otherwise checked here: export_write holds each to the reader's rules."
+    },
+    "media_holds_private_key": {
+      "section": "export",
+      "params": {
+        "type": "object",
+        "properties": {
+          "bytes": { "$ref": "#/$defs/B64url", "description": "A media file's bytes, all of them." }
+        },
+        "required": ["bytes"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "holds_private_key": { "type": "boolean", "description": "The bytes are a private key in DER, PKCS #8 or SEC1 by shape whatever the algorithm, or are UTF-8 text holding one: PEM armour naming a private key, or a word (split at ASCII whitespace) that decodes as base64 or base64url to one." }
+        },
+        "required": ["holds_private_key"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request", "parse"],
+      "notes": "SPEC §9.2's key material over a media file, the check CONTRACT §6.2 leaves to a host because the core never sees a file: every port's export reader judges a media file by it, and a host that streams media asks it here rather than keeping a copy. It reads leniently, as a lenient decoder would: a word forgives its padding, either alphabet and a last character whose spare bits are set, and a DER length may take any definite form of up to four octets, minimal or not, so that nothing a person's tools read as a key is passed as none. `js/key-material.json` is the list of cases."
     },
     "limits_rules_check": {
       "section": "limits",
@@ -2119,7 +2319,42 @@
       "errors": [
         "bad_request"
       ],
-      "notes": "SPEC §12's call budgets as one decision (crates/pact-limits; go/limits.go). A call is charged one token in EVERY bucket of its charge, or in none: a refusal spends nothing. A bucket's level is `min(burst, tokens + elapsed × rate)`, `elapsed` the seconds since `updated_at` and never negative (a clock that went back refills nothing, and the row is written with the earlier time); a level under 1 refuses, with `retry_after = max(1, ceil((1 − level) / rate))`. The arithmetic is the cloud's `RateLimiter.take` operation for operation in IEEE double precision, and `js/cases/limits-vectors.json` holds the two to the same decisions and the same bits. A host may delete a row idle for over an hour: under rules `limits_rules_check` passes it is full, and no decision changes. In order: `rules` (absent: `rules is required`; not enforceable: `the limits rules cannot be enforced: <limits_rules_check's why>`), `charge` (not an object: `charge is required`; `charge.kind is required`; `charge.kind is one of …`; a member its kind does not hold, the first in sorted order: `a <kind> charge holds <members>, and nothing else: <member>`; `charge.<member> is required` for a string that is absent or empty, `charge.<member> is a whole number` for a count, `charge.root is a string or null`, `charge.source is required`, `charge.addressed is required`), `now` (`now is a time in milliseconds`: a whole number from 0 to 2^53 − 1, written without a fraction or an exponent), `state` (not an object: `state is an object of rows by bucket`; a row, in sorted order of key, that does not read: `the state's row <key> does not read: <member>`)."
+      "notes": "SPEC §12's call budgets as one decision (crates/pact-limits; go/limits.go). A call is charged one token in EVERY bucket of its charge, or in none: a refusal spends nothing. A bucket's level is `min(burst, tokens + elapsed × rate)`, `elapsed` the seconds since `updated_at` and never negative (a clock that went back refills nothing, and the row is written with the earlier time); a level under 1 refuses, with `retry_after = max(1, ceil((1 − level) / rate))`. The arithmetic is what the cloud's `RateLimiter.take` was, operation for operation in IEEE double precision, until the cloud removed it and decided through this function (pact-cloud ba68f9c); `js/cases/limits-vectors.json`, a fixed record of that TypeScript's decisions, holds every port to the same decisions and the same bits. A host may delete a row idle for over an hour: under rules `limits_rules_check` passes it is full, and no decision changes. In order: `rules` (absent: `rules is required`; not enforceable: `the limits rules cannot be enforced: <limits_rules_check's why>`), `charge` (not an object: `charge is required`; `charge.kind is required`; `charge.kind is one of …`; a member its kind does not hold, the first in sorted order: `a <kind> charge holds <members>, and nothing else: <member>`; `charge.<member> is required` for a string that is absent or empty, `charge.<member> is a whole number` for a count, `charge.root is a string or null`, `charge.source is required`, `charge.addressed is required`), `now` (absent or null: `now is required`; otherwise `now is a time in milliseconds`: a whole number from 0 to 2^53 − 1, written without a fraction or an exponent), `state` (not an object: `state is an object of rows by bucket`; a row, in sorted order of key, that does not read: `the state's row <key> does not read: <member>`)."
+    },
+    "limits_buckets": {
+      "section": "limits",
+      "params": {
+        "type": "object",
+        "properties": {
+          "rules": { "$ref": "#/$defs/LimitsRules" },
+          "charge": { "$ref": "#/$defs/LimitsCharge" }
+        },
+        "required": ["rules", "charge"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "buckets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": { "type": "string", "description": "The row's key, as `limits_decide`'s `state` and `writes` name it." },
+                "per_second": { "type": "number", "description": "The sustained rate, in calls a second: for `identity` and `out:identity`, `contact_cap` × `contact_calls_per_second`, at most `identity_capacity_per_second` and at least 1." },
+                "burst": { "type": "number", "description": "The most calls the bucket holds; a bucket with no row is full." }
+              },
+              "required": ["key", "per_second", "burst"],
+              "additionalProperties": false
+            },
+            "description": "The buckets the charge is charged to, in charge order; none for `pending_in`, a count."
+          }
+        },
+        "required": ["buckets"],
+        "additionalProperties": false
+      },
+      "errors": ["bad_request"],
+      "notes": "The rows `limits_decide` reads for a charge, so a host can fetch them before it asks: the key scheme `LimitsCharge` describes, from the one place it is written (crates/pact-limits `Charge::buckets`; go/limits.go `Buckets`), where a host on the Wasm had to derive it a second time. Reads `rules` and then `charge` exactly as `limits_decide` does, in its words (`rules is required`; `the limits rules cannot be enforced: <why>`; the charge's own refusals)."
     }
   }
 }

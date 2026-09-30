@@ -1,0 +1,115 @@
+{
+  "about": "Key material, as SPEC §9.2 refuses it (\"any cell, any string member of the manifest or of a message, and any media file that decodes as a private key — PKCS #8 or SEC1, in DER or PEM\"): each case is bytes (`hex`) or text (`text`), and whether a media file of those bytes holds a private key. Detection reads leniently, as a lenient decoder would (CW-07, R38): a base64 word forgives its padding, either alphabet and a last character with a spare bit set, and a DER length may take any definite form of up to four octets. The one list: the core's a_media_file_is_key_material_in_der_or_pem (crates/pact-identity/src/export/mod.rs), the Go port's TestAMediaFileIsKeyMaterialInDEROrPEM (go/export_zip_test.go) and the parity cases of media_holds_private_key (js/cases/export.mjs) read it. Written once from the seed library's keys (seed \"key-material/ed25519\", \"key-material/sec1\", and js/cast.mjs's bharat.root for P-256), and data from then on.",
+  "cases": [
+    {
+      "what": "PKCS #8 of an Ed25519 key, in DER",
+      "hex": "302e020100300506032b6570042204202630a780eb2472df176707f13d80d715b3e6a1e8a6472410425455e80d866829",
+      "holds": true
+    },
+    {
+      "what": "PKCS #8 of a P-256 key, in DER",
+      "hex": "3041020100301306072a8648ce3d020106082a8648ce3d0301070427302502010104208c809385cedf0b98b39d8df4b66d68325822d0fffb7d5ffee31f480d9ecf669c",
+      "holds": true
+    },
+    {
+      "what": "SEC1, in DER",
+      "hex": "30250201010420b64e9916c4e5bdd8e07373ef1f3b3b696881a7817bdeb5d7830ff592ce5c3099",
+      "holds": true
+    },
+    {
+      "what": "PKCS #8 whose length is written in two octets where one would do (81)",
+      "hex": "30812e020100300506032b6570042204202630a780eb2472df176707f13d80d715b3e6a1e8a6472410425455e80d866829",
+      "holds": true
+    },
+    {
+      "what": "PKCS #8 whose length is written in three octets (82 00)",
+      "hex": "3082002e020100300506032b6570042204202630a780eb2472df176707f13d80d715b3e6a1e8a6472410425455e80d866829",
+      "holds": true
+    },
+    {
+      "what": "PKCS #8 whose length is written in four length octets (84 00 00 00)",
+      "hex": "30840000002e020100300506032b6570042204202630a780eb2472df176707f13d80d715b3e6a1e8a6472410425455e80d866829",
+      "holds": true
+    },
+    {
+      "what": "PKCS #8 whose length is written in five length octets",
+      "hex": "3085000000002e020100300506032b6570042204202630a780eb2472df176707f13d80d715b3e6a1e8a6472410425455e80d866829",
+      "holds": false
+    },
+    {
+      "what": "PKCS #8 whose length is indefinite",
+      "hex": "3080020100300506032b6570042204202630a780eb2472df176707f13d80d715b3e6a1e8a6472410425455e80d8668290000",
+      "holds": false
+    },
+    {
+      "what": "PKCS #8 with a byte after it",
+      "hex": "302e020100300506032b6570042204202630a780eb2472df176707f13d80d715b3e6a1e8a6472410425455e80d86682900",
+      "holds": false
+    },
+    {
+      "what": "DER that is no key",
+      "hex": "3003020105",
+      "holds": false
+    },
+    {
+      "what": "a certificate, in DER",
+      "hex": "308201313081e4a0030201020209009bf8bbf11e63ef36300506032b657030143112301006035504030c09416c696e612052616f3020170d3236303930313030303030305a180f39393939313233313233353935395a30143112301006035504030c09416c696e612052616f302a300506032b65700321008a9c89da0799b25a54e24c997a3b993752db12ae34a8fe80adb9ef28609a937da351304f30120603551d130101ff040830060101ff020100300e0603551d0f0101ff04040302020430290603551d0e04220420dba16f57b0ffe3094b716640d7702cedfb9a51f851f995cc96c1eaa0b03d5b83300506032b657003410051835654c9c897c089aa95797d1220dedf4186962c2299a7efea841f7c26356316d0881464a830f7665d6b5fb2ca7735589e6dca125dd26332ac31a939b95700",
+      "holds": false
+    },
+    {
+      "what": "a document",
+      "text": "%PDF-1.7\nthe bytes of a.pdf\n",
+      "holds": false
+    },
+    {
+      "what": "PKCS #8 in PEM",
+      "text": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEICYwp4DrJHLfF2cH8T2A1xWz5qHopkckEEJUVegNhmgp\n-----END PRIVATE KEY-----\n",
+      "holds": true
+    },
+    {
+      "what": "SEC1 in PEM",
+      "text": "-----BEGIN EC PRIVATE KEY-----\nMCUCAQEEILZOmRbE5b3Y4HNz7x87O2logaeBe96114MP9ZLOXDCZ\n-----END EC PRIVATE KEY-----\n",
+      "holds": true
+    },
+    {
+      "what": "a certificate in PEM",
+      "text": "-----BEGIN CERTIFICATE-----\nMIIBMTCB5KADAgECAgkAm/i78R5j7zYwBQYDK2VwMBQxEjAQBgNVBAMMCUFsaW5h\nIFJhbzAgFw0yNjA5MDEwMDAwMDBaGA85OTk5MTIzMTIzNTk1OVowFDESMBAGA1UE\nAwwJQWxpbmEgUmFvMCowBQYDK2VwAyEAipyJ2geZslpU4kyZejuZN1LbEq40qP6A\nrbnvKGCak32jUTBPMBIGA1UdEwEB/wQIMAYBAf8CAQAwDgYDVR0PAQH/BAQDAgIE\nMCkGA1UdDgQiBCDboW9XsP/jCUtxZkDXcCzt+5pR+FH5lcyWweqgsD1bgzAFBgMr\nZXADQQBRg1ZUyciXwImqlXl9EiDe30GGliwimafv6oQffCY1YxbQiBRkqDD3Zl1r\nX7LKdzVYnm3KEl3SYzKsMak5uVcA\n-----END CERTIFICATE-----\n",
+      "holds": false
+    },
+    {
+      "what": "PKCS #8 as one base64url word",
+      "text": "MEECAQAwEwYHKoZIzj0CAQYIKoZIzj0DAQcEJzAlAgEBBCCMgJOFzt8LmLOdjfS2bWgyWCLQ__t9X_7jH0gNns9mnA",
+      "holds": true
+    },
+    {
+      "what": "PKCS #8 as one base64 word, padded",
+      "text": "MEECAQAwEwYHKoZIzj0CAQYIKoZIzj0DAQcEJzAlAgEBBCCMgJOFzt8LmLOdjfS2bWgyWCLQ//t9X/7jH0gNns9mnA==",
+      "holds": true
+    },
+    {
+      "what": "PKCS #8 as a base64url word whose last character has a spare bit set",
+      "text": "MEECAQAwEwYHKoZIzj0CAQYIKoZIzj0DAQcEJzAlAgEBBCCMgJOFzt8LmLOdjfS2bWgyWCLQ__t9X_7jH0gNns9mnB",
+      "holds": true
+    },
+    {
+      "what": "PKCS #8 as a base64 word whose last character has a spare bit set, padded",
+      "text": "MEECAQAwEwYHKoZIzj0CAQYIKoZIzj0DAQcEJzAlAgEBBCCMgJOFzt8LmLOdjfS2bWgyWCLQ//t9X/7jH0gNns9mnB==",
+      "holds": true
+    },
+    {
+      "what": "PKCS #8 as a word in the middle of a line",
+      "text": "the key is MC4CAQAwBQYDK2VwBCIEICYwp4DrJHLfF2cH8T2A1xWz5qHopkckEEJUVegNhmgp and nothing else",
+      "holds": true
+    },
+    {
+      "what": "PKCS #8 as a word broken by a line break",
+      "text": "MC4CAQAwBQYDK2VwBCIEICYwp4DrJH\nLfF2cH8T2A1xWz5qHopkckEEJUVegNhmgp",
+      "holds": false
+    },
+    {
+      "what": "a word of the base64 alphabet that begins with M and decodes to no key",
+      "text": "MIIBIjANBgkqhkiG9w0BAQEFAAOC",
+      "holds": false
+    }
+  ]
+}

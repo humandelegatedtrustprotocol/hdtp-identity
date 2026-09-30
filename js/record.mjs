@@ -58,7 +58,9 @@ const holder = (id) => {
   const e = map[id];
   if (!e) return '— *nothing claims it*';
   const names = [...(e.held_by ?? []), ...(e.elsewhere_names ?? [])];
-  if (names.length) return names.map((n) => `\`${n}\``).join(', ');
+  // A named gap is part of the answer to "held by what": the rest of the MUST is held by nothing.
+  const gap = e.gap ? ' — *and a named gap: a part nothing holds (js/musts.json)*' : '';
+  if (names.length) return names.map((n) => `\`${n}\``).join(', ') + gap;
   return `*${e.elsewhere ?? 'elsewhere'}, by declaration*`;
 };
 
@@ -70,7 +72,7 @@ L.push('regenerates and fails on any difference, which is what gate.sh runs. Bot
 L.push('that prove them rather than from prose beside them: the MUSTs from `pact-protocol/SPEC.md` through');
 L.push("the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the parity cases from");
 L.push('`js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no');
-L.push('case can be listed here that did not pass.');
+L.push('case can be listed as proven that did not pass.');
 L.push('');
 L.push(`Specification: **${specVersion}**. `
   + `**${musts.length}** normative sentences, **${parity.cases}** cross-port parity cases over `
@@ -81,10 +83,10 @@ L.push('');
 // other, so it is worth recording as its own line rather than folded into the case count.
 const c = parity.contract;
 L.push(`Every answer of both ports is validated against \`${c.file}\` (**${c.methods}** functions, `
-  + `spec ${c.spec}): **${c.answers_validated}** answers held to the shape it declares, `
-  + `**${c.off_contract}** did not. Of **${c.declared_error_codes}** declared error codes, `
-  + `**${c.declared_error_codes - c.codes_never_produced.length}** were produced by a case here; the `
-  + `rest are declared for a caller's benefit and no argument in this suite reaches them.`);
+  + `spec ${c.spec}): **${c.answers_validated}** answers, of which **${c.off_contract}** do not hold to the shape `
+  + `it declares. Of **${c.declared_error_codes}** `
+  + `declared error codes, **${c.declared_error_codes - c.codes_never_produced.length}** were produced by both `
+  + 'ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.');
 L.push('');
 
 // ── the MUSTs ─────────────────────────────────────────────────────────────────────────
@@ -121,7 +123,9 @@ L.push('*whole on success* has at least one case whose successful answer is comp
 L.push('which is the only kind that notices a member going missing; a refusal compared whole proves both');
 L.push('ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.');
 L.push('');
-L.push(`At the run that generated this file: **${parity.cases}** cases, **${parity.disagreements}** disagreements, `
+L.push(`At the run that generated this file: **${parity.cases}** cases (**${parity.generated}** of the run's cases `
+  + 'are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), '
+  + `**${parity.disagreements}** disagreements, `
   + `**${parity.compared_whole}** of **${parity.functions}** functions compared whole on success.`);
 for (const f of parity.by_function) {
   L.push('');

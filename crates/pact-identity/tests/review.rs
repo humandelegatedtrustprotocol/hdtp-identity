@@ -289,6 +289,77 @@ fn an_envelope_asking_to_be_remembered_for_a_year_is_refused() {
     assert_eq!(edge["result"]["code"], "ok", "{edge}");
 }
 
+/// A header's `ts` and `exp` are integers it carries as themselves (2^53 - 1 either way): RFC 8785 writes
+/// the double, so past that the core sealed a header whose `ts` was not the one it was given, and a
+/// `ts` of i64::MAX with no `exp` overflowed computing the default (a panic in this debug build, a
+/// wrapped `exp` in the Wasm). go/review_test.go's TestTheTypedSealRefusesAHeaderIntegerItCannotCarry
+/// is the Go port's twin; js/parity.mjs holds both at the JSON boundary.
+#[test]
+fn a_header_integer_the_header_cannot_carry_is_refused_before_the_default_is_computed() {
+    let alina = pair("ed25519", E_A);
+    let seal = |fn_: &str, ts: Value, exp: Option<i64>| {
+        let mut args = json!({
+            "sender_pkcs8": alina.leaf_key["pkcs8"], "sender_chain": [b64u(&alina.leaf), b64u(&alina.root)],
+            "msg_id": "m", "ts": ts,
+        });
+        if fn_ == "seal_request" {
+            args["recipient_leaf"] = json!(b64u(&alina.leaf));
+        } else {
+            args["recipient_spki"] = alina.leaf_key["spki"].clone();
+            args["result"] = json!({});
+        }
+        if let Some(exp) = exp {
+            args["exp"] = json!(exp);
+        }
+        call(fn_, args)
+    };
+    let out = |m: &str| json!({ "error": "bad_request", "why": format!("{m} is an integer from -(2^53 - 1) to 2^53 - 1") });
+    const MAX: i64 = (1 << 53) - 1;
+    for fn_ in ["seal_request", "seal_result"] {
+        assert_eq!(seal(fn_, json!(i64::MAX), None), out("ts"), "{fn_}");
+        assert_eq!(seal(fn_, json!(i64::MIN), None), out("ts"), "{fn_}");
+        assert_eq!(seal(fn_, json!(MAX + 1), Some(1)), out("ts"), "{fn_}");
+        assert_eq!(seal(fn_, json!(MAX), None), out("exp"), "{fn_}");
+        assert_eq!(seal(fn_, json!(1), Some(-MAX - 1)), out("exp"), "{fn_}");
+        assert!(seal(fn_, json!(MAX), Some(MAX))["protected"].is_string(), "{fn_} at the edge");
+    }
+}
+
+// ── §13.1#1: `enc` is exactly the suite's Npk, under each suite, in both directions ──
+/// `sig` covers `protected ‖ enc ‖ ct` with nothing between them, so a byte moved across the enc/ct
+/// boundary leaves the signed bytes as they were: the forgery is signed, and the length is the one
+/// thing that refuses it. go/review_test.go's TestAnEncapsulatedKeyOfTheWrongLengthIsRefused is the Go
+/// port's twin, and js/parity.mjs holds both ports to it through `decide` and `open_result`.
+#[test]
+fn an_encapsulated_key_of_the_wrong_length_is_refused_under_each_suite() {
+    let alina = pair("ed25519", E_A);
+    for (alg, npk) in [("ed25519", 32), ("p256", 65)] {
+        let me = key(alg);
+        let sealed = call(
+            "seal_result",
+            json!({
+                "recipient_spki": me["spki"], "sender_pkcs8": alina.leaf_key["pkcs8"], "form": "chain",
+                "sender_chain": [b64u(&alina.leaf), b64u(&alina.root)], "result": { "ok": true }, "msg_id": "r-1", "ts": now_s(),
+            }),
+        );
+        let (enc, ct) = (from_b64u(sealed["enc"].as_str().unwrap()), from_b64u(sealed["ct"].as_str().unwrap()));
+        assert_eq!(enc.len(), npk, "{alg}");
+        let open = |enc: &[u8], ct: &[u8]| {
+            let envelope = json!({ "protected": sealed["protected"], "enc": b64u(enc), "ct": b64u(ct), "sig": sealed["sig"] });
+            call(
+                "open_result",
+                json!({ "envelope": envelope, "my_pkcs8": me["pkcs8"], "my_spki": me["spki"], "msg_id": "r-1", "now": NOW_RFC, "pins": [] }),
+            )
+        };
+        assert_eq!(open(&enc, &ct)["ok"], true, "{alg}: the envelope as sealed opens, so the harness is sound");
+        let short = open(&enc[..npk - 1], &[&enc[npk - 1..], &ct[..]].concat());
+        let long = open(&[&enc[..], &ct[..1]].concat(), &ct[1..]);
+        for (what, got) in [("one byte short", short), ("one byte long", long)] {
+            assert_eq!(got, json!({ "error": "envelope_invalid", "why": "encapsulated key is not the suite's length" }), "{alg}, {what}");
+        }
+    }
+}
+
 // ── MEDIUM 3: the address guard takes the normal form first ──
 #[test]
 fn the_address_guard_refuses_every_other_spelling_of_loopback() {
@@ -342,4 +413,109 @@ fn an_open_with_no_public_key_is_refused_by_name() {
         json!({ "envelope": { "protected": "", "enc": "", "ct": "", "sig": "" }, "my_pkcs8": k["pkcs8"], "msg_id": "m", "now": "2026-09-13T12:00:00Z" }),
     );
     assert_eq!(r, json!({ "error": "bad_request", "why": "my_spki is required" }));
+}
+
+/// The typed `decide`, `decide_chain` and `open_result` hold every root the host hands them to a
+/// fingerprint first, as the Go port's typed `Decide`, `DecideChain` and `OpenResult` do (its
+/// `hostRoots`), in the same words. Only the JSON reader asked it here, so a typed caller's pin whose
+/// root was `abc` was a root nothing matched: `decide_chain` answered `chain rule 1` where Go answered
+/// `node.pins[0].root is not a fingerprint` (the hunt of 2026-09-30). The control, the same state with
+/// a real fingerprint, gets past the check to the chain.
+#[test]
+fn typed_decisions_refuse_a_host_root_that_is_not_a_fingerprint() {
+    use pact_identity::envelope::{self, CallerPin, DecideInput, FormerEndpoint, HeldKey, NodeState, OpenResultArgs, Pin, Tombstone, Wire};
+    let fp = format!("sha256:{}", "A".repeat(43));
+    let pin =
+        |root: &str| Pin { root: root.into(), endpoint: E_A.into(), leaf: String::new(), state: "active".into(), leaf_fingerprint: None };
+    let node = |pins: Vec<Pin>, tombstones: Vec<Tombstone>, former_endpoints: Vec<FormerEndpoint>| NodeState {
+        endpoint: E_A.into(),
+        accept_new_hosts: "auto".into(),
+        chain: vec![],
+        keys: vec![],
+        former: vec![],
+        sibling_kids: vec![],
+        pins,
+        tombstones,
+        former_endpoints,
+        seen: vec![],
+    };
+    let why = |r: pact_identity::Result<envelope::DecideOutput>| match r {
+        Err(e) => format!("{}: {}", e.code, e.why),
+        Ok(d) => d.result.to_string(),
+    };
+    let stone = |root: &str| Tombstone { root: root.into(), leaf: String::new(), at: NOW_RFC.into() };
+    let former = |root: &str| FormerEndpoint { root: root.into(), endpoint: E_A.into(), at: NOW_RFC.into() };
+    for (state, want) in [
+        (node(vec![pin(&fp), pin("abc")], vec![], vec![]), "bad_request: node.pins[1].root is not a fingerprint"),
+        (node(vec![], vec![stone("")], vec![]), "bad_request: node.tombstones[0].root is not a fingerprint"),
+        (node(vec![pin(&fp)], vec![stone(&fp)], vec![former("abc")]), "bad_request: node.former_endpoints[0].root is not a fingerprint"),
+        // pins before tombstones, as the reader and the Go port read them
+        (node(vec![pin("abc")], vec![stone("abc")], vec![]), "bad_request: node.pins[0].root is not a fingerprint"),
+        // And, in the reader's order, a held key's kid first, then each pin's state and leaf fingerprint
+        // beside its root (the review of 2026-09-30: S1, S2, and the kid).
+        (
+            NodeState {
+                keys: vec![HeldKey { kid: "abc".into(), leaf: String::new(), pkcs8: String::new(), current: true }],
+                ..node(vec![pin("abc")], vec![], vec![])
+            },
+            "bad_request: node.keys[0].kid is not a fingerprint",
+        ),
+        (
+            node(vec![Pin { state: "Blocked".into(), ..pin(&fp) }], vec![], vec![]),
+            "bad_request: node.pins[0].state is active, pending_out or blocked",
+        ),
+        (
+            node(vec![Pin { leaf_fingerprint: Some(String::new()), ..pin(&fp) }], vec![], vec![]),
+            "bad_request: node.pins[0].leaf_fingerprint is not a fingerprint",
+        ),
+    ] {
+        assert_eq!(why(envelope::decide_chain(&state, &[], now_s())), want);
+        let input = DecideInput {
+            now: NOW_RFC.into(),
+            envelope: Wire { protected: String::new(), enc: String::new(), ct: String::new(), sig: String::new() },
+            node: state,
+        };
+        assert_eq!(why(envelope::decide(&input)), want, "decide asks it before anything else");
+    }
+    // The control: every root a fingerprint, and the call reaches what it was asked.
+    let good = node(vec![pin(&fp)], vec![stone(&fp)], vec![former(&fp)]);
+    assert_eq!(
+        why(envelope::decide_chain(&good, &[], now_s())),
+        json!({ "code": "envelope_invalid", "why": "chain rule 1: chain of 0" }).to_string()
+    );
+
+    let me = PrivateKey::generate(Alg::Ed25519).unwrap();
+    let me_pub = me.public();
+    let wire = Wire { protected: String::new(), enc: String::new(), ct: String::new(), sig: String::new() };
+    let open = |pins: &[CallerPin]| match envelope::open_result(OpenResultArgs {
+        envelope: &wire,
+        my_key: &me,
+        my_public: &me_pub,
+        msg_id: "m",
+        now: now_s(),
+        pins,
+        expected_root: None,
+        expected_endpoint: None,
+    }) {
+        Err(e) => format!("{}: {}", e.code, e.why),
+        Ok(v) => v.to_string(),
+    };
+    let caller = |root: &str| CallerPin {
+        root: root.into(),
+        endpoint: E_A.into(),
+        leaf: String::new(),
+        state: "active".into(),
+        leaf_fingerprint: None,
+    };
+    assert_eq!(open(&[caller(&fp), caller("abc")]), "bad_request: pins[1].root is not a fingerprint");
+    assert_eq!(
+        open(&[CallerPin { state: "removed".into(), ..caller(&fp) }]),
+        "bad_request: pins[0].state is active, pending_out or blocked"
+    );
+    assert_eq!(
+        open(&[CallerPin { leaf_fingerprint: Some("x".into()), ..caller(&fp) }]),
+        "bad_request: pins[0].leaf_fingerprint is not a fingerprint"
+    );
+    // The control: past the pins, the empty envelope is refused for itself.
+    assert!(!open(&[caller(&fp)]).contains("root is not a fingerprint"));
 }

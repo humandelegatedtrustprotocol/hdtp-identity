@@ -12,10 +12,11 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 
 /// The JSON blocks of a document's Appendix B: everything fenced as ```json between the heading
-/// `## Appendix B` and the closing line `*End of PACT`. Both markers must be there and every fence
-/// must close — the rule js/seed.mjs `appendixB` reads by, held by the same cases in both test suites.
+/// `## Appendix B` and the closing line `*End of PACT`. Both markers must be there, every fence must
+/// close and every block must be JSON — the rule js/seed.mjs `appendixB`, the core tests and the Go
+/// port read by, each held to js/appendix-b-reader.json's cases, refusals word for word.
 fn appendix_b(spec: &str) -> Res<Vec<Value>> {
-    let start = spec.find("## Appendix B").ok_or_else(|| Fail("no Appendix B in the document".into()))?;
+    let start = spec.find("## Appendix B").ok_or_else(|| Fail("the document has no Appendix B".into()))?;
     let end =
         spec[start..].find("*End of PACT").map(|i| start + i).ok_or_else(|| Fail("Appendix B has no end marker (*End of PACT)".into()))?;
     let b = &spec[start..end];
@@ -24,7 +25,8 @@ fn appendix_b(spec: &str) -> Res<Vec<Value>> {
     while let Some(i) = rest.find("```json\n") {
         let after = &rest[i + 8..];
         let j = after.find("\n```").ok_or_else(|| Fail("an unterminated json fence in Appendix B".into()))?;
-        out.push(serde_json::from_str(&after[..j]).map_err(|e| Fail(format!("Appendix B block: {e}")))?);
+        let n = out.len() + 1;
+        out.push(serde_json::from_str(&after[..j]).map_err(|_| Fail(format!("Appendix B block {n} is not JSON")))?);
         rest = &after[j + 4..];
     }
     Ok(out)
@@ -267,14 +269,19 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    // The same cases js/seed.test.mjs holds `appendixB` to.
+    // js/appendix-b-reader.json: the cases all four Appendix B readers of this repository are held to.
     #[test]
-    fn appendix_b_is_read_between_its_two_markers_and_a_missing_marker_or_an_open_fence_is_refused() {
-        let doc = |body: &str, end: &str| format!("# Spec\n\n## Appendix B\n\n{body}\n{end}");
-        let blocks = appendix_b(&doc("```json\n{\"a\":1}\n```\n\n```json\n[2]\n```", "*End of PACT 2.1*\n")).unwrap();
-        assert_eq!(blocks, vec![json!({ "a": 1 }), json!([2])]);
-        assert!(appendix_b("# no appendix").is_err());
-        assert!(appendix_b(&doc("```json\n{\"a\":1}\n```", "")).is_err_and(|e| e.0.contains("no end marker")));
-        assert!(appendix_b(&doc("```json\n{\"a\":1}\n", "*End of PACT 2.1*\n")).is_err_and(|e| e.0.contains("unterminated")));
+    fn appendix_b_is_read_as_the_shared_cases_say_refusals_word_for_word() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../js/appendix-b-reader.json");
+        let fixture: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let cases = fixture["cases"].as_array().unwrap();
+        assert!(cases.len() >= 10);
+        for c in cases {
+            let (name, doc) = (c["name"].as_str().unwrap(), c["doc"].as_str().unwrap());
+            match c["refused"].as_str() {
+                Some(why) => assert_eq!(appendix_b(doc).map_err(|e| e.0).unwrap_err(), why, "{name}"),
+                None => assert_eq!(json!(appendix_b(doc).map_err(|e| e.0).unwrap()), c["blocks"], "{name}"),
+            }
+        }
     }
 }

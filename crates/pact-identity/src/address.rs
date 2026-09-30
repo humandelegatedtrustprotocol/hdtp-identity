@@ -49,8 +49,21 @@ fn v6_private(ip: Ipv6Addr) -> bool {
     (s[0] & 0xfe00) == 0xfc00 || (s[0] & 0xffc0) == 0xfe80 || (s[0] & 0xffc0) == 0xfec0
 }
 
+/// Whether an IP literal is one the guard refuses (`v4_private`, `v6_private`), or an IPv6 literal
+/// with a zone id. One leading `[` and one trailing `]` are dropped, as a URL writes an IPv6 host: this
+/// trimmed every bracket from both ends, so `[[::1]]` was loopback here and no address to the Go port.
+/// Text that is no address — a zone on an IPv4 address, or an empty zone, as Go's `netip` reads them —
+/// is not private.
 pub fn ip_is_private(ip: &str) -> bool {
-    match ip.trim_matches(|c| c == '[' || c == ']').parse::<IpAddr>() {
+    let ip = ip.strip_prefix('[').unwrap_or(ip);
+    let ip = ip.strip_suffix(']').unwrap_or(ip);
+    // A zone is an interface scope (RFC 4007 §6), which no global address carries: a literal with one
+    // is never a public address. `std` cannot parse one, so this answered false for `fe80::1%eth0` — a
+    // link-local address a resolver may hand a host — while the Go port judged it by its address.
+    if let Some((address, zone)) = ip.split_once('%') {
+        return !zone.is_empty() && address.parse::<Ipv6Addr>().is_ok();
+    }
+    match ip.parse::<IpAddr>() {
         Ok(IpAddr::V4(v4)) => v4_private(v4),
         Ok(IpAddr::V6(v6)) => v6_private(v6),
         Err(_) => false,
@@ -130,5 +143,13 @@ mod tests {
         assert!(ip_is_private("10.0.0.1"));
         assert!(!ip_is_private("8.8.8.8"));
         assert!(!ip_is_private("not-an-ip"));
+        // A zone id is never public; an empty zone, or one on an IPv4 address, is no address.
+        for zoned in ["fe80::1%eth0", "2001:db8::1%eth0", "[fe80::1%eth0]", "fe80::1%eth0%x"] {
+            assert!(ip_is_private(zoned), "{zoned}");
+        }
+        for not_one in ["fe80::1%", "10.0.0.1%eth0", "[[::1]]", "]::1[", "[[10.0.0.1]]"] {
+            assert!(!ip_is_private(not_one), "{not_one}");
+        }
+        assert!(ip_is_private("[::1") && ip_is_private("::1]"));
     }
 }

@@ -20,8 +20,8 @@ func limitsWhole(v any) (int64, bool) {
 	if !isNum {
 		return 0, false
 	}
-	i, err := strconv.ParseInt(string(n), 10, 64)
-	if err != nil || i < 0 || i > limitsMaxExact {
+	i, isInt := integerText(string(n))
+	if !isInt || i < 0 || i > limitsMaxExact {
 		return 0, false
 	}
 	return i, true
@@ -34,21 +34,6 @@ func limitsNumber(v any) (float64, bool) {
 	}
 	f, err := strconv.ParseFloat(string(n), 64)
 	return f, err == nil
-}
-
-func limitsArgs(args json.RawMessage) (map[string]any, json.RawMessage) {
-	if len(args) == 0 {
-		return map[string]any{}, nil
-	}
-	decoded, err := decodeJSON(args)
-	if err != nil {
-		return nil, fail(codeArgs, "arguments do not read")
-	}
-	a, isObj := decoded.(map[string]any)
-	if !isObj {
-		return nil, fail(codeArgs, "args is a JSON object")
-	}
-	return a, nil
 }
 
 // limitsReadRules reads a rules document and holds it to Check; the error is the first reason.
@@ -74,13 +59,9 @@ func limitsReadRules(doc any) (LimitsRules, error) {
 	return rules, nil
 }
 
-func callLimitsRulesCheck(args json.RawMessage) json.RawMessage {
-	a, bad := limitsArgs(args)
-	if bad != nil {
-		return bad
-	}
-	doc, present := a["rules"]
-	if !present || doc == nil {
+func callLimitsRulesCheck(a args) json.RawMessage {
+	doc := a.value("rules")
+	if doc == nil {
 		return fail(codeArgs, "rules is required")
 	}
 	if _, err := limitsReadRules(doc); err != nil {
@@ -89,7 +70,7 @@ func callLimitsRulesCheck(args json.RawMessage) json.RawMessage {
 	return ok(map[string]any{"ok": true})
 }
 
-const limitsKinds = "contact_in, guest_in, guest_total, contact_out, stranger_out, integration, pending_in"
+var limitsKinds = strings.Join(limitsChargeKinds, ", ")
 
 func limitsReadCharge(v any) (LimitsCharge, error) {
 	o, isObj := v.(map[string]any)
@@ -226,29 +207,60 @@ type limitsAnswer struct {
 	Writes     []limitsWrite `json:"writes"`
 }
 
-func callLimitsDecide(args json.RawMessage) json.RawMessage {
-	a, bad := limitsArgs(args)
-	if bad != nil {
-		return bad
-	}
-	// In the order the function needs them (CONTRACT §0): the rules, what is charged, when, the rows.
-	doc, present := a["rules"]
-	if !present || doc == nil {
-		return fail(codeArgs, "rules is required")
+// limitsRulesAndCharge reads the rules and the charge, in that order and in these words: what
+// limits_decide and limits_buckets both read first, by one reader, as the core's rules_and_charge.
+func limitsRulesAndCharge(a args) (LimitsRules, LimitsCharge, json.RawMessage) {
+	doc := a.value("rules")
+	if doc == nil {
+		return nil, LimitsCharge{}, fail(codeArgs, "rules is required")
 	}
 	rules, err := limitsReadRules(doc)
 	if err != nil {
-		return fail(codeArgs, "the limits rules cannot be enforced: "+err.Error())
+		return nil, LimitsCharge{}, fail(codeArgs, "the limits rules cannot be enforced: "+err.Error())
 	}
-	charge, err := limitsReadCharge(a["charge"])
+	charge, err := limitsReadCharge(a.value("charge"))
 	if err != nil {
-		return failErr(codeArgs, err)
+		return nil, LimitsCharge{}, failErr(codeArgs, err)
 	}
-	now, isWhole := limitsWhole(a["now"])
+	return rules, charge, nil
+}
+
+type limitsBucketOut struct {
+	Key       string  `json:"key"`
+	PerSecond float64 `json:"per_second"`
+	Burst     float64 `json:"burst"`
+}
+
+// callLimitsBuckets answers the buckets a charge is charged to, in charge order, each with its key,
+// rate and burst: the rows a host holds for limits_decide's `state`, from Buckets, the one place the
+// key scheme is written. The Wasm could decide a charge and not say which rows it reads (X2).
+func callLimitsBuckets(a args) json.RawMessage {
+	rules, charge, bad := limitsRulesAndCharge(a)
+	if bad != nil {
+		return bad
+	}
+	out := []limitsBucketOut{}
+	for _, b := range charge.Buckets(rules) {
+		out = append(out, limitsBucketOut{Key: b.Key, PerSecond: b.PerSecond, Burst: b.Burst})
+	}
+	return ok(map[string]any{"buckets": out})
+}
+
+func callLimitsDecide(a args) json.RawMessage {
+	// In the order the function needs them (CONTRACT §0): the rules, what is charged, when, the rows.
+	rules, charge, bad := limitsRulesAndCharge(a)
+	if bad != nil {
+		return bad
+	}
+	// Absent or null is `now is required`, as CONTRACT §0 has every absent member (S1-2).
+	if a.present("now") == nil {
+		return fail(codeArgs, "now is required")
+	}
+	now, isWhole := limitsWhole(a.value("now"))
 	if !isWhole {
 		return fail(codeArgs, "now is a time in milliseconds")
 	}
-	store, err := limitsReadState(a["state"])
+	store, err := limitsReadState(a.value("state"))
 	if err != nil {
 		return failErr(codeArgs, err)
 	}

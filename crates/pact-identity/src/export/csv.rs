@@ -115,8 +115,10 @@ impl<'a> Iterator for Records<'a> {
     }
 }
 
-/// Every record, owned.
-pub fn read(text: &str) -> Result<Vec<Vec<String>>, Refusal> {
+/// Every record, owned: for the tests, which read a file back whole. The library streams its records
+/// (`Records`); this was public beside it with no caller outside a test (X12).
+#[cfg(test)]
+pub(crate) fn read(text: &str) -> Result<Vec<Vec<String>>, Refusal> {
     Records::new(text).map(|r| r.map(|(_, f)| f.into_iter().map(Cow::into_owned).collect())).collect()
 }
 

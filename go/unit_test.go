@@ -5,8 +5,10 @@ package pactidentity
 
 import (
 	"bytes"
+	"crypto/ecdh"
 	"encoding/json"
 	"math/big"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +17,9 @@ import (
 
 func TestIsNormalHTTPS(t *testing.T) {
 	good := []string{"https://agent.alina.example/mcp", "https://alina.host.example/alina/mcp", "https://a.example/x/y-z_1.2~", "https://a.example/%2F", "https://192.0.2.1/mcp", "https://[2001:db8::1]/mcp"}
-	bad := []string{"http://agent.alina.example/mcp", "https://agent.alina.example/", "https://agent.alina.example", "https://Agent.Alina.example/mcp", "https://agent.alina.example@mallory.example/mcp", "https://agent.alina.example:443/mcp", "https://agent.alina.example/mcp/", "https://agent.alina.example/mcp?x=1", "https://agent.alina.example/mcp#f", "https://agent.alina.example/mcp/../admin", "https://agent.alina.example/./mcp", "https://a.example/%2f", "https://a.example/%41", "https://a.example/a b", "https://a.example/a\\b", "https://a.example/ü", "https://a.example/%zz", "https://.a.example/mcp", "https://a..example/mcp", "https://01.2.3.4/mcp", "https://[2001:DB8::1]/mcp", "https://[::ffff:1.2.3.4]/mcp"}
+	bad := []string{"http://agent.alina.example/mcp", "https://agent.alina.example/", "https://agent.alina.example", "https://Agent.Alina.example/mcp", "https://agent.alina.example@mallory.example/mcp", "https://agent.alina.example:443/mcp", "https://agent.alina.example/mcp/", "https://agent.alina.example/mcp?x=1", "https://agent.alina.example/mcp#f", "https://agent.alina.example/mcp/../admin", "https://agent.alina.example/./mcp", "https://a.example/%2f", "https://a.example/%41", "https://a.example/a b", "https://a.example/a\\b", "https://a.example/ü", "https://a.example/%zz", "https://.a.example/mcp", "https://a..example/mcp", "https://01.2.3.4/mcp", "https://[2001:DB8::1]/mcp", "https://[::ffff:1.2.3.4]/mcp",
+		// No zone id in an IPv6 literal, in any spelling (T1, C1, R09): netip reads one and prints it back.
+		"https://[2001:db8::1%eth0]/mcp", "https://[2001:db8::1%25eth0]/mcp", "https://[2001:db8::1%x@evil.example]/mcp", "https://[2001:db8::1%x?y]/mcp", "https://[fe80::1%eth0]/mcp"}
 	for _, u := range good {
 		if !IsNormalHTTPS(u) {
 			t.Errorf("should be normal: %s", u)
@@ -46,7 +50,11 @@ func TestAddressGuard(t *testing.T) {
 	if ok, _ := AddressGuard(endpointB, endpointB, false); !ok {
 		t.Error("a contact may name the receiver's endpoint (the guard is for guests)")
 	}
-	for ip, want := range map[string]bool{"255.255.255.255": true, "127.0.0.1": true, "8.8.8.8": false, "::1": true, "2001:db8::1": false, "::ffff:192.168.0.1": true, "not an ip": false} {
+	for ip, want := range map[string]bool{"255.255.255.255": true, "127.0.0.1": true, "8.8.8.8": false, "::1": true, "2001:db8::1": false, "::ffff:192.168.0.1": true, "not an ip": false,
+		// A zone id is never public; an empty zone, or one on an IPv4 address, is no address (R10, F15).
+		"fe80::1%eth0": true, "2001:db8::1%eth0": true, "[fe80::1%eth0]": true, "fe80::1%": false, "10.0.0.1%eth0": false,
+		// One pair of brackets, no more (R11).
+		"[::1]": true, "[[::1]]": false, "]::1[": false} {
 		if IPIsPrivate(ip) != want {
 			t.Errorf("ip_is_private(%s) should be %v", ip, want)
 		}
@@ -172,6 +180,57 @@ func TestVault(t *testing.T) {
 	// The control: a wrong passphrase on that same document is still the one message.
 	if _, err := VaultOpen("wrong", *old); err == nil || err.Error() != errVault.Error() {
 		t.Errorf("wrong passphrase on v 1: %v", err)
+	}
+}
+
+// SPEC §2.2 on the software path (TC-8): WalletIssue signs only with a key that is the root the identity
+// is known by, whose certificate is that key's and signs a challenge under it, and returns only a
+// chain that validates to that root at the endpoint. It signed with whatever key sat beside the
+// fingerprint, and a leaf that failed chain rule 3 came back. The core's
+// a_vault_root_proves_itself_before_it_signs is the twin.
+func TestWalletIssueProvesTheRootBeforeItSigns(t *testing.T) {
+	now := time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC)
+	root, _ := KeyFromSeed(AlgEd25519, Seed("vault/root"))
+	other, _ := KeyFromSeed(AlgEd25519, Seed("vault/other"))
+	rootDer, _ := BuildRoot(RootOpts{CN: "Alina Rao", Key: root, NotBefore: now})
+	otherDer, _ := BuildRoot(RootOpts{CN: "Mallory", Key: other, NotBefore: now})
+	// A certificate of the root's own key that is no root: a leaf, under the root.
+	noRoot, err := BuildLeaf(LeafOpts{CN: "Alina Rao", RootCN: "Alina Rao", RootKey: root, HostPub: root.Public(), Endpoint: endpointA, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(24 * time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fp := Fingerprint(root.Public().SPKI)
+	vault := func(key *PrivateKey, cert []byte) VaultPlaintext {
+		pkcs8, _ := key.PKCS8()
+		return VaultPlaintext{V: 2, Roots: []VaultRoot{{Fingerprint: fp, CN: "Alina Rao", PKCS8: B64url(pkcs8), Cert: B64url(cert), Created: now.Format(time.RFC3339)}}}
+	}
+	host, _ := KeyFromSeed(AlgEd25519, Seed("vault/host"))
+	csr, _ := CSRNew("Alina Rao", host, endpointA, "")
+	issue := func(v VaultPlaintext) (*WalletIssued, error) {
+		return WalletIssue(v, RecordPlaintext{V: 2}, fp, csr, now, 365, false)
+	}
+	for what, c := range map[string]struct {
+		v    VaultPlaintext
+		want string
+	}{
+		"another key than its fingerprint names":   {vault(other, rootDer), "the vault's root key is not the root it is filed under"},
+		"another root's certificate":               {vault(root, otherDer), "the vault's root certificate is not its key's"},
+		"a certificate of its key that is no root": {vault(root, noRoot), "the chain it issued does not validate: chain rule "},
+	} {
+		if _, err := issue(c.v); err == nil || !strings.HasPrefix(err.Error(), c.want) || codeFor(err, "") != "bad_request" {
+			t.Errorf("%s: %v, want %q", what, err, c.want)
+		}
+	}
+	if rootProof != "PACT root proof v1\n" {
+		t.Errorf("the challenge is %q", rootProof)
+	}
+	// The control: the root, its certificate, and a chain that validates to it at the endpoint.
+	out, err := issue(vault(root, rootDer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vr := ValidateChain([][]byte{out.DER, rootDer}, ChainOpts{Now: now, ExpectedRoot: fp, ExpectedEndpoint: endpointA}); !vr.OK {
+		t.Errorf("the chain issued: rule %d, %s", vr.Rule, vr.Reason)
 	}
 }
 
@@ -363,29 +422,66 @@ func TestSealAndOpenResult(t *testing.T) {
 	}
 }
 
-// Arguments that are not an object, including the literal `null`, are one answer in both ports.
-// `js/parity.mjs` cannot reach this: its shim turns a null into `{}` before either port sees it.
+// Arguments that are not an object, including the literal `null`, are one answer in both ports;
+// js/parity.mjs compares the two (js/cases/dispatcher.mjs), and this is the port's own record.
 func TestArgsMustBeAnObject(t *testing.T) {
 	for _, args := range []string{`null`, `[]`, `3`, `"x"`, `true`} {
 		if out := Call("key_info", json.RawMessage(args)); !bytes.Contains(out, []byte("args is a JSON object")) {
 			t.Errorf("key_info(%s): %s", args, out)
 		}
 	}
-	// An absent `args` is not the same thing, and still reaches the function.
-	if out := Call("key_info", nil); !bytes.Contains(out, []byte("spki is required")) {
+	// No text at all is not an object either, as the core's `call` answers "" (js/boundary-text.json
+	// holds both ports to it); it was `{}` here. The line adapter sends `{}` for a request with none.
+	if out := Call("key_info", nil); !bytes.Contains(out, []byte("args is a JSON object")) {
 		t.Errorf("key_info with no args: %s", out)
 	}
 }
 
+// Every function, with nothing, an empty object, a list and the hostile object. Call recovers a panic
+// into `{"error":"internal"}`, which is a JSON object, so a sweep that only asked for an object could
+// not see one (TC-14): no input known reaches `internal`, and an answer carrying it fails here. The
+// hostile object is js/cases/hostile.json, which js/parity.mjs sends to both ports as well.
 func TestCallNeverPanics(t *testing.T) {
+	raw, err := os.ReadFile("../js/cases/hostile.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hostile map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &hostile); err != nil {
+		t.Fatal(err)
+	}
+	reached := 0
 	for _, name := range Functions() {
-		for _, args := range []string{``, `{}`, `[]`, `{"der":"!!","chain":["x"],"vcard":1,"now":"nope","envelope":{"protected":"e30"},"node":{}}`} {
+		// The hostile members this function declares: sent whole, the object is refused for its
+		// first undeclared member before any member is read (CONTRACT §0), and reaches no body.
+		mine := map[string]json.RawMessage{}
+		for _, m := range functions[name].members {
+			if v, has := hostile[m]; has {
+				mine[m] = v
+			}
+		}
+		sweep := []string{``, `{}`, `[]`}
+		if len(mine) > 0 {
+			b, _ := json.Marshal(mine)
+			sweep = append(sweep, string(b))
+			reached++
+		}
+		for _, args := range sweep {
 			out := Call(name, json.RawMessage(args))
 			var v map[string]any
 			if err := json.Unmarshal(out, &v); err != nil {
 				t.Errorf("%s(%s): not a JSON object: %s", name, args, out)
 			}
+			if v["error"] == "internal" {
+				t.Errorf("%s(%s): a panic, recovered: %s", name, args, out)
+			}
+			if why, _ := v["why"].(string); strings.Contains(why, "takes no member") {
+				t.Errorf("%s(%s): refused before its body, so the sweep reached nothing: %s", name, args, out)
+			}
 		}
+	}
+	if reached < 10 {
+		t.Errorf("the hostile object reaches %d functions' bodies", reached)
 	}
 	if !bytes.Contains(Call("no_such", nil), []byte(`"unsupported"`)) {
 		t.Error("unknown function")
@@ -499,5 +595,217 @@ func TestAP256ScalarOutsideTheGroupIsRefused(t *testing.T) {
 	}
 	if k.Public() == nil || k.Public().EC == nil {
 		t.Fatal("n-1 has no public key")
+	}
+}
+
+// SPEC §13.1: an all-zero DH output is refused. The only X25519 recipient the profile has is an Ed25519
+// key, converted, and one of small order converts to a low-order point: the identity (y = 1) and
+// y = -1 both map to u = 0. The boundary names it as the envelope's refusal, as the core does (T4);
+// the control is a real key under the same call. A bare X25519 key is no key of the profile.
+func TestALowOrderRecipientIsRefused(t *testing.T) {
+	prefix := mustHex("302a300506032b6570032100")
+	minusOne := mustHex("ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f")
+	identity := make([]byte, 32)
+	identity[0] = 1
+	for _, point := range [][]byte{identity, minusOne} {
+		pub, err := ParseSPKI(concat(prefix, point))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := Seal(SuiteX25519, pub, []byte("i"), nil, []byte("x")); err == nil || err.Error() != "all-zero DH output: low-order point" {
+			t.Errorf("a seal to a small-order key: %v", err)
+		}
+		out := Call("hpke_seal", mustJSON(map[string]any{"suite": SuiteX25519, "recipient_spki": B64url(concat(prefix, point)), "info": "i", "plaintext": "eA"}))
+		if !strings.Contains(string(out), `"error":"envelope_invalid"`) || !strings.Contains(string(out), "all-zero DH output: low-order point") {
+			t.Errorf("hpke_seal to a small-order key: %s", out)
+		}
+	}
+	real, _ := KeyFromSeed(AlgEd25519, make([]byte, 32))
+	if _, _, err := Seal(SuiteX25519, real.Public(), []byte("i"), nil, []byte("x")); err != nil {
+		t.Errorf("the control: %v", err)
+	}
+	if _, err := ParseSPKI(concat(mustHex("302a300506032b656e032100"), make([]byte, 32))); err == nil || err.Error() != "unsupported key type 1.3.101.110" {
+		t.Errorf("a bare X25519 key: %v", err)
+	}
+}
+
+// Every exported entry point that takes a key, or an options struct holding one, refuses a key that is
+// not one — nil, the zero value, a key given an Alg by hand — by name, before it reads a field of it
+// (T18: measured before, most of these panicked and the rest answered as if a key were there — a TBS
+// around an empty SubjectPublicKeyInfo, a PKCS #8 of an empty scalar). One case per struct at its zero
+// value, and each key argument nil and empty; the words are `<who> is required`, as the JSON boundary
+// names a member left out.
+func TestEveryTypedEntryPointRefusesAKeyThatIsNotOne(t *testing.T) {
+	now := time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC)
+	root, _ := KeyFromSeed(AlgEd25519, make([]byte, 32))
+	host, _ := KeyFromSeed(AlgP256, make([]byte, 32))
+	csr, err := CSRNew("A", host, endpointA, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := func(what string, err error, who string) {
+		t.Helper()
+		if err == nil || err.Error() != who+" is required" || codeFor(err, "") != codeArgs {
+			t.Errorf("%s: %v, want %s is required, bad_request", what, err, who)
+		}
+	}
+	noPrivate := map[string]*PrivateKey{"nil": nil, "the zero value": {}, "an Alg and nothing else": {Alg: AlgEd25519}, "a P-256 Alg and nothing else": {Alg: AlgP256}}
+	noPublic := map[string]*PublicKey{"nil": nil, "the zero value": {}, "an Alg and nothing else": {Alg: AlgEd25519}, "a P-256 Alg and no point": {Alg: AlgP256, SPKI: []byte{1}}}
+
+	// The structs at their zero value.
+	_, err = BuildRoot(RootOpts{})
+	refused("BuildRoot(RootOpts{})", err, "the root's key")
+	_, err = BuildLeaf(LeafOpts{})
+	refused("BuildLeaf(LeafOpts{})", err, "the root's key")
+	_, _, err = LeafTBS(LeafOpts{})
+	refused("LeafTBS(LeafOpts{})", err, "the root's public key")
+	_, err = IssueFromCSR(csr, IssueOpts{})
+	refused("IssueFromCSR(csr, IssueOpts{})", err, "the root's key")
+	_, err = IssueTBSFromCSR(csr, IssueOpts{})
+	refused("IssueTBSFromCSR(csr, IssueOpts{})", err, "the root's public key")
+	_, err = SealRequest(SealOpts{})
+	refused("SealRequest(SealOpts{})", err, "the sender's key")
+	_, err = SealResult(SealOpts{})
+	refused("SealResult(SealOpts{})", err, "the sender's key")
+	_, err = OpenResult(Envelope{}, OpenOpts{})
+	refused("OpenResult(Envelope{}, OpenOpts{})", err, "the recipient's key")
+	if _, err := (&Signer{}).Sign([]byte("x")); err == nil {
+		t.Error("Signer{}.Sign signed")
+	}
+	if _, err := (*Signer)(nil).Sign([]byte("x")); err == nil {
+		t.Error("a nil Signer signed")
+	}
+
+	// Each key argument that is not a key.
+	for what, k := range noPrivate {
+		_, err := BuildRoot(RootOpts{CN: "A", Key: k, NotBefore: now})
+		refused("BuildRoot, Key "+what, err, "the root's key")
+		_, err = BuildLeaf(LeafOpts{RootKey: k, HostPub: host.Public()})
+		refused("BuildLeaf, RootKey "+what, err, "the root's key")
+		_, err = IssueFromCSR(csr, IssueOpts{RootKey: k, Now: now})
+		refused("IssueFromCSR, RootKey "+what, err, "the root's key")
+		_, err = CSRNew("A", k, endpointA, "")
+		refused("CSRNew, host "+what, err, "the host's key")
+		_, err = SignDetached(k, []byte("x"))
+		refused("SignDetached, "+what, err, "the signer's key")
+		_, err = k.PKCS8()
+		refused("PKCS8 of "+what, err, "the key")
+		if k.Public() != nil || k.Signer() != nil {
+			t.Errorf("Public or Signer of %s answered a key", what)
+		}
+		_, err = SealRequest(SealOpts{RecipientKey: root.Public(), Sender: k, MsgID: "m", TS: 1})
+		refused("SealRequest, Sender "+what, err, "the sender's key")
+		_, err = Open(SuiteX25519, k, root.Public(), nil, nil, make([]byte, 32), make([]byte, 16))
+		refused("Open, the key "+what, err, "the recipient's key")
+		_, err = OpenResult(Envelope{}, OpenOpts{Recipient: k, RecipientPublic: root.Public()})
+		refused("OpenResult, Recipient "+what, err, "the recipient's key")
+	}
+	for what, p := range noPublic {
+		_, _, err := RootTBS("A", p, now, nil)
+		refused("RootTBS, "+what, err, "the root's public key")
+		_, _, err = LeafTBS(LeafOpts{RootPub: p, HostPub: host.Public()})
+		refused("LeafTBS, RootPub "+what, err, "the root's public key")
+		_, _, err = LeafTBS(LeafOpts{RootPub: root.Public(), HostPub: p})
+		refused("LeafTBS, HostPub "+what, err, "the host's public key")
+		_, err = BuildLeaf(LeafOpts{RootKey: root, HostPub: p})
+		refused("BuildLeaf, HostPub "+what, err, "the host's public key")
+		_, err = IssueTBSFromCSR(csr, IssueOpts{RootPub: p, Now: now})
+		refused("IssueTBSFromCSR, RootPub "+what, err, "the root's public key")
+		_, _, err = Seal(SuiteX25519, p, nil, nil, []byte("x"))
+		refused("Seal, "+what, err, "the recipient's public key")
+		_, err = Open(SuiteX25519, root, p, nil, nil, make([]byte, 32), make([]byte, 16))
+		refused("Open, the public key "+what, err, "the recipient's public key")
+		_, err = SealRequest(SealOpts{RecipientKey: p, Sender: root, MsgID: "m", TS: 1})
+		refused("SealRequest, RecipientKey "+what, err, "the recipient's public key")
+		_, err = SealResult(SealOpts{RecipientKey: p, Sender: root, MsgID: "m", TS: 1, Result: json.RawMessage(`{}`)})
+		refused("SealResult, RecipientKey "+what, err, "the recipient's public key")
+		_, err = OpenResult(Envelope{}, OpenOpts{Recipient: root, RecipientPublic: p})
+		refused("OpenResult, RecipientPublic "+what, err, "the recipient's public key")
+		_, err = AlgorithmOf(p)
+		refused("AlgorithmOf, "+what, err, "the key")
+		_, err = SuiteForKey(p)
+		refused("SuiteForKey, "+what, err, "the key")
+		if VerifyDetached(p, []byte("x"), make([]byte, 64)) {
+			t.Errorf("VerifyDetached with %s verified", what)
+		}
+	}
+	// The control: real keys get through every one of them.
+	if _, err := BuildRoot(RootOpts{CN: "A", Key: root, NotBefore: now}); err != nil {
+		t.Errorf("the control, BuildRoot: %v", err)
+	}
+	if _, err := IssueFromCSR(csr, IssueOpts{RootCN: "A", RootKey: root, Now: now}); err != nil {
+		t.Errorf("the control, IssueFromCSR: %v", err)
+	}
+	if _, err := SignDetached(host, []byte("x")); err != nil {
+		t.Errorf("the control, SignDetached: %v", err)
+	}
+}
+
+// T5: an open under PACT-SEAL-X25519 with a P-256 key read the key's seed, which a P-256 key does not
+// have, and so used the scalar of the empty seed — SHA-512 of nothing, clamped: a public constant. Any
+// P-256 key then opened a seal addressed to the Ed25519 key whose X25519 form is that constant times
+// the base point. The private key is held to the suite's algorithm now, as the core holds it; the
+// control, the same seal opened by the key it was made for, opens.
+func TestAKeyOfTheOtherAlgorithmOpensNothing(t *testing.T) {
+	crafted := craftedEmptySeedRecipient(t)
+	enc, ct, err := Seal(SuiteX25519, crafted, []byte("PACT-SEAL-v2"), nil, []byte("admitted"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, seed := range [][]byte{make([]byte, 32), bytes.Repeat([]byte{7}, 32)} {
+		p256, _ := KeyFromSeed(AlgP256, seed)
+		if pt, err := Open(SuiteX25519, p256, crafted, []byte("PACT-SEAL-v2"), nil, enc, ct); err == nil || err.Error() != "does not open" {
+			t.Errorf("a P-256 key opened a seal to the crafted key: %q, %v", pt, err)
+		}
+	}
+	// And a key of the other algorithm under the P-256 suite.
+	p256, _ := KeyFromSeed(AlgP256, make([]byte, 32))
+	ed, _ := KeyFromSeed(AlgEd25519, make([]byte, 32))
+	enc, ct, _ = Seal(SuiteP256, p256.Public(), []byte("i"), nil, []byte("x"))
+	if _, err := Open(SuiteP256, ed, p256.Public(), []byte("i"), nil, enc, ct); err == nil || err.Error() != "does not open" {
+		t.Errorf("an Ed25519 key under the P-256 suite: %v", err)
+	}
+	if pt, err := Open(SuiteP256, p256, p256.Public(), []byte("i"), nil, enc, ct); err != nil || string(pt) != "x" {
+		t.Errorf("the control: %q, %v", pt, err)
+	}
+}
+
+// craftedEmptySeedRecipient is the Ed25519 public key whose X25519 form (RFC 7748 §4.1) is the empty
+// seed's clamped scalar times the base point: y = (u - 1) / (u + 1) mod p, written little-endian.
+func craftedEmptySeedRecipient(t *testing.T) *PublicKey {
+	t.Helper()
+	sk, err := ecdh.X25519().NewPrivateKey(ed25519SeedToX25519(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := leBytesToInt(sk.PublicKey().Bytes())
+	num := new(big.Int).Sub(u, big.NewInt(1))
+	den := new(big.Int).ModInverse(new(big.Int).Add(u, big.NewInt(1)), p25519)
+	y := new(big.Int).Mod(new(big.Int).Mul(num, den), p25519)
+	pub, err := ParseSPKI(concat(mustHex("302a300506032b6570032100"), intToLE(y, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(ed25519PublicToX25519(pub.Ed), sk.PublicKey().Bytes()) {
+		t.Fatal("the crafted key does not map to the empty seed's point")
+	}
+	return pub
+}
+
+// S4-1: 32 bytes that decode to no Ed25519 point are no key, as the core's from_spki refuses them; a
+// point of small order is a point (the seal refuses it later), and so is y = 3.
+func TestAnEd25519KeyThatIsNotAPointDoesNotRead(t *testing.T) {
+	spki := func(first byte) []byte {
+		key := make([]byte, 32)
+		key[0] = first
+		return concat(mustHex("302a300506032b6570032100"), key)
+	}
+	if _, err := ParseSPKI(spki(2)); err == nil || err.Error() != "Ed25519 key is not a point" {
+		t.Errorf("y = 2: %v", err)
+	}
+	for _, first := range []byte{1, 3} {
+		if _, err := ParseSPKI(spki(first)); err != nil {
+			t.Errorf("y = %d is a point: %v", first, err)
+		}
 	}
 }

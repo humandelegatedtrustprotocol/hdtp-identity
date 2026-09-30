@@ -7,8 +7,9 @@ import (
 	"testing"
 )
 
-// The cloud's TypeScript and this port decide alike: every step of js/cases/limits-vectors.json,
-// replayed on this port's own state (swept after every step, where the TypeScript swept at most once
+// This port decides as the vectors of pact-cloud 6c771f7 say — js/cases/limits-vectors.json, a fixed
+// record of the cloud's TypeScript, which the cloud removed at ba68f9c: every step of it, replayed on
+// this port's own state (swept after every step, where the TypeScript swept at most once
 // a minute), every row compared bit for bit.
 func TestLimitsDecideAsTheTypeScriptDid(t *testing.T) {
 	raw, err := os.ReadFile("../js/cases/limits-vectors.json")
@@ -136,5 +137,33 @@ func TestLimitsEveryRuleRefusesAndAFreshKeyGetsThrough(t *testing.T) {
 	}
 	if d := LimitsDecide(r, LimitsCharge{Kind: "pending_in", Held: 2}, 0, LimitsMemoryStore{}); d.Allowed || d.Which != "pending_in" || d.RetryAfter != nil {
 		t.Fatalf("at the cap: %+v", d)
+	}
+}
+
+// What the crate's types cannot hold, this port's refuse (T21): a rules map without a member is that
+// member's `is a number`, as a document without it is, and not a rule about a 0 nobody wrote; a
+// charge of a kind nobody has is refused, where it spent no bucket and was allowed. The control is the
+// same rules whole, and a kind that exists.
+func TestLimitsRefuseWhatTheCratesTypesCannotHold(t *testing.T) {
+	r := limitsTestRules()
+	if err := r.Check(); err != nil {
+		t.Fatalf("the whole rules: %v", err)
+	}
+	for _, name := range LimitsRuleMembers {
+		without := LimitsRules{}
+		for k, v := range r {
+			if k != name {
+				without[k] = v
+			}
+		}
+		if err := without.Check(); err == nil || err.Error() != name+" is a number" {
+			t.Errorf("rules without %s: %v", name, err)
+		}
+	}
+	if d := LimitsDecide(r, LimitsCharge{Kind: "everything"}, 0, LimitsMemoryStore{}); d.Allowed || d.Which != "charge.kind" || d.RetryAfter != nil {
+		t.Errorf("a charge of an unknown kind: %+v", d)
+	}
+	if d := LimitsDecide(r, LimitsCharge{Kind: "stranger_out"}, 0, LimitsMemoryStore{}); !d.Allowed {
+		t.Errorf("a charge of a known kind: %+v", d)
 	}
 }
