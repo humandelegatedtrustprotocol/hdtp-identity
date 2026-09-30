@@ -12,18 +12,21 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 - **The parity gate generates its own cases** (the port-parity plan of 2026-09-29, S1): for every
   function the contract declares, `{}`, the hostile object, each required member absent and `null`
-  (held to CONTRACT §0's `<name> is required`), each optional string `""`, each optional member of
-  the wrong type, an undeclared member, and each required member absent beside each other member of
-  the wrong type (read order), and each member that holds a key holding one outside the profile —
-  1149 cases at the last count (1103 when written; the hostile object is now sent only to the 17
-  functions that declare one of its members, the key outside the profile came with cluster G, and
-  the functions added since have their own), varied from one named hand-written case per function
+  (held to CONTRACT §0's `<name> is required`), each member that takes a string as `""`, each
+  optional member of the wrong type, an undeclared member, and each required member absent beside
+  each other member of the wrong type (read order), and each member that holds a key holding one
+  outside the profile — 1261 cases at the last count (1103 when written; the hostile object is now
+  sent only to the 17 functions that declare one of its members, the key outside the profile came
+  with cluster G, the functions added since have their own, and the 112 required strings' `""` came
+  on 2026-09-30), varied from one named hand-written case per function
   that succeeds on both ports. 463 cases failed when they were written (459 generated, and 4 written
   beside them). While they were fixed, each was listed with the audit finding that closed it and
   excused only while it failed exactly as listed; every fix emptied the list, and the list and its
   mechanism are gone: every case must pass.
 - The coverage gate fails when a declared error code is not produced by both ports in one case they
-  answered alike (S2, TC-1); all 127 are. It used to print the count and pass.
+  answered alike (S2, TC-1); all 128 are. It used to print the count and pass. The 128th is
+  `card_decode`'s `parse`: both ports answer it for a `now` that is not an instant, and the contract
+  did not declare it until a required string's `""` case sent one.
 - `js/cases/hostile.json` is the one hostile object: the generated cases send it to both ports, Go's
   `TestCallNeverPanics` reads it and now fails on an answer of `internal` (its `recover()` turned a
   panic into a JSON object, which the sweep accepted), and the core has the same sweep
@@ -109,6 +112,16 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   `dns_name` given as `""` to `csr_new`, `build_leaf` or `leaf_tbs` is refused in both ports,
   `dns_name is empty`: the core wrote an empty dNSName, which rule 5 then refuses, and the Go port
   wrote none.
+- **`export_read`'s `owner` of `""` is compared, and a required string is sent `""`** (the hunt of
+  2026-09-30): `""` meant "no owner to compare" inside the Go port's manifest check, so `export_read`
+  with an owner of `""` read another identity's file whole, and the typed `ReadExportZip(zr, "", …)`
+  did too, where the core refuses (`manifest.json: owner: the file is <owner>'s, not this identity's
+  ()`). "No owner" is now `nil`, as the core's is `None`, and a given owner is always compared. The
+  entry above read as closing this; nothing had sent a required string `""`, because the generated
+  cases sent it to optional members only. Every required member that takes a string is now sent `""`
+  (112 cases). Each must refuse, unless `js/cases/generated.mjs`'s `EMPTY_IS_A_VALUE` names it with
+  the reason `""` is a value there (25 members, such as a commonName, the bytes to sign, a card's
+  `FN`). A name on that list that is no required string member fails the run.
 - **Three required members absent are `<name> is required`, as §0 says every one is** (S1-2, S1-3,
   which the generated cases found): `wallet_issue`'s `vault_plaintext` and `record_plaintext` (they
   said `…: the root lives there` and `…: the ledger lives there`, which a document that is not an

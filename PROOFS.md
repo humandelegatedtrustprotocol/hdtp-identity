@@ -7,9 +7,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed as proven that did not pass.
 
-Specification: **2.2.4**. **88** normative sentences, **2540** cross-port parity cases over **54** guarded functions.
+Specification: **2.2.4**. **88** normative sentences, **2652** cross-port parity cases over **54** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 2.2.4): **5080** answers, of which **0** do not hold to the shape it declares. Of **127** declared error codes, **127** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 2.2.4): **5304** answers, of which **0** do not hold to the shape it declares. Of **128** declared error codes, **128** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 88 normative sentences of the specification
 
@@ -202,7 +202,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 2540 cross-port parity cases
+## The 2652 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -210,9 +210,9 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **2540** cases (**1149** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
+At the run that generated this file: **2652** cases (**1261** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
 
-### `address_guard` — 50 cases · whole on success
+### `address_guard` — 51 cases · whole on success
 
 - address_guard https://255.255.255.255/mcp
 - address_guard https://127.0.0.1/mcp
@@ -258,6 +258,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · address_guard · {}
 - generated · address_guard · endpoint absent
 - generated · address_guard · endpoint null
+- generated · address_guard · endpoint ""
 - generated · address_guard · self_endpoint ""
 - generated · address_guard · self_endpoint 7
 - generated · address_guard · guest "yes"
@@ -265,7 +266,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · address_guard · endpoint absent, self_endpoint 7
 - generated · address_guard · endpoint absent, guest "yes"
 
-### `assemble_leaf` — 18 cases · whole on success
+### `assemble_leaf` — 20 cases · whole on success
 
 - assemble_leaf with a token's high-S signature
 - assemble_leaf with a low-S signature
@@ -276,8 +277,10 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · assemble_leaf · {}
 - generated · assemble_leaf · tbs absent
 - generated · assemble_leaf · tbs null
+- generated · assemble_leaf · tbs ""
 - generated · assemble_leaf · sig absent
 - generated · assemble_leaf · sig null
+- generated · assemble_leaf · sig ""
 - generated · assemble_leaf · sig_alg ""
 - generated · assemble_leaf · sig_alg 7
 - generated · assemble_leaf · an undeclared member
@@ -286,7 +289,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · assemble_leaf · sig absent, tbs 7
 - generated · assemble_leaf · sig absent, sig_alg 7
 
-### `assemble_root` — 15 cases · whole on success
+### `assemble_root` — 17 cases · whole on success
 
 - assemble_root of a TBS that is not one
 - assemble_root with nothing to work from
@@ -294,8 +297,10 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · assemble_root · {}
 - generated · assemble_root · tbs absent
 - generated · assemble_root · tbs null
+- generated · assemble_root · tbs ""
 - generated · assemble_root · sig absent
 - generated · assemble_root · sig null
+- generated · assemble_root · sig ""
 - generated · assemble_root · sig_alg ""
 - generated · assemble_root · sig_alg 7
 - generated · assemble_root · an undeclared member
@@ -304,7 +309,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · assemble_root · sig absent, tbs 7
 - generated · assemble_root · sig absent, sig_alg 7
 
-### `book_rows` — 16 cases · whole on success
+### `book_rows` — 17 cases · whole on success
 
 - book_rows: a contact with everything, one with the least
 - book_rows: an empty book
@@ -319,11 +324,12 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · book_rows · contacts null
 - generated · book_rows · exported_at absent
 - generated · book_rows · exported_at null
+- generated · book_rows · exported_at ""
 - generated · book_rows · an undeclared member
 - generated · book_rows · contacts absent, exported_at 7
 - generated · book_rows · exported_at absent, contacts "x"
 
-### `build_leaf` — 95 cases · whole on success
+### `build_leaf` — 102 cases · whole on success
 
 - build_leaf
 - build_leaf with a serial that is too short and no cn
@@ -345,18 +351,25 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · build_leaf · {}
 - generated · build_leaf · cn absent
 - generated · build_leaf · cn null
+- generated · build_leaf · cn ""
 - generated · build_leaf · root_cn absent
 - generated · build_leaf · root_cn null
+- generated · build_leaf · root_cn ""
 - generated · build_leaf · host_spki absent
 - generated · build_leaf · host_spki null
+- generated · build_leaf · host_spki ""
 - generated · build_leaf · endpoint absent
 - generated · build_leaf · endpoint null
+- generated · build_leaf · endpoint ""
 - generated · build_leaf · not_before absent
 - generated · build_leaf · not_before null
+- generated · build_leaf · not_before ""
 - generated · build_leaf · not_after absent
 - generated · build_leaf · not_after null
+- generated · build_leaf · not_after ""
 - generated · build_leaf · root_pkcs8 absent
 - generated · build_leaf · root_pkcs8 null
+- generated · build_leaf · root_pkcs8 ""
 - generated · build_leaf · dns_name ""
 - generated · build_leaf · dns_name 7
 - generated · build_leaf · serial ""
@@ -421,7 +434,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · build_leaf · root_pkcs8 absent, not_after 7
 - generated · build_leaf · root_pkcs8 absent, serial 7
 
-### `build_root` — 26 cases · whole on success
+### `build_root` — 29 cases · whole on success
 
 - build_root with no key
 - build_root
@@ -432,10 +445,13 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · build_root · {}
 - generated · build_root · cn absent
 - generated · build_root · cn null
+- generated · build_root · cn ""
 - generated · build_root · pkcs8 absent
 - generated · build_root · pkcs8 null
+- generated · build_root · pkcs8 ""
 - generated · build_root · not_before absent
 - generated · build_root · not_before null
+- generated · build_root · not_before ""
 - generated · build_root · serial ""
 - generated · build_root · serial 7
 - generated · build_root · an undeclared member
@@ -450,7 +466,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · build_root · not_before absent, pkcs8 7
 - generated · build_root · not_before absent, serial 7
 
-### `card_decode` — 37 cases · whole on success
+### `card_decode` — 39 cases · whole on success
 
 - card_decode of a real card
 - card_decode of an empty card
@@ -484,13 +500,15 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · card_decode · the hostile object
 - generated · card_decode · vcard absent
 - generated · card_decode · vcard null
+- generated · card_decode · vcard ""
 - generated · card_decode · now absent
 - generated · card_decode · now null
+- generated · card_decode · now ""
 - generated · card_decode · an undeclared member
 - generated · card_decode · vcard absent, now 7
 - generated · card_decode · now absent, vcard 7
 
-### `card_encode` — 32 cases · whole on success
+### `card_encode` — 34 cases · whole on success
 
 - card_encode
 - card_encode with a name outside ASCII
@@ -511,8 +529,10 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · card_encode · {}
 - generated · card_encode · fn absent
 - generated · card_encode · fn null
+- generated · card_encode · fn ""
 - generated · card_encode · cert absent
 - generated · card_encode · cert null
+- generated · card_encode · cert ""
 - generated · card_encode · seal ""
 - generated · card_encode · seal 7
 - generated · card_encode · extra "x"
@@ -525,7 +545,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · card_encode · cert absent, seal 7
 - generated · card_encode · cert absent, extra "x"
 
-### `compare_leaves` — 19 cases · whole on success
+### `compare_leaves` — 21 cases · whole on success
 
 - compare_leaves with itself
 - compare_leaves against a root
@@ -539,15 +559,17 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · compare_leaves · {}
 - generated · compare_leaves · pinned absent
 - generated · compare_leaves · pinned null
+- generated · compare_leaves · pinned ""
 - generated · compare_leaves · presented absent
 - generated · compare_leaves · presented null
+- generated · compare_leaves · presented ""
 - generated · compare_leaves · an undeclared member
 - generated · compare_leaves · pinned holding a key outside the profile
 - generated · compare_leaves · presented holding a key outside the profile
 - generated · compare_leaves · pinned absent, presented 7
 - generated · compare_leaves · presented absent, pinned 7
 
-### `csr_check` — 34 cases · whole on success
+### `csr_check` — 35 cases · whole on success
 
 - csr_check of bytes that are not a request
 - csr_check of a certificate
@@ -578,13 +600,14 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · csr_check · the hostile object
 - generated · csr_check · der absent
 - generated · csr_check · der null
+- generated · csr_check · der ""
 - generated · csr_check · root_spkis "x"
 - generated · csr_check · an undeclared member
 - generated · csr_check · der holding a key outside the profile
 - generated · csr_check · root_spkis holding a key outside the profile
 - generated · csr_check · der absent, root_spkis "x"
 
-### `csr_new` — 27 cases · whole on success
+### `csr_new` — 30 cases · whole on success
 
 - csr_new with no key
 - csr_new naming a local address
@@ -596,10 +619,13 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · csr_new · {}
 - generated · csr_new · cn absent
 - generated · csr_new · cn null
+- generated · csr_new · cn ""
 - generated · csr_new · host_pkcs8 absent
 - generated · csr_new · host_pkcs8 null
+- generated · csr_new · host_pkcs8 ""
 - generated · csr_new · endpoint absent
 - generated · csr_new · endpoint null
+- generated · csr_new · endpoint ""
 - generated · csr_new · dns_name ""
 - generated · csr_new · dns_name 7
 - generated · csr_new · an undeclared member
@@ -614,7 +640,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · csr_new · endpoint absent, host_pkcs8 7
 - generated · csr_new · endpoint absent, dns_name 7
 
-### `decide` — 117 cases · whole on success
+### `decide` — 118 cases · whole on success
 
 - decide on an envelope from a pinned contact
 - decide on a pinned contact's call that names no tool
@@ -722,6 +748,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · decide · the hostile object
 - generated · decide · now absent
 - generated · decide · now null
+- generated · decide · now ""
 - generated · decide · envelope absent
 - generated · decide · envelope null
 - generated · decide · node absent
@@ -734,7 +761,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · decide · node absent, now 7
 - generated · decide · node absent, envelope "x"
 
-### `decide_chain` — 43 cases · whole on success
+### `decide_chain` — 44 cases · whole on success
 
 - decide_chain: a root nobody pins
 - decide_chain: a root nobody pins, at an address another root is pinned at
@@ -771,6 +798,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · decide_chain · chain null
 - generated · decide_chain · now absent
 - generated · decide_chain · now null
+- generated · decide_chain · now ""
 - generated · decide_chain · an undeclared member
 - generated · decide_chain · chain holding a key outside the profile
 - generated · decide_chain · node absent, chain "x"
@@ -780,7 +808,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · decide_chain · now absent, node "x"
 - generated · decide_chain · now absent, chain "x"
 
-### `derive_seed` — 18 cases · whole on success
+### `derive_seed` — 20 cases · whole on success
 
 - derive_seed with an info string that is not one of the three
 - derive_seed with the wrong case in the domain separator
@@ -795,8 +823,10 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · derive_seed · {}
 - generated · derive_seed · prf absent
 - generated · derive_seed · prf null
+- generated · derive_seed · prf ""
 - generated · derive_seed · info absent
 - generated · derive_seed · info null
+- generated · derive_seed · info ""
 - generated · derive_seed · an undeclared member
 - generated · derive_seed · prf absent, info 7
 - generated · derive_seed · info absent, prf 7
@@ -833,7 +863,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · export_merge · held absent, rows "x"
 - generated · export_merge · rows absent, held "x"
 
-### `export_read` — 91 cases · whole on success
+### `export_read` — 93 cases · whole on success
 
 - export_read: what export_write wrote
 - export_read at an instant that does not read
@@ -902,8 +932,10 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · export_read · directory null
 - generated · export_read · owner absent
 - generated · export_read · owner null
+- generated · export_read · owner ""
 - generated · export_read · now absent
 - generated · export_read · now null
+- generated · export_read · now ""
 - generated · export_read · manifest ""
 - generated · export_read · manifest 7
 - generated · export_read · contacts_csv ""
@@ -927,7 +959,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · export_read · now absent, threads_csv 7
 - generated · export_read · now absent, owner 7
 
-### `export_read_end` — 98 cases · whole on success
+### `export_read_end` — 99 cases · whole on success
 
 - export_read_end: what was written
 - export corpus valid-export.zip: export_read_end
@@ -963,6 +995,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · export_read_end · {}
 - generated · export_read_end · manifest absent
 - generated · export_read_end · manifest null
+- generated · export_read_end · manifest ""
 - generated · export_read_end · lines absent
 - generated · export_read_end · lines null
 - generated · export_read_end · ids absent
@@ -1085,7 +1118,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · export_read_messages · media absent, contacts "x"
 - generated · export_read_messages · media absent, first_line "7"
 
-### `export_write` — 63 cases · whole on success
+### `export_write` — 67 cases · whole on success
 
 - export_write: every formula prefix, quoting and line breaks, sorted rows
 - export_write: a book
@@ -1109,12 +1142,16 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · export_write · {}
 - generated · export_write · owner absent
 - generated · export_write · owner null
+- generated · export_write · owner ""
 - generated · export_write · owner_name absent
 - generated · export_write · owner_name null
+- generated · export_write · owner_name ""
 - generated · export_write · exported_at absent
 - generated · export_write · exported_at null
+- generated · export_write · exported_at ""
 - generated · export_write · tool absent
 - generated · export_write · tool null
+- generated · export_write · tool ""
 - generated · export_write · contacts absent
 - generated · export_write · contacts null
 - generated · export_write · threads "x"
@@ -1168,7 +1205,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · export_write_messages · an undeclared member
 - generated · export_write_messages · messages absent, msg_ids "x"
 
-### `follow_renewed` — 48 cases · whole on success
+### `follow_renewed` — 52 cases · whole on success
 
 - follow_renewed on a chain to another root
 - follow_renewed on a chain that is not one
@@ -1197,12 +1234,16 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · follow_renewed · the hostile object
 - generated · follow_renewed · pinned_root absent
 - generated · follow_renewed · pinned_root null
+- generated · follow_renewed · pinned_root ""
 - generated · follow_renewed · pinned_leaf absent
 - generated · follow_renewed · pinned_leaf null
+- generated · follow_renewed · pinned_leaf ""
 - generated · follow_renewed · dialed absent
 - generated · follow_renewed · dialed null
+- generated · follow_renewed · dialed ""
 - generated · follow_renewed · now absent
 - generated · follow_renewed · now null
+- generated · follow_renewed · now ""
 - generated · follow_renewed · answer ""
 - generated · follow_renewed · an undeclared member
 - generated · follow_renewed · pinned_leaf holding a key outside the profile
@@ -1219,7 +1260,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · follow_renewed · now absent, pinned_leaf 7
 - generated · follow_renewed · now absent, dialed 7
 
-### `generate_key` — 9 cases · whole on success
+### `generate_key` — 10 cases · whole on success
 
 - generate_key
 - generate_key of a P-256 key
@@ -1229,9 +1270,10 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · generate_key · {}
 - generated · generate_key · alg absent
 - generated · generate_key · alg null
+- generated · generate_key · alg ""
 - generated · generate_key · an undeclared member
 
-### `hpke_open` — 68 cases · whole on success
+### `hpke_open` — 74 cases · whole on success
 
 - hpke_open of a ciphertext that is not one
 - hpke_open with nothing to work from
@@ -1250,16 +1292,22 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · hpke_open · {}
 - generated · hpke_open · suite absent
 - generated · hpke_open · suite null
+- generated · hpke_open · suite ""
 - generated · hpke_open · recipient_pkcs8 absent
 - generated · hpke_open · recipient_pkcs8 null
+- generated · hpke_open · recipient_pkcs8 ""
 - generated · hpke_open · recipient_spki absent
 - generated · hpke_open · recipient_spki null
+- generated · hpke_open · recipient_spki ""
 - generated · hpke_open · info absent
 - generated · hpke_open · info null
+- generated · hpke_open · info ""
 - generated · hpke_open · enc absent
 - generated · hpke_open · enc null
+- generated · hpke_open · enc ""
 - generated · hpke_open · ct absent
 - generated · hpke_open · ct null
+- generated · hpke_open · ct ""
 - generated · hpke_open · aad ""
 - generated · hpke_open · aad 7
 - generated · hpke_open · an undeclared member
@@ -1302,7 +1350,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · hpke_open · ct absent, aad 7
 - generated · hpke_open · ct absent, enc 7
 
-### `hpke_seal` — 50 cases · whole on success
+### `hpke_seal` — 54 cases · whole on success
 
 - hpke_seal with a suite nobody has
 - hpke_seal with nothing to work from
@@ -1322,12 +1370,16 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · hpke_seal · {}
 - generated · hpke_seal · suite absent
 - generated · hpke_seal · suite null
+- generated · hpke_seal · suite ""
 - generated · hpke_seal · recipient_spki absent
 - generated · hpke_seal · recipient_spki null
+- generated · hpke_seal · recipient_spki ""
 - generated · hpke_seal · info absent
 - generated · hpke_seal · info null
+- generated · hpke_seal · info ""
 - generated · hpke_seal · plaintext absent
 - generated · hpke_seal · plaintext null
+- generated · hpke_seal · plaintext ""
 - generated · hpke_seal · aad ""
 - generated · hpke_seal · aad 7
 - generated · hpke_seal · ephemeral_seed ""
@@ -1355,7 +1407,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · hpke_seal · plaintext absent, aad 7
 - generated · hpke_seal · plaintext absent, ephemeral_seed 7
 
-### `ip_is_private` — 45 cases · whole on success
+### `ip_is_private` — 46 cases · whole on success
 
 - ip_is_private "10.0.0.1"
 - ip_is_private "8.8.8.8"
@@ -1401,9 +1453,10 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · ip_is_private · {}
 - generated · ip_is_private · ip absent
 - generated · ip_is_private · ip null
+- generated · ip_is_private · ip ""
 - generated · ip_is_private · an undeclared member
 
-### `is_normal_https` — 41 cases · whole on success
+### `is_normal_https` — 42 cases · whole on success
 
 - is_normal_https "https://agent.alina.example/mcp"
 - is_normal_https "https://agent.alina.example:8443/mcp"
@@ -1445,9 +1498,10 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · is_normal_https · {}
 - generated · is_normal_https · url absent
 - generated · is_normal_https · url null
+- generated · is_normal_https · url ""
 - generated · is_normal_https · an undeclared member
 
-### `issue_from_csr` — 57 cases · whole on success
+### `issue_from_csr` — 61 cases · whole on success
 
 - issue_from_csr with an explicit zero validity
 - issue_from_csr over 398 days
@@ -1468,12 +1522,16 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · issue_from_csr · the hostile object
 - generated · issue_from_csr · csr absent
 - generated · issue_from_csr · csr null
+- generated · issue_from_csr · csr ""
 - generated · issue_from_csr · root_cn absent
 - generated · issue_from_csr · root_cn null
+- generated · issue_from_csr · root_cn ""
 - generated · issue_from_csr · root_pkcs8 absent
 - generated · issue_from_csr · root_pkcs8 null
+- generated · issue_from_csr · root_pkcs8 ""
 - generated · issue_from_csr · now absent
 - generated · issue_from_csr · now null
+- generated · issue_from_csr · now ""
 - generated · issue_from_csr · root_spkis "x"
 - generated · issue_from_csr · previous_not_before ""
 - generated · issue_from_csr · previous_not_before 7
@@ -1507,7 +1565,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · issue_from_csr · now absent, valid_days "7"
 - generated · issue_from_csr · now absent, root_pkcs8 7
 
-### `issue_tbs_from_csr` — 46 cases · whole on success
+### `issue_tbs_from_csr` — 50 cases · whole on success
 
 - issue_tbs_from_csr of a request that is a truncated SEQUENCE
 - issue_tbs_from_csr
@@ -1517,12 +1575,16 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · issue_tbs_from_csr · the hostile object
 - generated · issue_tbs_from_csr · csr absent
 - generated · issue_tbs_from_csr · csr null
+- generated · issue_tbs_from_csr · csr ""
 - generated · issue_tbs_from_csr · root_cn absent
 - generated · issue_tbs_from_csr · root_cn null
+- generated · issue_tbs_from_csr · root_cn ""
 - generated · issue_tbs_from_csr · root_spki absent
 - generated · issue_tbs_from_csr · root_spki null
+- generated · issue_tbs_from_csr · root_spki ""
 - generated · issue_tbs_from_csr · now absent
 - generated · issue_tbs_from_csr · now null
+- generated · issue_tbs_from_csr · now ""
 - generated · issue_tbs_from_csr · root_spkis "x"
 - generated · issue_tbs_from_csr · previous_not_before ""
 - generated · issue_tbs_from_csr · previous_not_before 7
@@ -1556,7 +1618,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · issue_tbs_from_csr · now absent, valid_days "7"
 - generated · issue_tbs_from_csr · now absent, root_spki 7
 
-### `key_from_seed` — 14 cases · whole on success
+### `key_from_seed` — 16 cases · whole on success
 
 - key_from_seed with a short seed
 - key_from_seed with an unknown algorithm
@@ -1567,13 +1629,15 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · key_from_seed · {}
 - generated · key_from_seed · alg absent
 - generated · key_from_seed · alg null
+- generated · key_from_seed · alg ""
 - generated · key_from_seed · seed absent
 - generated · key_from_seed · seed null
+- generated · key_from_seed · seed ""
 - generated · key_from_seed · an undeclared member
 - generated · key_from_seed · alg absent, seed 7
 - generated · key_from_seed · seed absent, alg 7
 
-### `key_info` — 32 cases · whole on success
+### `key_info` — 33 cases · whole on success
 
 - args that are not an object
 - args that are a list
@@ -1605,10 +1669,11 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · key_info · {}
 - generated · key_info · spki absent
 - generated · key_info · spki null
+- generated · key_info · spki ""
 - generated · key_info · an undeclared member
 - generated · key_info · spki holding a key outside the profile
 
-### `leaf_tbs` — 87 cases · whole on success
+### `leaf_tbs` — 94 cases · whole on success
 
 - leaf_tbs
 - leaf_tbs with no issuer
@@ -1622,18 +1687,25 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · leaf_tbs · {}
 - generated · leaf_tbs · cn absent
 - generated · leaf_tbs · cn null
+- generated · leaf_tbs · cn ""
 - generated · leaf_tbs · root_cn absent
 - generated · leaf_tbs · root_cn null
+- generated · leaf_tbs · root_cn ""
 - generated · leaf_tbs · host_spki absent
 - generated · leaf_tbs · host_spki null
+- generated · leaf_tbs · host_spki ""
 - generated · leaf_tbs · endpoint absent
 - generated · leaf_tbs · endpoint null
+- generated · leaf_tbs · endpoint ""
 - generated · leaf_tbs · not_before absent
 - generated · leaf_tbs · not_before null
+- generated · leaf_tbs · not_before ""
 - generated · leaf_tbs · not_after absent
 - generated · leaf_tbs · not_after null
+- generated · leaf_tbs · not_after ""
 - generated · leaf_tbs · root_spki absent
 - generated · leaf_tbs · root_spki null
+- generated · leaf_tbs · root_spki ""
 - generated · leaf_tbs · dns_name ""
 - generated · leaf_tbs · dns_name 7
 - generated · leaf_tbs · serial ""
@@ -1698,7 +1770,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · leaf_tbs · root_spki absent, not_after 7
 - generated · leaf_tbs · root_spki absent, serial 7
 
-### `ledger_check` — 59 cases · whole on success
+### `ledger_check` — 62 cases · whole on success
 
 - ledger_check: a renewal where the live leaf is
 - ledger_check: a move, not chosen
@@ -1740,10 +1812,13 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · ledger_check · the hostile object
 - generated · ledger_check · root absent
 - generated · ledger_check · root null
+- generated · ledger_check · root ""
 - generated · ledger_check · endpoint absent
 - generated · ledger_check · endpoint null
+- generated · ledger_check · endpoint ""
 - generated · ledger_check · now absent
 - generated · ledger_check · now null
+- generated · ledger_check · now ""
 - generated · ledger_check · ledger "x"
 - generated · ledger_check · move "yes"
 - generated · ledger_check · an undeclared member
@@ -1878,7 +1953,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · limits_decide · now absent, charge "x"
 - generated · limits_decide · now absent, state "x"
 
-### `limits_rules_check` — 22 cases · whole on success
+### `limits_rules_check` — 23 cases · whole on success
 
 - limits_rules_check: a document that can be enforced
 - limits_rules_check: not an object
@@ -1901,9 +1976,10 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · limits_rules_check · {}
 - generated · limits_rules_check · rules absent
 - generated · limits_rules_check · rules null
+- generated · limits_rules_check · rules ""
 - generated · limits_rules_check · an undeclared member
 
-### `media_holds_private_key` — 28 cases · whole on success
+### `media_holds_private_key` — 29 cases · whole on success
 
 - media_holds_private_key: PKCS #8 of an Ed25519 key, in DER
 - media_holds_private_key: PKCS #8 of a P-256 key, in DER
@@ -1932,6 +2008,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · media_holds_private_key · {}
 - generated · media_holds_private_key · bytes absent
 - generated · media_holds_private_key · bytes null
+- generated · media_holds_private_key · bytes ""
 - generated · media_holds_private_key · an undeclared member
 
 ### `no_such_function` — 5 cases · not a dispatched function
@@ -1942,7 +2019,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - a function nobody defines, with args holding half a surrogate pair
 - a function nobody defines, with args holding a number past the largest double
 
-### `open_result` — 113 cases · whole on success
+### `open_result` — 117 cases · whole on success
 
 - open_result of a request envelope
 - open_result with nothing to work from
@@ -2008,12 +2085,16 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · open_result · envelope null
 - generated · open_result · my_pkcs8 absent
 - generated · open_result · my_pkcs8 null
+- generated · open_result · my_pkcs8 ""
 - generated · open_result · my_spki absent
 - generated · open_result · my_spki null
+- generated · open_result · my_spki ""
 - generated · open_result · msg_id absent
 - generated · open_result · msg_id null
+- generated · open_result · msg_id ""
 - generated · open_result · now absent
 - generated · open_result · now null
+- generated · open_result · now ""
 - generated · open_result · pins "x"
 - generated · open_result · expected_root ""
 - generated · open_result · expected_root 7
@@ -2058,7 +2139,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · open_result · now absent, expected_root 7
 - generated · open_result · now absent, expected_endpoint 7
 
-### `parse_certificate` — 46 cases · whole on success
+### `parse_certificate` — 47 cases · whole on success
 
 - parse_certificate of a root
 - parse_certificate of a leaf
@@ -2104,6 +2185,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · parse_certificate · the hostile object
 - generated · parse_certificate · der absent
 - generated · parse_certificate · der null
+- generated · parse_certificate · der ""
 - generated · parse_certificate · an undeclared member
 - generated · parse_certificate · der holding a key outside the profile
 
@@ -2113,7 +2195,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · prf_salt · {}
 - generated · prf_salt · an undeclared member
 
-### `profile_error` — 21 cases · whole on success
+### `profile_error` — 23 cases · whole on success
 
 - profile_error of a leaf read as a root
 - profile_error of a root read as a leaf
@@ -2130,14 +2212,16 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · profile_error · the hostile object
 - generated · profile_error · der absent
 - generated · profile_error · der null
+- generated · profile_error · der ""
 - generated · profile_error · kind absent
 - generated · profile_error · kind null
+- generated · profile_error · kind ""
 - generated · profile_error · an undeclared member
 - generated · profile_error · der holding a key outside the profile
 - generated · profile_error · der absent, kind 7
 - generated · profile_error · kind absent, der 7
 
-### `public_key` — 21 cases · whole on success
+### `public_key` — 22 cases · whole on success
 
 - public_key of a key that is not one
 - public_key with no argument
@@ -2158,10 +2242,11 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · public_key · {}
 - generated · public_key · pkcs8 absent
 - generated · public_key · pkcs8 null
+- generated · public_key · pkcs8 ""
 - generated · public_key · an undeclared member
 - generated · public_key · pkcs8 holding a key outside the profile
 
-### `refresh_check` — 47 cases · whole on success
+### `refresh_check` — 49 cases · whole on success
 
 - refresh_check: the pinned leaf, unchanged
 - refresh_check: a newer leaf than the pinned one
@@ -2203,15 +2288,17 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · refresh_check · pin null
 - generated · refresh_check · answer absent
 - generated · refresh_check · answer null
+- generated · refresh_check · answer ""
 - generated · refresh_check · now absent
 - generated · refresh_check · now null
+- generated · refresh_check · now ""
 - generated · refresh_check · an undeclared member
 - generated · refresh_check · pin absent, now 7
 - generated · refresh_check · answer absent, pin "x"
 - generated · refresh_check · answer absent, now 7
 - generated · refresh_check · now absent, pin "x"
 
-### `root_tbs` — 27 cases · whole on success
+### `root_tbs` — 30 cases · whole on success
 
 - root_tbs
 - root_tbs with no key
@@ -2223,10 +2310,13 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · root_tbs · {}
 - generated · root_tbs · cn absent
 - generated · root_tbs · cn null
+- generated · root_tbs · cn ""
 - generated · root_tbs · spki absent
 - generated · root_tbs · spki null
+- generated · root_tbs · spki ""
 - generated · root_tbs · not_before absent
 - generated · root_tbs · not_before null
+- generated · root_tbs · not_before ""
 - generated · root_tbs · serial ""
 - generated · root_tbs · serial 7
 - generated · root_tbs · an undeclared member
@@ -2241,7 +2331,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · root_tbs · not_before absent, spki 7
 - generated · root_tbs · not_before absent, serial 7
 
-### `seal_request` — 100 cases · whole on success
+### `seal_request` — 103 cases · whole on success
 
 - seal_request with no recipient
 - seal_request with a form nobody has
@@ -2286,10 +2376,13 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · seal_request · {}
 - generated · seal_request · recipient_leaf absent
 - generated · seal_request · recipient_leaf null
+- generated · seal_request · recipient_leaf ""
 - generated · seal_request · sender_pkcs8 absent
 - generated · seal_request · sender_pkcs8 null
+- generated · seal_request · sender_pkcs8 ""
 - generated · seal_request · msg_id absent
 - generated · seal_request · msg_id null
+- generated · seal_request · msg_id ""
 - generated · seal_request · ts absent
 - generated · seal_request · ts null
 - generated · seal_request · form ""
@@ -2344,7 +2437,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · seal_request · ts absent, method 7
 - generated · seal_request · ts absent, cty 7
 
-### `seal_result` — 80 cases · whole on success
+### `seal_result` — 83 cases · whole on success
 
 - seal_result
 - seal_result with no recipient
@@ -2380,10 +2473,13 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · seal_result · {}
 - generated · seal_result · recipient_spki absent
 - generated · seal_result · recipient_spki null
+- generated · seal_result · recipient_spki ""
 - generated · seal_result · sender_pkcs8 absent
 - generated · seal_result · sender_pkcs8 null
+- generated · seal_result · sender_pkcs8 ""
 - generated · seal_result · msg_id absent
 - generated · seal_result · msg_id null
+- generated · seal_result · msg_id ""
 - generated · seal_result · ts absent
 - generated · seal_result · ts null
 - generated · seal_result · form ""
@@ -2427,7 +2523,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · seal_result · ts absent, exp "7"
 - generated · seal_result · ts absent, ephemeral_seed 7
 
-### `sign` — 15 cases · whole on success
+### `sign` — 17 cases · whole on success
 
 - sign with a public key
 - sign with no data
@@ -2438,14 +2534,16 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · sign · {}
 - generated · sign · pkcs8 absent
 - generated · sign · pkcs8 null
+- generated · sign · pkcs8 ""
 - generated · sign · data absent
 - generated · sign · data null
+- generated · sign · data ""
 - generated · sign · an undeclared member
 - generated · sign · pkcs8 holding a key outside the profile
 - generated · sign · pkcs8 absent, data 7
 - generated · sign · data absent, pkcs8 7
 
-### `signing_request_check` — 100 cases · whole on success
+### `signing_request_check` — 102 cases · whole on success
 
 - signing_request_check: a renewal from a localhost node
 - signing_request_check: a move from an https host, without root_cert
@@ -2533,8 +2631,10 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · signing_request_check · request null
 - generated · signing_request_check · origin absent
 - generated · signing_request_check · origin null
+- generated · signing_request_check · origin ""
 - generated · signing_request_check · now absent
 - generated · signing_request_check · now null
+- generated · signing_request_check · now ""
 - generated · signing_request_check · root_spkis "x"
 - generated · signing_request_check · an undeclared member
 - generated · signing_request_check · root_spkis holding a key outside the profile
@@ -2548,7 +2648,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · signing_request_check · now absent, origin 7
 - generated · signing_request_check · now absent, root_spkis "x"
 
-### `suite_for` — 14 cases · whole on success
+### `suite_for` — 15 cases · whole on success
 
 - suite_for an spki that is not one
 - suite_for an Ed25519 key
@@ -2562,10 +2662,11 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · suite_for · {}
 - generated · suite_for · spki absent
 - generated · suite_for · spki null
+- generated · suite_for · spki ""
 - generated · suite_for · an undeclared member
 - generated · suite_for · spki holding a key outside the profile
 
-### `validate_chain` — 63 cases · whole on success
+### `validate_chain` — 64 cases · whole on success
 
 - validate_chain of a real chain
 - validate_chain against the root and endpoint it really has
@@ -2618,6 +2719,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · validate_chain · chain null
 - generated · validate_chain · now absent
 - generated · validate_chain · now null
+- generated · validate_chain · now ""
 - generated · validate_chain · expected_root ""
 - generated · validate_chain · expected_root 7
 - generated · validate_chain · expected_endpoint ""
@@ -2631,7 +2733,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · validate_chain · now absent, expected_root 7
 - generated · validate_chain · now absent, expected_endpoint 7
 
-### `vault_open` — 47 cases · whole on success
+### `vault_open` — 49 cases · whole on success
 
 - vault_open of what vault_seal made
 - vault_open of what vault_seal made, with t spelled 1.0
@@ -2676,12 +2778,14 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · vault_open · {}
 - generated · vault_open · passphrase absent
 - generated · vault_open · passphrase null
+- generated · vault_open · passphrase ""
 - generated · vault_open · vault absent
 - generated · vault_open · vault null
+- generated · vault_open · vault ""
 - generated · vault_open · an undeclared member
 - generated · vault_open · vault absent, passphrase 7
 
-### `vault_seal` — 63 cases · whole on success
+### `vault_seal` — 65 cases · whole on success
 
 - vault_seal
 - vault_seal of a record
@@ -2731,8 +2835,10 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · vault_seal · {}
 - generated · vault_seal · passphrase absent
 - generated · vault_seal · passphrase null
+- generated · vault_seal · passphrase ""
 - generated · vault_seal · plaintext absent
 - generated · vault_seal · plaintext null
+- generated · vault_seal · plaintext ""
 - generated · vault_seal · kdf "x"
 - generated · vault_seal · salt ""
 - generated · vault_seal · salt 7
@@ -2747,7 +2853,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · vault_seal · plaintext absent, salt 7
 - generated · vault_seal · plaintext absent, nonce 7
 
-### `verify` — 25 cases · whole on success
+### `verify` — 28 cases · whole on success
 
 - verify a signature that is not one
 - verify with an empty signature
@@ -2762,10 +2868,13 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · verify · {}
 - generated · verify · spki absent
 - generated · verify · spki null
+- generated · verify · spki ""
 - generated · verify · data absent
 - generated · verify · data null
+- generated · verify · data ""
 - generated · verify · sig absent
 - generated · verify · sig null
+- generated · verify · sig ""
 - generated · verify · an undeclared member
 - generated · verify · spki holding a key outside the profile
 - generated · verify · spki absent, data 7
@@ -2789,7 +2898,7 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - version with a number past the largest double before containers nested 129 deep
 - version with containers nested 129 deep before a number past the largest double
 
-### `wallet_issue` — 128 cases · whole on success
+### `wallet_issue` — 131 cases · whole on success
 
 - wallet_issue
 - wallet_issue from a vault that carries a ledger
@@ -2881,10 +2990,13 @@ At the run that generated this file: **2540** cases (**1149** of the run's cases
 - generated · wallet_issue · record_plaintext null
 - generated · wallet_issue · root_fingerprint absent
 - generated · wallet_issue · root_fingerprint null
+- generated · wallet_issue · root_fingerprint ""
 - generated · wallet_issue · csr absent
 - generated · wallet_issue · csr null
+- generated · wallet_issue · csr ""
 - generated · wallet_issue · now absent
 - generated · wallet_issue · now null
+- generated · wallet_issue · now ""
 - generated · wallet_issue · valid_days "7"
 - generated · wallet_issue · move "yes"
 - generated · wallet_issue · an undeclared member

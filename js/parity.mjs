@@ -99,6 +99,7 @@ const verbose = process.argv.includes('--verbose');
 const picked = pickBases(contract, written, ask, succeeded);
 problems.push(...picked.problems);
 const made = generate(contract, picked.bases, f.outside);
+problems.push(...made.problems);
 const handIds = new Set(written.map(({ id }) => id));
 for (const { id } of made.cases) if (handIds.has(id)) problems.push(`the case id ${JSON.stringify(id)} is both written and generated`);
 for (const [id, want] of made.expected) expected.set(id, { want, file: 'generated' });
@@ -116,7 +117,7 @@ const holds = (v, got) => {
   if (v !== null && typeof v === 'object') return JSON.stringify(canonical(v)) === JSON.stringify(canonical(got));
   return got === v;
 };
-const shown = (want) => JSON.stringify(want, (_, v) => (v instanceof RegExp ? String(v) : v));
+const shown = (want) => (typeof want === 'function' ? want.label : JSON.stringify(want, (_, v) => (v instanceof RegExp ? String(v) : v)));
 
 for (const c of cases) {
   const { id, fn, args, how } = c;
@@ -142,9 +143,12 @@ for (const c of cases) {
   const want = expected.get(id)?.want;
   // `decide` and `decide_chain` answer under `result`, and a refusal is the answer itself; an
   // expectation that names `result` or `effects` is held to the whole answer, effects and all.
-  const answerWhole = want && ('result' in want || 'effects' in want);
+  // A judge (a function, from js/cases/generated.mjs) is asked of the whole answer: the contract fixes
+  // whether the call refuses there, not its words.
+  const answerWhole = typeof want === 'function' || (want && ('result' in want || 'effects' in want));
   const judged = (got) => (answerWhole ? got : got?.result ?? got);
-  const missed = want ? [['wasm', raw], ['go', rawGo]].filter(([, got]) => !got?.threw && Object.entries(want).some(([k, v]) => !holds(v, judged(got)?.[k]))) : [];
+  const holdsAll = (got) => (typeof want === 'function' ? want(got) : Object.entries(want).every(([k, v]) => holds(v, judged(got)?.[k])));
+  const missed = want ? [['wasm', raw], ['go', rawGo]].filter(([, got]) => !got?.threw && !holdsAll(got)) : [];
   for (const [port, got] of missed) {
     fails.push(`${port} not as expected`);
     said.push(`  NOT AS EXPECTED  ${id}  (${port}): want ${shown(want)}, got ${JSON.stringify(judged(got))}`);

@@ -250,3 +250,19 @@ func TestAMediaFileIsKeyMaterialInDEROrPEM(t *testing.T) {
 		}
 	}
 }
+
+// An owner of "" is an owner, compared like any other, as the core compares it (its `Option`; CONTRACT
+// §0: empty is not absent). It meant "no owner" to this port's manifest check, so a host that passed
+// an empty root read another identity's file whole where the core refuses it (the port-parity hunt
+// of 2026-09-30). The file's own owner is the control that must read.
+func TestReadExportZipComparesAnEmptyOwner(t *testing.T) {
+	in, files := exportFixture(t)
+	zr := writeFixture(t, in, files)
+	if _, err := ReadExportZip(zr, exportOwner, in.ExportedAt, 1<<30); err != nil {
+		t.Fatalf("the file's own owner (the control): %v", err)
+	}
+	want := "manifest.json: owner: the file is " + exportOwner + "'s, not this identity's ()"
+	if _, err := ReadExportZip(zr, "", in.ExportedAt, 1<<30); err == nil || err.Error() != want {
+		t.Fatalf("an owner of \"\": %v, want %q", err, want)
+	}
+}
