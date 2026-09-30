@@ -25,6 +25,11 @@
 //                members were sent "", so no required string ever was, and export_read read another
 //                identity's file for an owner of "" in one port and refused it in the other (the hunt
 //                of 2026-09-30);
+//   nested ""    each string member of an object nested in the base's arguments (a list's first
+//                entry), as "", compared between the ports: a pin's `leaf_fingerprint` of "" was a
+//                claim matching no leaf to the core and no claim at all to the Go port, and nothing
+//                sent it, since the "" pass reached top-level members only (S1 of the review of
+//                2026-09-30);
 //   wrong type   each optional member of the wrong JSON type — a number for a string, a string for an
 //                object, a list or a number, "yes" for a boolean — held to CONTRACT §0's answer for it:
 //                bytes are `{"error": "parse", "why": "not base64url"}`, as bytes that will not decode
@@ -336,6 +341,14 @@ export function generate(contract, bases, outside) {
       if (wrong !== undefined) add(`${name} ${show(wrong)}`, fn, { ...base.args, [name]: wrong }, how, 'an optional member of the wrong type', wrongTypeAnswer(name, schema, root));
     }
     add('an undeclared member', fn, { ...base.args, [UNDECLARED]: 1 }, how, 'an undeclared member');
+    for (const path of nestedObjects(base.args)) {
+      for (const [k, v] of Object.entries(path.reduce((o, p) => o[p], base.args))) {
+        if (typeof v !== 'string' || v === '') continue;
+        const args = structuredClone(base.args);
+        path.reduce((o, p) => o[p], args)[k] = '';
+        add(`${[...path, k].join('.')} ""`, fn, args, how, 'a nested string empty');
+      }
+    }
     for (const path of nestedObjects(base.args)) {
       const at = `${fn} ${path.join('.')}`;
       const loose = READ_FOR_WHAT_IT_NEEDS.has(at);

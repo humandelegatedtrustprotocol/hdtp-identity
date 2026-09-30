@@ -171,6 +171,19 @@ export default function exportCases({ add, expect }, f) {
   ];
   add('export_merge: a held pin is never replaced', 'export_merge', { held, rows });
   add('export_merge with rows whose root is no fingerprint', 'export_merge', { held, rows: [{ root: 'alina' }] });
+  // A row's status and added are what ContactRow says they are, in export_read's words: a held
+  // `Blocked` was read as not blocked, so the import did not keep the person's block, and an added of
+  // "" was carried into the rows the host writes (the review of 2026-09-30, found by parity's nested ""
+  // cases). The controls are the case above and the one below.
+  for (const [what, over, where, why] of [
+    ['a held row whose status is "Blocked"', { held: [row({ status: 'Blocked' })] }, 'held[0]', 'status is not active, blocked or pending_out'],
+    ['a row whose status is ""', { rows: [row({ status: '' })] }, 'rows[0]', 'status is not active, blocked or pending_out'],
+    ['a held row whose added is ""', { held: [row({ added: '' })] }, 'held[0]', 'added is not an RFC 3339 instant'],
+    ['a row whose added is a date', { rows: [row({ added: '2026-09-02' })] }, 'rows[0]', 'added is not an RFC 3339 instant'],
+  ]) {
+    add(`export_merge with ${what}`, 'export_merge', { held, rows, ...over });
+    expect(`export_merge with ${what}`, { error: 'bad_request', why: `${where}: ${why}` });
+  }
   // What the person decided about a held contact outlives an export that says otherwise (SPEC 9.2#16):
   // a blocked contact stays blocked and keeps its permissions even when the row is written for its
   // leaf, and each disagreement is a conflict. Permissions are a set: an order is no disagreement.
@@ -229,6 +242,17 @@ export default function exportCases({ add, expect }, f) {
   const bookRows = wasm.call('book_rows', { contacts: [kept, { root: other('B'), endpoint: 'https://b.example/mcp' }], exported_at: now }).rows;
   add('export_write: the rows book_rows made', 'export_write', { owner, owner_name: 'Olive', exported_at: now, tool: 'parity', contacts: bookRows });
   expect('book_rows: a contact with a member a book does not keep', { error: 'bad_request', why: 'contacts[0]: "preset" is not a member of a wallet contact' });
+  // A book's root and added reach the rows as the contract types them: a root that is no fingerprint
+  // or an added that is no instant came back in a row off the contract (the review of 2026-09-30).
+  for (const [what, over, why] of [
+    ['a root that is no fingerprint', { root: 'alina' }, 'contacts[0]: root is not a fingerprint'],
+    ['a root of ""', { root: '' }, 'contacts[0]: root is not a fingerprint'],
+    ['an added of ""', { added: '' }, 'contacts[0]: added is not an RFC 3339 instant'],
+    ['an added with an offset', { added: '2026-09-02T09:00:00+01:00' }, 'contacts[0]: added is not an RFC 3339 instant'],
+  ]) {
+    add(`book_rows: a contact with ${what}`, 'book_rows', { contacts: [{ ...kept, ...over }], exported_at: now });
+    expect(`book_rows: a contact with ${what}`, { error: 'bad_request', why });
+  }
 
   // ── the arguments and the writers' refusals ─────────────────────────────────────────────────
   add('export_read with nothing to work from', 'export_read', {});

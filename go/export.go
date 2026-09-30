@@ -1490,11 +1490,24 @@ func exportWrite(owner, ownerName string, exportedAt time.Time, tool string, con
 
 // ── the merge ───────────────────────────────────────────────────────────────────────────────────
 
+// mergeRoot is a row's root, with the two other members the merge reads a meaning from held to what
+// the contract says they are (ContactRow), in export_read's words, as the core's root_of: a status
+// outside the three was read as not blocked, so a held contact written as "Blocked" lost its block on
+// an import, and an added that is no instant was carried into what the host writes (the review of
+// 2026-09-30, found by parity's nested "" cases). A member that is absent is left to the host.
 func mergeRoot(v any, what string, i int) (string, error) {
 	o, _ := v.(map[string]any)
 	r, isText := o["root"].(string)
 	if !isText || !IsFingerprint(r) {
 		return "", exportRefuse(fmt.Sprintf("%s[%d]: root is not a fingerprint", what, i))
+	}
+	if status, isText := o["status"].(string); isText && !contains(contactStatuses, status) {
+		return "", exportRefuse(fmt.Sprintf("%s[%d]: status is not active, blocked or pending_out", what, i))
+	}
+	if added, isText := o["added"].(string); isText {
+		if _, ok := parseInstantZ(added); !ok {
+			return "", exportRefuse(fmt.Sprintf("%s[%d]: added is not an RFC 3339 instant", what, i))
+		}
 	}
 	return r, nil
 }
@@ -1610,6 +1623,20 @@ func bookRows(contacts []any, exportedAt time.Time) ([]any, error) {
 				}
 			}
 		}
+		// A row carries the root and added into export_write and to the host as the contract types
+		// them, as the core's book_rows: a root that is no fingerprint, or an added that is no
+		// instant, came back in a row off the contract (the review of 2026-09-30).
+		if !IsFingerprint(o["root"].(string)) {
+			return nil, exportRefuse(fmt.Sprintf("contacts[%d]: root is not a fingerprint", i))
+		}
+		added, has := o["added"].(string)
+		if has {
+			if _, ok := parseInstantZ(added); !ok {
+				return nil, exportRefuse(fmt.Sprintf("contacts[%d]: added is not an RFC 3339 instant", i))
+			}
+		} else {
+			added = timeOut(exportedAt)
+		}
 		opt := func(m string) any {
 			if s, isText := o[m].(string); isText {
 				return s
@@ -1617,10 +1644,6 @@ func bookRows(contacts []any, exportedAt time.Time) ([]any, error) {
 			return nil
 		}
 		name, _ := o["name"].(string)
-		added, has := o["added"].(string)
-		if !has {
-			added = timeOut(exportedAt)
-		}
 		rows = append(rows, map[string]any{
 			"root": o["root"], "endpoint": o["endpoint"], "name": name, "display_name": "",
 			"status": "active", "was_active": true, "permissions": []any{}, "their_permissions": []any{},

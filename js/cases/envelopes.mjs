@@ -402,13 +402,55 @@ export default function envelopes({ add, expect }, f) {
 
   // C — the small form names its leaf, and an unreadable pin that names some OTHER leaf is never parsed.
   const mine = { root: rootFp, endpoint: ENDPOINT, leaf: leafDer, state: 'active' };
-  const gone = { root: 'sha256:a-row-gone-bad', endpoint: 'https://ghost.example/mcp', leaf: 'AAAA', state: 'active' };
+  // The gone row's root and the leaf it names are fingerprints: from e49ef50 a root that is not one is
+  // refused before any pin is read, and so were these two cases, whatever their names said, until the
+  // review of 2026-09-30 found it with S1.
+  const gone = { root: 'sha256:' + 'B'.repeat(43), endpoint: 'https://ghost.example/mcp', leaf: 'AAAA', state: 'active' };
   add('decide, small form: the pin names its leaf', 'decide', { now, envelope: small, node: { ...node, pins: [{ ...mine, leaf_fingerprint: hostFp }] } });
-  add('decide, small form: an unreadable pin that names some OTHER leaf is never parsed', 'decide', { now, envelope: small, node: { ...node, pins: [{ ...gone, leaf_fingerprint: 'sha256:somebody-else' }, { ...mine, leaf_fingerprint: hostFp }] } });
+  add('decide, small form: an unreadable pin that names some OTHER leaf is never parsed', 'decide', { now, envelope: small, node: { ...node, pins: [{ ...gone, leaf_fingerprint: 'sha256:' + 'C'.repeat(43) }, { ...mine, leaf_fingerprint: hostFp }] } });
+  expect('decide, small form: an unreadable pin that names some OTHER leaf is never parsed', { code: 'ok', form: 'leaf', tier: 'contact' });
   add('decide, small form: an unreadable pin that names no leaf has to be parsed', 'decide', { now, envelope: small, node: { ...node, pins: [gone, { ...mine, leaf_fingerprint: hostFp }] } });
   add('decide, small form: a pin whose named leaf is not its leaf', 'decide', { now, envelope: small, node: { ...node, pins: [{ ...mine, leaf: rootDer, leaf_fingerprint: hostFp }] } });
   add('open_result, leaf form: the pin names its leaf', 'open_result', open(leafForm, { pins: [{ ...mine, leaf_fingerprint: hostFp }] }));
   add('open_result, leaf form: a pin whose named leaf is not its leaf', 'open_result', open(leafForm, { pins: [{ ...mine, leaf: rootDer, leaf_fingerprint: hostFp }] }));
+  expect('decide, small form: an unreadable pin that names no leaf has to be parsed', { error: 'parse' });
+
+  // ── S1 and S2 of the review of 2026-09-30: a pin's leaf_fingerprint and state are what they say ──
+  // A leaf_fingerprint of "" was a claim matching no leaf to the core (`chain_required`, `unknown
+  // leaf`) and no claim at all to the Go port (`ok`), and a state outside the three the contract names
+  // was read as `active` by both, so a blocked contact whose host wrote "Blocked" was a full contact.
+  // Both are the host's damaged state, refused where each is read, by its path. The controls: the
+  // pin with the right fingerprint, and each of the three states (a blocked contact's message is a
+  // guest's, which may only redeem or request).
+  const badFp = (fp) => `${fp === '' ? 'an empty' : 'a malformed'} leaf_fingerprint (${JSON.stringify(fp)})`;
+  for (const fp of ['', 'abc', 'sha256:short', hostFp + '=']) {
+    add(`decide, small form: a pin with ${badFp(fp)}`, 'decide', { now, envelope: small, node: { ...node, pins: [{ ...mine, leaf_fingerprint: fp }] } });
+    expect(`decide, small form: a pin with ${badFp(fp)}`, { error: 'bad_request', why: 'node.pins[0].leaf_fingerprint is not a fingerprint' });
+    add(`open_result, leaf form: a pin with ${badFp(fp)}`, 'open_result', open(leafForm, { pins: [{ ...mine, leaf_fingerprint: fp }] }));
+    expect(`open_result, leaf form: a pin with ${badFp(fp)}`, { error: 'bad_request', why: 'pins[0].leaf_fingerprint is not a fingerprint' });
+  }
+  expect('decide, small form: the pin names its leaf', { code: 'ok', form: 'leaf', tier: 'contact' });
+  for (const state of ['Blocked', 'blocked ', 'removed', 'pending_in', '']) {
+    add(`decide on a pinned contact whose state is ${JSON.stringify(state)}`, 'decide', { now, envelope: sealed, node: { ...node, pins: [{ ...mine, state }] } });
+    expect(`decide on a pinned contact whose state is ${JSON.stringify(state)}`, { error: 'bad_request', why: 'node.pins[0].state is active, pending_out or blocked' });
+    add(`open_result with a pin whose state is ${JSON.stringify(state)}`, 'open_result', open(leafForm, { pins: [{ ...mine, state }] }));
+    expect(`open_result with a pin whose state is ${JSON.stringify(state)}`, { error: 'bad_request', why: 'pins[0].state is active, pending_out or blocked' });
+  }
+  // A held key's kid is a fingerprint, as a pin's root is (the review of 2026-09-30, found by parity's
+  // nested "" cases): read as any string, a key no envelope could name was held without a word.
+  for (const kid of ['', 'abc']) {
+    const id = `decide with a held key whose kid is ${JSON.stringify(kid)}`;
+    add(id, 'decide', { now, envelope: sealed, node: { ...node, pins: pinned, keys: node.keys.map((k) => ({ ...k, kid })) } });
+    expect(id, { error: 'bad_request', why: 'node.keys[0].kid is not a fingerprint' });
+  }
+  // A state that is not a string was `node.pins[0].state is required` already, and stays so: the type
+  // first, then the value.
+  add('decide on a pinned contact whose state is a number', 'decide', { now, envelope: sealed, node: { ...node, pins: [{ ...mine, state: 1 }] } });
+  expect('decide on a pinned contact whose state is a number', { error: 'bad_request', why: 'node.pins[0].state is required' });
+  for (const [state, want] of [['active', { code: 'ok', tier: 'contact' }], ['blocked', { code: 'envelope_invalid', why: 'guest may only redeem or request' }], ['pending_out', { code: 'pending_approval' }]]) {
+    add(`decide on a pinned contact whose state is ${state}`, 'decide', { now, envelope: sealed, node: { ...node, pins: [{ ...mine, state }] } });
+    expect(`decide on a pinned contact whose state is ${state}`, want);
+  }
 
   // ── P-21 (review of 2026-09-23): a pending contact's sealed listing ──────────────────────────────
   //
@@ -843,6 +885,9 @@ export default function envelopes({ add, expect }, f) {
     // decide: it came back as `address_claim: "abc"`, off the contract.
     add('decide_chain with a pin whose root is not a fingerprint', 'decide_chain', at({ pins: [{ ...pinned[0], root: 'abc' }] }));
     expect('decide_chain with a pin whose root is not a fingerprint', { error: 'bad_request', why: 'node.pins[0].root is not a fingerprint' });
+    // A held key's kid, as in decide (the review of 2026-09-30).
+    add('decide_chain with a held key whose kid is not a fingerprint', 'decide_chain', at({ pins: pinned, keys: node.keys.map((k) => ({ ...k, kid: 'abc' })) }));
+    expect('decide_chain with a held key whose kid is not a fingerprint', { error: 'bad_request', why: 'node.keys[0].kid is not a fingerprint' });
     // Another endpoint, under auto and under ask, and a pending_out pin that moved under ask: the
     // new-address rule comes before the pending_out one.
     const movedAt = (o, pins = pinned) => ({ ...at({ pins, ...o }), chain: chainOf(movedLeaf) });
