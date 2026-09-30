@@ -10,6 +10,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+## 0.4.2 — 2026-09-30
+
 - SPEC 2.2.5: `version` answers spec 2.2.5 in both ports, and `contract/contract.json` names it (so
   do `CONTRACT.md` and `PROOFS.md`, both generated). Nothing on the wire: the text reads as the
   specification as it stands — its revision narrative moved to pact-protocol's `CHANGES.md`, the

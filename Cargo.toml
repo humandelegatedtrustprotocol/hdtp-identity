@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/pact-identity", "crates/pact-identity-wasm", "crates/pact", "crates/pact-limits"]
 
 [workspace.package]
-version = "0.4.1"
+version = "0.4.2"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/pact-cloud/pact-identity"
