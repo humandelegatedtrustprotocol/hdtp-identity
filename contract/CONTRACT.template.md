@@ -66,10 +66,25 @@ the tables is `contract/CONTRACT.template.md` and is written by hand.
   missing, the one named is the first the function needs, and both ports read them in the same order.
 - **A member a function does not declare is refused**, before any member is read: `{"error":
   "bad_request", "why": "<fn> takes no member \"<m>\""}`, naming the first such member in sorted
-  order. A function declares the members its `params` list, and no others. This holds the arguments
-  object itself; the objects inside a member (an envelope, a node state, a pin) are read for the
-  members they need and not held to their schemas' `additionalProperties`, because a host's typed
-  port, which decodes them into fixed structs, cannot see a member it has no field for either.
+  order. A function declares the members its `params` list, and no others. That holds the arguments
+  object. An object inside a member is read one of two ways, and both ports read each the same way
+  (`js/parity.mjs` sends every object in every function's base an undeclared member, and requires a
+  refusal of a document and an answer for the second kind, which `js/cases/generated.mjs`'s
+  `READ_FOR_WHAT_IT_NEEDS` lists per function):
+  - **a document** — something a port writes and a port reads back, whose members SPEC or this
+    contract lists — is held to its members, and one it does not list is refused in its function's
+    words: a vault document and its `kdf`; `wallet_issue`'s vault and record plaintexts and the roots,
+    contacts and passkey inside them; a ledger entry; a signing request; `export_manifest`'s manifest,
+    its `counts` and `files`, and `hashes`; a row of `export_write`'s `contacts` and `threads` and of
+    `export_write_messages`'s `messages`; a wallet contact of `book_rows`; the limits rules and a
+    charge;
+  - **what a host hands in of its own state, or of what a peer sent it** — an envelope, a node state
+    and its keys and pins, a pin, the answer to `get_card` and its `data`, a directory entry,
+    `export_merge`'s held pins and rows, `export_write`'s media — and the JSON a seal carries
+    (`vault_seal`'s plaintext, of which only `v` is read, `seal_request`'s `params`, `seal_result`'s
+    `result`) are read for the members they need and not held to their schemas'
+    `additionalProperties`: a host's typed port decodes them into fixed structs and cannot see a
+    member it has no field for either.
 - **`why` is part of the answer.** Two ports refusing the same call in different words is a
   divergence, not a detail: it is what a person debugging reads, and what a caller's test asserts. No
   `why` may be a library's own error text — one port cannot reproduce another library's wording.
@@ -253,7 +268,10 @@ Output:
 The other results, each with an empty `effects` list unless stated: `{"code": "envelope_invalid",
 "why"}` — and when `why` is `guest may only redeem or request` it also carries `root` and `leaf`, so a
 host holding an older pin of that leaf's key learns the root above it (§14.3) and decides again; `{"code": "chain_required"}`; `{"code": "certificate_renewed", "data": {"chain": [...]}}`;
-`{"code": "pending_approval"}`; and `{"code": "ok", "replayed": true}` for a seen `msg_id`.
+`{"code": "pending_approval", "root", "endpoint", "leaf", "form", "msg_id"}` — what the signature
+proved and the request's `msg_id`, so a host can seal the refusal back to the caller (§13.2) without
+opening the envelope again; its effects are the pin's own moves, never `seen`; and
+`{"code": "ok", "replayed": true}` for a seen `msg_id`.
 The `why` strings are the seed's, verbatim, so the intrusion suite reads both ports alike.
 
 Order, as `receive()` has it (freshness also refuses `exp − ts` over 30 days, §13.1, as `exp too far from ts`): decode `protected` → header members exactly `cty,exp,kid,msg_id,suite,ts,v`

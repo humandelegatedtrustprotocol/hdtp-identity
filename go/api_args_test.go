@@ -75,8 +75,9 @@ func TestEveryFunctionDeclaresTheContractsMembers(t *testing.T) {
 
 // An empty expectation is "not given" to a Go caller of the typed API and a value at the JSON
 // boundary (CONTRACT §0). The node's first certification passes ExpectedRoot "" and must validate
-// (pact-gateway internal/identity/leaf.go:561); the same chain with `expected_root: ""` handed to Call
-// is refused, as the core refuses it. FollowRenewed's pinned root and dialed address are always held.
+// (pact-gateway internal/identity/leaf.go, installLeaf's ValidateChain, before the account has a
+// root); the same chain with `expected_root: ""` handed to Call is refused, as the core refuses it.
+// FollowRenewed's pinned root and dialed address are always held.
 func TestAnEmptyExpectationIsNotGivenOnlyToAGoCaller(t *testing.T) {
 	p := reviewIdentity(t, "ed25519", reviewEndpoint)
 	now := mustTime(t, "2026-09-13T12:00:00Z")

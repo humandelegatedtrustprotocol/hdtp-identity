@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { collect, CASE_FILES } from './cases/index.mjs';
-import { generate, pickBases, wrongTypeFor, wrongTypeAnswer, keyedOf, refuses, BASES, EMPTY_IS_A_VALUE, HOSTILE } from './cases/generated.mjs';
+import { generate, pickBases, wrongTypeFor, wrongTypeAnswer, keyedOf, refuses, BASES, EMPTY_IS_A_VALUE, HOSTILE, READ_FOR_WHAT_IT_NEEDS, UNDECLARED } from './cases/generated.mjs';
 
 const contract = {
   sections: { build: 'The build', keys: 'Keys', cards: 'Cards' },
@@ -132,6 +132,41 @@ test('a name on EMPTY_IS_A_VALUE that is no required string member fails the run
   const { problems } = generate(small, new Map());
   assert.ok(problems.some((p) => /EMPTY_IS_A_VALUE names build_root\.cn, which is not a required member that takes a string/.test(p)), problems.join('\n'));
   assert.ok(!problems.some((p) => / sign\.data,/.test(p)), 'sign.data is a required string member of the small contract');
+});
+
+test('a member undeclared inside a member is judged by CONTRACT §0: a document refuses it, a host\'s state reads past it', () => {
+  // `decide node` is on READ_FOR_WHAT_IT_NEEDS and `sign held` is not: a small contract with both.
+  const two = {
+    ...small,
+    methods: {
+      ...small.methods,
+      sign: { ...small.methods.sign, params: { ...small.methods.sign.params, properties: { ...small.methods.sign.params.properties, held: { type: 'object' } } } },
+      decide: { section: 'keys', params: { type: 'object', properties: { node: { type: 'object' } }, required: ['node'] }, errors: ['bad_request'] },
+    },
+  };
+  const bases = new Map([
+    ['sign', { id: 'sign', fn: 'sign', args: { pkcs8: 'AA', data: 'BB', held: { a: 1 } }, how: '*' }],
+    ['decide', { id: 'decide', fn: 'decide', args: { node: { endpoint: 'e', pins: [{ root: 'r' }] } }, how: '*' }],
+  ]);
+  const { cases, expected, problems } = generate(two, bases);
+  const at = (id) => cases.find((c) => c.id === `generated · ${id}`);
+  const document = expected.get('generated · sign · an undeclared member in held');
+  assert.deepEqual(at('sign · an undeclared member in held').args.held, { a: 1, [UNDECLARED]: 1 });
+  assert.equal(at('sign · an undeclared member in held').described, undefined, 'a document is judged on what was sent');
+  assert.equal(document({ error: 'bad_request', why: 'held holds a, and nothing else: not_a_member' }), true);
+  assert.equal(document({ sig: 'AA' }), false);
+  assert.ok(READ_FOR_WHAT_IT_NEEDS.has('decide node'));
+  const state = expected.get('generated · decide · an undeclared member in node');
+  assert.equal(state({ result: { code: 'ok' }, effects: [] }), true);
+  assert.equal(state({ error: 'bad_request', why: 'node holds …' }), false);
+  // Read past, the call is held to the contract as the base's arguments, without the added member.
+  assert.deepEqual(at('decide · an undeclared member in node').described, bases.get('decide').args);
+  // decide's pins.0 is a list's first entry, and on the list too; its base reaches it.
+  assert.ok(expected.has('generated · decide · an undeclared member in node.pins.0'));
+  // The rest of READ_FOR_WHAT_IT_NEEDS names functions this contract does not have, or ones with no base.
+  assert.ok(problems.some((p) => /READ_FOR_WHAT_IT_NEEDS names refresh_check pin, and the contract has no refresh_check/.test(p)), problems.join('\n'));
+  assert.ok(problems.some((p) => /READ_FOR_WHAT_IT_NEEDS names decide envelope, which no generated case reaches/.test(p)), problems.join('\n'));
+  assert.ok(!problems.some((p) => /names decide node[ ,]/.test(p)), problems.join('\n'));
 });
 
 test('an optional member of the wrong type is held to §0: bytes do not decode, anything else is named', () => {

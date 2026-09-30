@@ -395,7 +395,10 @@ export default function envelopes({ add, expect }, f) {
     expect(listing, { code: 'ok', tier: 'pending', endpoint });
     const control = `decide: a pending_out contact's sealed send_message waits, ${what}`;
     add(control, 'decide', { now, envelope: seal(form, chainLeaf, 'tools/call', { name: 'send_message' }), node: pendingOut });
-    expect(control, { code: 'pending_approval' });
+    // It waits, and names what the signature proved, so a host can seal the refusal back (the
+    // port-parity lead 2): the root, the address, the leaf the signature verified under, the form, and
+    // the request's msg_id. `seen` is not an effect: the call was not taken.
+    expect(control, { code: 'pending_approval', root: rootFp, endpoint, leaf: form === 'chain' ? b64url(chainLeaf) : leafDer, form, msg_id: 'p-21' });
   }
 
   // TC-3 — §13.1#1: `enc` is exactly the suite's Npk (65 bytes for PACT-SEAL-P256, 32 for

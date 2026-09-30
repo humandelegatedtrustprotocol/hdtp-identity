@@ -352,8 +352,16 @@
         },
         {
           "type": "object",
-          "properties": { "code": { "const": "pending_approval" } },
-          "required": ["code"],
+          "description": "A `pending_out` pin calling anything but the pending tier's tools: the call waits for the owner's approval. It names what the signature proved — `root`, `endpoint`, the `leaf` it verified under and the `form` — and the request's `msg_id`, which no `seen` effect carries here, so a host can seal the refusal back to the caller (§13.2) without opening the envelope again. The pin's own moves are effects; `seen` is not one, since the call was not taken.",
+          "properties": {
+            "code": { "const": "pending_approval" },
+            "root": { "$ref": "#/$defs/Fingerprint" },
+            "endpoint": { "type": "string" },
+            "leaf": { "$ref": "#/$defs/CertDer" },
+            "form": { "$ref": "#/$defs/Form" },
+            "msg_id": { "type": "string" }
+          },
+          "required": ["code", "root", "endpoint", "leaf", "form", "msg_id"],
           "additionalProperties": false
         }
       ]

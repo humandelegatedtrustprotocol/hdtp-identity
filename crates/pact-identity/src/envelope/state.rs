@@ -153,10 +153,35 @@ impl Wire {
 /// came back as the answer's `address_claim: "abc"`, which the contract types as a fingerprint.
 fn root(o: &Map<String, Value>, path: &str) -> Result<String> {
     let root = text(o, "root", path)?;
-    if !crate::ledger::is_fingerprint(&root) {
+    host_root(&root, path)?;
+    Ok(root)
+}
+
+/// One root the host holds, at `path`: a fingerprint, or `bad_request` `<path>.root is not a
+/// fingerprint`.
+pub(crate) fn host_root(root: &str, path: &str) -> Result<()> {
+    if !crate::ledger::is_fingerprint(root) {
         return err("bad_request", format!("{path}.root is not a fingerprint"));
     }
-    Ok(root)
+    Ok(())
+}
+
+/// Every root a node state holds — its pins', its tombstones' and its former endpoints', in the order
+/// the reader reads them — held to `host_root`: what the typed `decide` and `decide_chain` ask first,
+/// since a typed caller's `NodeState` never passed through the reader, as the Go port's typed `Decide`
+/// and `DecideChain` ask it (its `hostRoots`). Only the reader checked, so a typed caller's pin whose
+/// root was `abc` was a root nothing matched (the hunt of 2026-09-30).
+pub(crate) fn host_roots(node: &NodeState) -> Result<()> {
+    for (i, p) in node.pins.iter().enumerate() {
+        host_root(&p.root, &format!("node.pins[{i}]"))?;
+    }
+    for (i, t) in node.tombstones.iter().enumerate() {
+        host_root(&t.root, &format!("node.tombstones[{i}]"))?;
+    }
+    for (i, f) in node.former_endpoints.iter().enumerate() {
+        host_root(&f.root, &format!("node.former_endpoints[{i}]"))?;
+    }
+    Ok(())
 }
 
 /// A pin, `open_result`'s or a node's: root, endpoint and leaf; `state` absent is `active`.
