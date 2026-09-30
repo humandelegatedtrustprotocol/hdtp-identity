@@ -13,11 +13,23 @@ pub struct Merged {
     pub conflicts: Vec<Value>,
 }
 
+/// A row's root, and the two other members merge reads a meaning from, held to what the contract
+/// says they are (`ContactRow`), in export_read's words: a `status` outside the three was read as not
+/// blocked, so a held contact the host wrote as `Blocked` lost its block on an import, and an `added`
+/// that is no instant was carried into what the host writes (the review of 2026-09-30, found by
+/// parity's nested "" cases). A member that is absent is left to the host, as before.
 fn root_of(v: &Value, what: &str, i: usize) -> Result<String> {
-    match v.get("root").and_then(|r| r.as_str()) {
-        Some(r) if is_fingerprint(r) => Ok(r.to_string()),
-        _ => refuse(format!("{what}[{i}]: root is not a fingerprint")),
+    let root = match v.get("root").and_then(|r| r.as_str()) {
+        Some(r) if is_fingerprint(r) => r.to_string(),
+        _ => return refuse(format!("{what}[{i}]: root is not a fingerprint")),
+    };
+    if v.get("status").and_then(|s| s.as_str()).is_some_and(|s| !super::STATUSES.contains(&s)) {
+        return refuse(format!("{what}[{i}]: status is not active, blocked or pending_out"));
     }
+    if v.get("added").and_then(|s| s.as_str()).is_some_and(|a| crate::time::parse_rfc3339(a).is_err()) {
+        return refuse(format!("{what}[{i}]: added is not an RFC 3339 instant"));
+    }
+    Ok(root)
 }
 
 /// What the person decided about a contact the host holds: never taken from a file.

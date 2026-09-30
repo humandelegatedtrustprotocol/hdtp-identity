@@ -301,10 +301,11 @@ pub struct OpenResultArgs<'a> {
 /// The caller's side of §13.2: open, validate the responder's chain or find the named leaf among
 /// the pins, refuse a superseded leaf, verify the signature, correlate.
 pub fn open_result(a: OpenResultArgs<'_>) -> Result<Value> {
-    // The caller's pins are its own state: a root that is not a fingerprint is refused first, as the
-    // Go port's typed OpenResult refuses it, for a typed caller whose pins never passed the reader.
+    // The caller's pins are its own state: a root that is not a fingerprint, a state outside the three
+    // and a leaf fingerprint that is not one are refused first, as the Go port's typed OpenResult
+    // refuses them, for a typed caller whose pins never passed the reader.
     for (i, p) in a.pins.iter().enumerate() {
-        state::host_root(&p.root, &format!("pins[{i}]"))?;
+        state::host_pin(&p.root, &p.state, p.leaf_fingerprint.as_deref(), &format!("pins[{i}]"))?;
     }
     let invalid = |why: &str| err::<Value>("envelope_invalid", why);
     let (aad, h) = decode_header(&a.envelope.protected)?;

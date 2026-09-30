@@ -242,9 +242,17 @@ fn a_pin_that_names_its_leaf_is_matched_by_name_and_only_the_match_is_parsed() {
     }
     // An unreadable pin that does NOT say which leaf it holds has to be parsed to find out, and is an error…
     assert_eq!(decide(json!([unreadable(None), theirs(Some(&their_fp))]))["error"], "parse");
-    // …and one that says it holds some OTHER leaf is never parsed at all.
-    let d = decide(json!([unreadable(Some("sha256:somebody-else")), theirs(Some(&their_fp))]));
+    // …and one that says it holds some OTHER leaf is never parsed at all. The other leaf is named by a
+    // fingerprint: a leaf_fingerprint that is not one is the host's damaged state, refused where it is
+    // read (the review of 2026-09-30, S1), as `sha256:somebody-else` now is.
+    let d = decide(json!([unreadable(Some(&format!("sha256:{}", "H".repeat(43)))), theirs(Some(&their_fp))]));
     assert_eq!(d["result"]["code"], "ok", "{d}");
+    let d = decide(json!([unreadable(Some("sha256:somebody-else")), theirs(Some(&their_fp))]));
+    assert_eq!(
+        (d["error"].as_str(), d["why"].as_str()),
+        (Some("bad_request"), Some("node.pins[0].leaf_fingerprint is not a fingerprint")),
+        "{d}"
+    );
 
     // The name is a claim about the certificate beside it, and is held to it.
     let lying = {

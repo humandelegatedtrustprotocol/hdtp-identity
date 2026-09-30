@@ -295,12 +295,58 @@ func hostRoot(root, path string) error {
 	return nil
 }
 
-// hostRoots is hostRoot over the node's pins, tombstones and former endpoints, in the order the
-// reader reads them: what the typed Decide and DecideChain ask first, since a Go caller's NodeState
-// never passed through the JSON reader.
+// hostKid holds a held key's kid to the contract's Fingerprint (HeldKey), as the core's host_kid:
+// read as any string, a key whose kid was "" was a key no envelope named, held by both ports without
+// a word (the review of 2026-09-30, found by parity's nested "" cases).
+func hostKid(kid, path string) error {
+	if !IsFingerprint(kid) {
+		return errArg(path + ".kid is not a fingerprint")
+	}
+	return nil
+}
+
+// hostState holds a pin's state to the three the contract names (Pin). Any other was read as active,
+// so a blocked contact whose host wrote "Blocked", "blocked " or "removed" was a full contact (S2 of
+// the review of 2026-09-30). A typed Pin's zero value, "", never reaches it: hostPin reads it as
+// active, and the JSON reader reads an absent state as active and refuses a present "".
+func hostState(state, path string) error {
+	switch state {
+	case "active", "pending_out", "blocked":
+		return nil
+	}
+	return errArg(path + ".state is active, pending_out or blocked")
+}
+
+// hostPin holds a typed caller's pin as the reader holds one, in the reader's order: its root, its
+// state ("" is the zero value, active) and its leaf fingerprint ("" is the zero value, none), as the
+// core's host_pin does.
+func hostPin(p Pin, path string) error {
+	if err := hostRoot(p.Root, path); err != nil {
+		return err
+	}
+	if p.State != "" {
+		if err := hostState(p.State, path); err != nil {
+			return err
+		}
+	}
+	if p.LeafFingerprint != "" && !IsFingerprint(p.LeafFingerprint) {
+		return errArg(path + ".leaf_fingerprint is not a fingerprint")
+	}
+	return nil
+}
+
+// hostRoots is hostKid over the node's held keys, then hostRoot over its pins, tombstones and former
+// endpoints, in the order the reader reads them, with each pin's state and leaf fingerprint beside its
+// root (hostPin): what the typed Decide and DecideChain ask first, since a Go caller's NodeState never
+// passed through the JSON reader.
 func hostRoots(node NodeState) error {
+	for i, k := range node.Keys {
+		if err := hostKid(k.Kid, "node.keys["+itoa(i)+"]"); err != nil {
+			return err
+		}
+	}
 	for i, p := range node.Pins {
-		if err := hostRoot(p.Root, "node.pins["+itoa(i)+"]"); err != nil {
+		if err := hostPin(p, "node.pins["+itoa(i)+"]"); err != nil {
 			return err
 		}
 	}
@@ -954,7 +1000,7 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 		return nil, err
 	}
 	for i, p := range o.Pins {
-		if err := hostRoot(p.Root, "pins["+itoa(i)+"]"); err != nil {
+		if err := hostPin(p, "pins["+itoa(i)+"]"); err != nil {
 			return nil, err
 		}
 	}

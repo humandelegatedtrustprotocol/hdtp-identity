@@ -423,7 +423,7 @@ fn an_open_with_no_public_key_is_refused_by_name() {
 /// a real fingerprint, gets past the check to the chain.
 #[test]
 fn typed_decisions_refuse_a_host_root_that_is_not_a_fingerprint() {
-    use pact_identity::envelope::{self, CallerPin, DecideInput, FormerEndpoint, NodeState, OpenResultArgs, Pin, Tombstone, Wire};
+    use pact_identity::envelope::{self, CallerPin, DecideInput, FormerEndpoint, HeldKey, NodeState, OpenResultArgs, Pin, Tombstone, Wire};
     let fp = format!("sha256:{}", "A".repeat(43));
     let pin =
         |root: &str| Pin { root: root.into(), endpoint: E_A.into(), leaf: String::new(), state: "active".into(), leaf_fingerprint: None };
@@ -451,6 +451,23 @@ fn typed_decisions_refuse_a_host_root_that_is_not_a_fingerprint() {
         (node(vec![pin(&fp)], vec![stone(&fp)], vec![former("abc")]), "bad_request: node.former_endpoints[0].root is not a fingerprint"),
         // pins before tombstones, as the reader and the Go port read them
         (node(vec![pin("abc")], vec![stone("abc")], vec![]), "bad_request: node.pins[0].root is not a fingerprint"),
+        // And, in the reader's order, a held key's kid first, then each pin's state and leaf fingerprint
+        // beside its root (the review of 2026-09-30: S1, S2, and the kid).
+        (
+            NodeState {
+                keys: vec![HeldKey { kid: "abc".into(), leaf: String::new(), pkcs8: String::new(), current: true }],
+                ..node(vec![pin("abc")], vec![], vec![])
+            },
+            "bad_request: node.keys[0].kid is not a fingerprint",
+        ),
+        (
+            node(vec![Pin { state: "Blocked".into(), ..pin(&fp) }], vec![], vec![]),
+            "bad_request: node.pins[0].state is active, pending_out or blocked",
+        ),
+        (
+            node(vec![Pin { leaf_fingerprint: Some(String::new()), ..pin(&fp) }], vec![], vec![]),
+            "bad_request: node.pins[0].leaf_fingerprint is not a fingerprint",
+        ),
     ] {
         assert_eq!(why(envelope::decide_chain(&state, &[], now_s())), want);
         let input = DecideInput {
@@ -491,6 +508,14 @@ fn typed_decisions_refuse_a_host_root_that_is_not_a_fingerprint() {
         leaf_fingerprint: None,
     };
     assert_eq!(open(&[caller(&fp), caller("abc")]), "bad_request: pins[1].root is not a fingerprint");
+    assert_eq!(
+        open(&[CallerPin { state: "removed".into(), ..caller(&fp) }]),
+        "bad_request: pins[0].state is active, pending_out or blocked"
+    );
+    assert_eq!(
+        open(&[CallerPin { leaf_fingerprint: Some("x".into()), ..caller(&fp) }]),
+        "bad_request: pins[0].leaf_fingerprint is not a fingerprint"
+    );
     // The control: past the pins, the empty envelope is refused for itself.
     assert!(!open(&[caller(&fp)]).contains("root is not a fingerprint"));
 }

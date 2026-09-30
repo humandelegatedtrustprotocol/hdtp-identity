@@ -483,11 +483,19 @@ func pinOf(v any, path string) (Pin, error) {
 	if state != nil {
 		p.State = *state
 	}
+	if err := hostState(p.State, path); err != nil {
+		return Pin{}, err
+	}
+	// Present, "" is a leaf fingerprint that is not one, as the core reads it; this port read it as
+	// absent, the typed Pin's zero value (S1 of the review of 2026-09-30).
 	fp, err := s.optText("leaf_fingerprint")
 	if err != nil {
 		return Pin{}, err
 	}
 	if fp != nil {
+		if !IsFingerprint(*fp) {
+			return Pin{}, errArg(path + ".leaf_fingerprint is not a fingerprint")
+		}
 		p.LeafFingerprint = *fp
 	}
 	return p, nil
@@ -528,6 +536,9 @@ func nodeStateOf(v any) (NodeState, error) {
 		}
 		var h HeldKey
 		if h.Kid, err = k.text("kid"); err != nil {
+			return HeldKey{}, err
+		}
+		if err := hostKid(h.Kid, path); err != nil {
 			return HeldKey{}, err
 		}
 		if h.Leaf, err = k.text("leaf"); err != nil {

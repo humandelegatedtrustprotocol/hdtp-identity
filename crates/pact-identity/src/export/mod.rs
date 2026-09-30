@@ -938,6 +938,15 @@ pub fn book_rows(contacts: &[Value], exported_at: i64) -> Result<Vec<Value>> {
             }
         }
         let text = |m: &str| o.get(m).and_then(|v| v.as_str());
+        // A row carries the root and `added` into export_write and to the host as the contract types
+        // them: a root that is no fingerprint, or an `added` that is no instant, came back in a row
+        // off the contract (the review of 2026-09-30, found by parity's nested "" cases).
+        if !text("root").is_some_and(is_fingerprint) {
+            return refuse(format!("contacts[{i}]: root is not a fingerprint"));
+        }
+        if text("added").is_some_and(|a| crate::time::parse_rfc3339(a).is_err()) {
+            return refuse(format!("contacts[{i}]: added is not an RFC 3339 instant"));
+        }
         rows.push(json!({
             "root": text("root"), "endpoint": text("endpoint"), "name": text("name").unwrap_or(""), "display_name": "",
             "status": "active", "was_active": true, "permissions": [], "their_permissions": [],
