@@ -10,6 +10,13 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+- SPEC 2.2.5: `version` answers spec 2.2.5 in both ports, and `contract/contract.json` names it (so
+  do `CONTRACT.md` and `PROOFS.md`, both generated). Nothing on the wire: the text reads as the
+  specification as it stands — its revision narrative moved to pact-protocol's `CHANGES.md`, the
+  in-body references to the document's own history became timeless prose, and §14.1 now says a
+  P-256 key is written as its uncompressed point, which both ports already refused otherwise. One
+  MUST sentence of the 88, 13.3#1, was reworded without change of requirement; `js/musts.json`
+  already carries its hash (#25). No behaviour changes.
 - **The parity gate generates its own cases** (the port-parity plan of 2026-09-29, S1): for every
   function the contract declares, `{}`, the hostile object, each required member absent and `null`
   (held to CONTRACT §0's `<name> is required`), each member that takes a string as `""`, each
