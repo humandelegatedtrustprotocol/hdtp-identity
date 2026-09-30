@@ -426,6 +426,14 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   `js/seed.test.mjs` compares `js/appendix-b-reader.json` with pact-protocol's
   `vectors/appendix-b-reader.json`, byte for byte, from the pact-protocol beside this repository, as
   the gate reads it. pact-protocol's copy arrives with its PR #10, so this lands with it.
+- **The seed is held to the ports where they read alike** (R33's seed half, and clusters G and H):
+  26 parity expectations for `parse_certificate` and `card_decode` now come from the seed's own
+  `parse` and `decodeCard` at run time, where a fixed string stood: an empty keyUsage BIT STRING, an
+  empty `[3]`, three validity times, a keyUsage whose OID is padded and whose criticality is spelled
+  `0x01`, a key outside the profile (four, in a certificate and on a card), a card's certificate
+  with a stray character (nine), and the controls. On pact-protocol main the seed read 20 of them
+  differently, so the gate fails there, and passes against pact-protocol PR #10, with which this
+  lands.
 
 ## 0.4.1 — 2026-09-28
 
