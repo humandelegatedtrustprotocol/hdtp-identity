@@ -566,6 +566,43 @@ export default function envelopes({ add, expect }, f) {
   // An answer is held by its `result`, which is what the peer sent.
   expect('open_result on an answer whose result holds the largest double', { n: 1.7976931348623157e308 });
 
+  // ── M1 of the review of 2026-09-30: text that is not UTF-8, and half a surrogate pair ─────────────
+  // serde_json, which the core reads with, refuses bytes that are not UTF-8 and a \u escape of half a
+  // surrogate pair; encoding/json reads the first as U+FFFD and the second as U+FFFD too. So a call
+  // whose header msg_id was "\ud800", or whose body held one or a raw 0xFF, was `protected is not JSON`
+  // or `does not open` to the core (the cloud) and `ok` to the Go port (the node), and so was the
+  // seed's node until pact-protocol#10 (2ba05a1). A surrogate pair, and an escaped backslash before a
+  // `u`, are the controls. `@` in a text stands for the bytes given.
+  const bytesAt = (text, ...b) => { const t = Buffer.from(text), i = t.indexOf('@'); return Buffer.concat([t.subarray(0, i), Buffer.from(b), t.subarray(i + 1)]); };
+  const msgIdText = (text) => (t) => t.replace(/"msg_id":"[^"]*"/, `"msg_id":${text}`);
+  const rawBody = (msgId, argsText, ...b) => sealText({ to: toMyself, cty: 'application/pact-call+json', msgId, body: bytesAt(`{"method":"tools/call","params":{"name":"send_message","arguments":${argsText}},"chain":${chainText}}`, ...b) });
+  const headerNotJSON = { code: 'envelope_invalid', why: 'protected is not JSON' };
+  for (const [what, envelope, want] of [
+    ['a header whose msg_id is half a surrogate pair', callText('p-m1-1', '{}', { header: msgIdText('"\\ud800"') }), headerNotJSON],
+    ['a header holding a byte that is not UTF-8', callText('p-m1-2', '{}', { header: (t) => bytesAt(msgIdText('"@"')(t), 0xff) }), headerNotJSON],
+    ['a body whose value is half a surrogate pair', callText('p-m1-3', '{"text":"\\ud800"}'), notJSON],
+    ['a body whose value is the low half of a surrogate pair', callText('p-m1-4', '{"text":"\\udc00"}'), notJSON],
+    ['a body whose member name is half a surrogate pair', callText('p-m1-5', '{"\\ud800":1}'), notJSON],
+    ['a body holding bytes that are not UTF-8', rawBody('p-m1-6', '{"text":"@"}', 0xff, 0xfe), notJSON],
+    ['a body holding a surrogate pair', callText('p-m1-7', '{"text":"\\ud83d\\ude00"}'), { code: 'ok', tier: 'contact' }],
+    ['a body holding an escaped backslash before a u', callText('p-m1-8', '{"text":"\\\\ud800"}'), { code: 'ok', tier: 'contact' }],
+  ]) {
+    add(`decide on an envelope with ${what}`, 'decide', { now, envelope, node: pinnedNode });
+    expect(`decide on an envelope with ${what}`, want);
+  }
+  const rawResult = (...b) => sealText({ to: callerKey.pub, cty: 'application/pact-result+json', msgId: 'r-1', body: bytesAt(`{"result":{"text":"@"},"chain":${chainText}}`, ...b) });
+  const answerNotJSON = { error: 'envelope_invalid', why: 'does not open' };
+  for (const [what, answer, want] of [
+    ['an answer whose header msg_id is half a surrogate pair', sealText({ to: callerKey.pub, cty: 'application/pact-result+json', msgId: 'r-1', body: `{"result":{},"chain":${chainText}}`, header: msgIdText('"\\ud800"') }), { error: 'envelope_invalid', why: 'protected is not JSON' }],
+    ['an answer whose result holds half a surrogate pair', resultText('{"text":"\\ud800"}'), answerNotJSON],
+    ['an answer whose result names a member with half a surrogate pair', resultText('{"\\udc00":1}'), answerNotJSON],
+    ['an answer whose result holds bytes that are not UTF-8', rawResult(0xff, 0xfe), answerNotJSON],
+    ['an answer whose result holds a surrogate pair', resultText('{"text":"\\ud83d\\ude00"}'), { text: '\u{1F600}' }],
+  ]) {
+    add(`open_result on ${what}`, 'open_result', open(answer));
+    expect(`open_result on ${what}`, want);
+  }
+
   // ── G: the keys an envelope is sealed to (T4, F6, R14) ───────────────────────────────────────────
   //
   // The X25519 suite is for an Ed25519 recipient, converted (CONTRACT §5; SPEC §13.1's suite table),

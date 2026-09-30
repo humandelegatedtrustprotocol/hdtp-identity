@@ -14,14 +14,24 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf16"
+	"unicode/utf8"
 )
 
 // decodeJSON reads JSON into the generic shape (map[string]any, []any, json.Number, string, bool, nil),
 // keeping numbers as written — and refuses what the core's serde_json refuses and encoding/json
-// reads (jsonLimit), so that every text this port reads, an envelope's header and body, a manifest,
-// a line of messages.jsonl, is JSON to it exactly when it is JSON to the core. A body holding
-// `1e400` was decided `ok` here and refused as `does not open` there (R40).
+// reads: bytes that are not UTF-8 and a \u escape of half a surrogate pair, both of which
+// encoding/json reads as U+FFFD, and what jsonLimit finds. So every text this port reads, an
+// envelope's header and body, a manifest, a line of messages.jsonl, is JSON to it exactly when it is
+// JSON to the core. A body holding `1e400` was decided `ok` here and refused as `does not open`
+// there (R40); so was a header or a body holding "\ud800" or a byte 0xFF, until the review of
+// 2026-09-30 (M1).
 func decodeJSON(b []byte) (any, error) {
+	if !utf8.Valid(b) {
+		return nil, errors.New("not UTF-8")
+	}
+	if loneSurrogate(b) {
+		return nil, errors.New("a string holds half of a UTF-16 surrogate pair")
+	}
 	if why := jsonLimit(b); why != "" {
 		return nil, errors.New(why)
 	}
