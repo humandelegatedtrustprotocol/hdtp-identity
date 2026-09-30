@@ -174,10 +174,22 @@ export default function certificates({ add, expect }, f) {
       ['three validity times, and a NULL after the outer algorithm', rebuilt({ 4: seq(notBefore, notAfter, notAfter) }, seq(algOid, NULL)), parseFails('time not in the DER form')],
       ['a NULL after the outer algorithm', rebuilt({}, seq(algOid, NULL)), parseFails('certificate shape')],
       ['a keyUsage whose OID is padded and whose criticality is spelled 0x01', rebuilt({ 7: tlv(0xa3, seq(...withBadKeyUsage)) }), seedReads],
-      // The controls: a keyUsage of no bits written with its initial octet (`03 01 00`) reads, and the
-      // leaf rebuilt with nothing changed reads as the leaf — to the seed too.
+      // Five more single faults the contract lists among what parsing refuses (2026-09-30), each
+      // written before signing. The seed read two of them (an extnValue that is not an OCTET STRING, a
+      // compressed P-256 point) and named a third in other words (`extension shape` for four parts)
+      // until pact-protocol PR #10's df57707.
+      ['one validity time', rebuilt({ 4: seq(notBefore) }), seedReads],
+      ['an extension of four parts', alinaLeaf({ label: 'parity/r33', misencode: { extensionParts: { oid: '2.5.29.14', der: '05000500' } } }), seedReads],
+      ['an extnValue that is not an OCTET STRING', alinaLeaf({ label: 'parity/r33', misencode: { wrapperTag: { oid: '2.5.29.14', tag: 0x03 } } }), seedReads],
+      ['an extnValue OCTET STRING holding two TLVs', alinaLeaf({ label: 'parity/r33', misencode: { valueTail: { oid: '2.5.29.14', der: '0500' } } }), seedReads],
+      ['a keyUsage with an unused bit set', alinaLeaf({ label: 'parity/r33', misencode: { keyUsage: [0x07, 0x81] } }), seedReads],
+      ['a P-256 key written as its compressed point', alinaLeaf({ hostKey: p256Key, label: 'parity/r33', misencode: { compressedPoint: true } }), seedReads],
+      // The controls: a keyUsage of no bits written with its initial octet (`03 01 00`) reads, the leaf
+      // rebuilt with nothing changed reads as the leaf, and a P-256 key written uncompressed reads as
+      // that key — to the seed too.
       ['a keyUsage of no bits, with its initial octet', alinaLeaf({ label: 'parity/r33', misencode: { keyUsage: [0] } }), seedReads, { key_usage: [] }],
       ['nothing changed (the control)', rebuilt({}), seedReads, { spki: hostSpki }],
+      ['a P-256 key, uncompressed (the control)', alinaLeaf({ hostKey: p256Key, label: 'parity/r33' }), seedReads, { spki: p256Spki }],
     ].map(([what, der, want, also = {}]) => [what, der, want === seedReads ? seedReads(der, also) : want])) {
       add(`parse_certificate of a leaf with ${what}`, 'parse_certificate', { der });
       expect(`parse_certificate of a leaf with ${what}`, want);
