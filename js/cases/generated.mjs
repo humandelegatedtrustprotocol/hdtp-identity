@@ -19,7 +19,12 @@
 //   absent       each required member left out of a call that succeeds, held to CONTRACT §0's answer
 //                for it: `{"error": "bad_request", "why": "<name> is required"}`;
 //   null         the same member as the JSON literal null, which §0 says is absent: the same answer;
-//   ""           each optional member that takes a string, as "" (§0: empty is not absent);
+//   ""           each member that takes a string, as "" (§0: empty is not absent). An optional one is
+//                compared between the ports; a REQUIRED one is also judged: it must refuse, unless
+//                EMPTY_IS_A_VALUE below names it with the reason "" is a value there. Only optional
+//                members were sent "", so no required string ever was, and export_read read another
+//                identity's file for an owner of "" in one port and refused it in the other (the hunt
+//                of 2026-09-30);
 //   wrong type   each optional member of the wrong JSON type — a number for a string, a string for an
 //                object, a list or a number, "yes" for a boolean — held to CONTRACT §0's answer for it:
 //                bytes are `{"error": "parse", "why": "not base64url"}`, as bytes that will not decode
@@ -63,6 +68,47 @@ export function keyedOf(schema, root) {
   }
   return null;
 }
+
+/**
+ * Whether an answer refuses, in its function's own shape: a failure (`error` with `why` beside it, as
+ * CONTRACT §0 writes every one; profile_error's `{error: null}` is an answer whose member happens to
+ * be called that), `{ok: false}` (the checks that answer a verdict), a decision other than `ok`, or
+ * follow_renewed's `{follow: false}`.
+ */
+export const refuses = (a) => !!a && ((typeof a.error === 'string' && typeof a.why === 'string') || a.ok === false || a.follow === false || (a.result?.code !== undefined && a.result.code !== 'ok'));
+
+/**
+ * The required string members where "" is a value, not a mistake, each with why — decided per member
+ * on 2026-09-30, from what the function is for and what reads what it writes. Every other required
+ * string member must refuse "". A name here that is no required string member fails the run.
+ */
+export const EMPTY_IS_A_VALUE = {
+  'sign.data': 'the bytes to sign: none are a message like any other',
+  'verify.data': 'the bytes to verify: none are a message like any other (the base signature is over others: valid false)',
+  'verify.sig': 'no signature is one that does not verify: valid false',
+  'build_root.cn': "a commonName is the name as given: §14.1 sets no length, and profile_error reads a root named \"\" as in the profile",
+  'root_tbs.cn': 'as build_root',
+  'build_leaf.cn': 'as build_root: profile_error reads a leaf named "" as in the profile',
+  'build_leaf.root_cn': 'as build_root',
+  'leaf_tbs.cn': 'as build_leaf',
+  'leaf_tbs.root_cn': 'as build_root',
+  'csr_new.cn': 'as build_leaf',
+  'issue_from_csr.root_cn': 'as build_root',
+  'issue_tbs_from_csr.root_cn': 'as build_root',
+  'assemble_root.sig': "assembly writes the signature it is handed (the contract's note); whether it verifies is chain rule 3's question, asked where the certificate is read",
+  'assemble_leaf.sig': 'as assemble_root',
+  'profile_error.kind': 'declared, not enforced: anything but "root" is judged as a leaf (the contract\'s note)',
+  'is_normal_https.url': 'the question is whether text is a normal https URL, and "" is not: normal false',
+  'ip_is_private.ip': 'text that is no address is not private (the contract\'s note): private false',
+  'csr_new.endpoint': 'a request carries the address it is given: SPEC §9 has the wallet refuse one not in normal form, and csr_check and issue_from_csr refuse it ("endpoint is not an https URL in normal form")',
+  'card_encode.fn': "FN is the sender's own claim (SPEC §3): a card whose FN is empty reads, in the seed and both ports",
+  'card_encode.cert': 'a certificate is refused where it is read (CONTRACT §0): card_decode refuses this card, "certificate does not parse: DER truncated"',
+  'hpke_seal.info': 'bytes: none are a value',
+  'hpke_seal.plaintext': 'bytes: none are a value',
+  'export_write.owner_name': 'informative (SPEC §9.2): only key material is refused in it',
+  'export_write.tool': 'as owner_name',
+  'media_holds_private_key.bytes': 'no bytes hold no key: false',
+};
 
 /** The member no function declares, for the undeclared-member case. */
 export const UNDECLARED = 'not_a_member';
@@ -200,14 +246,24 @@ export function pickBases(contract, cases, ask, succeeded) {
 }
 
 /**
- * The generated cases, `[{ id, fn, args, how, kind, file }]`, and `expected`: a Map from id to the
- * answer the contract fixes for it. `bases` is `pickBases`'s; `outside` maps each of KEYED to a value
- * whose key is outside the profile, and without it that shape is not made.
+ * The generated cases, `[{ id, fn, args, how, kind, file }]`; `expected`, a Map from id to the answer
+ * the contract fixes for it (its members, or a judge: a function of the whole answer, with a `label`);
+ * and `problems`, what is wrong with this file's own lists. `bases` is `pickBases`'s; `outside` maps
+ * each of KEYED to a value whose key is outside the profile, and without it that shape is not made.
  */
 export function generate(contract, bases, outside) {
   const cases = [];
   const expected = new Map();
+  const problems = [];
+  const judge = (label, f) => Object.assign(f, { label });
+  const refused = judge('a refusal', refuses);
+  const answered = judge('an answer, not a refusal ("" is a value here: EMPTY_IS_A_VALUE)', (a) => !refuses(a));
   const root = contract.root ?? { $defs: contract.$defs };
+  for (const key of Object.keys(EMPTY_IS_A_VALUE)) {
+    const [fn, name] = key.split('.');
+    const m = contract.methods[fn];
+    if (!m?.params.required?.includes(name) || !admitted(m.params.properties[name], root).has('string')) problems.push(`js/cases/generated.mjs's EMPTY_IS_A_VALUE names ${key}, which is not a required member that takes a string`);
+  }
   const add = (what, fn, args, how, kind, want) => {
     const id = `generated · ${fn} · ${what}`;
     cases.push({ id, fn, args, how, kind, file: 'generated' });
@@ -228,6 +284,7 @@ export function generate(contract, bases, outside) {
       const want = { error: 'bad_request', why: `${name} is required` };
       add(`${name} absent`, fn, without(name), how, 'a required member absent', want);
       add(`${name} null`, fn, { ...base.args, [name]: null }, how, 'a required member null', want);
+      if (admitted(m.params.properties[name], root).has('string')) add(`${name} ""`, fn, { ...base.args, [name]: '' }, how, 'a required string empty', `${fn}.${name}` in EMPTY_IS_A_VALUE ? answered : refused);
     }
     for (const [name, schema] of members) {
       if (required.includes(name)) continue;
@@ -251,5 +308,5 @@ export function generate(contract, bases, outside) {
       }
     }
   }
-  return { cases, expected };
+  return { cases, expected, problems };
 }
