@@ -9,12 +9,15 @@ pub fn canonical(v: &Value) -> String {
 }
 
 /// A JSON value a caller handed in, as it is sealed into a plaintext (`params`, `result`, `error`, a
-/// vault's document): numbers and strings as RFC 8785 writes them, and members in the order the value
-/// holds them — the order they were written in, a member written twice once, where it first appeared,
-/// with the value it was given last, as serde_json's `preserve_order` map reads it (and JSON.parse).
-/// Not sorted: Appendix B's plaintexts write `name` before `arguments`. serde_json's own writer
-/// printed `1e2` as `100.0` and `-0` as `-0.0`, and the Go port sealed the caller's text as it was
-/// written, duplicates and escapes and all: two plaintexts for one call.
+/// vault's document): strings as RFC 8785 writes them; an integer serde_json holds as one (an i64, or
+/// a u64 past it) by its digits, and every other number as RFC 8785 writes it; and members in the
+/// order the value holds them — the order they were written in, a member written twice once, where it
+/// first appeared, with the value it was given last, as serde_json's `preserve_order` map reads it
+/// (and JSON.parse). Not sorted: Appendix B's plaintexts write `name` before `arguments`. serde_json's
+/// own writer printed `1e2` as `100.0` and `-0` as `-0.0`, and the Go port sealed the caller's text as
+/// it was written, duplicates and escapes and all: two plaintexts for one call. The digits are the
+/// owner's choice (M2 of the review of 2026-09-30): RFC 8785's double is the header's rule, and an
+/// id of 12345678901234567891 in a caller's `params` was sealed as 12345678901234567000 until then.
 pub fn in_order(v: &Value) -> String {
     let mut out = String::new();
     write(v, false, &mut out);
@@ -25,6 +28,9 @@ fn write(v: &Value, sorted: bool, out: &mut String) {
     match v {
         Value::Null => out.push_str("null"),
         Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+        // An integer serde holds as one keeps its digits in a sealed value; `-0`, a fraction and an
+        // exponent it holds as a double, as RFC 8785 does.
+        Value::Number(n) if !sorted && (n.is_i64() || n.is_u64()) => out.push_str(&n.to_string()),
         Value::Number(n) => out.push_str(&number(n)),
         Value::String(s) => out.push_str(&string(s)),
         Value::Array(a) => {
@@ -131,6 +137,10 @@ mod tests {
         let v: Value = serde_json::from_str(r#"{"name":"x","arguments":{"b":1,"a":[2.50,-0,1e2]},"name":"y"}"#).unwrap();
         assert_eq!(in_order(&v), r#"{"name":"y","arguments":{"b":1,"a":[2.5,0,100]}}"#);
         assert_eq!(canonical(&v), r#"{"arguments":{"a":[2.5,0,100],"b":1},"name":"y"}"#);
+        // An i64 or a u64 keeps its digits in a sealed value, and is RFC 8785's double in `canonical`.
+        let v: Value = serde_json::from_str(r#"{"u":12345678901234567891,"i":-9223372036854775808,"f":9007199254740993.0}"#).unwrap();
+        assert_eq!(in_order(&v), r#"{"u":12345678901234567891,"i":-9223372036854775808,"f":9007199254740992}"#);
+        assert_eq!(canonical(&v), r#"{"f":9007199254740992,"i":-9223372036854776000,"u":12345678901234567000}"#);
     }
     /// The rows are contract/contract.json's `CanonicalNumbers`, one list, which go/review_test.go's
     /// TestNumbersAsECMAScriptPrintsThem runs through the Go port too. (Each port carried its own copy

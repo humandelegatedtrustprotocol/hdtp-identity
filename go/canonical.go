@@ -248,10 +248,12 @@ func jsonString(s string) string {
 }
 
 // inOrder writes a JSON value a caller handed in as it is sealed into a plaintext (params, result,
-// error, a vault's document), as the core's canonical::in_order writes it: numbers and strings as
-// RFC 8785 writes them, and members in the order they were written, a member written twice once,
-// where it first appeared, with the value it was given last — as serde_json's preserve_order map and
-// JSON.parse read it. Not sorted: Appendix B's plaintexts write `name` before `arguments`. This port
+// error, a vault's document), as the core's canonical::in_order writes it: strings as RFC 8785 writes
+// them; an integer the core holds as one (an i64, or a u64 past it: sealedInteger) by its digits, and
+// every other number as RFC 8785 writes it; and members in the order they were written, a member
+// written twice once, where it first appeared, with the value it was given last — as serde_json's
+// preserve_order map and JSON.parse read it. Not sorted: Appendix B's plaintexts write `name` before
+// `arguments`. This port
 // sealed the caller's text compacted, duplicates, escapes and `1.50` as written, where the core sealed
 // the value it had read: two plaintexts for one call.
 func inOrder(raw []byte) ([]byte, error) {
@@ -345,9 +347,32 @@ func writeInOrder(b *bytes.Buffer, v any) {
 			writeInOrder(b, e)
 		}
 		b.WriteByte(']')
+	case json.Number:
+		if sealedInteger(string(x)) {
+			b.WriteString(string(x))
+		} else {
+			writeCanonical(b, x)
+		}
 	default:
 		writeCanonical(b, x)
 	}
+}
+
+// sealedInteger is a number the core's serde_json holds as an integer, which a sealed value keeps
+// by its digits (the owner's choice on M2 of the review of 2026-09-30): digits with an optional
+// minus, no fraction and no exponent, within an i64 when negative and a u64 otherwise, and not -0,
+// which serde holds as a double. RFC 8785's double is the header's rule (Canonical); this writer
+// printed 12345678901234567891 as 12345678901234567000, as the core's did.
+func sealedInteger(s string) bool {
+	if s == "-0" || strings.ContainsAny(s, ".eE") {
+		return false
+	}
+	if strings.HasPrefix(s, "-") {
+		_, err := strconv.ParseInt(s, 10, 64)
+		return err == nil
+	}
+	_, err := strconv.ParseUint(s, 10, 64)
+	return err == nil
 }
 
 // sortedKeys joins an object's member names in code-point order with commas — the seed's
