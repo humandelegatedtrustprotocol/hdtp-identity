@@ -2,7 +2,7 @@
 // receiving decision.
 import { seed, b64url, pkcs8Of, spkiOf, fingerprint, x25519FromSeed } from '../../../pact-protocol/vectors/lib/keys.mjs';
 import { buildLeaf, parse } from '../../../pact-protocol/vectors/lib/x509.mjs';
-import { sealDeterministic, signDetached, suiteForKey } from '../../../pact-protocol/vectors/lib/hpke.mjs';
+import { sealDeterministic, signDetached, suiteForKey, open as openHpke } from '../../../pact-protocol/vectors/lib/hpke.mjs';
 import { canonical } from '../../../pact-protocol/vectors/lib/canonical.mjs';
 import { ENDPOINTS, bharat, BORN, DIES } from '../cast.mjs';
 import { RawArgs } from '../port.mjs';
@@ -139,7 +139,8 @@ export default function envelopes({ add, expect }, f) {
     expect('seal_result with a ts of 2^53 - 1 and no exp', out('exp'));
   }
   // A JSON value the caller hands in is sealed as the value it is (canonical::in_order, Go inOrder):
-  // numbers and strings as RFC 8785 writes them, members in the order written, a member written twice
+  // strings and every number but an i64 or a u64 as RFC 8785 writes them (those keep their digits:
+  // below), members in the order written, a member written twice
   // once, where it first appeared, with its last value. The core sealed what serde_json wrote (`1e2`
   // as `100.0`, `-0` as `-0.0`) and the Go port the caller's text as written, duplicates and escapes
   // and all: two plaintexts for one call (a lead of the port-parity verification, 2026-09-30). A
@@ -162,6 +163,38 @@ export default function envelopes({ add, expect }, f) {
       if (seedReads) expect(`seal_request whose params hold ${what}`, seeded({ msgId: 'p-13', ts: 1757000001, params: JSON.parse(text) }));
       add(`seal_result whose result holds ${what}`, 'seal_result', RawArgs.edit({ ...answer, result: '@@' }, '"result":"@@"', `"result":${text}`));
       add(`seal_result whose error holds ${what}`, 'seal_result', RawArgs.edit({ ...answer, error: '@@' }, '"error":"@@"', `"error":${text}`));
+    }
+  }
+  // An integer the core holds as one — an i64, or a u64 past it — is sealed by its digits, as the
+  // core sealed it before the writer above and as the caller wrote it: RFC 8785's double is the
+  // header's rule, and a value the caller hands in keeps every digit it had (the owner's choice (a) on
+  // M2 of the review of 2026-09-30). The writer above had printed 12345678901234567891 as
+  // 12345678901234567000 in both ports. JavaScript cannot hold these, so the seed cannot seal them: each
+  // envelope is opened here, with the seed's HPKE, and its plaintext's bytes are the answer's judge.
+  // An integer past 64 bits is no integer to the core; it stays a double, above ('an integer past a
+  // double'), and so do -0 and a fraction.
+  {
+    const base = { ...toMe, msg_id: 'p-15', ts: 1757000001, params: '@@' };
+    const answer = { recipient_spki: hostSpki, sender_pkcs8: hostPkcs8, sender_chain: [leafDer, rootDer], msg_id: 'p-16', ts: 1757000001, ephemeral_seed: eph(7) };
+    const plaintextOf = (got) => {
+      const e = got?.envelope ?? got;
+      if (typeof e?.protected !== 'string') return null;
+      const aad = Buffer.from(e.protected, 'base64url'), { suite } = JSON.parse(aad);
+      try { return openHpke(suite, hostKey.priv, hostKey.pub, Buffer.from('PACT-SEAL-v2'), aad, Buffer.from(e.enc, 'base64url'), Buffer.from(e.ct, 'base64url')).toString(); } catch { return null; }
+    };
+    const holding = (text) => Object.assign((got) => plaintextOf(got)?.includes(text) ?? false, { label: `a plaintext holding ${text}` });
+    for (const [what, text, sealed] of [
+      ['a u64 past the largest i64', '{"id":12345678901234567891}', '{"id":12345678901234567891}'],
+      ['the largest u64', '{"id":18446744073709551615}', '{"id":18446744073709551615}'],
+      ['an i64 past 2^53', '{"id":9007199254740993}', '{"id":9007199254740993}'],
+      ['the smallest i64', '{"id":-9223372036854775808}', '{"id":-9223372036854775808}'],
+      ['an integer past 64 bits, which is a double', '{"id":18446744073709551616}', '{"id":18446744073709552000}'],
+      ['a fraction past 2^53, which is a double', '{"id":9007199254740993.0}', '{"id":9007199254740992}'],
+    ]) {
+      add(`seal_request whose params hold ${what}`, 'seal_request', RawArgs.edit(base, '"params":"@@"', `"params":${text}`));
+      expect(`seal_request whose params hold ${what}`, holding(sealed));
+      add(`seal_result whose result holds ${what}`, 'seal_result', RawArgs.edit({ ...answer, result: '@@' }, '"result":"@@"', `"result":${text}`));
+      expect(`seal_result whose result holds ${what}`, holding(sealed));
     }
   }
   // The JSON literal null is absent (CONTRACT §0), for the members sealed into the body too: both ports
