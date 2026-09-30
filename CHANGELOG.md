@@ -546,6 +546,14 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   entries above. Two small-form cases whose names said an unreadable pin was never parsed had tested,
   since e49ef50, only that a root which is no fingerprint is refused; their pin's root is now one, and
   they hold what their names say.
+- **The contract says four more things the code does** (the review of 2026-09-30): `refresh_check`'s
+  note names `pin.leaf is a CA certificate, not a leaf` and where it is asked (S3); `parse_certificate`'s
+  names the order the seed reads a certificate's fields in, which is not the ports', and that nothing
+  compares the seed's words for a certificate with two faults (S7, R33's seed half); `card_encode`'s
+  names `extra is required` for a list holding a non-string, §0's words for a member of the wrong type
+  (N1); and §0's sentence that the seed refuses a key outside the profile in the ports' words names what
+  pact-protocol b841dd3 made true of it: a padded P-256 curve OID, a SubjectPublicKeyInfo of another
+  shape, a P-256 point off the curve (N2).
 
 ## 0.4.1 — 2026-09-28
 
