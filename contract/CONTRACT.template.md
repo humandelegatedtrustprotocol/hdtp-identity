@@ -101,7 +101,9 @@ the tables is `contract/CONTRACT.template.md` and is written by hand.
   double"}`, and arrays and objects nested more than 127 deep, the arguments object counted, `args:
   nested more than 127 deep` — whichever comes first in the text. JSON that travels as text — an
   envelope's header and body, a manifest, a line of `messages.jsonl`, a vault's plaintext — holding
-  either is text that is not JSON, answered as each function answers that. RFC 8785, in which a
+  either, or half a surrogate pair, or a byte that is not UTF-8, is text that is not JSON, answered
+  as each function answers that (a manifest or a line that is not UTF-8 is refused before it is read
+  as JSON, as `not UTF-8 text`). RFC 8785, in which a
   header is written, has no infinite number. Arguments that do not parse at all answer `args is a
   JSON object`, and so do arguments with no text at all (Go's `Call(name, nil)` included): no
   arguments is `{}`, which the JS loader and the Go line adapter send for a call that gives none.

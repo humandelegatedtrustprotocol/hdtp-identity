@@ -237,10 +237,18 @@ func TestJSONTheCoreDoesNotReadIsNotReadHere(t *testing.T) {
 }
 
 // A vault's plaintext is JSON exactly when the core's parser reads it: one holding a number infinite
-// as a double opened here, where the core finds the vault damaged (R40). The control opens.
+// as a double (R40), half a surrogate pair or a byte that is not UTF-8 (the review of 2026-09-30, M1)
+// opened here, where the core finds the vault damaged. The controls open.
 func TestAVaultPlaintextTheCoreCannotReadIsDamage(t *testing.T) {
 	kdf := &KDF{Name: "argon2id", MKiB: 8192, T: 1, P: 1}
-	for plaintext, want := range map[string]error{`{"v":2,"roots":[],"n":1e400}`: errVault, `{"v":2,"roots":[],"n":1e308}`: nil} {
+	for plaintext, want := range map[string]error{
+		`{"v":2,"roots":[],"n":1e400}`:          errVault,
+		`{"v":2,"roots":[],"n":"\ud800"}`:       errVault,
+		`{"v":2,"roots":[],"\udc00":1}`:         errVault,
+		"{\"v\":2,\"roots\":[],\"n\":\"\xff\"}": errVault,
+		`{"v":2,"roots":[],"n":1e308}`:          nil,
+		`{"v":2,"roots":[],"n":"\ud83d\ude00"}`: nil,
+	} {
 		sealed, err := vaultSealAny("a passphrase", []byte(plaintext), kdf, nil, nil)
 		if err != nil {
 			t.Fatal(err)
