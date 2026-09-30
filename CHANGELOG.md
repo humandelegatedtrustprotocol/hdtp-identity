@@ -434,6 +434,12 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   with a stray character (nine), and the controls. On pact-protocol main the seed read 20 of them
   differently, so the gate fails there, and passes against pact-protocol PR #10, with which this
   lands.
+- **MUST 13.3#2 names its gap** (CW-06): `js/musts.json` says what nothing here holds — keeping a
+  seen `msg_id`'s record until `min(exp, ts + 300 s)` — and that both hosts keep it until `exp`
+  alone, CW-06's fix being the node's and the cloud's; PROOFS.md marks the row. It cited the tests of
+  the skew window and the thirty-day cap alone, which read in PROOFS.md as holding the retention.
+- **The order `build_leaf` and `leaf_tbs` read `serial` in** is held by two parity cases (a serial
+  too short and no `cn`: `serial is 8 to 20 bytes`), both ports already agreeing.
 
 ## 0.4.1 — 2026-09-28
 

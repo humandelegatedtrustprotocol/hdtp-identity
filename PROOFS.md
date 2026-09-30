@@ -7,9 +7,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed as proven that did not pass.
 
-Specification: **2.2.4**. **88** normative sentences, **2470** cross-port parity cases over **54** guarded functions.
+Specification: **2.2.4**. **88** normative sentences, **2530** cross-port parity cases over **54** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 2.2.4): **4940** answers, of which **0** do not hold to the shape it declares. Of **127** declared error codes, **127** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 2.2.4): **5060** answers, of which **0** do not hold to the shape it declares. Of **127** declared error codes, **127** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 88 normative sentences of the specification
 
@@ -164,7 +164,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 | # | The sentence | Held by |
 |---|---|---|
 | `13.3#1` | Receivers MUST validate in this order, rejecting at the first failure: decode `protected`; check `v` and `suite` supported; resolve `kid` to a leaf key this endpoint holds for the identity served at the path the envelope arrived at — the current one, or a superseded one not yet past its `notAfter` — and otherwise answer `certificate_renewed` with the current chain when `kid` names a key this endpoint once held for that identity, `envelope_invalid` when it never did or holds it for another identity (§14.4); check that `suite` is the one the leaf's key takes (§13.1); HPKE-open; require the plaintext to carry exactly `method`, `params` and one of `chain` or `leaf`; with `leaf`, find the leaf it names among the pins of active and pending contacts and verify `sig` under its key, answering `chain_required` to any failure, and proceed at that pin's tier and endpoint; with `chain`, validate it (§14.2), verify `sig` under its leaf key, and resolve the tier (§6.1) — when the chain's root is pinned, a leaf older than the pinned one is a guest, a different endpoint is §5.3, a newer leaf at the pinned endpoint replaces it; when it is not pinned, apply the guest binding of §13.2; enforce time — `now < exp`, and `\|now − ts\| ≤ 300 s`, since every 2.0 envelope is delivered directly; enforce `msg_id` idempotency (a replayed envelope is acknowledged with its original result, never re-executed); then dispatch. | `go:TestDecideOnVectors`, `rust:decide_on_the_vector_envelopes`, `scenario:a guessed kid learns nothing`, `scenario:an envelope for Alina's key delivered at Mallory's path on a shared host` |
-| `13.3#2` | Idempotency records for seen `msg_id`s MUST be retained until `min(exp, ts + 300 s)` — the end of the window in which the envelope could be presented again and accepted. | `scenario:an envelope that asks to be remembered for a year`, `rust:an_envelope_asking_to_be_remembered_for_a_year_is_refused`, `go:TestLifetimeAndCallerSideChecks` |
+| `13.3#2` | Idempotency records for seen `msg_id`s MUST be retained until `min(exp, ts + 300 s)` — the end of the window in which the envelope could be presented again and accepted. | `scenario:an envelope that asks to be remembered for a year`, `rust:an_envelope_asking_to_be_remembered_for_a_year_is_refused`, `go:TestLifetimeAndCallerSideChecks` — *and a named gap: a part nothing holds (js/musts.json)* |
 | `13.3#3` | A **blocked** sender's envelopes MUST be processed exactly as an unknown sender's — the guest card-binding rules of §13.2 apply and a sealed `tools/list` is rejected `envelope_invalid` — so sealing never becomes an oracle distinguishing blocked from unknown (§12); a guest envelope whose inner call carries no `card` argument is likewise rejected `envelope_invalid`. | `scenario:a blocked sender is answered exactly as an unknown one` |
 
 ### 13.4 Negotiation
@@ -202,7 +202,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 2470 cross-port parity cases
+## The 2530 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -210,7 +210,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **2470** cases (**1149** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
+At the run that generated this file: **2530** cases (**1149** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
 
 ### `address_guard` — 50 cases · whole on success
 
@@ -323,9 +323,10 @@ At the run that generated this file: **2470** cases (**1149** of the run's cases
 - generated · book_rows · contacts absent, exported_at 7
 - generated · book_rows · exported_at absent, contacts "x"
 
-### `build_leaf` — 94 cases · whole on success
+### `build_leaf` — 95 cases · whole on success
 
 - build_leaf
+- build_leaf with a serial that is too short and no cn
 - build_leaf over 398 days
 - build_leaf of exactly 398 days
 - build_leaf of 398 days and a second
@@ -613,7 +614,7 @@ At the run that generated this file: **2470** cases (**1149** of the run's cases
 - generated · csr_new · endpoint absent, host_pkcs8 7
 - generated · csr_new · endpoint absent, dns_name 7
 
-### `decide` — 113 cases · whole on success
+### `decide` — 117 cases · whole on success
 
 - decide on an envelope from a pinned contact
 - decide on a pinned contact's call that names no tool
@@ -658,6 +659,10 @@ At the run that generated this file: **2470** cases (**1149** of the run's cases
 - decide on a peer who returns exactly at the end of the tombstone window
 - decide on a stranger at an endpoint another root left a second inside the claim window
 - decide on a stranger at an endpoint another root left exactly at the end of the claim window
+- decide on a stranger at an endpoint a former endpoint whose root is not a fingerprint left
+- decide on a peer with a tombstone whose root is not a fingerprint
+- decide on an envelope from a contact whose pin's root is not a fingerprint
+- decide with a second pin whose root is empty
 - decide on a caller proven by a chain who is a guest: unknown root
 - decide on a caller proven by a chain who is a guest: blocked
 - decide on a caller proven by a chain who is a guest: superseded leaf
@@ -729,7 +734,7 @@ At the run that generated this file: **2470** cases (**1149** of the run's cases
 - generated · decide · node absent, now 7
 - generated · decide · node absent, envelope "x"
 
-### `decide_chain` — 42 cases · whole on success
+### `decide_chain` — 43 cases · whole on success
 
 - decide_chain: a root nobody pins
 - decide_chain: a root nobody pins, at an address another root is pinned at
@@ -742,6 +747,7 @@ At the run that generated this file: **2470** cases (**1149** of the run's cases
 - decide_chain: the pinned leaf
 - decide_chain: a newer leaf at the pinned endpoint
 - decide_chain: a pending_out pin
+- decide_chain with a pin whose root is not a fingerprint
 - decide_chain: the pinned root at another endpoint, under auto
 - decide_chain: the pinned root at another endpoint, under ask
 - decide_chain: a pending_out pin at another endpoint, under ask
@@ -1599,10 +1605,11 @@ At the run that generated this file: **2470** cases (**1149** of the run's cases
 - generated · key_info · an undeclared member
 - generated · key_info · spki holding a key outside the profile
 
-### `leaf_tbs` — 86 cases · whole on success
+### `leaf_tbs` — 87 cases · whole on success
 
 - leaf_tbs
 - leaf_tbs with no issuer
+- leaf_tbs with a serial that is too short and no cn
 - leaf_tbs naming https://[2001:db8::1%25eth0]/mcp
 - leaf_tbs naming https://[2001:db8::1%eth0]/mcp
 - leaf_tbs under a root key outside the profile: rsa
@@ -1688,7 +1695,7 @@ At the run that generated this file: **2470** cases (**1149** of the run's cases
 - generated · leaf_tbs · root_spki absent, not_after 7
 - generated · leaf_tbs · root_spki absent, serial 7
 
-### `ledger_check` — 58 cases · whole on success
+### `ledger_check` — 59 cases · whole on success
 
 - ledger_check: a renewal where the live leaf is
 - ledger_check: a move, not chosen
@@ -1722,6 +1729,7 @@ At the run that generated this file: **2470** cases (**1149** of the run's cases
 - ledger_check with a now that does not read
 - ledger_check with a move that is not a boolean
 - ledger_check with nothing to work from
+- ledger_check over a ledger whose origin is null
 - ledger_check over a ledger that reads
 - ledger_check for https://[2001:db8::1%25eth0]/mcp
 - ledger_check for https://[2001:db8::1%eth0]/mcp
@@ -1931,7 +1939,7 @@ At the run that generated this file: **2470** cases (**1149** of the run's cases
 - a function nobody defines, with args holding half a surrogate pair
 - a function nobody defines, with args holding a number past the largest double
 
-### `open_result` — 112 cases · whole on success
+### `open_result` — 113 cases · whole on success
 
 - open_result of a request envelope
 - open_result with nothing to work from
@@ -1950,6 +1958,7 @@ At the run that generated this file: **2470** cases (**1149** of the run's cases
 - open_result on a real answer whose ct carries a stray character
 - open_result on a real answer whose enc is padded
 - open_result on a real answer whose sig has a line break in it
+- open_result in the leaf form, from a held leaf whose pin's root is not a fingerprint
 - open_result with no now
 - open_result, leaf form: the pin names its leaf
 - open_result, leaf form: a pin whose named leaf is not its leaf
@@ -2142,7 +2151,7 @@ At the run that generated this file: **2470** cases (**1149** of the run's cases
 - generated · public_key · an undeclared member
 - generated · public_key · pkcs8 holding a key outside the profile
 
-### `refresh_check` — 42 cases · whole on success
+### `refresh_check` — 47 cases · whole on success
 
 - refresh_check: the pinned leaf, unchanged
 - refresh_check: a newer leaf than the pinned one
@@ -2171,6 +2180,11 @@ At the run that generated this file: **2470** cases (**1149** of the run's cases
 - refresh_check with a pinned leaf that is a number
 - refresh_check with a pinned leaf that is not a certificate
 - refresh_check with a pinned leaf holding a key outside the profile
+- refresh_check with a pin whose root is not a fingerprint
+- refresh_check with a pin whose root is empty
+- refresh_check with a pin whose root is a character short
+- refresh_check with a pin whose root is not a fingerprint and no endpoint
+- refresh_check with a pin whose root is not a fingerprint and no answer
 - refresh_check with no answer
 - refresh_check with no now
 - generated · refresh_check · {}
@@ -2217,7 +2231,7 @@ At the run that generated this file: **2470** cases (**1149** of the run's cases
 - generated · root_tbs · not_before absent, spki 7
 - generated · root_tbs · not_before absent, serial 7
 
-### `seal_request` — 82 cases · whole on success
+### `seal_request` — 100 cases · whole on success
 
 - seal_request with no recipient
 - seal_request with a form nobody has
@@ -2233,6 +2247,24 @@ At the run that generated this file: **2470** cases (**1149** of the run's cases
 - seal_request with an empty method and an empty cty
 - seal_request with ts -0
 - seal_request with exp -0
+- seal_request with a ts of 2^53 + 1
+- seal_request with a ts of 2^53
+- seal_request with a ts of -2^53
+- seal_request with a ts of the largest i64, and no exp
+- seal_request with an exp of 2^53 + 1
+- seal_request with a ts of 2^53 - 1 and no exp, whose default is past it
+- seal_request with a ts of 2^53 and a chain of one
+- seal_request with a ts of 2^53 and no sender_chain
+- seal_request with a ts of 2^53 and a seed of 31 bytes
+- seal_request with a ts and an exp of 2^53 - 1
+- seal_request with a ts of -(2^53 - 1)
+- seal_request whose params hold a member written twice
+- seal_request whose params hold a member written twice around another
+- seal_request whose params hold an integer past a double
+- seal_request whose params hold escapes JSON.stringify does not write
+- seal_request whose params hold numbers written as JSON.stringify does not write them
+- seal_request whose params hold members named by integers, out of order
+- seal_request whose params hold a list holding each of them
 - seal_request with params null
 - seal_request with neither msg_id nor sender_chain
 - seal_request with nothing to work from
@@ -2302,11 +2334,28 @@ At the run that generated this file: **2470** cases (**1149** of the run's cases
 - generated · seal_request · ts absent, method 7
 - generated · seal_request · ts absent, cty 7
 
-### `seal_result` — 63 cases · whole on success
+### `seal_result` — 80 cases · whole on success
 
 - seal_result
 - seal_result with no recipient
 - seal_result with neither a result nor an error
+- seal_result with a ts of 2^53 + 1
+- seal_result with an exp of -2^53
+- seal_result with a ts of 2^53 - 1 and no exp
+- seal_result whose result holds a member written twice
+- seal_result whose error holds a member written twice
+- seal_result whose result holds a member written twice around another
+- seal_result whose error holds a member written twice around another
+- seal_result whose result holds an integer past a double
+- seal_result whose error holds an integer past a double
+- seal_result whose result holds escapes JSON.stringify does not write
+- seal_result whose error holds escapes JSON.stringify does not write
+- seal_result whose result holds numbers written as JSON.stringify does not write them
+- seal_result whose error holds numbers written as JSON.stringify does not write them
+- seal_result whose result holds members named by integers, out of order
+- seal_result whose error holds members named by integers, out of order
+- seal_result whose result holds a list holding each of them
+- seal_result whose error holds a list holding each of them
 - seal_result with a result that is null
 - seal_result with a null result beside an error
 - seal_result with a null error beside a result
@@ -2622,12 +2671,14 @@ At the run that generated this file: **2470** cases (**1149** of the run's cases
 - generated · vault_open · an undeclared member
 - generated · vault_open · vault absent, passphrase 7
 
-### `vault_seal` — 61 cases · whole on success
+### `vault_seal` — 63 cases · whole on success
 
 - vault_seal
 - vault_seal of a record
 - vault_seal of an earlier generation
 - vault_seal of a plaintext with no generation
+- vault_seal of a document holding a member written twice
+- vault_seal of a document holding numbers and escapes JSON.stringify does not write
 - vault_seal with a nonce that is not 12 bytes
 - vault_seal with an empty passphrase
 - vault_seal with no plaintext
@@ -2728,7 +2779,7 @@ At the run that generated this file: **2470** cases (**1149** of the run's cases
 - version with a number past the largest double before containers nested 129 deep
 - version with containers nested 129 deep before a number past the largest double
 
-### `wallet_issue` — 119 cases · whole on success
+### `wallet_issue` — 128 cases · whole on success
 
 - wallet_issue
 - wallet_issue from a vault that carries a ledger
@@ -2802,6 +2853,15 @@ At the run that generated this file: **2470** cases (**1149** of the run's cases
 - wallet_issue with a record whose contact holds its state
 - wallet_issue with a record whose passkey is a string
 - wallet_issue with a record whose backup_verified_at is negative
+- wallet_issue with a root whose pkcs8 is null
+- wallet_issue with a root whose fingerprint is null
+- wallet_issue with a vault whose roots are null
+- wallet_issue with a vault whose ledger is null
+- wallet_issue with a vault with a null member it does not hold
+- wallet_issue with a record whose contact has a null endpoint
+- wallet_issue with a record whose ledger entry has a null endpoint
+- wallet_issue from documents whose every optional member is null
+- wallet_issue from a record whose ledger and contacts are null
 - wallet_issue from documents with every member they may hold
 - generated · wallet_issue · {}
 - generated · wallet_issue · the hostile object

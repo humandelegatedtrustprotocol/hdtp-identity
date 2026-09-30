@@ -669,7 +669,8 @@
       "rust:an_envelope_asking_to_be_remembered_for_a_year_is_refused",
       "go:TestLifetimeAndCallerSideChecks"
     ],
-    "why": "what this library holds is the bound that makes a record kept past ts + 300 s protect nothing: the skew window and the thirty-day cap on exp − ts, which both port tests hold (a year refused, exactly thirty days accepted). Keeping the records is the host's, and both hosts keep them until exp alone today (CW-06 of the port-parity audit of 2026-09-29), so no host is named as holding the retention itself"
+    "why": "what this library holds is the bound that makes a record kept past ts + 300 s protect nothing: the skew window and the thirty-day cap on exp − ts, which both port tests hold (a year refused, exactly thirty days accepted). Keeping the records is the host's, and both hosts keep them until exp alone today (CW-06 of the port-parity audit of 2026-09-29), so no host is named as holding the retention itself",
+    "gap": "the retention itself: keeping a seen msg_id's record until min(exp, ts + 300 s). Both hosts keep it until exp alone (the node's PutIdempotency window is the header's exp; the cloud's recordAck is until exp), which is CW-06 of the port-parity audit of 2026-09-29, its fix the node's and the cloud's"
   },
   "13.3#3": {
     "hash": "71e0e50ade5b",
