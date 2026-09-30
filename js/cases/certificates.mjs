@@ -55,6 +55,15 @@ export default function certificates({ add, expect }, f) {
   add('leaf_tbs', 'leaf_tbs', { cn: 'Alina Rao', root_cn: 'Alina Rao', root_spki: rootSpki, host_spki: hostSpki, endpoint: ENDPOINT, not_before: now, not_after: '2027-09-01T00:00:00Z', serial: SERIAL });
   add('leaf_tbs with no issuer', 'leaf_tbs', { cn: 'A', root_cn: 'A', host_spki: hostSpki, endpoint: ENDPOINT, not_before: now, not_after: '2027-09-01T00:00:00Z' });
   add('build_leaf', 'build_leaf', { cn: 'Alina Rao', root_cn: 'Alina Rao', root_pkcs8: rootPkcs8, host_spki: hostSpki, endpoint: ENDPOINT, not_before: now, not_after: '2027-09-01T00:00:00Z', serial: SERIAL });
+  // The order build_leaf and leaf_tbs read an optional `serial` in: after the keys, before `cn`, the
+  // endpoint and the dates, in both ports. §0's order rule speaks of several missing REQUIRED members;
+  // a bad optional one beside a missing required one is a reading both ports share, held here so that
+  // neither moves alone (an observation of the port-parity verification, 2026-09-30).
+  for (const [fn, keys] of [['build_leaf', { root_pkcs8: rootPkcs8 }], ['leaf_tbs', { root_spki: rootSpki }]]) {
+    const id = `${fn} with a serial that is too short and no cn`;
+    add(id, fn, { root_cn: 'A', ...keys, host_spki: hostSpki, endpoint: ENDPOINT, not_before: now, not_after: '2027-09-01T00:00:00Z', serial: b64url(new Uint8Array(4)) });
+    expect(id, { error: 'bad_request', why: 'serial is 8 to 20 bytes' });
+  }
   add('build_root with a serial that is too short', 'build_root', { cn: 'Alina Rao', pkcs8: rootPkcs8, not_before: now, serial: b64url(new Uint8Array(4)) });
   add('build_root with an instant that is not one', 'build_root', { cn: 'Alina Rao', pkcs8: rootPkcs8, not_before: 'yesterday', serial: SERIAL });
   add('build_leaf over 398 days', 'build_leaf', { cn: 'A', root_cn: 'A', root_pkcs8: rootPkcs8, host_spki: hostSpki, endpoint: ENDPOINT, not_before: '2026-09-01T00:00:00Z', not_after: '2027-11-01T00:00:00Z', serial: SERIAL });
