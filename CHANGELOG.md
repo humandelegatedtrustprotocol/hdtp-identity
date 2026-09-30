@@ -198,9 +198,15 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   result, and read such a manifest or line. Both ports scan the arguments first, after half a
   surrogate pair, and answer `args: a number is outside the range of a double` or `args: nested more
   than 127 deep`, the first in the text; the Go port's JSON text readers (an envelope's header and
-  body, a manifest, a line of messages.jsonl, a vault's plaintext) refuse the same, so each answers as
-  the core's does. Arguments that do not parse are `args is a JSON object` in the core too, as in the
-  Go port's `Call`; `why` never carries serde's or encoding/json's words, internal answers included.
+  body, a manifest, a line of messages.jsonl, a vault's plaintext) refuse the same. They also refuse
+  bytes that are not UTF-8 and half a surrogate pair, both of which encoding/json reads as U+FFFD: this
+  entry said the readers answered as the core's did before they did, and an envelope whose header
+  `msg_id` was `"\ud800"`, or whose body held one or a byte 0xFF, was `ok` to the Go port and
+  `protected is not JSON` or `does not open` to the core, and a vault whose plaintext held one opened
+  in the Go port and was damaged to the core (the review of 2026-09-30, M1; a manifest and a line
+  already refused both). Arguments that do not parse
+  are `args is a JSON object` in the core too, as in the Go port's `Call`; `why` never carries serde's
+  or encoding/json's words, internal answers included.
 - Go, typed (T21): `SigningRequestCheck(nil, …)` is `request is required`, as the core answers a
   request that is not an object (it named the first member, `csr is required`); `LimitsRules.Check`
   answers a member the map does not hold `<name> is a number`, as a document without it is answered
