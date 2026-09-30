@@ -1,7 +1,7 @@
 //! Sealed envelopes (§13): sealing in both forms, the caller's side of a result, `certificate_renewed`
 //! on the caller's side, and `decide` — the receiving side of §13.3, §6.1, §5.3 and §14.4 as one pure
 //! function over state the host supplies. `envelope.mjs receive()` is its specification, line for line.
-use crate::canonical::canonical;
+use crate::canonical::{canonical, in_order};
 use crate::hpke::{self, suite_for, Suite};
 use crate::keys::{PrivateKey, PublicKey, Signer};
 use crate::util::{b64u, err, from_b64u, wire_b64u, Error, Result};
@@ -45,6 +45,9 @@ fn timing(now: i64, ts: i64, exp: i64) -> Timing {
     Timing::Ok
 }
 
+/// How long an endpoint stays claimed by the root that was pinned at it, and how long a removal
+/// tombstone holds a returning root: contract/contract.json's `Windows`, which tests/constants.rs
+/// holds these to (and go/constants_test.go the Go port's).
 pub const CLAIM_WINDOW_S: i64 = 30 * 86_400;
 pub const TOMBSTONE_S: i64 = 30 * 86_400;
 pub const CTY_CALL: &str = "application/pact-call+json";
@@ -76,6 +79,26 @@ impl Form {
             _ => err("bad_request", "form is chain or leaf"),
         }
     }
+}
+
+/// The largest integer a header carries as itself: 2^53 - 1. RFC 8785 writes a number as the double
+/// it is, so a `ts` of 9007199254740993 was sealed as 9007199254740992 here, and as itself by the Go
+/// port, which wrote an int64 exactly: two headers for one call, and neither the one asked for.
+pub const HEADER_INT_MAX: i64 = (1 << 53) - 1;
+
+/// A header's `ts` and `exp` (`exp` absent is `ts + 600`), each an integer a header carries as itself
+/// (`HEADER_INT_MAX`), or the one that is not, named. `ts` first, so the default is computed only from
+/// one that is: `i64::MAX + 600` overflows.
+fn header_times(ts: i64, exp: Option<i64>) -> Result<(i64, i64)> {
+    let carried = |n: i64| (-HEADER_INT_MAX..=HEADER_INT_MAX).contains(&n);
+    if !carried(ts) {
+        return err("bad_request", "ts is an integer from -(2^53 - 1) to 2^53 - 1");
+    }
+    let exp = exp.unwrap_or(ts + 600);
+    if !carried(exp) {
+        return err("bad_request", "exp is an integer from -(2^53 - 1) to 2^53 - 1");
+    }
+    Ok((ts, exp))
 }
 
 fn header(suite: Suite, kid: &str, msg_id: &str, ts: i64, exp: i64, cty: &str) -> Vec<u8> {
@@ -111,7 +134,7 @@ fn seal_body(
 ) -> Result<Wire> {
     let suite = suite_for(recipient);
     let aad = header(suite, &recipient.fingerprint(), msg_id, ts, exp, cty);
-    let plaintext = serde_json::to_vec(body).map_err(|e| Error::new("internal", e.to_string()))?;
+    let plaintext = in_order(body).into_bytes();
     let (enc, ct) = hpke::seal(suite, recipient, INFO_V2, &aad, &plaintext, seed)?;
     let mut signed = aad.clone();
     signed.extend_from_slice(&enc);
@@ -136,6 +159,7 @@ pub struct SealRequest<'a> {
 
 /// `{method, params, chain | leaf}`, in that member order, sealed to the recipient leaf's key.
 pub fn seal_request(r: SealRequest<'_>) -> Result<Wire> {
+    let (ts, exp) = header_times(r.ts, r.exp)?;
     // One expansion of the sender's key for the leaf form's fingerprint and the signature.
     let signer = r.sender.signer();
     let (k, v) = proof(r.form, &signer, r.sender_chain)?;
@@ -143,16 +167,7 @@ pub fn seal_request(r: SealRequest<'_>) -> Result<Wire> {
     body.insert("method".into(), Value::String(r.method.clone()));
     body.insert("params".into(), r.params.clone());
     body.insert(k.into(), v);
-    seal_body(
-        r.recipient,
-        &signer,
-        &Value::Object(body),
-        &r.msg_id,
-        r.ts,
-        r.exp.unwrap_or(r.ts + 600),
-        r.cty.as_deref().unwrap_or(CTY_CALL),
-        r.ephemeral_seed,
-    )
+    seal_body(r.recipient, &signer, &Value::Object(body), &r.msg_id, ts, exp, r.cty.as_deref().unwrap_or(CTY_CALL), r.ephemeral_seed)
 }
 
 pub struct SealResult<'a> {
@@ -170,6 +185,7 @@ pub struct SealResult<'a> {
 
 /// `{result | error, chain | leaf}` sealed back to the caller's key with the request's `msg_id`.
 pub fn seal_result(r: SealResult<'_>) -> Result<Wire> {
+    let (ts, exp) = header_times(r.ts, r.exp)?;
     // One expansion of the sender's key for the leaf form's fingerprint and the signature.
     let signer = r.sender.signer();
     let (k, v) = proof(r.form, &signer, r.sender_chain)?;
@@ -180,7 +196,7 @@ pub fn seal_result(r: SealResult<'_>) -> Result<Wire> {
         _ => return err("bad_request", "a result carries exactly one of result and error"),
     };
     body.insert(k.into(), v);
-    seal_body(r.recipient, &signer, &Value::Object(body), &r.msg_id, r.ts, r.exp.unwrap_or(r.ts + 600), CTY_RESULT, r.ephemeral_seed)
+    seal_body(r.recipient, &signer, &Value::Object(body), &r.msg_id, ts, exp, CTY_RESULT, r.ephemeral_seed)
 }
 
 fn members(v: &Value) -> String {
@@ -258,21 +274,15 @@ where
     Ok(None)
 }
 
-/// A caller's pin, as `open_result` needs it.
-#[derive(Deserialize, Clone, Debug)]
+/// A caller's pin, as `open_result` needs it (read from JSON by `CallerPin::read_all`, state.rs).
+#[derive(Clone, Debug)]
 pub struct CallerPin {
     pub root: String,
     pub endpoint: String,
     pub leaf: String,
-    #[serde(default = "active")]
     pub state: String,
     /// The fingerprint of `leaf`'s key, when the host keeps it — see `pin_holding`.
-    #[serde(default)]
     pub leaf_fingerprint: Option<String>,
-}
-
-fn active() -> String {
-    "active".into()
 }
 
 pub struct OpenResultArgs<'a> {
@@ -291,6 +301,12 @@ pub struct OpenResultArgs<'a> {
 /// The caller's side of §13.2: open, validate the responder's chain or find the named leaf among
 /// the pins, refuse a superseded leaf, verify the signature, correlate.
 pub fn open_result(a: OpenResultArgs<'_>) -> Result<Value> {
+    // The caller's pins are its own state: a root that is not a fingerprint, a state outside the three
+    // and a leaf fingerprint that is not one are refused first, as the Go port's typed OpenResult
+    // refuses them, for a typed caller whose pins never passed the reader.
+    for (i, p) in a.pins.iter().enumerate() {
+        state::host_pin(&p.root, &p.state, p.leaf_fingerprint.as_deref(), &format!("pins[{i}]"))?;
+    }
     let invalid = |why: &str| err::<Value>("envelope_invalid", why);
     let (aad, h) = decode_header(&a.envelope.protected)?;
     let suite = header_checks(&h)?;
@@ -392,9 +408,13 @@ pub fn open_result(a: OpenResultArgs<'_>) -> Result<Value> {
     Ok(Value::Object(out))
 }
 
+/// The chain a peer put in its plaintext. A member that is not a string, or does not read, is the
+/// plaintext's shape: `open_result` answered one that did not read with the reader's own `parse`, an
+/// error of the CALL for what is a refusal of the ENVELOPE, where `decide` answered `plaintext shape`.
 fn chain_of(v: &Value) -> Result<Vec<Vec<u8>>> {
-    let Some(items) = v.as_array() else { return err("envelope_invalid", "plaintext shape") };
-    items.iter().map(|c| c.as_str().ok_or_else(|| Error::new("envelope_invalid", "plaintext shape")).and_then(from_b64u)).collect()
+    let shape = || Error::new("envelope_invalid", "plaintext shape");
+    let Some(items) = v.as_array() else { return Err(shape()) };
+    items.iter().map(|c| c.as_str().and_then(|s| from_b64u(s).ok()).ok_or_else(shape)).collect()
 }
 
 /// §14.4 on the caller's side: follow only a chain that validates to the pinned root at the dialed
@@ -420,7 +440,7 @@ pub fn follow_renewed(answer: &Value, pinned_root: &str, pinned_leaf: &[u8], dia
 
 mod decide;
 mod state;
-pub use decide::decide;
+pub use decide::{decide, decide_chain};
 pub use state::{DecideInput, DecideOutput, FormerEndpoint, HeldKey, NodeState, Pin, Tombstone};
 
 /// The suite a recipient's SubjectPublicKeyInfo takes, by name.

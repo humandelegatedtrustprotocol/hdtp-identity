@@ -140,8 +140,12 @@ fn key_schedule(s: Suite, shared_secret: &[u8], info: &[u8]) -> (Zeroizing<Vec<u
 }
 
 fn shared_secret(s: Suite, dh: &[u8], kem_context: &[u8]) -> Result<Zeroizing<Vec<u8>>> {
+    // SPEC §13.1 and RFC 9180 §7.1.4. A recipient key that is a low-order point is the argument's
+    // fault, and the envelope's refusal: this said `internal`, a code the contract declares for no
+    // input, and every seal reached it for a small-order Ed25519 leaf, which chain validation passes
+    // (T4). The Go port said `envelope_invalid`. An open maps it to `does not open` with the rest.
     if dh.iter().all(|&b| b == 0) {
-        return err("internal", "all-zero DH output: low-order point");
+        return err("envelope_invalid", "all-zero DH output: low-order point");
     }
     let mut id = b"KEM".to_vec();
     id.extend_from_slice(&i2osp2(s.kem()));
@@ -149,10 +153,16 @@ fn shared_secret(s: Suite, dh: &[u8], kem_context: &[u8]) -> Result<Zeroizing<Ve
     Ok(Zeroizing::new(labeled_expand(&id, &eae_prk, "shared_secret", kem_context, Suite::NSECRET)))
 }
 
+/// The KEM public key of a recipient: the P-256 point, or the Ed25519 key mapped to X25519 (§13.1). A
+/// suite that is not the key's is the envelope layer's refusal, in its words, at every door: this
+/// answered `unsupported` (`not a P-256 key`, `a P-256 key has no X25519 form`) through `hpke_seal`,
+/// a code the contract does not declare there, where the Go port and this core's own `open_result`
+/// say `envelope_invalid` (F6, R14).
 fn recipient_public(suite: Suite, key: &PublicKey) -> Result<Vec<u8>> {
-    match suite {
-        Suite::P256 => key.p256_uncompressed(),
-        Suite::X25519 => Ok(key.x25519()?.to_vec()),
+    match (suite, key.alg()) {
+        (Suite::P256, Alg::P256) => key.p256_uncompressed(),
+        (Suite::X25519, Alg::Ed25519) => Ok(key.x25519()?.to_vec()),
+        _ => err("envelope_invalid", "suite does not fit the key"),
     }
 }
 
@@ -310,9 +320,65 @@ mod tests {
         }
     }
 
+    /// SPEC §13.1: an all-zero DH output is refused. The only X25519 recipient the profile has is an
+    /// Ed25519 key, converted, and a small-order Ed25519 point converts to a low-order X25519 one: the
+    /// identity (y = 1) and y = -1 both map to u = 0. The refusal is the envelope's, named; the control
+    /// is a real key under the same call.
     #[test]
     fn refuses_a_low_order_point() {
-        let zero = PublicKey::from_spki(&crate::keys::x25519_spki(&[0u8; 32])).unwrap();
-        assert!(seal(Suite::X25519, &zero, b"i", b"", b"x", None).is_err());
+        const ED25519_SPKI: &str = "302a300506032b6570032100";
+        let mut identity = [0u8; 32];
+        identity[0] = 1;
+        let mut minus_one = [0xffu8; 32];
+        minus_one[0] = 0xec;
+        minus_one[31] = 0x7f;
+        for point in [identity, minus_one] {
+            let spki = [crate::util::from_hex(ED25519_SPKI).unwrap(), point.to_vec()].concat();
+            let low = PublicKey::from_spki(&spki).unwrap();
+            let e = seal(Suite::X25519, &low, b"i", b"", b"x", None).unwrap_err();
+            assert_eq!((e.code.as_str(), e.why.as_str()), ("envelope_invalid", "all-zero DH output: low-order point"));
+        }
+        let real = PrivateKey::from_seed(Alg::Ed25519, &label_seed("t/r")).unwrap().public();
+        assert!(seal(Suite::X25519, &real, b"i", b"", b"x", None).is_ok());
+    }
+
+    /// T5, the Go port's admit, held here as a property of the core: an open is by a key of the suite's
+    /// own algorithm. The Go port read a P-256 key's absent seed as the empty one, whose clamped
+    /// SHA-512 is a public scalar, so any P-256 key opened a seal to the Ed25519 key that maps to that
+    /// scalar's point. Here that seal, opened by two P-256 keys, does not open; and the control, a
+    /// seal to a real Ed25519 key, opens for it.
+    #[test]
+    fn a_key_of_the_other_algorithm_opens_nothing() {
+        use sha2::Digest;
+        let mut empty = [0u8; 32];
+        empty.copy_from_slice(&sha2::Sha512::digest([])[..32]);
+        let u = x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from(empty)).to_bytes();
+        let point = curve25519_dalek::montgomery::MontgomeryPoint(u).to_edwards(0).unwrap().compress().to_bytes();
+        let crafted = PublicKey::from_spki(&[crate::util::from_hex("302a300506032b6570032100").unwrap(), point.to_vec()].concat()).unwrap();
+        assert_eq!(crafted.x25519().unwrap(), u, "the crafted key maps to the empty seed's point");
+        let (enc, ct) = seal(Suite::X25519, &crafted, b"PACT-SEAL-v2", b"", b"admitted", None).unwrap();
+        for label in ["t/p256/a", "t/p256/b"] {
+            let p256 = PrivateKey::from_seed(Alg::P256, &label_seed(label)).unwrap();
+            let e = open(Suite::X25519, &p256, &crafted, b"PACT-SEAL-v2", b"", &enc, &ct).unwrap_err();
+            assert_eq!((e.code.as_str(), e.why.as_str()), ("envelope_invalid", "does not open"));
+        }
+        let real = PrivateKey::from_seed(Alg::Ed25519, &label_seed("t/r")).unwrap();
+        let (enc, ct) = seal(Suite::X25519, &real.public(), b"PACT-SEAL-v2", b"", b"x", None).unwrap();
+        assert_eq!(open(Suite::X25519, &real, &real.public(), b"PACT-SEAL-v2", b"", &enc, &ct).unwrap(), b"x");
+    }
+
+    /// A suite that is not the recipient key's is refused as the envelope layer refuses it (F6, R14),
+    /// and a key outside the profile is not a key at all (T4): an X25519 SubjectPublicKeyInfo does not
+    /// read, so nothing is sealed to one.
+    #[test]
+    fn a_suite_that_is_not_the_keys_is_refused_in_the_envelopes_words() {
+        for (alg, suite) in [(Alg::P256, Suite::X25519), (Alg::Ed25519, Suite::P256)] {
+            let key = PrivateKey::from_seed(alg, &label_seed("t/r")).unwrap().public();
+            let e = seal(suite, &key, b"i", b"", b"x", None).unwrap_err();
+            assert_eq!((e.code.as_str(), e.why.as_str()), ("envelope_invalid", "suite does not fit the key"));
+        }
+        let x25519 = [crate::util::from_hex("302a300506032b656e032100").unwrap(), vec![9u8; 32]].concat();
+        let e = PublicKey::from_spki(&x25519).err().unwrap();
+        assert_eq!((e.code.as_str(), e.why.as_str()), ("unsupported", "unsupported key type 1.3.101.110"));
     }
 }

@@ -1,7 +1,7 @@
 //! The envelopes section of contract/contract.json (§5 envelopes): a body for each function it declares, which
 //! `api.rs`'s `dispatch` names.
 use super::*;
-use crate::envelope::{self, CallerPin, Form, OpenResultArgs, SealRequest, SealResult, Wire};
+use crate::envelope::{self, CallerPin, DecideInput, Form, OpenResultArgs, SealRequest, SealResult, Wire};
 use crate::hpke::{self, Suite};
 
 pub(super) fn suite_for(a: &Value) -> Result<Value> {
@@ -47,17 +47,19 @@ pub(super) fn seal_request(a: &Value) -> Result<Value> {
         let wire = envelope::seal_request(SealRequest {
             recipient: &leaf.public_key,
             sender: &sender,
-            form: Form::parse(opt_s(a, "form").unwrap_or("chain"))?,
+            form: Form::parse(opt_s(a, "form")?.unwrap_or("chain"))?,
             sender_chain: sender_chain.as_deref(),
-            method: opt_s(a, "method").unwrap_or("tools/call").to_string(),
-            params: a.get("params").cloned().unwrap_or(json!({})),
+            method: opt_s(a, "method")?.unwrap_or("tools/call").to_string(),
+            // Absent or null is `{}` (CONTRACT §0: null is absent); present, sealed as the value it reads as
+            // (seal_request's in_order), not as the text it was written in.
+            params: a.get("params").filter(|v| !v.is_null()).cloned().unwrap_or(json!({})),
             msg_id: id(a, "msg_id")?.to_string(),
             ts: int(a, "ts")?,
-            exp: opt_int(a, "exp"),
-            cty: opt_s(a, "cty").map(|c| c.to_string()),
+            exp: opt_int(a, "exp")?,
+            cty: opt_s(a, "cty")?.map(|c| c.to_string()),
             ephemeral_seed: seed32(a, "ephemeral_seed")?,
         })?;
-        serde_json::to_value(wire).map_err(|e| Error::new("internal", e.to_string()))?
+        serde_json::to_value(wire).map_err(|_| Error::new("internal", crate::util::UNSERIALISABLE))?
     })
 }
 
@@ -69,27 +71,38 @@ pub(super) fn seal_result(a: &Value) -> Result<Value> {
         let wire = envelope::seal_result(SealResult {
             recipient: &recipient,
             sender: &sender,
-            form: Form::parse(opt_s(a, "form").unwrap_or("chain"))?,
+            form: Form::parse(opt_s(a, "form")?.unwrap_or("chain"))?,
             sender_chain: sender_chain.as_deref(),
-            result: a.get("result").cloned(),
-            error: a.get("error").cloned(),
+            // Null is absent (CONTRACT §0): a null result alone is no result, and beside an error it is
+            // not a second one. Both ports sealed it as present.
+            result: a.get("result").filter(|v| !v.is_null()).cloned(),
+            error: a.get("error").filter(|v| !v.is_null()).cloned(),
             msg_id: id(a, "msg_id")?.to_string(),
             ts: int(a, "ts")?,
-            exp: opt_int(a, "exp"),
+            exp: opt_int(a, "exp")?,
             ephemeral_seed: seed32(a, "ephemeral_seed")?,
         })?;
-        serde_json::to_value(wire).map_err(|e| Error::new("internal", e.to_string()))?
+        serde_json::to_value(wire).map_err(|_| Error::new("internal", crate::util::UNSERIALISABLE))?
     })
 }
 
 pub(super) fn open_result(a: &Value) -> Result<Value> {
     Ok({
-        let wire: Wire = serde_json::from_value(a.get("envelope").cloned().unwrap_or(Value::Null))
-            .map_err(|_| Error::new("envelope_invalid", "envelope members"))?;
+        // Absent is the caller's omission (CONTRACT §0, `envelope is required`); present, every refusal
+        // of the envelope is `envelope_invalid`, and names the member that is not there (T9, F12,
+        // S1-1): it answered "envelope members" for all five faults, and the Go port five ways.
+        let wire = match a.get("envelope").filter(|v| !v.is_null()) {
+            None => return err("bad_request", "envelope is required"),
+            Some(v) => Wire::read(v).map_err(|e| Error::new("envelope_invalid", e.why))?,
+        };
         let key = private(a, "my_pkcs8")?;
         let me = public(a, "my_spki")?;
-        let pins: Vec<CallerPin> = serde_json::from_value(a.get("pins").cloned().unwrap_or(json!([])))
-            .map_err(|e| Error::new("bad_request", format!("pins: {e}")))?;
+        // Absent and null are no pins (§0: null is absent); a pin is refused by the member it lacks,
+        // in these words and never serde's (F11, R20, R21).
+        let pins: Vec<CallerPin> = match a.get("pins").filter(|v| !v.is_null()) {
+            None => Vec::new(),
+            Some(v) => CallerPin::read_all(v)?,
+        };
         envelope::open_result(OpenResultArgs {
             envelope: &wire,
             my_key: &key,
@@ -97,8 +110,8 @@ pub(super) fn open_result(a: &Value) -> Result<Value> {
             msg_id: s(a, "msg_id")?,
             now: instant(a, "now")?,
             pins: &pins,
-            expected_root: opt_s(a, "expected_root"),
-            expected_endpoint: opt_s(a, "expected_endpoint"),
+            expected_root: opt_s(a, "expected_root")?,
+            expected_endpoint: opt_s(a, "expected_endpoint")?,
         })?
     })
 }
@@ -114,17 +127,21 @@ pub(super) fn follow_renewed(a: &Value) -> Result<Value> {
 }
 
 pub(super) fn decide(a: &Value) -> Result<Value> {
-    Ok({
-        // A missing `node` is not a decision against an empty node, and the member is named the
-        // way the caller wrote it rather than the way serde reports a missing field — the Go port
-        // cannot reproduce another library's wording, and CONTRACT §0 promises it will not have to.
-        for k in ["node", "envelope", "now"] {
-            if a.get(k).is_none_or(Value::is_null) {
-                return err("bad_request", format!("{k} is required"));
-            }
+    let input = DecideInput::read(a)?;
+    serde_json::to_value(envelope::decide(&input)?).map_err(|_| Error::new("internal", crate::util::UNSERIALISABLE))
+}
+
+/// A chain proven at the TLS layer, decided by the pins (`envelope::decide_chain`). Read as `decide`
+/// reads its own: `node`, `chain` and `now` absent or null, in that order; then the node whole, by the
+/// one reader; the chain, as every function reads one; `now`.
+pub(super) fn decide_chain(a: &Value) -> Result<Value> {
+    for k in ["node", "chain", "now"] {
+        if a.get(k).is_none_or(Value::is_null) {
+            return Err(required(k));
         }
-        let input: envelope::DecideInput =
-            serde_json::from_value(a.clone()).map_err(|_| Error::new("bad_request", "decide input does not read"))?;
-        serde_json::to_value(envelope::decide(&input)?).map_err(|e| Error::new("internal", e.to_string()))?
-    })
+    }
+    let node = envelope::NodeState::read(&a["node"])?;
+    let chain = chain(a, "chain")?;
+    let now = instant(a, "now")?;
+    serde_json::to_value(envelope::decide_chain(&node, &chain, now)?).map_err(|_| Error::new("internal", crate::util::UNSERIALISABLE))
 }

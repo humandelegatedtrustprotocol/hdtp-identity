@@ -60,8 +60,6 @@ fn leaf(cn: &str, root: &PrivateKey, host: &PublicKey, endpoint: &str, dns: Opti
         ca: false,
         usage: None,
         aki: None,
-        extra: Vec::new(),
-        alg_oid: None,
     };
     x509::build_leaf(&spec, root).map_err(|e| Fail(e.why))
 }

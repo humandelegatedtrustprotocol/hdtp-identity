@@ -23,42 +23,105 @@ the tables is `contract/CONTRACT.template.md` and is written by hand.
 
 ## 0. Conventions
 
-- **Bytes in JSON** are base64url without padding (`b64url`). The vector file alone uses hex.
+- **Bytes in JSON** are base64url without padding (`b64url`), and an answer always spells them so.
+  An argument's bytes are read forgiving the padding and the standard alphabet's `+` and `/`, and
+  nothing else: whitespace of any kind, any other character outside the alphabet, `=` anywhere but
+  the end, and a last character with a spare bit set are `{"error": "parse", "why": "not
+  base64url"}`. Every string a port reads that it did not write itself — a card's certificate, a
+  chain in a peer's plaintext, a pin's leaf, a held key, a vault's salt, nonce and ciphertext — is
+  read by the same rule and refused in its function's words. One list of cases,
+  `js/b64url-arguments.json`, holds both ports to it. The members of an envelope that travelled are
+  read by a stricter rule (§5). The vector file alone uses hex.
 - **Instants** in JSON are RFC 3339 UTC strings with second precision (`"2026-09-13T12:00:00Z"`);
   `ts` and `exp` inside an envelope header stay integer Unix seconds, as the spec says.
 - **Keys**: a private key is PKCS #8 DER; a public key is SubjectPublicKeyInfo DER. Algorithms are
   `"ed25519"` and `"p256"`. A **fingerprint** is `"sha256:" + b64url(SHA-256(SPKI))`; a **key id** is
-  the 32 raw bytes of that hash.
+  the 32 raw bytes of that hash. A key of any other algorithm — RSA, P-384, a bare X25519 key, an
+  Ed25519 key whose AlgorithmIdentifier carries parameters — is refused where it is read, as a key or
+  inside a certificate or a request: `{"error": "unsupported", "why": "unsupported key type <OID>"}`,
+  the OID the key's AlgorithmIdentifier names first (a function that answers a refusal as its result
+  carries the same words: chain rule 1, `csr_check`, `card_decode`). The seed's `parse` refuses it in
+  the same words, a P-256 key whose curve OID has a padded subidentifier included, and reads a
+  SubjectPublicKeyInfo as the ports do: `SubjectPublicKeyInfo shape` for anything but its
+  AlgorithmIdentifier and a key BIT STRING with no unused bits, `P-256 key is not a point` for one off
+  the curve (pact-protocol b841dd3; before it the seed named these in OpenSSL's words or as an OID not
+  in the DER form, and read a key with unused bits).
 - **Every function returns one JSON object.** Success shapes are listed per function. Failure is
-  `{"error": "<code>", "why": "<one line>"}`, where `code` is a spec error where one applies
-  (`envelope_invalid`, `chain_required`, `certificate_renewed`, `bad_request`, `pending_approval`) and
-  otherwise one of `parse`, `profile`, `unsupported`, `key`, `vault`, `internal`. Ports never throw
-  across the boundary.
+  `{"error": "<code>", "why": "<one line>"}`, where `code` is one of the contract's `ErrorCode`
+  ({{error_codes}}), and each function lists the codes it can fail with, which `js/parity.mjs` holds
+  both ports to. `chain_required`, `certificate_renewed` and `pending_approval` are not failures: they
+  are the `code` of an answer of `decide` (§5.1), which succeeds. Ports never throw across the
+  boundary.
 - **A member that is absent is not a member that is empty.** Absent answers `{"error": "bad_request",
   "why": "<name> is required"}` naming the member the caller left out; present but unusable — `""`,
   bytes that will not decode, a string where an object belongs — answers what is wrong with the value
   (`parse`/`"not base64url"`, a parser's own words). A port whose zero value and missing value are
   the same thing loses this distinction, and both have: `{"spki": ""}` once read as "spki is
   required" in one port and as a truncated DER in the other. The JSON literal `null` counts as absent.
+- **A member of the wrong JSON type is refused, never read as absent** — an optional one too, which is
+  where the ports parted: one read `"serial": 7` as no serial and drew a random one, `"guest": "yes"`
+  as not a guest and `"exp": "7"` as ts + 600, and the other refused each. A base64url member that is
+  not a string answers `{"error": "parse", "why": "not base64url"}`, as bytes that will not decode
+  do; any other answers `bad_request` in words that name it — `<name> is required`, the words its
+  absence gets, unless the function has more particular ones (`first_line is a line number from 1`).
+  An integer is a number written without a fraction or an exponent, and not `-0`: `365.0` and `-0`
+  are not a number of days, although JavaScript reads both as one.
 - **The order a function reads its members is part of its answer.** When several required members are
   missing, the one named is the first the function needs, and both ports read them in the same order.
+- **A member a function does not declare is refused**, before any member is read: `{"error":
+  "bad_request", "why": "<fn> takes no member \"<m>\""}`, naming the first such member in sorted
+  order. A function declares the members its `params` list, and no others. That holds the arguments
+  object. An object inside a member is read one of two ways, and both ports read each the same way
+  (`js/parity.mjs` sends every object in every function's base an undeclared member, and requires a
+  refusal of a document and an answer for the second kind, which `js/cases/generated.mjs`'s
+  `READ_FOR_WHAT_IT_NEEDS` lists per function):
+  - **a document** — something a port writes and a port reads back, whose members SPEC or this
+    contract lists — is held to its members, and one it does not list is refused in its function's
+    words: a vault document and its `kdf`; `wallet_issue`'s vault and record plaintexts and the roots,
+    contacts and passkey inside them; a ledger entry; a signing request; `export_manifest`'s manifest,
+    its `counts` and `files`, and `hashes`; a row of `export_write`'s `contacts` and `threads` and of
+    `export_write_messages`'s `messages`; a wallet contact of `book_rows`; the limits rules and a
+    charge;
+  - **what a host hands in of its own state, or of what a peer sent it** — an envelope, a node state
+    and its keys and pins, a pin, the answer to `get_card` and its `data`, a directory entry,
+    `export_merge`'s held pins and rows, `export_write`'s media — and the JSON a seal carries
+    (`vault_seal`'s plaintext, of which only `v` is read, `seal_request`'s `params`, `seal_result`'s
+    `result`) are read for the members they need and not held to their schemas'
+    `additionalProperties`: a host's typed port decodes them into fixed structs and cannot see a
+    member it has no field for either.
 - **`why` is part of the answer.** Two ports refusing the same call in different words is a
   divergence, not a detail: it is what a person debugging reads, and what a caller's test asserts. No
   `why` may be a library's own error text — one port cannot reproduce another library's wording.
-- **Half a surrogate pair is refused before anything else.** Arguments holding a `\u` escape of half
-  a UTF-16 surrogate pair (a high one not followed by a low one, or a low one alone) answer
-  `{"error": "bad_request", "why": "args: a string holds half of a UTF-16 surrogate pair"}` from
-  every function, before the arguments are read: one JSON parser refuses such text and another reads
-  it as U+FFFD, and a port must not answer by its parser's choice.
+- **The name is judged first.** A name no function has answers `{"error": "unsupported", "why": "no
+  function named <name>"}`, whatever the arguments are — a list, `null`, text that does not parse, or
+  any of what the next two rules refuse. Everything below is judged only for a function that exists.
+- **Half a surrogate pair is refused next, before the arguments are read.** Arguments holding a `\u`
+  escape of half a UTF-16 surrogate pair (a high one not followed by a low one, or a low one alone)
+  answer `{"error": "bad_request", "why": "args: a string holds half of a UTF-16 surrogate pair"}`
+  from every function: one JSON parser refuses such text and another reads it as U+FFFD, and a port
+  must not answer by its parser's choice.
+- **So is what one JSON parser refuses and another reads**, next: a number that is infinite as a
+  double (`1e400`) answers `{"error": "bad_request", "why": "args: a number is outside the range of a
+  double"}`, and arrays and objects nested more than 127 deep, the arguments object counted, `args:
+  nested more than 127 deep` — whichever comes first in the text. JSON that travels as text — an
+  envelope's header and body, a manifest, a line of `messages.jsonl`, a vault's plaintext — holding
+  either, or half a surrogate pair, or a byte that is not UTF-8, is text that is not JSON, answered
+  as each function answers that (a manifest or a line that is not UTF-8 is refused before it is read
+  as JSON, as `not UTF-8 text`). RFC 8785, in which a
+  header is written, has no infinite number. Arguments that do not parse at all answer `args is a
+  JSON object`, and so do arguments with no text at all (Go's `Call(name, nil)` included): no
+  arguments is `{}`, which the JS loader and the Go line adapter send for a call that gives none.
 - **`version` is the one exception.** It describes the port, not a rule, so its answer differs and
   nothing compares it.
 
 {{table:build}}
 - The Wasm boundary takes `&str` JSON and `&[u8]` DER and returns `String` JSON. The Go port exposes
-  the same functions as Go functions on `[]byte`/`string` returning structs, plus a `pact-identity-go`
-  binary that reads JSON requests on stdin, one per line (`{"fn": "<name>", "args": {...}}`), and
-  writes one JSON answer per line, so the JavaScript suites can aim the same cases at both ports
-  through one process per run.
+  the same boundary as `Call(name, args)`, and most of the functions also as Go functions on
+  `[]byte`/`string` returning structs; the export section is reached through `Call` alone, beside the
+  two typed conveniences for a whole file, `ReadExportZip` and `WriteExportZip` (§6.2). It also builds a
+  `pact-identity-go` binary that reads JSON requests on stdin, one per line (`{"fn": "<name>", "args":
+  {...}}`), and writes one JSON answer per line, so the JavaScript suites can aim the same cases at
+  both ports through one process per run.
 
 ## 1. Keys
 
@@ -119,8 +182,11 @@ the host makes with its own endpoint in hand.
 
 Suites: `PACT-SEAL-P256` (DHKEM(P-256, HKDF-SHA256), HKDF-SHA256, AES-128-GCM) for a P-256 recipient,
 `PACT-SEAL-X25519` (DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, ChaCha20-Poly1305) for an Ed25519
-recipient converted by the RFC 7748 §4.1 and RFC 8032 §5.1.5 maps. HPKE Base mode, single shot,
-`info` = `PACT-SEAL-v2`. All-zero DH output refused. The
+recipient converted by the RFC 7748 §4.1 and RFC 8032 §5.1.5 maps; a bare X25519 key is no key of
+the profile (§0). A suite that is not the recipient key's is `envelope_invalid`, `suite does not fit
+the key`. HPKE Base mode, single shot, `info` = `PACT-SEAL-v2`. All-zero DH output refused: a seal to
+an Ed25519 key of small order meets one, and is `envelope_invalid`, `all-zero DH output: low-order
+point`; an open that meets one does not open. The
 header is the AAD, canonicalised per RFC 8785; the signature is over `protected ‖ enc ‖ ct`.
 
 **A member of an envelope has ONE spelling** (SPEC §13.1): unpadded base64url, canonical. `decide`
@@ -152,6 +218,12 @@ clarification this library fixes and Phase 0.5 folds into the spec.
 `decide` implements SPEC §13.3 in order, §6.1 tiers, §5.3 new addresses with the removal tombstone,
 §14.3 and §14.4, over state the host supplies. It changes nothing; it returns what it decided and the
 effects the host must apply. `envelope.mjs receive()` is its specification, line for line.
+
+Its arguments are the host's, decoded by the host, so a fault in them fails the call (`bad_request`)
+and is never a decision about the peer: `node`, `envelope` and `now` absent or null, in that order
+(`<name> is required`); then the node read whole as `NodeState` says, then the envelope's four
+members in order, each named by its path when it is absent, null or not the type it is
+(`node.pins[0].leaf is required`, `envelope.sig is required`); then `now`.
 
 Input:
 
@@ -187,7 +259,7 @@ Output:
   "result": {"code": "ok", "tier": "contact" | "pending" | "guest" | "pending_new_address",
              "root": "sha256:…", "endpoint": "https://…", "method": "tools/call", "tool": "send_message",
              "params": {…}, "form": "chain" | "leaf", "leaf": "<leaf der the signature verified under>",
-             "replayed"?: true, "why"?: "…",
+             "replayed"?: true, "why"?: "unknown root" | "blocked" | "superseded leaf", "demote"?: false | true,
              "address_claim"?: "sha256:…", "forced"?: "tombstone", "decision"?: "ask"},
   "effects": [
     {"op": "seen", "msg_id": "…"},
@@ -202,7 +274,10 @@ Output:
 The other results, each with an empty `effects` list unless stated: `{"code": "envelope_invalid",
 "why"}` — and when `why` is `guest may only redeem or request` it also carries `root` and `leaf`, so a
 host holding an older pin of that leaf's key learns the root above it (§14.3) and decides again; `{"code": "chain_required"}`; `{"code": "certificate_renewed", "data": {"chain": [...]}}`;
-`{"code": "pending_approval"}`; and `{"code": "ok", "replayed": true}` for a seen `msg_id`.
+`{"code": "pending_approval", "root", "endpoint", "leaf", "form", "msg_id"}` — what the signature
+proved and the request's `msg_id`, so a host can seal the refusal back to the caller (§13.2) without
+opening the envelope again; its effects are the pin's own moves, never `seen`; and
+`{"code": "ok", "replayed": true}` for a seen `msg_id`.
 The `why` strings are the seed's, verbatim, so the intrusion suite reads both ports alike.
 
 Order, as `receive()` has it (freshness also refuses `exp − ts` over 30 days, §13.1, as `exp too far from ts`): decode `protected` → header members exactly `cty,exp,kid,msg_id,suite,ts,v`
@@ -219,7 +294,10 @@ within 30 days with a newer leaf → `pending_new_address` forced `ask`, else gu
 method is `tools/call`, the tool `redeem_invite` or `request_contact`, `params.arguments.card`
 decodes, its certificate byte-equals the chain's leaf, the endpoint is not this node's own
 (`guest endpoint is this node's own address`, §14.5), `address_claim` names a pin at that endpoint
-or a former endpoint within 30 days; root pinned and blocked → guest; superseded → guest; conflict →
+or a former endpoint within 30 days; root pinned and blocked → guest; superseded → guest (a guest's
+answer carries `why`, one of `unknown root`, `blocked` and `superseded leaf`, and `demote`, true for
+the last two: a pin for the root stands and the caller is a guest anyway, so a host resolves it to no
+contact row — the host reads `demote`, never the words); conflict →
 `envelope_invalid`; another endpoint → `ask` pending or `auto` re-pin with the former endpoint recorded
 and a `new_address` event; newer at the pinned endpoint → `pin_update` and a `renewal` event; then
 `pending_out` allows `tools/list` and `contact_accepted`/`contact_rejected` at tier `pending` (a listing
@@ -229,6 +307,14 @@ contact.
 A `pending_new_address` result is the host's to answer as SPEC §5.3 words it: the `update_contact` that
 brought the new address answers `{"status": "pending"}`; every other call from that address, until the
 owner decides, answers `pending_approval`.
+
+`decide_chain` is the same pin decision for a chain proven outside an envelope — at the TLS layer, where
+the handshake is the leaf key's signature — so a host's two doors cannot decide one caller two ways
+(the node's TLS door did, on a removal tombstone and on a conflicting leaf). Both functions take it
+from one place in each port; `js/doors.test.mjs` holds the two answers to each other over every
+outcome. What is the call's and not the chain's — the guest binding, the receiver's own address, what
+a `pending_out` pin may call — the host applies to each call on its TLS door, as `decide` applies it
+to the envelope's.
 
 ## 6. Vault (SPEC §9; the format shared by the wallet page and the CLI)
 
@@ -281,7 +367,7 @@ and its decrypted bytes. What it does not: the JSON argument and answer strings 
 those strings in linear memory, which are freed but not cleared. A host that must not leave key
 material behind treats the strings it passes and receives as its own to clear.
 
-**The KDF's range, at both ends, on both paths.** `m_kib` 8192–2097152 (8 MiB–2 GiB), `t` 1–16, `p` 1–16, `name` `argon2id`; anything else is `{"error": "vault", "why": "kdf parameters out of range"}` (or `"unknown kdf"`), from `vault_seal` and `vault_open` alike, through one parser. The parameters are read out of the document **before the passphrase is tested**, so an unbounded reader hands an attacker's file a 256 GiB allocation or a derivation that never returns, and an unbounded writer seals the person's root behind a KDF a laptop brute-forces. A value that does not fit in 32 bits is out of range, never truncated.
+**The KDF's range, at both ends, on both paths.** `m_kib` 8192–2097152 (8 MiB–2 GiB), `t` 1–16, `p` 1–16, `name` `argon2id`; anything else is `{"error": "vault", "why": "kdf parameters out of range"}` (or `"unknown kdf"`), from `vault_seal` and `vault_open` alike, through one reader in each port, and every derivation — a typed call's too — is held to the same range. The parameters are read out of the document **before the passphrase is tested**, so an unbounded reader hands an attacker's file a 256 GiB allocation or a derivation that never returns, and an unbounded writer seals the person's root behind a KDF a laptop brute-forces. A value that does not fit in 32 bits is out of range, never truncated. A salt under `VaultSaltMin` (8 bytes) is `{"error": "vault", "why": "salt is at least 8 bytes"}` at both ends, named before Argon2id is asked for anything: no `why` is the library's.
 
 ### 6.1 The ledger — what signing would mean
 
@@ -321,7 +407,8 @@ the host can do, and the words both hosts of this repository use for it (the Go 
   sha256 is not its name`): the manifest lists the text members only, and a media member is bound
   by its name and counted by `counts.media` (SPEC 2.2.2);
 - refuse a media file whose bytes are a private key — PKCS #8 or SEC1 in DER, or text holding one
-  (`media/<h>: holds a private key`);
+  (`media/<h>: holds a private key`) — which it asks `media_holds_private_key`, the rule both ports'
+  readers apply, rather than keep a copy of it;
 - hand `export_read_end` the media `export_read` answered, so a media file no message names is
   refused.
 
@@ -332,9 +419,9 @@ a Rust host that write the same rows write the same file. A media file is stored
 What a contact controls never stops the export (SPEC 9.2#22–25): `export_write_messages` leaves out
 a message whose body is a private key and answers it in `left_out`, and a host that writes in
 batches names the file's msg_ids in `msg_ids`, so a reply to a message not carried is written null.
-The core never sees a media file's bytes, so the host checks each before it writes: a message whose
-file is a private key is left out with the file and listed with the rest, for the host to report to
-the person.
+The core never sees a media file's bytes unless it is handed them, so the host checks each before it
+writes, with `media_holds_private_key`: a message whose file is a private key is left out with the file
+and listed with the rest, for the host to report to the person.
 `book_rows` is the one mapping from the wallet's own book (`VaultContact`, §6) to those rows, which
 every wallet uses before `export_write` writes a book.
 
@@ -358,11 +445,14 @@ envelope and knows the caller (layer 2 of pact-gateway `docs/release/two-layer-l
 layer 1, per address and per path, is the host's edge). The rules are a document the host keeps in
 its configuration and checks with `limits_rules_check` before it publishes one; the library holds no
 default. The counters are rows the host keeps, handed in as `state` and handed back as `writes`: the
-library does no I/O and reads no clock. A call is charged to every bucket of its charge or to none,
+library does no I/O and reads no clock. `limits_buckets` names the rows a charge reads, with each
+bucket's rate and burst, so a host fetches them from the key scheme written here and not from a copy
+of it. A call is charged to every bucket of its charge or to none,
 and the bucket keys are the cloud's `rate_buckets` keys, so rows written before the move read the
-same after it. The arithmetic is the cloud's `RateLimiter.take`, operation for operation;
-`js/cases/limits-vectors.json`, generated by running that TypeScript over SQLite
-(`js/limits-vectors.mjs`), holds every port to its decisions and to the bits of every row it wrote.
+same after it. The arithmetic is what the cloud's `RateLimiter.take` was, operation for operation,
+until the cloud removed it and decided through this library (pact-cloud ba68f9c);
+`js/cases/limits-vectors.json`, a fixed record made by running that TypeScript over SQLite, holds
+every port to its decisions and to the bits of every row it wrote.
 Two rules have no TypeScript to be held to: the guest total, charged before the open, and the cap on
 waiting requests.
 
@@ -392,7 +482,14 @@ waiting requests.
    mismatched `sig_alg`, a name that straddles the vCard fold, every private and loopback spelling of
    an address, a root offered as a key id — and compares the whole answer, `why` strings included.
    The vectors prove the bytes a peer sees; this proves the codes, the words and the shapes a
-   *caller* sees, which no vector carries. It also fails when:
+   *caller* sees, which no vector carries. Besides the cases written by hand, `js/cases/generated.mjs`
+   makes, for every function this file declares, the shapes of a caller's mistake from the function's
+   own `params`: `{}`; the hostile object `js/cases/hostile.json` (which the Go port's
+   `TestCallNeverPanics` sweeps with too); each required member absent and `null`, held to §0's
+   `<name> is required`; each optional string `""`; each optional member of the wrong type; a member
+   the contract does not declare; and, for read order, each required member absent beside each other
+   member of the wrong type. Each is varied from a call that succeeds on both ports, named per
+   function. Every case must pass: nothing is excused. It also fails when:
    - the two dispatchers and `contract/contract.json` stop naming the same set of functions
      (`version` lived in one dispatcher and not the other until this check existed; a function
      described in the contract and dispatched by neither port would be prose nothing runs);
@@ -400,6 +497,9 @@ waiting requests.
      check here that two agreeing ports cannot pass by agreeing, since a member both grew, or both
      dropped, is invisible to a comparison;
    - a function on either dispatcher has no case here, so the contract cannot grow past its guard;
+   - an error code a function declares is never produced by both ports in one case they answered
+     alike — a refusal nobody compared, or a code nothing can reach, which is a claim to take out of
+     this file;
    - a function is only ever compared through a list of named keys rather than whole. That last one
      is the point: `card_decode` dropped its entire `leaf` member in one port, and a key list would
      never have noticed, because a key list only looks at the keys someone thought to name. Where an

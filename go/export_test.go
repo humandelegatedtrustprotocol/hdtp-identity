@@ -264,3 +264,17 @@ func TestExportMergeKeepsWhatThePersonDecidedAboutAHeldContact(t *testing.T) {
 		t.Errorf("no difference, and conflicts: %v", c)
 	}
 }
+
+// csvRead is every record, at once: for these tests, which read a file back whole. The port streams its
+// records (csvEach); this sat beside it with no caller outside a test (X12).
+func csvRead(text string) ([][]string, *csvRefusal) {
+	var records [][]string
+	bad := csvEach(text, func(_ int, fields []string) bool {
+		records = append(records, append([]string(nil), fields...))
+		return true
+	})
+	if bad != nil {
+		return nil, bad
+	}
+	return records, nil
+}

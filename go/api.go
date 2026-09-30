@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -32,43 +31,19 @@ func fail(code, why string) json.RawMessage {
 
 func failErr(code string, err error) json.RawMessage { return fail(code, err.Error()) }
 
+// failAs is an error answered with the code CONTRACT §0 names for it (codeFor), or `fallback`.
+func failAs(fallback string, err error) json.RawMessage { return failErr(codeFor(err, fallback), err) }
+
 func ok(v any) json.RawMessage {
 	b, err := json.Marshal(v)
 	if err != nil {
-		return fail("internal", err.Error())
+		// encoding/json's words are not an answer (CONTRACT §0); the core's line for the same.
+		return fail("internal", "does not serialise as JSON")
 	}
 	return b
 }
 
 func timeOut(t time.Time) string { return t.UTC().Format(time.RFC3339) }
-
-// The default validity belongs to the boundary: an absent member means a year, and an explicit zero
-// is refused, as the Rust core refuses it. (A Go caller of the library passes a real number or
-// omits the field, which its struct cannot tell from zero — hence the pointer here.)
-func daysOr(v *int) (int, error) {
-	if v == nil {
-		return 365, nil
-	}
-	if *v < 1 || *v > MaxLeafDays {
-		return 0, errArg("validity must be between one and 398 days")
-	}
-	return *v, nil
-}
-
-// timeIn reads a REQUIRED instant. Absent, it is `<name> is required` and `bad_request`, as every
-// other absent member is (CONTRACT §0) and as the core says it; this port said "an instant is
-// required" and called it `parse`, in every function that takes one. Present and unreadable is `parse`.
-func timeIn(s *string, name string) (time.Time, error) {
-	if s == nil {
-		return time.Time{}, errArg(name + " is required")
-	}
-	// The one grammar (parseInstantZ): time.RFC3339 took an offset `now` in every function.
-	t, ok := parseInstantZ(*s)
-	if !ok {
-		return time.Time{}, parseError{"not an RFC 3339 instant: " + *s}
-	}
-	return t, nil
-}
 
 // A caller's arguments that will not read are a caller mistake, so they answer `bad_request` here
 // and in the Rust core alike (CONTRACT §0: the same names, the same shapes, the same codes).
@@ -103,66 +78,6 @@ func codeFor(err error, fallback string) string {
 	return fallback
 }
 
-func decodeArgs(args json.RawMessage, into any) error {
-	if len(args) == 0 {
-		args = []byte("{}")
-	}
-	err := json.Unmarshal(args, into)
-	// A member of the wrong JSON type. encoding/json says so in its own words — "json: cannot unmarshal
-	// string into Go struct field sealArgs.sender_chain of type []pactidentity.B64" — which the other
-	// port cannot reproduce and CONTRACT §0 says it will not have to. The core reads a member with an
-	// accessor that finds nothing of the type it wants and answers `<name> is required`; so does this.
-	var mismatch *json.UnmarshalTypeError
-	if errors.As(err, &mismatch) {
-		if mismatch.Field != "" && !strings.Contains(mismatch.Field, ".") {
-			return errArg(mismatch.Field + " is required")
-		}
-		return errArg("arguments do not read")
-	}
-	return err
-}
-
-// privIn and pubIn take the member's own name so an absent key is reported the way the caller wrote
-// it — `host_pkcs8 is required`, not `pkcs8 is required`, when that is the member that is missing.
-// Absent is `== nil` (see b64.go): a member present as "" is not missing, it is bytes that will not
-// parse, and the parser says so, as the Rust core does.
-func privIn(der B64, name string) (*PrivateKey, error) {
-	if der == nil {
-		return nil, errArg(name + " is required")
-	}
-	return ParsePKCS8(der)
-}
-
-func pubIn(spki B64, name string) (*PublicKey, error) {
-	if spki == nil {
-		return nil, errArg(name + " is required")
-	}
-	pub, err := ParseSPKI(spki)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := AlgorithmOf(pub); err != nil {
-		return nil, err
-	}
-	return pub, nil
-}
-
-// need is the same rule for a member the function reads directly rather than through a key parser.
-func need(b B64, name string) error {
-	if b == nil {
-		return errArg(name + " is required")
-	}
-	return nil
-}
-
-// needStr is the same rule for a string member: absent (nil) is a caller's mistake that names it.
-func needStr(s *string, name string) (string, error) {
-	if s == nil {
-		return "", errArg(name + " is required")
-	}
-	return *s, nil
-}
-
 func certOut(c *Cert) map[string]any {
 	kind := "other"
 	if ProfileError(c, "root") == "" {
@@ -170,9 +85,12 @@ func certOut(c *Cert) map[string]any {
 	} else if ProfileError(c, "leaf") == "" {
 		kind = "leaf"
 	}
+	// A certificate that is neither is judged as a root when it is a CA AND self-issued, and as a leaf
+	// otherwise, as the contract's `Certificate` says and the core judges it: this judged every CA as a
+	// root, so a CA-flagged leaf under another name was a root's refusal here and a leaf's there (T17).
 	var profileErr any
 	if kind == "other" {
-		if c.CA {
+		if c.CA && c.Issuer == c.Subject {
 			profileErr = ProfileError(c, "root")
 		} else {
 			profileErr = ProfileError(c, "leaf")
@@ -218,114 +136,143 @@ func certOut(c *Cert) map[string]any {
 	}
 }
 
-// Call dispatches one contract function.
 // loneSurrogateWhy is what Call answers arguments holding an unpaired UTF-16 surrogate escape.
 const loneSurrogateWhy = "args: a string holds half of a UTF-16 surrogate pair"
 
+// Call dispatches one contract function.
 func Call(name string, args json.RawMessage) (out json.RawMessage) {
 	defer func() {
 		if r := recover(); r != nil {
 			out = fail("internal", fmt.Sprint(r))
 		}
 	}()
-	// A \u escape of half a surrogate pair: encoding/json reads it as U+FFFD, and the Rust core's
-	// parser refuses it, so the two ports answered it two ways. Both name it first, in these words,
-	// before anything reads the arguments or the name.
-	if loneSurrogate(args) {
-		return fail(codeArgs, loneSurrogateWhy)
-	}
+	// The name first: one the contract does not have is `unsupported`, whatever the arguments are
+	// (CONTRACT §0). The core read the arguments first, so a list, null or half a surrogate pair beside
+	// an unknown name was a refusal of the arguments there and `unsupported` here (R34).
 	fn, found := functions[name]
 	if !found {
 		return fail("unsupported", "no function named "+name)
 	}
-	// Arguments are an object, or the member is not there at all. A list, a bare scalar or the literal
-	// `null` is a caller's mistake named here, once, rather than as whatever encoding/json says about
-	// the struct it failed to fill — which leaks a Go type into an answer the Rust core gives in four
-	// words. `null` belongs with the rest: the Rust core's `call` matches an object or refuses, and an
-	// absent `args` is a zero-length message, still distinguishable, so nothing else moves.
-	//
-	// This one cannot be reached through `js/parity.mjs`: its port shim does `JSON.stringify(args ?? {})`,
-	// so a null never survives the trip. A case the harness cannot express lives in each port's own
-	// suite instead — here and in the Rust core's `api::tests`.
-	if t := bytes.TrimSpace(args); len(t) > 0 && t[0] != '{' {
+	// A \u escape of half a surrogate pair: encoding/json reads it as U+FFFD, and the Rust core's
+	// parser refuses it, so the two ports answered it two ways. Both name it next, in these words,
+	// before anything reads the arguments.
+	if loneSurrogate(args) {
+		return fail(codeArgs, loneSurrogateWhy)
+	}
+	// What one port's JSON parser refuses and the other's reads — a number infinite as a double, or
+	// containers nested past serde_json's limit — named next, in the core's words: this port read the
+	// arguments and went on where the core answered serde's text (R40, S3-2).
+	if why := jsonLimit(args); why != "" {
+		return fail(codeArgs, "args: "+why)
+	}
+	// Arguments are an object. A list, a bare scalar, the literal `null` or no text at all is a
+	// caller's mistake named here, once, rather than as whatever encoding/json says about the map
+	// readArgs could not fill — which leaks a Go type into an answer the Rust core gives in four words.
+	// No text at all was `{}` here and `args is a JSON object` to the core's `call`; a caller that
+	// means no arguments passes `{}`, as the JS loader and this port's line adapter do.
+	// js/boundary-text.json holds both ports to these answers, and js/parity.mjs the rest
+	// (js/cases/dispatcher.mjs).
+	if t := bytes.TrimSpace(args); len(t) == 0 || t[0] != '{' {
 		return fail(codeArgs, "args is a JSON object")
 	}
-	return fn(args)
+	a, bad := readArgs(args)
+	if bad != nil {
+		return bad
+	}
+	// A member the function does not declare, before any member is read (CONTRACT §0), named as the
+	// Rust core names it: the first in sorted order.
+	if k := stranger(a, fn.members); k != "" {
+		return fail(codeArgs, name+" takes no member \""+k+"\"")
+	}
+	return fn.call(a)
+}
+
+// function is one name of the dispatcher: the members contract/contract.json declares for it (its
+// `params.properties`, in order; TestEveryFunctionDeclaresTheContractsMembers holds the two equal,
+// as the core's `every_function_declares_the_contracts_members` holds api.rs's `declared`), and
+// the body in api_<section>.go that answers it.
+type function struct {
+	members []string
+	call    func(args) json.RawMessage
 }
 
 // functions is the dispatcher: every name contract/contract.json declares, grouped by its sections,
 // each naming the function in api_<section>.go that answers it.
-var functions = map[string]func(json.RawMessage) json.RawMessage{
+var functions = map[string]function{
 	// The build: api_build.go
-	"version": callVersion,
+	"version": {nil, callVersion},
 
 	// Keys: api_keys.go
-	"generate_key":  callGenerateKey,
-	"prf_salt":      callPrfSalt,
-	"derive_seed":   callDeriveSeed,
-	"key_from_seed": callKeyFromSeed,
-	"public_key":    callPublicKey,
-	"key_info":      callKeyInfo,
-	"sign":          callSign,
-	"verify":        callVerify,
+	"generate_key":  {[]string{"alg"}, callGenerateKey},
+	"prf_salt":      {nil, callPrfSalt},
+	"derive_seed":   {[]string{"prf", "info"}, callDeriveSeed},
+	"key_from_seed": {[]string{"alg", "seed"}, callKeyFromSeed},
+	"public_key":    {[]string{"pkcs8"}, callPublicKey},
+	"key_info":      {[]string{"spki"}, callKeyInfo},
+	"sign":          {[]string{"pkcs8", "data"}, callSign},
+	"verify":        {[]string{"spki", "data", "sig"}, callVerify},
 
 	// Certificates: api_certificates.go
-	"build_root":        callBuildRoot,
-	"root_tbs":          callRootTBS,
-	"assemble_root":     assembleFn,
-	"assemble_leaf":     assembleFn,
-	"build_leaf":        callBuildLeaf,
-	"leaf_tbs":          callLeafTBS,
-	"parse_certificate": callParseCertificate,
-	"profile_error":     callProfileError,
-	"validate_chain":    callValidateChain,
-	"compare_leaves":    callCompareLeaves,
-	"is_normal_https":   callIsNormalHTTPS,
-	"address_guard":     callAddressGuard,
-	"ip_is_private":     callIPIsPrivate,
+	"build_root":        {[]string{"cn", "pkcs8", "not_before", "serial"}, callBuildRoot},
+	"root_tbs":          {[]string{"cn", "spki", "not_before", "serial"}, callRootTBS},
+	"assemble_root":     {[]string{"tbs", "sig", "sig_alg"}, assembleFn},
+	"assemble_leaf":     {[]string{"tbs", "sig", "sig_alg"}, assembleFn},
+	"build_leaf":        {[]string{"cn", "root_cn", "host_spki", "endpoint", "dns_name", "not_before", "not_after", "serial", "root_pkcs8"}, callBuildLeaf},
+	"leaf_tbs":          {[]string{"cn", "root_cn", "host_spki", "endpoint", "dns_name", "not_before", "not_after", "serial", "root_spki"}, callLeafTBS},
+	"parse_certificate": {[]string{"der"}, callParseCertificate},
+	"profile_error":     {[]string{"der", "kind"}, callProfileError},
+	"validate_chain":    {[]string{"chain", "now", "expected_root", "expected_endpoint"}, callValidateChain},
+	"compare_leaves":    {[]string{"pinned", "presented"}, callCompareLeaves},
+	"is_normal_https":   {[]string{"url"}, callIsNormalHTTPS},
+	"address_guard":     {[]string{"endpoint", "self_endpoint", "guest"}, callAddressGuard},
+	"ip_is_private":     {[]string{"ip"}, callIPIsPrivate},
 
 	// Certificate signing requests: api_csr.go
-	"csr_new":            callCSRNew,
-	"csr_check":          callCSRCheck,
-	"issue_from_csr":     callIssueFromCSR,
-	"issue_tbs_from_csr": callIssueTBSFromCSR,
+	"csr_new":            {[]string{"cn", "host_pkcs8", "endpoint", "dns_name"}, callCSRNew},
+	"csr_check":          {[]string{"der", "root_spkis"}, callCSRCheck},
+	"issue_from_csr":     {[]string{"csr", "root_cn", "root_spkis", "now", "previous_not_before", "valid_days", "root_pkcs8"}, callIssueFromCSR},
+	"issue_tbs_from_csr": {[]string{"csr", "root_cn", "root_spkis", "now", "previous_not_before", "valid_days", "root_spki"}, callIssueTBSFromCSR},
 
 	// Signing requests: api_signing.go
-	"signing_request_check": callSigningRequestCheck,
+	"signing_request_check": {[]string{"request", "origin", "now", "root_spkis"}, callSigningRequestCheck},
 
 	// Cards: api_cards.go
-	"card_encode": callCardEncode,
-	"card_decode": callCardDecode,
+	"card_encode":   {[]string{"fn", "cert", "seal", "extra"}, callCardEncode},
+	"card_decode":   {[]string{"vcard", "now"}, callCardDecode},
+	"refresh_check": {[]string{"pin", "answer", "now"}, callRefreshCheck},
 
 	// Envelopes: api_envelopes.go
-	"suite_for":      callSuiteFor,
-	"hpke_seal":      callHPKESeal,
-	"hpke_open":      callHPKEOpen,
-	"seal_request":   callSealRequest,
-	"seal_result":    callSealResult,
-	"open_result":    callOpenResult,
-	"follow_renewed": callFollowRenewed,
-	"decide":         callDecide,
+	"suite_for":      {[]string{"spki"}, callSuiteFor},
+	"hpke_seal":      {[]string{"suite", "recipient_spki", "info", "aad", "plaintext", "ephemeral_seed"}, callHPKESeal},
+	"hpke_open":      {[]string{"suite", "recipient_pkcs8", "recipient_spki", "info", "aad", "enc", "ct"}, callHPKEOpen},
+	"seal_request":   {[]string{"recipient_leaf", "sender_pkcs8", "form", "sender_chain", "msg_id", "ts", "exp", "ephemeral_seed", "method", "params", "cty"}, callSealRequest},
+	"seal_result":    {[]string{"recipient_spki", "sender_pkcs8", "form", "sender_chain", "msg_id", "ts", "exp", "ephemeral_seed", "result", "error"}, callSealResult},
+	"open_result":    {[]string{"envelope", "my_pkcs8", "my_spki", "msg_id", "now", "pins", "expected_root", "expected_endpoint"}, callOpenResult},
+	"follow_renewed": {[]string{"answer", "pinned_root", "pinned_leaf", "dialed", "now"}, callFollowRenewed},
+	"decide":         {[]string{"now", "envelope", "node"}, callDecide},
+	"decide_chain":   {[]string{"node", "chain", "now"}, callDecideChain},
 
 	// Vault: api_vault.go
-	"vault_seal":   callVaultSeal,
-	"vault_open":   callVaultOpen,
-	"wallet_issue": callWalletIssue,
+	"vault_seal":   {[]string{"passphrase", "plaintext", "kdf", "salt", "nonce"}, callVaultSeal},
+	"vault_open":   {[]string{"passphrase", "vault"}, callVaultOpen},
+	"wallet_issue": {[]string{"vault_plaintext", "record_plaintext", "root_fingerprint", "csr", "now", "valid_days", "move"}, callWalletIssue},
 
 	// Export: api_export.go
-	"export_read":           callExportRead,
-	"export_read_messages":  callExportReadMessages,
-	"export_read_end":       callExportReadEnd,
-	"export_write":          callExportWrite,
-	"export_write_messages": callExportWriteMessages,
-	"export_manifest":       callExportManifest,
-	"book_rows":             callBookRows,
-	"export_merge":          callExportMerge,
+	"export_read":             {[]string{"directory", "manifest", "contacts_csv", "threads_csv", "owner", "now"}, callExportRead},
+	"export_read_messages":    {[]string{"lines", "threads", "contacts", "media", "first_line"}, callExportReadMessages},
+	"export_read_end":         {[]string{"manifest", "messages_sha256", "lines", "ids", "msg_ids", "reply_tos", "media_seen", "media"}, callExportReadEnd},
+	"export_write":            {[]string{"owner", "owner_name", "exported_at", "tool", "contacts", "threads", "media"}, callExportWrite},
+	"export_write_messages":   {[]string{"messages", "msg_ids"}, callExportWriteMessages},
+	"export_manifest":         {[]string{"partial", "hashes", "messages"}, callExportManifest},
+	"book_rows":               {[]string{"contacts", "exported_at"}, callBookRows},
+	"export_merge":            {[]string{"held", "rows"}, callExportMerge},
+	"media_holds_private_key": {[]string{"bytes"}, callMediaHoldsPrivateKey},
 
 	// Ledger: api_ledger.go
-	"ledger_check": callLedgerCheck,
+	"ledger_check": {[]string{"ledger", "root", "endpoint", "now", "move"}, callLedgerCheck},
 
 	// Limits: api_limits.go
-	"limits_rules_check": callLimitsRulesCheck,
-	"limits_decide":      callLimitsDecide,
+	"limits_rules_check": {[]string{"rules"}, callLimitsRulesCheck},
+	"limits_decide":      {[]string{"rules", "charge", "now", "state"}, callLimitsDecide},
+	"limits_buckets":     {[]string{"rules", "charge"}, callLimitsBuckets},
 }

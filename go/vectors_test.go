@@ -1,8 +1,9 @@
 package pactidentity
 
-// Proves this port against Appendix B: the certificates rebuilt byte for byte, the v1 envelopes opened,
-// every chain, newest-leaf, certificate_renewed and v2 envelope case, and the envelopes reproduced from
-// their ephemeral seeds.
+// Proves this port against Appendix B: the certificates rebuilt (byte for byte where the issuer is
+// Ed25519; the TBS, and the vector's signature verified, where it is P-256), the ones marked refused
+// refused, every chain, newest-leaf, certificate_renewed and v2 envelope case, the envelopes
+// reproduced from their ephemeral seeds, decide on them, and the derivation vectors.
 
 import (
 	"bytes"
@@ -107,9 +108,10 @@ func loadVectors(t *testing.T) vectorFile {
 }
 
 // appendixB is the JSON blocks of a specification's Appendix B: everything fenced as ```json between
-// the heading `## Appendix B` and the first `*End of PACT` after it. Both markers must be there and
-// every fence must close — the rule js/seed.mjs `appendixB` and the CLI's `appendix_b`
-// (crates/pact/src/vectors/check.rs) read by, held by the same cases in TestAppendixBIsReadBetweenItsMarkers.
+// the heading `## Appendix B` and the first `*End of PACT` after it. Both markers must be there,
+// every fence must close and every block must be JSON — the rule js/seed.mjs `appendixB`, the CLI's
+// `appendix_b` (crates/pact/src/vectors/check.rs) and the core tests' read by, each held to
+// js/appendix-b-reader.json's cases, refusals word for word (TestAppendixBIsReadAsTheSharedCasesSay).
 // It sliced with two bare strings.Index calls, which panicked on a missing marker, took an end marker
 // from before the heading, and silently dropped a block whose fence never closed.
 func appendixB(spec string) ([]json.RawMessage, error) {
@@ -142,28 +144,58 @@ func appendixB(spec string) ([]json.RawMessage, error) {
 	}
 }
 
-// The cases js/seed.test.mjs and check.rs hold their slicers to, plus two they do not: an end marker
-// quoted before the heading, and a block that is not JSON.
-func TestAppendixBIsReadBetweenItsMarkers(t *testing.T) {
-	doc := func(body, end string) string { return "# Spec\n\n## Appendix B\n\n" + body + "\n" + end }
-	blocks, err := appendixB(doc("```json\n{\"a\":1}\n```\n\n```json\n[2]\n```", "*End of PACT 2.1*\n"))
-	if err != nil || len(blocks) != 2 || string(blocks[0]) != `{"a":1}` || string(blocks[1]) != "[2]" {
-		t.Fatalf("two blocks read as %q, %v", blocks, err)
+// js/appendix-b-reader.json: the cases all four Appendix B readers of this repository are held to.
+// (This port's list used to hold two cases the other readers' did not: an end marker quoted before
+// the heading, and a block that is not JSON. They are in the one list now.)
+func TestAppendixBIsReadAsTheSharedCasesSay(t *testing.T) {
+	raw, err := os.ReadFile("../js/appendix-b-reader.json")
+	if err != nil {
+		t.Fatal(err)
 	}
-	early := "*End of PACT 2.0* is quoted here\n" + doc("```json\n{\"a\":1}\n```", "*End of PACT 2.1*\n")
-	if blocks, err := appendixB(early); err != nil || len(blocks) != 1 {
-		t.Errorf("an end marker before the heading was taken for the appendix's own: %q, %v", blocks, err)
-	}
-	for _, c := range []struct{ name, doc, want string }{
-		{"no appendix", "# no appendix", "no Appendix B"},
-		{"no end marker", doc("```json\n{\"a\":1}\n```", ""), "no end marker"},
-		{"an open fence", doc("```json\n{\"a\":1}\n", "*End of PACT 2.1*\n"), "unterminated"},
-		{"a block that is not JSON", doc("```json\n{\"a\":\n```", "*End of PACT 2.1*\n"), "not JSON"},
-	} {
-		if _, err := appendixB(c.doc); err == nil || !strings.Contains(err.Error(), c.want) {
-			t.Errorf("%s: got %v, want an error saying %q", c.name, err, c.want)
+	var fixture struct {
+		Cases []struct {
+			Name, Doc, Refused string
+			Blocks             []json.RawMessage
 		}
 	}
+	if err := json.Unmarshal(raw, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixture.Cases) < 10 {
+		t.Fatalf("%d cases", len(fixture.Cases))
+	}
+	for _, c := range fixture.Cases {
+		blocks, err := appendixB(c.Doc)
+		if c.Refused != "" {
+			if err == nil || err.Error() != c.Refused {
+				t.Errorf("%s: got %v, want the refusal %q", c.Name, err, c.Refused)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s: %v", c.Name, err)
+			continue
+		}
+		got, _ := json.Marshal(canonicalBlocks(t, blocks))
+		want, _ := json.Marshal(canonicalBlocks(t, c.Blocks))
+		if !bytes.Equal(got, want) {
+			t.Errorf("%s: read %s, want %s", c.Name, got, want)
+		}
+	}
+}
+
+// canonicalBlocks decodes each block, so two spellings of one JSON value compare equal.
+func canonicalBlocks(t *testing.T, blocks []json.RawMessage) []any {
+	t.Helper()
+	out := []any{}
+	for _, b := range blocks {
+		var v any
+		if err := json.Unmarshal(b, &v); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, v)
+	}
+	return out
 }
 
 func mustTime(t *testing.T, s string) time.Time {
@@ -340,7 +372,7 @@ func TestChainCases(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		follow, why, _ := FollowRenewed(chainIn(c.Answer.Data.Chain), "sha256:"+B64url(pinned.AKI), der(c.PinnedLeaf), c.Dialed, mustTime(t, c.Now))
+		follow, why, _ := FollowRenewed(chainIn(t, c.Answer.Data.Chain), "sha256:"+B64url(pinned.AKI), der(c.PinnedLeaf), c.Dialed, mustTime(t, c.Now))
 		if follow != (c.Expect == "follow") {
 			t.Errorf("%s: expected %s (%s)", c.Name, c.Expect, why)
 		}
@@ -371,7 +403,7 @@ func TestV2Envelopes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		aad, enc, ct := FromB64url(e.Protected), FromB64url(e.Enc), FromB64url(e.Ct)
+		aad, enc, ct := wireIn(t, e.Protected), wireIn(t, e.Enc), wireIn(t, e.Ct)
 		hv, err := decodeJSON(aad)
 		if err != nil {
 			t.Fatal(err)
@@ -410,7 +442,7 @@ func TestV2Envelopes(t *testing.T) {
 			if body["leaf"] != Fingerprint(senderLeaf.SPKI) {
 				t.Errorf("%s: leaf names the sender's held leaf", e.Name)
 			}
-			if !VerifyDetached(senderLeaf.PublicKey, signed, FromB64url(e.Sig)) {
+			if !VerifyDetached(senderLeaf.PublicKey, signed, wireIn(t, e.Sig)) {
 				t.Errorf("%s: signature under the held leaf's key", e.Name)
 			}
 			if len(ct) >= 400 {
@@ -422,7 +454,7 @@ func TestV2Envelopes(t *testing.T) {
 			}
 			var chain [][]byte
 			for _, c := range body["chain"].([]any) {
-				chain = append(chain, FromB64url(c.(string)))
+				chain = append(chain, chainIn(t, []string{c.(string)})[0])
 			}
 			r := ValidateChain(chain, ChainOpts{Now: now})
 			if !r.OK {
@@ -432,7 +464,7 @@ func TestV2Envelopes(t *testing.T) {
 			if !bytes.Equal(chain[0], der(e.SenderChain[0])) {
 				t.Errorf("%s: chain inside is not the sender's", e.Name)
 			}
-			if !VerifyDetached(r.LeafKey, signed, FromB64url(e.Sig)) {
+			if !VerifyDetached(r.LeafKey, signed, wireIn(t, e.Sig)) {
 				t.Errorf("%s: signature under the chain's leaf key", e.Name)
 			}
 		}
@@ -514,7 +546,7 @@ func TestDerivationVectors(t *testing.T) {
 		if got := B64url(PrfSalt()); got != d.Salt {
 			t.Errorf("%s: salt is SHA-256(\"pact/vault/1\"): got %s want %s", d.Info, got, d.Salt)
 		}
-		prf, err := decodeB64url(d.Prf)
+		prf, err := DecodeB64url(d.Prf)
 		if err != nil {
 			t.Fatal(err)
 		}

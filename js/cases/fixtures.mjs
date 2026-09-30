@@ -11,10 +11,13 @@
 //   - a sealed vault (cases/vault.mjs): the seed has no vault;
 //   - a sealed RESULT (`answerTo`, and the result in cases/envelopes.mjs): the seed seals requests.
 // And one is made by the OTHER port on purpose: 'verify a signature the other port made'.
-import { generateKeyPairSync } from 'node:crypto';
+import { createPublicKey, generateKeyPairSync } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { seed, ed25519FromSeed, x25519FromSeed, pkcs8Of, spkiOf, b64url, fingerprint, keyId } from '../../../pact-protocol/vectors/lib/keys.mjs';
 import { buildRoot, buildLeaf } from '../../../pact-protocol/vectors/lib/x509.mjs';
 import { encodeCard } from '../../../pact-protocol/vectors/lib/card.mjs';
+import { read as derRead, children as derChildren, seq as derSeq, oid as derOid, tlv as derTlv, int as derInt, octet as derOctet, bitstr as derBitstr } from '../../../pact-protocol/vectors/lib/der.mjs';
+import { signDetached } from '../../../pact-protocol/vectors/lib/hpke.mjs';
 import { sealEnvelope } from '../../../pact-protocol/vectors/lib/envelope.mjs';
 import { alina, bharat, CLOCK, BORN, DIES, ENDPOINTS } from '../cast.mjs';
 
@@ -111,8 +114,56 @@ export function fixtures({ wasm, go }) {
   // it is handed in, so none of its bytes reach an answer.
   const rsaSpki = b64url(generateKeyPairSync('rsa', { modulusLength: 2048 }).publicKey.export({ type: 'spki', format: 'der' }));
 
+  // ── keys outside the profile (R12, T2, T3, T4) ───────────────────────────────────────────────────
+  //
+  // `outside` holds one value of each contract type that carries a key — Spki, Pkcs8, CertDer, Csr —
+  // whose key is Alina's host key with a NULL after the Ed25519 OID, which RFC 8410 does not have:
+  // deterministic, the same key in every form, and read by no port as a key. js/cases/generated.mjs
+  // puts one into every member of those types. The certificate is the seed's (its subjectKeyIdentifier
+  // follows the bytes written); the request is port-built from `csr`, re-signed by the host key.
+  const nullParams = derSeq(derOid('1.3.101.112'), derTlv(0x05, Buffer.alloc(0)));
+  const withNull = (spki) => derSeq(nullParams, derChildren(derRead(spki))[1].raw);
+  const hostSeed = derChildren(derRead(pkcs8Of(hostKey.priv)))[2].content.subarray(2);
+  const outsideSpki = withNull(spkiOf(hostKey.pub));
+  // A request carrying `spki`, made from `csr` and signed by the host key: its signature verifies
+  // under no key it could name, which is not what it is asked about — the key is refused first.
+  const requestFor = (spki) => {
+    const [info, sigAlg] = derChildren(derRead(Buffer.from(csr, 'base64url')));
+    const [version, subject, , attributes] = derChildren(info);
+    const cri = derSeq(version.raw, subject.raw, spki, attributes.raw);
+    return b64url(derSeq(cri, sigAlg.raw, derBitstr(signDetached(hostKey.priv, cri))));
+  };
+  const outside = {
+    Spki: b64url(outsideSpki),
+    Pkcs8: b64url(derSeq(derInt(0), nullParams, derOctet(derOctet(hostSeed)))),
+    CertDer: alinaLeaf({ misencode: { spkiAlgOid: '06032b65700500' }, label: 'parity/outside' }),
+    Csr: requestFor(outsideSpki),
+  };
+  // Keys of three algorithms the profile does not have, each a key some platform makes: RSA and
+  // P-384 (named by the ecPublicKey OID, the curve beside it) fresh each run, and a bare X25519 key,
+  // which one port read as a third algorithm. `foreign[kind]` is `{ spki, oid, pub }`.
+  const x25519Pub = x25519FromSeed(seed('parity/x25519')).pub;
+  const foreign = {
+    rsa: { pub: createPublicKey({ key: Buffer.from(rsaSpki, 'base64url'), format: 'der', type: 'spki' }), oid: '1.2.840.113549.1.1.1' },
+    'P-384': { pub: generateKeyPairSync('ec', { namedCurve: 'secp384r1' }).publicKey, oid: '1.2.840.10045.2.1' },
+    X25519: { pub: x25519Pub, oid: '1.3.101.110' },
+  };
+  for (const k of Object.values(foreign)) k.spki = spkiOf(k.pub);
+  foreign['Ed25519 with a NULL'] = { spki: outsideSpki, oid: '1.3.101.112' };
+  // A leaf under Alina's root carrying one of them. keyUsage is given, as the seed picks it by an
+  // algorithm these do not have.
+  const foreignLeaf = (kind) => kind === 'Ed25519 with a NULL'
+    ? outside.CertDer
+    : alinaLeaf({ hostKey: { pub: foreign[kind].pub }, usage: [0], label: `parity/foreign/${kind}` });
+
+  // The constants contract/contract.json carries once for both ports (its `Windows`, `Kdf`, …): a case
+  // at an edge reads the edge from here, so it moves with the contract and cannot go stale beside it.
+  const defs = JSON.parse(readFileSync(new URL('../../contract/contract.json', import.meta.url), 'utf8')).$defs;
+  // An instant `seconds` before `now`, as an argument writes one.
+  const before = (seconds) => new Date((at(now) - seconds) * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+
   return {
-    wasm, go, now, at, ENDPOINT,
+    wasm, go, now, at, ENDPOINT, defs, before,
     rootKey, hostKey, p256Key, callerKey,
     rootDer, leafDer, rootDerBytes, leafDerBytes,
     rootPkcs8, hostPkcs8, p256Pkcs8, callerPkcs8,
@@ -121,7 +172,7 @@ export function fixtures({ wasm, go }) {
     csr, rootCsr, card, vault, record, leafTbs, rootTbs,
     request, sealed, sealedNoTool, small, node, pinned,
     answerTo, open, chainForm, leafForm, follow, olderLeaf,
-    alinaLeaf, p256RootDer, p256Leaf, twinLeaf, shortAki,
+    alinaLeaf, p256RootDer, p256Leaf, twinLeaf, shortAki, outside, foreign, foreignLeaf, requestFor,
     shape, withoutSerial, x25519SpkiDer: spkiOf(x25519FromSeed(seed('parity/x25519')).pub),
     SERIAL: b64url(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8])),
     B64_BAD: ['!!!', '', 'AA=', 'a b c', '~~~~'],

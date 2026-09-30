@@ -191,6 +191,12 @@ for (const [what, uris, dns] of [
   ['dot segment', ['https://agent.alina.example/mcp/../admin']],
   ['query string', [E_A + '?x=1']],
   ['dNSName of another host', [E_A], 'mallory.example'],
+  // A host both ports refuse (their normalHost) and the seed read as normal until pact-protocol b841dd3
+  // (the review of 2026-09-30, S6): WHATWG's URL keeps each of these as written.
+  ['an underscore in the host', ['https://agent_alina.example/mcp']],
+  ['a trailing dot on the host', ['https://agent.alina.example./mcp']],
+  ['an empty label in the host', ['https://agent..alina.example/mcp']],
+  ['an IPv4-mapped IPv6 literal', ['https://[::ffff:102:304]/mcp']],
 ]) scenario('certificate', 'endpoint: ' + what, 'rule 5', () => rule([leafOf(rootA, 'Alina Rao', hostA, E_A, { uris, dnsName: dns }), ROOT_A]));
 
 // The same exactness one layer down. DER has one encoding of each of these, and a certificate that
@@ -201,13 +207,33 @@ for (const [what, misencode] of [
   ['an explicit `critical FALSE`, which DER never encodes', { explicitFalse: OID.eku }],
   ['keyUsage carrying a bit in a second byte', { keyUsage: [0x07, 0x80, 0x80] }],
   ['keyUsage whose trailing zero bits are not removed', { keyUsage: [0x00, 0x80] }],
+  ['keyUsage with an unused bit set', { keyUsage: [0x07, 0x81] }],
   ['an extension OID with a padded subidentifier', { oidFor: { oid: OID.keyUsage, der: '060455801d0f' } }],
   ['a signature-algorithm OID with a padded subidentifier', { sigAlgOid: '06042b806570' }],
   ['a commonName attribute type with a padded subidentifier', { cnOid: '060455800403' }],
   ['an extendedKeyUsage OID with a padded subidentifier', { ekuOid: '06092b0601050507800301' }],
   ['a SubjectPublicKeyInfo algorithm OID with a padded subidentifier', { spkiAlgOid: '06042b806570' }],
   ['a serial with a needless leading zero', { serial: [0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77] }],
+  // What contract/contract.json says parsing refuses (parse_certificate's notes) and no scenario here
+  // asked until 2026-09-30, each written into the TBS before it is signed, so the one fault is the only
+  // reason to refuse. The seed read the second and third of them.
+  ['a validity with three times', { validityTimes: 3 }],
+  ['an extension of four parts', { extensionParts: { oid: OID.ski, der: '05000500' } }],
+  ['an extnValue that is not an OCTET STRING', { wrapperTag: { oid: OID.ski, tag: 0x03 } }],
+  ['an extnValue OCTET STRING holding two TLVs', { valueTail: { oid: OID.ski, der: '0500' } }],
 ]) scenario('certificate', 'DER: ' + what, 'rule 1', () => rule([leafOf(rootA, 'Alina Rao', hostA, E_A, { misencode }), ROOT_A]));
+// A P-256 key is read as its uncompressed point only; the compressed one is a second
+// SubjectPublicKeyInfo, and so a second fingerprint (§2), for one key.
+scenario('certificate', 'DER: a P-256 key written as its compressed point', 'rule 1', () => rule([leafOf(rootB, 'Bharat Mehta', hostB, E_B, { misencode: { compressedPoint: true } }), ROOT_B]));
+// A SubjectPublicKeyInfo is exactly its AlgorithmIdentifier and a key BIT STRING with no unused bits,
+// or a second spelling of one key is a second fingerprint (§2). Both ports refused these; the seed read
+// the unused-bit keys until pact-protocol b841dd3 (the review of 2026-09-30, S5).
+for (const [what, misencode] of [
+  ['an Ed25519 key BIT STRING with 1 unused bit', { spkiUnusedBits: 1 }],
+  ['an Ed25519 key BIT STRING with 7 unused bits', { spkiUnusedBits: 7 }],
+  ['a SubjectPublicKeyInfo with a member after its key', { spkiTail: '0500' }],
+]) scenario('certificate', 'DER: ' + what, 'rule 1', () => rule([leafOf(rootA, 'Alina Rao', hostA, E_A, { misencode }), ROOT_A]));
+scenario('certificate', 'DER: a P-256 key BIT STRING with 1 unused bit', 'rule 1', () => rule([leafOf(rootB, 'Bharat Mehta', hostB, E_B, { misencode: { spkiUnusedBits: 1 } }), ROOT_B]));
 
 // A root's dates carry no trust — its fingerprint is the identity, and rule 4 checks the leaf's
 // validity alone (§14.2). Recorded as accepted on purpose: an implementation that reaches for RFC 5280
@@ -269,19 +295,20 @@ scenario('secrets', 'HPKE ephemeral reuse leaks the XOR of two plaintexts; produ
   const d1 = seal('PACT-SEAL-X25519', hostA.sign.pub, info, aad, p1, seed('same')), d2 = seal('PACT-SEAL-X25519', hostA.sign.pub, info, aad, p1, seed('same'));
   return leaks && !d1.enc.equals(d2.enc) && !d1.enc.equals(c1.enc) ? 'leaks with a fixed seed, differs without' : 'unexpected';
 });
-// The all-zero X25519 SPKI is built HERE, outside the scenario, so a Node release that refuses this
-// hand-assembled DER — or one wrong byte in the hex prefix — fails loudly instead of scoring the
-// scenario `blocked` for an exception that never reached the low-order-point check. The old
-// assertion was `/threw/`, which matched any exception from either of the two throw sites.
-const zeroX25519 = createPublicKey({ key: Buffer.concat([Buffer.from('302a300506032b656e032100', 'hex'), Buffer.alloc(32)]), format: 'der', type: 'spki' });
-// The two ports refuse this at DIFFERENT LAYERS, which tightening the assertion is what revealed:
-// the Rust core accepts a raw X25519 recipient SPKI and then refuses the all-zero shared secret,
-// while the Go port refuses the recipient key itself ("suite does not fit the key", because
-// `recipientPublic` wants an Ed25519 key to convert). Both refuse, and neither refuses for an
-// unrelated reason — so both wordings are named here rather than matching any exception, and the
-// divergence in `why` is recorded for the cross-port pass rather than hidden by a loose regex.
-scenario('secrets', 'a low-order X25519 recipient point', blockedIf((got) => /^threw: .*(low order|all-zero|shared secret|identity|suite does not fit)/i.test(got)), () => {
-  seal('PACT-SEAL-X25519', zeroX25519, Buffer.from('PACT-SEAL-v2'), Buffer.alloc(0), Buffer.from('x'));
+// A low-order recipient point, reached the one way the profile has: an Ed25519 key of small order,
+// which the X25519 suite converts (RFC 7748 §4.1) to a low-order point, so the DH output is all zero
+// and SPEC §13.1 refuses it. The identity (y = 1) maps to u = 0. The key is built HERE, outside the
+// scenario, so a Node release that refuses this hand-assembled DER fails loudly instead of scoring
+// the scenario `blocked` for an exception that never reached the check.
+//
+// This sealed to a bare X25519 SubjectPublicKeyInfo of zeros, and the two ports refused it at
+// different layers: the core sealed to a bare X25519 key and refused the shared secret, as
+// `internal`; the Go port refused the key as a suite that does not fit. A bare X25519 key is outside
+// the profile now, and refused where it is read (T4), so it could no longer reach the check at all;
+// the assertion names the refusal the scenario is for, and nothing else.
+const smallOrder = createPublicKey({ key: Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), Buffer.from([1]), Buffer.alloc(31)]), format: 'der', type: 'spki' });
+scenario('secrets', 'a low-order X25519 recipient point', blockedIf((got) => got === 'threw: envelope_invalid: all-zero DH output: low-order point'), () => {
+  seal('PACT-SEAL-X25519', smallOrder, Buffer.from('PACT-SEAL-v2'), Buffer.alloc(0), Buffer.from('x'));
   return 'sealed';
 });
 scenario('secrets', 'the root private keys are not in the spec', 'absent', () => {

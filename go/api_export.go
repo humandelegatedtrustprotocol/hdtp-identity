@@ -7,138 +7,7 @@ package pactidentity
 import (
 	"bytes"
 	"encoding/json"
-	"time"
 )
-
-type exportArgs map[string]json.RawMessage
-
-func readExportArgs(raw json.RawMessage) (exportArgs, json.RawMessage) {
-	a := exportArgs{}
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &a); err != nil {
-			return nil, fail(codeArgs, "args is a JSON object")
-		}
-	}
-	return a, nil
-}
-
-func (a exportArgs) value(k string) any {
-	raw, has := a[k]
-	if !has {
-		return nil
-	}
-	v, err := decodeJSON(raw)
-	if err != nil {
-		return nil
-	}
-	return v
-}
-
-// text is a string member, decoded straight into a string: a 16 MiB CSV member decoded through a
-// generic Decoder was buffered twice over before it was a string once.
-func (a exportArgs) text(k string) (string, bool) {
-	raw, has := a[k]
-	if !has || len(raw) == 0 || raw[0] != '"' {
-		return "", false
-	}
-	var s string
-	if json.Unmarshal(raw, &s) != nil {
-		return "", false
-	}
-	return s, true
-}
-
-// str is the core's `s`: a string, or `<k> is required`.
-func (a exportArgs) str(k string) (string, error) {
-	s, isText := a.text(k)
-	if !isText {
-		return "", errArg(k + " is required")
-	}
-	return s, nil
-}
-
-// optStr is the core's `opt_s`: anything but a string is absent.
-func (a exportArgs) optStr(k string) *string {
-	s, isText := a.text(k)
-	if !isText {
-		return nil
-	}
-	return &s
-}
-
-func (a exportArgs) instant(k string) (time.Time, json.RawMessage) {
-	s, err := a.str(k)
-	if err != nil {
-		return time.Time{}, failErr(codeArgs, err)
-	}
-	t, ok := parseInstantZ(s)
-	if !ok {
-		return time.Time{}, fail("parse", "not an RFC 3339 instant: "+s)
-	}
-	return t, nil
-}
-
-func (a exportArgs) list(k string) ([]any, error) {
-	l, isList := a.value(k).([]any)
-	if !isList {
-		return nil, errArg(k + " is required")
-	}
-	return l, nil
-}
-
-func (a exportArgs) optList(k string) ([]any, error) {
-	switch v := a.value(k).(type) {
-	case nil:
-		return []any{}, nil
-	case []any:
-		return v, nil
-	}
-	return nil, errArg(k + " is required")
-}
-
-// strings is a list of strings, decoded straight into one: a list of an id per message decoded as
-// a list of interfaces first held each id twice over. A member that is not a list is `<k> is
-// required`; a list holding anything but strings — null included, which a decoder into strings
-// would quietly read as "" — is `<k> is a list of strings`.
-func (a exportArgs) strings(k string) ([]string, error) {
-	raw, has := a[k]
-	if !has || len(raw) == 0 || raw[0] != '[' {
-		return nil, errArg(k + " is required")
-	}
-	out := []string{}
-	if json.Unmarshal(raw, &out) != nil || holdsNull(raw) {
-		return nil, errArg(k + " is a list of strings")
-	}
-	return out, nil
-}
-
-// holdsNull is whether JSON text holds a null outside every string in it.
-func holdsNull(raw []byte) bool {
-	in := false
-	for i := 0; i < len(raw); i++ {
-		switch c := raw[i]; {
-		case in && c == '\\':
-			i++
-		case c == '"':
-			in = !in
-		case !in && c == 'n':
-			return true
-		}
-	}
-	return false
-}
-
-func (a exportArgs) count(k string) (uint64, error) {
-	v := a.value(k)
-	if v == nil {
-		return 0, nil
-	}
-	n, ok := asU64(v)
-	if !ok {
-		return 0, errArg(k + " is a whole number")
-	}
-	return n, nil
-}
 
 func mediaOut(media []ExportMedia) []any {
 	out := []any{}
@@ -148,11 +17,7 @@ func mediaOut(media []ExportMedia) []any {
 	return out
 }
 
-func callExportRead(args json.RawMessage) json.RawMessage {
-	a, bad := readExportArgs(args)
-	if bad != nil {
-		return bad
-	}
+func callExportRead(a args) json.RawMessage {
 	entries, err := a.list("directory")
 	if err != nil {
 		return failErr(codeArgs, err)
@@ -173,12 +38,20 @@ func callExportRead(args json.RawMessage) json.RawMessage {
 	if err != nil {
 		return failErr(codeArgs, err)
 	}
-	now, bad := a.instant("now")
-	if bad != nil {
-		return bad
+	now, err := a.instant("now")
+	if err != nil {
+		return failErr(codeFor(err, "parse"), err)
 	}
-	threadsCSV := a.optStr("threads_csv")
-	r, err := exportRead(directory, a.optStr("manifest"), a.optStr("contacts_csv"), threadsCSV, owner, now)
+	// The three texts, in the core's order, each a string or not given: one of another type is refused,
+	// where both ports read it as absent (CONTRACT §0, F5).
+	var texts [3]*string
+	for i, k := range []string{"manifest", "contacts_csv", "threads_csv"} {
+		if texts[i], err = a.optStr(k); err != nil {
+			return failErr(codeArgs, err)
+		}
+	}
+	threadsCSV := texts[2]
+	r, err := exportRead(directory, texts[0], texts[1], threadsCSV, owner, now)
 	if err != nil {
 		return fail(codeArgs, err.Error())
 	}
@@ -189,11 +62,7 @@ func callExportRead(args json.RawMessage) json.RawMessage {
 	return readAnswer(r, threadsBytes)
 }
 
-func callExportReadMessages(args json.RawMessage) json.RawMessage {
-	a, bad := readExportArgs(args)
-	if bad != nil {
-		return bad
-	}
+func callExportReadMessages(a args) json.RawMessage {
 	lines, err := a.strings("lines")
 	if err != nil {
 		return failErr(codeArgs, err)
@@ -224,11 +93,7 @@ func callExportReadMessages(args json.RawMessage) json.RawMessage {
 	return ok(map[string]any{"messages": messages, "media_seen": seen})
 }
 
-func callExportReadEnd(args json.RawMessage) json.RawMessage {
-	a, bad := readExportArgs(args)
-	if bad != nil {
-		return bad
-	}
+func callExportReadEnd(a args) json.RawMessage {
 	text, err := a.str("manifest")
 	if err != nil {
 		return failErr(codeArgs, err)
@@ -242,6 +107,10 @@ func callExportReadEnd(args json.RawMessage) json.RawMessage {
 		return fail(codeArgs, "messages_sha256 is a lowercase hex sha256 or null")
 	}
 	e := exportEnd{messagesSHA256: sha}
+	// Absent, it was 0 lines, and the file was refused for its count instead (S1-3).
+	if a.present("lines") == nil {
+		return fail(codeArgs, "lines is required")
+	}
 	if e.lines, err = a.count("lines"); err != nil {
 		return failErr(codeArgs, err)
 	}
@@ -259,11 +128,7 @@ func callExportReadEnd(args json.RawMessage) json.RawMessage {
 	return ok(map[string]any{"ok": true})
 }
 
-func callExportWrite(args json.RawMessage) json.RawMessage {
-	a, bad := readExportArgs(args)
-	if bad != nil {
-		return bad
-	}
+func callExportWrite(a args) json.RawMessage {
 	owner, err := a.str("owner")
 	if err != nil {
 		return failErr(codeArgs, err)
@@ -272,9 +137,9 @@ func callExportWrite(args json.RawMessage) json.RawMessage {
 	if err != nil {
 		return failErr(codeArgs, err)
 	}
-	at, bad := a.instant("exported_at")
-	if bad != nil {
-		return bad
+	at, err := a.instant("exported_at")
+	if err != nil {
+		return failErr(codeFor(err, "parse"), err)
 	}
 	tool, err := a.str("tool")
 	if err != nil {
@@ -303,11 +168,7 @@ func callExportWrite(args json.RawMessage) json.RawMessage {
 	return ok(map[string]any{"partial": w.partial, "contacts_csv": w.contactsCSV, "threads_csv": threadsCSV})
 }
 
-func callExportWriteMessages(args json.RawMessage) json.RawMessage {
-	a, bad := readExportArgs(args)
-	if bad != nil {
-		return bad
-	}
+func callExportWriteMessages(a args) json.RawMessage {
 	messages, err := a.list("messages")
 	if err != nil {
 		return failErr(codeArgs, err)
@@ -325,11 +186,7 @@ func callExportWriteMessages(args json.RawMessage) json.RawMessage {
 	return ok(map[string]any{"lines": lines, "left_out": leftOut})
 }
 
-func callExportManifest(args json.RawMessage) json.RawMessage {
-	a, bad := readExportArgs(args)
-	if bad != nil {
-		return bad
-	}
+func callExportManifest(a args) json.RawMessage {
 	if _, isObj := a.value("partial").(map[string]any); !isObj {
 		return fail(codeArgs, "partial is required")
 	}
@@ -364,11 +221,7 @@ func callExportManifest(args json.RawMessage) json.RawMessage {
 	return ok(map[string]any{"manifest": text})
 }
 
-func callExportMerge(args json.RawMessage) json.RawMessage {
-	a, bad := readExportArgs(args)
-	if bad != nil {
-		return bad
-	}
+func callExportMerge(a args) json.RawMessage {
 	held, err := a.list("held")
 	if err != nil {
 		return failErr(codeArgs, err)
@@ -384,18 +237,26 @@ func callExportMerge(args json.RawMessage) json.RawMessage {
 	return ok(map[string]any{"write": write, "keep": keep, "conflicts": conflicts})
 }
 
-func callBookRows(args json.RawMessage) json.RawMessage {
-	a, bad := readExportArgs(args)
-	if bad != nil {
-		return bad
+// callMediaHoldsPrivateKey answers whether a media file's bytes are key material (SPEC §9.2), as
+// ReadExportZip judges a media file: the check a host makes on the files it streams, which the core
+// never sees. The cloud kept a third copy in TypeScript that read spellings the ports did not (CW-07,
+// R38).
+func callMediaHoldsPrivateKey(a args) json.RawMessage {
+	b, err := a.bytes("bytes")
+	if err != nil {
+		return failAs("parse", err)
 	}
+	return ok(map[string]any{"holds_private_key": mediaHoldsPrivateKey(b)})
+}
+
+func callBookRows(a args) json.RawMessage {
 	contacts, err := a.list("contacts")
 	if err != nil {
 		return failErr(codeArgs, err)
 	}
-	at, bad := a.instant("exported_at")
-	if bad != nil {
-		return bad
+	at, err := a.instant("exported_at")
+	if err != nil {
+		return failErr(codeFor(err, "parse"), err)
 	}
 	rows, err := bookRows(contacts, at)
 	if err != nil {

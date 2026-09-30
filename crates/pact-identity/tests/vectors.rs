@@ -1,6 +1,8 @@
-//! Appendix B, proven from the core: the seven certificates rebuilt byte for byte, the four `v: 1`
-//! envelopes opened, every chain, newest-leaf and certificate_renewed case, every `v: 2` envelope
-//! opened and re-sealed from its ephemeral seed, and `decide` on the vector envelopes.
+//! Appendix B, proven from the core: the seven certificates it builds rebuilt (byte for byte where the
+//! issuer is Ed25519; the TBS, and the vector's signature verified, where it is P-256, whose ECDSA is
+//! not reproducible), the three marked `refused` refused, every chain, newest-leaf and
+//! certificate_renewed case, every `v: 2` envelope opened and re-sealed from its ephemeral seed,
+//! `decide` on the vector envelopes, a result sealed back and opened, and the derivation vectors.
 use pact_identity::envelope::{self, DecideInput, Form, SealRequest};
 use pact_identity::hpke::{self, suite_for, Suite};
 use pact_identity::keys::{self, Alg, PrivateKey, PublicKey};
@@ -26,21 +28,43 @@ fn spec() -> String {
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
-/// The JSON blocks of Appendix B.
-fn appendix_b_blocks() -> Vec<Value> {
-    let s = spec();
-    let start = s.find("## Appendix B").expect("Appendix B");
-    let end = s.find("*End of PACT").expect("the end marker");
-    let b = &s[start..end];
+/// The JSON blocks of a document's Appendix B: everything fenced as ```json between the heading
+/// `## Appendix B` and the first `*End of PACT` after it. Both markers must be there, every fence
+/// must close and every block must be JSON — held to js/appendix-b-reader.json's cases, as the other
+/// three readers are. (It found the end marker from the start of the file, so a marker quoted before
+/// the heading sliced nothing, and it had no test.)
+fn appendix_b(spec: &str) -> Result<Vec<Value>, String> {
+    let start = spec.find("## Appendix B").ok_or("the document has no Appendix B")?;
+    let end = spec[start..].find("*End of PACT").map(|i| start + i).ok_or("Appendix B has no end marker (*End of PACT)")?;
     let mut out = Vec::new();
-    let mut rest = b;
+    let mut rest = &spec[start..end];
     while let Some(i) = rest.find("```json\n") {
         let after = &rest[i + 8..];
-        let j = after.find("\n```").expect("fence");
-        out.push(serde_json::from_str(&after[..j]).expect("json block"));
+        let j = after.find("\n```").ok_or("an unterminated json fence in Appendix B")?;
+        let n = out.len() + 1;
+        out.push(serde_json::from_str(&after[..j]).map_err(|_| format!("Appendix B block {n} is not JSON"))?);
         rest = &after[j + 4..];
     }
-    out
+    Ok(out)
+}
+
+fn appendix_b_blocks() -> Vec<Value> {
+    appendix_b(&spec()).unwrap()
+}
+
+#[test]
+fn appendix_b_is_read_as_the_shared_cases_say_refusals_word_for_word() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../js/appendix-b-reader.json");
+    let fixture: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let cases = fixture["cases"].as_array().unwrap();
+    assert!(cases.len() >= 10);
+    for c in cases {
+        let (name, doc) = (c["name"].as_str().unwrap(), c["doc"].as_str().unwrap());
+        match c["refused"].as_str() {
+            Some(why) => assert_eq!(appendix_b(doc).unwrap_err(), why, "{name}"),
+            None => assert_eq!(json!(appendix_b(doc).unwrap()), c["blocks"], "{name}"),
+        }
+    }
 }
 
 const NOW: &str = "2026-09-13T12:00:00Z";
@@ -96,8 +120,6 @@ fn leaf<'a>(
         ca: false,
         usage: None,
         aki: None,
-        extra: Vec::new(),
-        alg_oid: None,
     };
     x509::build_leaf(&spec, root).unwrap()
 }
@@ -378,17 +400,16 @@ fn decide_on_the_vector_envelopes() {
     let wire = |e: &Value| json!({ "protected": e["protected"], "enc": e["enc"], "ct": e["ct"], "sig": e["sig"] });
 
     // A stranger with a chain calling send_message: the guest binding refuses it.
-    let input: DecideInput =
-        serde_json::from_value(json!({ "now": NOW, "envelope": wire(full), "node": node_for(&v, &der, "leaf_b", "root_b", vec![]) }))
-            .unwrap();
+    let input =
+        DecideInput::read(&json!({ "now": NOW, "envelope": wire(full), "node": node_for(&v, &der, "leaf_b", "root_b", vec![]) })).unwrap();
     let out = envelope::decide(&input).unwrap();
     assert_eq!(out.result["code"], "envelope_invalid");
     assert_eq!(out.result["why"], "guest may only redeem or request");
     assert!(out.effects.is_empty());
 
     // The same envelope from a pinned contact is a contact-tier call, with the message id recorded.
-    let input: DecideInput = serde_json::from_value(
-        json!({ "now": NOW, "envelope": wire(full), "node": node_for(&v, &der, "leaf_b", "root_b", vec![pin_a.clone()]) }),
+    let input = DecideInput::read(
+        &json!({ "now": NOW, "envelope": wire(full), "node": node_for(&v, &der, "leaf_b", "root_b", vec![pin_a.clone()]) }),
     )
     .unwrap();
     let out = envelope::decide(&input).unwrap();
@@ -402,12 +423,11 @@ fn decide_on_the_vector_envelopes() {
     assert_eq!(out.effects, vec![json!({ "op": "seen", "msg_id": "vec-v2-alina-to-bharat" })]);
 
     // The small form: chain_required for a stranger, contact for a pinned leaf.
-    let input: DecideInput =
-        serde_json::from_value(json!({ "now": NOW, "envelope": wire(small), "node": node_for(&v, &der, "leaf_b", "root_b", vec![]) }))
-            .unwrap();
+    let input =
+        DecideInput::read(&json!({ "now": NOW, "envelope": wire(small), "node": node_for(&v, &der, "leaf_b", "root_b", vec![]) })).unwrap();
     assert_eq!(envelope::decide(&input).unwrap().result, json!({ "code": "chain_required" }));
-    let input: DecideInput = serde_json::from_value(
-        json!({ "now": NOW, "envelope": wire(small), "node": node_for(&v, &der, "leaf_b", "root_b", vec![pin_a.clone()]) }),
+    let input = DecideInput::read(
+        &json!({ "now": NOW, "envelope": wire(small), "node": node_for(&v, &der, "leaf_b", "root_b", vec![pin_a.clone()]) }),
     )
     .unwrap();
     let out = envelope::decide(&input).unwrap();
@@ -417,7 +437,7 @@ fn decide_on_the_vector_envelopes() {
     // A replay is acknowledged, not re-executed.
     let mut node = node_for(&v, &der, "leaf_b", "root_b", vec![pin_a.clone()]);
     node["seen"] = json!(["vec-v2-alina-to-bharat"]);
-    let input: DecideInput = serde_json::from_value(json!({ "now": NOW, "envelope": wire(full), "node": node })).unwrap();
+    let input = DecideInput::read(&json!({ "now": NOW, "envelope": wire(full), "node": node })).unwrap();
     assert_eq!(envelope::decide(&input).unwrap().result, json!({ "code": "ok", "replayed": true }));
 
     // The same through the boundary.

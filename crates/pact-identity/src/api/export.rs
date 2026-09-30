@@ -41,7 +41,7 @@ pub(super) fn export_read(a: &Value) -> Result<Answer> {
     }
     let owner = s(a, "owner")?;
     let now = instant(a, "now")?;
-    let r = export::read(&directory, opt_s(a, "manifest"), opt_s(a, "contacts_csv"), opt_s(a, "threads_csv"), owner, now)?;
+    let r = export::read(&directory, opt_s(a, "manifest")?, opt_s(a, "contacts_csv")?, opt_s(a, "threads_csv")?, owner, now)?;
     // Written straight from the rows, which borrow the members' text: no tree of values beside them.
     Ok(Answer::Text(r.answer))
 }
@@ -227,9 +227,37 @@ pub(super) fn export_read_end_lean(args: &str) -> Option<Result<Value>> {
     // without keeping any of it: the lean path answers only what the ordinary one would. A member the
     // struct does not name is otherwise skipped unread, and `{"x": 1e400, ...}` was answered `ok` here
     // where the ordinary path refuses it.
-    serde_json::from_str::<Walk>(args).ok()?;
+    let TopKeys(keys) = serde_json::from_str(args).ok()?;
+    // A member the function does not declare, refused as `call` refuses it for every other function.
+    if let Some(e) = super::undeclared("export_read_end", keys.iter().map(String::as_str)) {
+        return Some(Err(e));
+    }
     let a: EndArgs<'_> = serde_json::from_str(args).ok()?;
     Some(read_end(&a))
+}
+
+/// An object's member names, its values walked whole as `Walk` walks them and not kept.
+struct TopKeys(Vec<String>);
+
+impl<'de> serde::Deserialize<'de> for TopKeys {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        use serde::de::{MapAccess, Visitor};
+        struct V;
+        impl<'de> Visitor<'de> for V {
+            type Value = TopKeys;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a JSON object")
+            }
+            fn visit_map<M: MapAccess<'de>>(self, mut m: M) -> std::result::Result<TopKeys, M::Error> {
+                let mut keys = Vec::new();
+                while let Some((k, Walk)) = m.next_entry::<String, Walk>()? {
+                    keys.push(k);
+                }
+                Ok(TopKeys(keys))
+            }
+        }
+        d.deserialize_map(V)
+    }
 }
 
 /// A JSON value walked whole, every number parsed and nothing kept.
@@ -287,7 +315,8 @@ fn read_end<'b>(a: &'b EndArgs<'_>) -> Result<Value> {
         Some(_) => return err("bad_request", "messages_sha256 is a lowercase hex sha256 or null"),
     };
     let lines = match &a.lines {
-        None | Some(Value::Null) => 0,
+        // Absent, it was 0 lines, and the file was refused for its count instead (S1-3).
+        None | Some(Value::Null) => return err("bad_request", "lines is required"),
         Some(v) => v.as_u64().ok_or_else(|| Error::new("bad_request", "lines is a whole number"))?,
     };
     let list = |l: &'b Option<StrList<'_>>, k: &str| match l {
@@ -338,7 +367,7 @@ pub(super) fn export_manifest(a: &Value) -> Result<Value> {
     let sha = match a.get("hashes") {
         None | Some(Value::Null) => None,
         Some(Value::Object(h)) => {
-            if let Some(k) = crate::ledger::stranger(h, &["messages.jsonl"]) {
+            if let Some(k) = crate::util::stranger(h, &["messages.jsonl"]) {
                 return err(
                     "bad_request",
                     format!("hashes: {} is not hashed by the host: only messages.jsonl is", crate::canonical::string(&k)),
@@ -358,6 +387,14 @@ pub(super) fn export_manifest(a: &Value) -> Result<Value> {
 pub(super) fn export_merge(a: &Value) -> Result<Value> {
     let m = merge::merge(list(a, "held")?, list(a, "rows")?)?;
     Ok(json!({ "write": m.write, "keep": m.keep, "conflicts": m.conflicts }))
+}
+
+/// Whether a media file's bytes are key material (SPEC §9.2), as every port's export reader judges a
+/// media file: the check a host makes on the files it streams, which the core never sees. The cloud
+/// kept a third copy of it in TypeScript that read spellings the ports did not (CW-07, R38).
+pub(super) fn media_holds_private_key(a: &Value) -> Result<Value> {
+    let b = bytes(a, "bytes")?;
+    Ok(json!({ "holds_private_key": export::media_holds_private_key(&b) }))
 }
 
 pub(super) fn book_rows(a: &Value) -> Result<Value> {

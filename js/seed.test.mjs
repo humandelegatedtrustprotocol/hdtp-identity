@@ -32,13 +32,24 @@ test('within one results directory the seed runs once, and a changed input runs 
   }
 });
 
-test('Appendix B is read between its two markers, and a missing marker or an open fence is refused', () => {
-  const doc = (body, end = '*End of PACT 2.1*\n') => `# Spec\n\n## Appendix B\n\n${body}\n${end}`;
-  assert.deepEqual(appendixB(doc('```json\n{"a":1}\n```\n\n```json\n[2]\n```')), [{ a: 1 }, [2]]);
-  assert.throws(() => appendixB('# no appendix'), /no Appendix B/);
-  // The slice this replaced took indexOf's -1 as its end, and so read to one character short of the file.
-  assert.throws(() => appendixB(doc('```json\n{"a":1}\n```', '')), /no end marker/);
-  assert.throws(() => appendixB(doc('```json\n{"a":1}\n')), /unterminated json fence/);
+// js/appendix-b-reader.json: the cases all four Appendix B readers of this repository are held to.
+test('Appendix B is read as js/appendix-b-reader.json says, refusals word for word', () => {
+  const { cases } = JSON.parse(readFileSync(new URL('./appendix-b-reader.json', import.meta.url), 'utf8'));
+  assert.ok(cases.length >= 10);
+  for (const c of cases) {
+    if (c.refused) assert.throws(() => appendixB(c.doc), (e) => e.message === c.refused, c.name);
+    else assert.deepEqual(appendixB(c.doc), c.blocks, c.name);
+  }
+});
+
+// Two repositories keep this list, and each holds its own readers to its own copy: pact-protocol's
+// vectors/check.mjs holds the checker's and the splicer's reader to vectors/appendix-b-reader.json.
+// The two copies are held to each other here, byte for byte, from the pact-protocol checked out
+// beside this repository, as the gate reads it (TC-12): a case added to one list alone fails.
+test('the Appendix B cases are the same bytes in pact-protocol\'s copy', () => {
+  const mine = readFileSync(new URL('./appendix-b-reader.json', import.meta.url));
+  const theirs = readFileSync(new URL('../../pact-protocol/vectors/appendix-b-reader.json', import.meta.url));
+  assert.ok(mine.equals(theirs), 'js/appendix-b-reader.json and pact-protocol vectors/appendix-b-reader.json differ');
 });
 
 test('the specification\'s first block is the seed\'s vector file, unchanged', () => {

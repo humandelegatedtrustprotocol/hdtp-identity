@@ -1,7 +1,8 @@
 package pactidentity
 
 // The Certificates section of contract/contract.json: a body for each function it declares, which
-// api.go's `functions` map dispatches by name, and the helpers only these use.
+// api.go's `functions` map dispatches by name, and the helpers only these use. Each reads its members
+// as api/certificates.rs does, in its order.
 
 import (
 	"bytes"
@@ -9,97 +10,79 @@ import (
 	"time"
 )
 
-func callBuildRoot(args json.RawMessage) json.RawMessage {
-	var a struct {
-		CN        string  `json:"cn"`
-		PKCS8     B64     `json:"pkcs8"`
-		NotBefore *string `json:"not_before"`
-		Serial    B64     `json:"serial"`
-	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	priv, err := privIn(a.PKCS8, "pkcs8")
+func callBuildRoot(a args) json.RawMessage {
+	priv, err := a.priv("pkcs8")
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs("parse", err)
 	}
-	nb, err := timeIn(a.NotBefore, "not_before")
+	cn, err := a.str("cn")
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs(codeArgs, err)
 	}
-	serial, err := serialIn(a.Serial)
+	nb, err := a.instant("not_before")
 	if err != nil {
-		return failErr(codeArgs, err)
+		return failAs("parse", err)
 	}
-	der, err := BuildRoot(RootOpts{CN: a.CN, Key: priv, NotBefore: nb, Serial: serial})
+	serial, err := a.serial()
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs(codeArgs, err)
+	}
+	der, err := BuildRoot(RootOpts{CN: cn, Key: priv, NotBefore: nb, Serial: serial})
+	if err != nil {
+		return failAs("parse", err)
 	}
 	return ok(map[string]any{"der": B64url(der), "fingerprint": Fingerprint(priv.Public().SPKI)})
 }
 
-func callRootTBS(args json.RawMessage) json.RawMessage {
-	var a struct {
-		CN        string  `json:"cn"`
-		SPKI      B64     `json:"spki"`
-		NotBefore *string `json:"not_before"`
-		Serial    B64     `json:"serial"`
-	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	pub, err := pubIn(a.SPKI, "spki")
+func callRootTBS(a args) json.RawMessage {
+	cn, err := a.str("cn")
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs(codeArgs, err)
 	}
-	nb, err := timeIn(a.NotBefore, "not_before")
+	pub, err := a.pub("spki")
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs("parse", err)
 	}
-	serial, err := serialIn(a.Serial)
+	nb, err := a.instant("not_before")
 	if err != nil {
-		return failErr(codeArgs, err)
+		return failAs("parse", err)
 	}
-	tbs, alg, err := RootTBS(a.CN, pub, nb, serial)
+	serial, err := a.serial()
+	if err != nil {
+		return failAs(codeArgs, err)
+	}
+	tbs, alg, err := RootTBS(cn, pub, nb, serial)
 	if err != nil {
 		return failErr("internal", err)
 	}
 	return ok(map[string]any{"tbs": B64url(tbs), "sig_alg": B64url(alg)})
 }
 
-func callBuildLeaf(args json.RawMessage) json.RawMessage {
-	var a leafArgs
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	root, err := privIn(a.RootPKCS8, "root_pkcs8")
+func callBuildLeaf(a args) json.RawMessage {
+	root, err := a.priv("root_pkcs8")
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs("parse", err)
 	}
-	lo, err := a.opts()
+	lo, err := leafSpec(a)
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs("parse", err)
 	}
 	lo.RootKey = root
 	der, err := BuildLeaf(lo)
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs("parse", err)
 	}
 	return ok(map[string]any{"der": B64url(der)})
 }
 
-func callLeafTBS(args json.RawMessage) json.RawMessage {
-	var a leafArgs
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	rootPub, err := pubIn(a.RootSPKI, "root_spki")
+func callLeafTBS(a args) json.RawMessage {
+	rootPub, err := a.pub("root_spki")
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs("parse", err)
 	}
-	lo, err := a.opts()
+	lo, err := leafSpec(a)
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs("parse", err)
 	}
 	lo.RootPub = rootPub
 	tbs, alg, err := LeafTBS(lo)
@@ -109,145 +92,118 @@ func callLeafTBS(args json.RawMessage) json.RawMessage {
 	return ok(map[string]any{"tbs": B64url(tbs), "sig_alg": B64url(alg)})
 }
 
-func callParseCertificate(args json.RawMessage) json.RawMessage {
-	var a struct {
-		DER B64 `json:"der"`
-	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	if err := need(a.DER, "der"); err != nil {
-		return failErr(codeArgs, err)
-	}
-	c, err := Parse(a.DER)
+func callParseCertificate(a args) json.RawMessage {
+	der, err := a.bytes("der")
 	if err != nil {
-		return failErr("parse", err)
+		return failAs(codeArgs, err)
+	}
+	c, err := Parse(der)
+	if err != nil {
+		return failAs("parse", err)
 	}
 	return ok(certOut(c))
 }
 
-func callProfileError(args json.RawMessage) json.RawMessage {
-	var a struct {
-		DER  B64    `json:"der"`
-		Kind string `json:"kind"`
-	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	if err := need(a.DER, "der"); err != nil {
-		return failErr(codeArgs, err)
-	}
-	c, err := Parse(a.DER)
+func callProfileError(a args) json.RawMessage {
+	der, err := a.bytes("der")
 	if err != nil {
-		return failErr("parse", err)
+		return failAs(codeArgs, err)
+	}
+	c, err := Parse(der)
+	if err != nil {
+		return failAs("parse", err)
+	}
+	kind, err := a.str("kind")
+	if err != nil {
+		return failAs(codeArgs, err)
 	}
 	var e any
-	if s := ProfileError(c, a.Kind); s != "" {
+	if s := ProfileError(c, kind); s != "" {
 		e = s
 	}
 	return ok(map[string]any{"error": e})
 }
 
-func callValidateChain(args json.RawMessage) json.RawMessage {
-	var a struct {
-		Chain            []B64   `json:"chain"`
-		Now              *string `json:"now"`
-		ExpectedRoot     string  `json:"expected_root"`
-		ExpectedEndpoint string  `json:"expected_endpoint"`
-	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	if a.Chain == nil {
-		return failErr(codeArgs, errArg("chain is required"))
-	}
-	now, err := timeIn(a.Now, "now")
+func callValidateChain(a args) json.RawMessage {
+	chain, err := a.chain("chain")
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs(codeArgs, err)
 	}
-	return ok(chainOut(ValidateChain(chainOf(a.Chain), ChainOpts{Now: now, ExpectedRoot: a.ExpectedRoot, ExpectedEndpoint: a.ExpectedEndpoint})))
+	now, err := a.instant("now")
+	if err != nil {
+		return failAs("parse", err)
+	}
+	root, err := a.optStr("expected_root")
+	if err != nil {
+		return failAs(codeArgs, err)
+	}
+	endpoint, err := a.optStr("expected_endpoint")
+	if err != nil {
+		return failAs(codeArgs, err)
+	}
+	o := ChainOpts{Now: now}
+	if root != nil {
+		o.ExpectedRoot, o.rootGiven = *root, true
+	}
+	if endpoint != nil {
+		o.ExpectedEndpoint, o.endpointGiven = *endpoint, true
+	}
+	return ok(chainOut(ValidateChain(chain, o)))
 }
 
-func callCompareLeaves(args json.RawMessage) json.RawMessage {
-	var a struct {
-		Pinned    B64 `json:"pinned"`
-		Presented B64 `json:"presented"`
-	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	if err := need(a.Pinned, "pinned"); err != nil {
-		return failErr(codeArgs, err)
-	}
-	if err := need(a.Presented, "presented"); err != nil {
-		return failErr(codeArgs, err)
-	}
-	order, err := CompareLeaves(a.Pinned, a.Presented)
+func callCompareLeaves(a args) json.RawMessage {
+	pinned, err := a.bytes("pinned")
 	if err != nil {
-		return failErr("parse", err)
+		return failAs(codeArgs, err)
+	}
+	presented, err := a.bytes("presented")
+	if err != nil {
+		return failAs(codeArgs, err)
+	}
+	order, err := CompareLeaves(pinned, presented)
+	if err != nil {
+		return failAs("parse", err)
 	}
 	return ok(map[string]any{"order": order})
 }
 
-func callIsNormalHTTPS(args json.RawMessage) json.RawMessage {
-	var a struct {
-		URL *string `json:"url"`
-	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	url, err := needStr(a.URL, "url")
+func callIsNormalHTTPS(a args) json.RawMessage {
+	url, err := a.str("url")
 	if err != nil {
-		return failErr(codeArgs, err)
+		return failAs(codeArgs, err)
 	}
 	return ok(map[string]any{"normal": IsNormalHTTPS(url)})
 }
 
-func callAddressGuard(args json.RawMessage) json.RawMessage {
-	var a struct {
-		Endpoint     *string `json:"endpoint"`
-		SelfEndpoint string  `json:"self_endpoint"`
-		Guest        bool    `json:"guest"`
-	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	endpoint, err := needStr(a.Endpoint, "endpoint")
+func callAddressGuard(a args) json.RawMessage {
+	endpoint, err := a.str("endpoint")
 	if err != nil {
-		return failErr(codeArgs, err)
+		return failAs(codeArgs, err)
 	}
-	if good, why := AddressGuard(endpoint, a.SelfEndpoint, a.Guest); !good {
+	self, err := a.optStr("self_endpoint")
+	if err != nil {
+		return failAs(codeArgs, err)
+	}
+	guest, err := a.boolean("guest")
+	if err != nil {
+		return failAs(codeArgs, err)
+	}
+	selfEndpoint := ""
+	if self != nil {
+		selfEndpoint = *self
+	}
+	if good, why := AddressGuard(endpoint, selfEndpoint, guest); !good {
 		return ok(map[string]any{"ok": false, "why": why})
 	}
 	return ok(map[string]any{"ok": true})
 }
 
-func callIPIsPrivate(args json.RawMessage) json.RawMessage {
-	var a struct {
-		IP *string `json:"ip"`
-	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
-	}
-	ip, err := needStr(a.IP, "ip")
+func callIPIsPrivate(a args) json.RawMessage {
+	ip, err := a.str("ip")
 	if err != nil {
-		return failErr(codeArgs, err)
+		return failAs(codeArgs, err)
 	}
 	return ok(map[string]any{"private": IPIsPrivate(ip)})
-}
-
-// serialIn is §14.1's serial rule at the boundary: absent means one is made, and a serial that is
-// given is 8 to 20 bytes — the width the profile fixes so a serial cannot be a channel or a
-// collision. It was checked in the Rust core and not here, so this port signed a certificate with a
-// four-byte serial that the other port refused to make.
-func serialIn(b B64) ([]byte, error) {
-	if b == nil {
-		return nil, nil // BuildRoot/BuildLeaf make a random one
-	}
-	if len(b) < 8 || len(b) > 20 {
-		return nil, errArg("serial is 8 to 20 bytes")
-	}
-	return b, nil
 }
 
 func chainOut(r ChainResult) map[string]any {
@@ -265,32 +221,31 @@ func chainOut(r ChainResult) map[string]any {
 // held in a card or an authenticator, where the key is never bytes here. The algorithm outside a
 // certificate is the TBS's own third field, so a `sig_alg` handed back must equal it — a mismatch is
 // the caller pairing the wrong signature with the wrong body, and is refused rather than assembled.
-func assembleFn(args json.RawMessage) json.RawMessage {
-	var a struct {
-		TBS    B64 `json:"tbs"`
-		Sig    B64 `json:"sig"`
-		SigAlg B64 `json:"sig_alg"`
+// Read as the core reads it: the TBS and its algorithm, the `sig_alg` handed back, then `sig`.
+func assembleFn(a args) json.RawMessage {
+	tbs, err := a.bytes("tbs")
+	if err != nil {
+		return failAs(codeArgs, err)
 	}
-	if err := decodeArgs(args, &a); err != nil {
-		return failErr(codeFor(err, codeArgs), err)
+	declared, err := declaredAlg(tbs)
+	if err != nil {
+		return failAs("parse", err)
 	}
-	if err := need(a.TBS, "tbs"); err != nil {
-		return failErr(codeArgs, err)
+	given, err := a.optBytes("sig_alg")
+	if err != nil {
+		return failAs("parse", err)
+	}
+	if given != nil && !bytes.Equal(given, declared) {
+		return fail(codeArgs, "sig_alg is not the algorithm the tbs declares")
 	}
 	// A certificate with no signature is not a certificate. This port assembled one when `sig` was
 	// absent, which the Rust core refuses — and an unsigned certificate that parses is worse than one
 	// that does not, because it travels before anything checks it.
-	if err := need(a.Sig, "sig"); err != nil {
-		return failErr(codeArgs, err)
-	}
-	declared, err := declaredAlg(a.TBS)
+	sig, err := a.bytes("sig")
 	if err != nil {
-		return failErr(codeFor(err, "parse"), err)
+		return failAs(codeArgs, err)
 	}
-	if a.SigAlg != nil && !bytes.Equal(a.SigAlg, declared) {
-		return fail(codeArgs, "sig_alg is not the algorithm the tbs declares")
-	}
-	return ok(map[string]any{"der": B64url(Assemble(a.TBS, declared, a.Sig))})
+	return ok(map[string]any{"der": B64url(Assemble(tbs, declared, sig))})
 }
 
 // declaredAlg is the AlgorithmIdentifier a TBSCertificate names as its own (§14.1: the algorithm
@@ -310,41 +265,46 @@ func declaredAlg(tbs []byte) ([]byte, error) {
 	return f[2].raw, nil
 }
 
-type leafArgs struct {
-	CN        string  `json:"cn"`
-	RootCN    string  `json:"root_cn"`
-	RootPKCS8 B64     `json:"root_pkcs8"`
-	RootSPKI  B64     `json:"root_spki"`
-	HostSPKI  B64     `json:"host_spki"`
-	Endpoint  string  `json:"endpoint"`
-	DNSName   string  `json:"dns_name"`
-	NotBefore *string `json:"not_before"`
-	NotAfter  *string `json:"not_after"`
-	Serial    B64     `json:"serial"`
-}
-
-func (a leafArgs) opts() (LeafOpts, error) {
-	host, err := pubIn(a.HostSPKI, "host_spki")
+// leafSpec is the core's `leaf_spec`, after the issuer's key: the host's key, the serial, the
+// endpoint, the dates and their §14.1 bounds, then the names — the contract's members and no others.
+func leafSpec(a args) (LeafOpts, error) {
+	host, err := a.pub("host_spki")
 	if err != nil {
 		return LeafOpts{}, err
 	}
-	nb, err := timeIn(a.NotBefore, "not_before")
+	serial, err := a.serial()
 	if err != nil {
 		return LeafOpts{}, err
 	}
-	na, err := timeIn(a.NotAfter, "not_after")
+	endpoint, err := a.str("endpoint")
+	if err != nil {
+		return LeafOpts{}, err
+	}
+	nb, err := a.instant("not_before")
+	if err != nil {
+		return LeafOpts{}, err
+	}
+	na, err := a.instant("not_after")
 	if err != nil {
 		return LeafOpts{}, err
 	}
 	if na.Sub(nb) > MaxLeafDays*24*time.Hour {
 		return LeafOpts{}, errArg("validity over 398 days")
 	}
-	if !IsNormalHTTPS(a.Endpoint) {
+	if !IsNormalHTTPS(endpoint) {
 		return LeafOpts{}, errArg("endpoint is not an https URL in normal form")
 	}
-	serial, err := serialIn(a.Serial)
+	cn, err := a.str("cn")
 	if err != nil {
 		return LeafOpts{}, err
 	}
-	return LeafOpts{CN: a.CN, RootCN: a.RootCN, HostPub: host, Endpoint: a.Endpoint, DNSName: a.DNSName, NotBefore: nb, NotAfter: na, Serial: serial}, nil
+	rootCN, err := a.str("root_cn")
+	if err != nil {
+		return LeafOpts{}, err
+	}
+	dns, err := a.dnsName()
+	if err != nil {
+		return LeafOpts{}, err
+	}
+	return LeafOpts{CN: cn, RootCN: rootCN, HostPub: host, Endpoint: endpoint, DNSName: dns, NotBefore: nb, NotAfter: na, Serial: serial}, nil
 }

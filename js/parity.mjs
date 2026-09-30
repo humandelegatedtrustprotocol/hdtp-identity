@@ -17,8 +17,11 @@
 //
 //   node js/parity.mjs [--only <text>] [--verbose] [--manifest <file>]
 //
-// It exits non-zero on any disagreement, on an answer off the contract, and when the contract's
-// surface grows without a case, so the harness cannot fall silently behind the thing it guards.
+// It exits non-zero on any disagreement, on an answer off the contract, on an answer other than the
+// one a case expects, and when the contract's surface grows without a case, so the harness cannot
+// fall silently behind the thing it guards. There is no list of excused failures: the one the
+// port-parity work of 2026-09-29 kept while it fixed the divergences its generated cases found was
+// emptied by those fixes and deleted with its mechanism.
 //
 // It holds both ports to `contract/contract.json`, which is where the surface is WRITTEN DOWN: every
 // answer of every case, from each port, is validated against the schema the contract declares for it.
@@ -26,12 +29,14 @@
 // a member both ports grew, or both dropped, is invisible to a comparison.
 //
 // The cases live in js/cases/<section>.mjs, one file per section of the contract (js/cases/index.mjs
-// collects them); this file only runs them.
+// collects them), and in js/cases/generated.mjs, which makes the shapes of a caller's mistake for
+// every function from the contract itself; this file only runs them.
 import { readFileSync } from 'node:fs';
-import { makePort } from './port.mjs';
+import { makePort, RawArgs } from './port.mjs';
 import { loadContract, judge } from '../contract/contract.mjs';
 import { fixtures } from './cases/fixtures.mjs';
 import { collect } from './cases/index.mjs';
+import { pickBases, generate } from './cases/generated.mjs';
 import { rustDispatch, goDispatch } from './surface.mjs';
 import { recorder } from './results.mjs';
 
@@ -42,7 +47,8 @@ if (!go) {
   process.exit(2);
 }
 const contract = await loadContract();
-const { cases, expected, problems } = await collect(fixtures({ wasm, go }), contract);
+const f = fixtures({ wasm, go });
+const { cases: written, expected, problems } = await collect(f, contract);
 
 // ── comparison ─────────────────────────────────────────────────────────────────────────────────
 // Members are compared by name, not by the order a language's encoder happens to emit them in (Go
@@ -57,13 +63,19 @@ const pick = (o, how, port) =>
 const answer = (port, fn, args) => {
   try { return port.call(fn, args); } catch (e) { return { threw: String(e.message || e) }; }
 };
+// Each case is asked of the two ports once, whatever asks first: the generated cases' bases are asked
+// before the run, filtered or not, and the run takes their answers from here.
+const asked = new Map();
+const ask = (c) => {
+  if (!asked.has(c)) asked.set(c, [answer(wasm, c.fn, c.args), answer(go, c.fn, c.args)]);
+  return asked.get(c);
+};
 
 const only = process.argv.includes('--only') ? process.argv[process.argv.indexOf('--only') + 1] : null;
 let bad = 0;
 let ran = 0;
 let held = 0; // answers validated against the contract's schemas, both ports counted
-let offContract = 0;
-const seenCodes = new Map(); // function -> the error codes it was seen to fail with
+let offContract = 0; // of those, the answers off the contract
 // Which functions were compared whole on an answer that SUCCEEDED. A refusal compared whole proves
 // only that both ports refuse alike; it says nothing about the members of the answer a caller
 // actually uses, and that is where `card_decode` lost its entire `leaf`.
@@ -79,50 +91,91 @@ const succeeded = (raw) =>
   raw && !raw.error && !raw.threw && raw.ok !== false && !(raw.result && raw.result.code && raw.result.code !== 'ok');
 const provenWhole = new Set();
 const results = recorder('parity');
+const verbose = process.argv.includes('--verbose');
 
-for (const { id, fn, args, how } of cases) {
+// ── the generated cases ─────────────────────────────────────────────────────────────────────────
+// js/cases/generated.mjs: every function's shapes of a caller's mistake, from the contract, varied
+// from one hand-written case that succeeds on both ports (its base). They join the hand-written ones.
+const picked = pickBases(contract, written, ask, succeeded);
+problems.push(...picked.problems);
+const made = generate(contract, picked.bases, f.outside);
+problems.push(...made.problems);
+const handIds = new Set(written.map(({ id }) => id));
+for (const { id } of made.cases) if (handIds.has(id)) problems.push(`the case id ${JSON.stringify(id)} is both written and generated`);
+for (const [id, want] of made.expected) expected.set(id, { want, file: 'generated' });
+const cases = [...written, ...made.cases];
+
+// The error codes each function was seen to fail with in BOTH ports, in a case the two answered
+// alike: what the failure side of the coverage gate is judged on (below).
+const comparedCodes = new Map();
+
+// A member of an expected answer is the value the answer's member must be — an object or a list
+// compared whole, members in any order — or a pattern its text must match where the contract fixes
+// part of the words (the member a refusal names) and not all of them.
+const holds = (v, got) => {
+  if (v instanceof RegExp) return typeof got === 'string' && v.test(got);
+  if (v !== null && typeof v === 'object') return JSON.stringify(canonical(v)) === JSON.stringify(canonical(got));
+  return got === v;
+};
+const shown = (want) => (typeof want === 'function' ? want.label : JSON.stringify(want, (_, v) => (v instanceof RegExp ? String(v) : v)));
+
+for (const c of cases) {
+  const { id, fn, args, how } = c;
   if (only && !id.includes(only) && fn !== only) continue;
   ran++;
   const t0 = performance.now();
-  const raw = answer(wasm, fn, args);
-  const rawGo = answer(go, fn, args);
-  const ms = performance.now() - t0; // the two ports' answers
-  const reasons = [];
-  if ((how === '*' || typeof how === 'function') && succeeded(raw)) provenWhole.add(fn);
+  const [raw, rawGo] = ask(c);
+  const ms = performance.now() - t0; // the two ports' answers, or nothing where a base already had them
+  const fails = [];
+  const said = []; // what is printed for a failure
   for (const [port, got] of [['wasm', raw], ['go', rawGo]]) {
-    if (got?.threw) continue; // a port that threw has already failed the comparison below
+    if (got?.threw) { fails.push(`${port} threw`); said.push(`  THREW  ${id}  (${port}): ${got.threw}`); continue; }
     held++;
-    const wrong = judge(contract, fn, args, got, seenCodes);
+    const wrong = judge(contract, fn, c.described ?? (args instanceof RawArgs ? args.value : args), got);
     if (wrong.length) {
       offContract++;
-      reasons.push(`off the contract (${port}): ${wrong[0]}`);
-      console.log(`  OFF THE CONTRACT  ${id}  (${port})`);
-      for (const w of wrong.slice(0, 4)) console.log(`    ${w}`);
+      fails.push(`${port} off the contract`);
+      said.push(`  OFF THE CONTRACT  ${id}  (${port})`, ...wrong.slice(0, 4).map((w) => `    ${w}`));
     }
   }
-  // A case that carries the spec's answer is held to it, and counts once however many ports miss it.
+  // A case that carries the spec's (or the contract's) answer is held to it; one that misses it is
+  // not compared besides.
   const want = expected.get(id)?.want;
-  // `decide` answers under `result`; a refusal is the answer itself.
-  const judged = (got) => got?.result ?? got;
-  const missed = want ? [['wasm', raw], ['go', rawGo]].filter(([, got]) => Object.entries(want).some(([k, v]) => judged(got)?.[k] !== v)) : [];
-  for (const [port, got] of missed) console.log(`  NOT AS THE SPEC SAYS  ${id}  (${port}): want ${JSON.stringify(want)}, got ${JSON.stringify(judged(got))}`);
-  if (missed.length) {
-    bad++;
-    results.add(id, 'FAIL', { reason: [`not as the spec says (${missed.map(([p]) => p).join(', ')})`, ...reasons].join('; '), ms });
-    continue;
+  // `decide` and `decide_chain` answer under `result`, and a refusal is the answer itself; an
+  // expectation that names `result` or `effects` is held to the whole answer, effects and all.
+  // A judge (a function, from js/cases/generated.mjs) is asked of the whole answer: the contract fixes
+  // whether the call refuses there, not its words.
+  const answerWhole = typeof want === 'function' || (want && ('result' in want || 'effects' in want));
+  const judged = (got) => (answerWhole ? got : got?.result ?? got);
+  const holdsAll = (got) => (typeof want === 'function' ? want(got) : Object.entries(want).every(([k, v]) => holds(v, judged(got)?.[k])));
+  const missed = want ? [['wasm', raw], ['go', rawGo]].filter(([, got]) => !got?.threw && !holdsAll(got)) : [];
+  for (const [port, got] of missed) {
+    fails.push(`${port} not as expected`);
+    said.push(`  NOT AS EXPECTED  ${id}  (${port}): want ${shown(want)}, got ${JSON.stringify(judged(got))}`);
   }
-  const a = pick(raw, how, wasm);
-  const b = pick(rawGo, how, go);
-  if (JSON.stringify(a) !== JSON.stringify(b)) {
-    bad++;
-    reasons.push('the ports differ');
-    console.log(`  DIFFER  ${id}`);
-    console.log(`    wasm ${JSON.stringify(a)}`);
-    console.log(`    go   ${JSON.stringify(b)}`);
-  } else if (process.argv.includes('--verbose')) {
-    console.log(`  agree   ${id}`);
+  if (!missed.length && !raw?.threw && !rawGo?.threw) {
+    const a = pick(raw, how, wasm);
+    const b = pick(rawGo, how, go);
+    if (JSON.stringify(a) !== JSON.stringify(b)) {
+      fails.push('differ');
+      said.push(`  DIFFER  ${id}`, `    wasm ${JSON.stringify(a)}`, `    go   ${JSON.stringify(b)}`);
+    }
   }
-  results.add(id, reasons.length ? 'FAIL' : 'PASS', { reason: reasons.join('; ') || null, ms });
+  if (!fails.length) {
+    if ((how === '*' || typeof how === 'function') && succeeded(raw)) provenWhole.add(fn);
+    if (raw?.error && raw.error === rawGo?.error) {
+      if (!comparedCodes.has(fn)) comparedCodes.set(fn, new Set());
+      comparedCodes.get(fn).add(raw.error);
+    }
+    if (verbose) console.log(`  agree   ${id}`);
+    results.add(id, 'PASS', { ms });
+  } else {
+    bad++;
+    const why = `fails (${fails.join(', ')})`;
+    console.log(`  FAILS  ${id}: ${why}`);
+    for (const line of said) console.log(line);
+    results.add(id, 'FAIL', { reason: why, ms });
+  }
 }
 
 // ── the coverage gate ──────────────────────────────────────────────────────────────────────────
@@ -137,10 +190,18 @@ for (const { id, fn, args, how } of cases) {
 //   2. every name has a case;
 //   3. every name has at least one case compared whole (`'*'`), not through a key list. That is the
 //      one that matters: `card_decode` dropped its entire `leaf` member in one port, and no key list
-//      would have noticed, because a key list only ever looks at the keys someone thought to name.
+//      would have noticed, because a key list only ever looks at the keys someone thought to name;
+//   4. every error code a function DECLARES was produced by both ports in one case they answered
+//      alike. This was printed and never failed (TC-1): a declared code no case produced is either
+//      reachable, and then it is a refusal nobody has compared — the audit of 2026-09-29 found 13 of
+//      15 reachable with one malformed argument, and a `parse` in one port and a `bad_request` in the
+//      other behind one of them — or it is not, and then declaring it is a claim nothing makes true,
+//      and the fix is to the contract. So there is no list of exceptions: every declared code is
+//      produced, today, by a case below.
 //
 // 1, and the collection's own problems (an id used twice, a case filed under the wrong section, an
-// expectation for an id no case has), fail a filtered run too; 2 and 3 cannot be judged on one.
+// expectation for an id no case has, a base that names nothing), fail a filtered run too; 2, 3 and 4
+// cannot be judged on one.
 const source = (f) => readFileSync(new URL(f, import.meta.url), 'utf8');
 const surfaceOf = (read, f) => { try { return read(source(f)); } catch (e) { problems.push(`${f}: ${e.message}`); return new Set(); } };
 const rustNames = surfaceOf(rustDispatch, '../crates/pact-identity/src/api.rs');
@@ -166,22 +227,19 @@ const partial = [...surface].filter((f) => covered.has(f) && !whole.has(f)).sort
 if (uncovered.length) coverage.push(`no parity case at all: ${uncovered.join(', ')}`);
 if (partial.length) coverage.push(`never compared whole on an answer that succeeded, so a dropped member would not show: ${partial.join(', ')}`);
 
-// A declared error code no case ever produced is not a failure — some are unreachable from any
-// argument, and `ErrorCode` declares `key` and `internal` so a caller's switch has a name for them
-// — but it is the honest measure of how much of the failure side these cases reach, so it is
-// printed rather than left as an impression.
 const declared = [...contractNames].flatMap((fn) => contract.methods[fn].errors.map((c) => `${fn}/${c}`));
 const unseen = declared.filter((k) => {
   const [fn, code] = k.split('/');
-  return !seenCodes.get(fn)?.has(code);
+  return !comparedCodes.get(fn)?.has(code);
 });
+if (unseen.length) coverage.push(`declared and never produced by both ports in a case they answered alike, so that refusal is compared by nothing: ${unseen.join(', ')}`);
 
 const failing = only ? problems : [...problems, ...coverage];
 if (failing.length) {
   console.log('\n  THE GATE IS NOT SATISFIED');
   for (const p of failing) console.log(`    ${p}`);
 }
-if (only) console.log('\n  a filtered run: the coverage gate (every function has a case, one compared whole) was not evaluated');
+if (only) console.log('\n  a filtered run: the coverage gate (every function has a case, one compared whole, every declared code produced) was not evaluated');
 // The gate's own two verdicts, as cases of the result file, so a run of record carries them.
 results.add('the collection, and the dispatchers against the contract', problems.length ? 'FAIL' : 'PASS', { reason: problems.join('; ') || null, ms: 0 });
 results.add('the coverage gate', only ? 'SKIPPED' : coverage.length ? 'FAIL' : 'PASS', { reason: only ? 'a filtered run' : coverage.join('; ') || null, ms: 0 });
@@ -194,7 +252,7 @@ results.write();
 // gate is satisfied, on an unfiltered run, so a manifest describes checks that actually held: a file
 // claiming 270 passing cases cannot be produced by a run in which they did not.
 const manifestAt = process.argv[process.argv.indexOf('--manifest') + 1];
-const agreed = bad === 0 && offContract === 0 && failing.length === 0;
+const agreed = bad === 0 && failing.length === 0;
 if (process.argv.includes('--manifest') && manifestAt && !only && agreed) {
   const byFn = new Map();
   for (const { id, fn } of cases) {
@@ -205,6 +263,7 @@ if (process.argv.includes('--manifest') && manifestAt && !only && agreed) {
   writeFileSync(manifestAt, JSON.stringify({
     generated_by: 'js/parity.mjs --manifest',
     cases: cases.length,
+    generated: made.cases.length,
     functions: surface.size,
     compared_whole: [...surface].filter((f) => whole.has(f)).length,
     disagreements: bad,
@@ -224,8 +283,8 @@ if (process.argv.includes('--manifest') && manifestAt && !only && agreed) {
 
 const total = only ? ran : cases.length;
 const wholeInSurface = [...surface].filter((f) => whole.has(f)).length;
-console.log(`\n${total - bad}/${total} boundary answers agree between the ports${only ? ` (filtered by ${JSON.stringify(only)})` : `; ${surface.size} functions guarded, ${wholeInSurface} of them compared whole`}`);
-console.log(`${held - offContract}/${held} answers hold to contract/contract.json (spec ${contract.spec}, ${contractNames.size} functions, both ports); ${declared.length - unseen.length}/${declared.length} declared error codes were produced`);
+console.log(`\n${total - bad}/${total} boundary answers agree between the ports${only ? ` (filtered by ${JSON.stringify(only)})` : `; ${surface.size} functions guarded, ${wholeInSurface} of them compared whole`} (${made.cases.length} of the cases generated from the contract)`);
+console.log(`${held - offContract}/${held} answers hold to contract/contract.json (spec ${contract.spec}, ${contractNames.size} functions, both ports)${only ? '' : `; ${declared.length - unseen.length}/${declared.length} declared error codes were produced by both ports in a case they answered alike`}`);
 // `bad` is a COUNT, and process.exit truncates mod 256: with 276 cases, exactly 256 disagreements
 // would have exited 0.
-process.exit(bad > 0 || offContract > 0 || failing.length ? 1 : 0);
+process.exit(bad > 0 || failing.length ? 1 : 0);

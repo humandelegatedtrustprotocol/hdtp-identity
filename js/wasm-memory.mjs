@@ -15,7 +15,7 @@ export function fresh() {
   new Function('exports', 'require', 'module', '__filename', '__dirname', source)(module.exports, require, module, glue, glue.replace(/\/[^/]*$/, ''));
   const mod = module.exports;
   return {
-    call: (name, args) => JSON.parse(mod.call(name, JSON.stringify(args ?? {}))),
+    call: (name, args) => JSON.parse(mod.call(name, JSON.stringify(args === undefined ? {} : args))),
     /** The instance's linear memory, in bytes. It only ever grows. */
     bytes: () => mod.__memory().buffer.byteLength,
   };

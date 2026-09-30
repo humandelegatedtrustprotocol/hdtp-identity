@@ -50,7 +50,8 @@
     "text": "Before issuing any certificate, a wallet MUST establish that the root it is about to sign with is the root the",
     "held_by": [
       "rust:a_vault_entry_that_disagrees_with_its_own_certificate_signs_nothing",
-      "go:TestVaultRulesMirrorTheCore"
+      "rust:a_vault_root_proves_itself_before_it_signs",
+      "go:TestWalletIssueProvesTheRootBeforeItSigns"
     ]
   },
   "2.2#2": {
@@ -59,30 +60,33 @@
     "held_by": [
       "rust:a_card_whose_certificate_and_key_disagree_gets_no_leaf",
       "rust:another_card_signs_nothing_for_this_identity",
-      "rust:a_card_that_swaps_its_key_after_the_check_signs_nothing_that_is_kept"
+      "rust:a_card_that_swaps_its_key_after_the_check_signs_nothing_that_is_kept",
+      "rust:a_vault_root_proves_itself_before_it_signs",
+      "go:TestWalletIssueProvesTheRootBeforeItSigns"
     ]
   },
   "2.2#3": {
     "hash": "48f03f123375",
     "text": "The challenge MUST be domain-separated from certificate bytes — the ASCII `PACT root proof v1` followed by a n",
     "elsewhere": "wallet",
-    "why": "the challenge is the browser wallet's, and a hosting platform's half is held in that platform's own MUST table, beside its code. This library issues from a vault whose entry carries the certificate and checks that instead"
+    "why": "the challenge a wallet signs with a root it does not hold in software is the wallet's: a browser wallet signs it with the derived root, and a hosting platform's half is held in that platform's own MUST table, beside its code. This library's wallet_issue, which holds the key, signs `PACT root proof v1`, a newline and 32 random bytes and verifies the signature under the root certificate's key before it issues (vault.rs prove_root, go/vault.go proveRoot); the tests cited on 2.2#2 hold the refusals around it and the prefix"
   },
   "2.2#4": {
     "hash": "11306b742c60",
     "text": "A wallet MUST validate a chain it has assembled (§14.2) against the expected root and endpoint before returnin",
     "held_by": [
       "rust:a_leaf_the_card_signed_validates_to_that_root_at_its_endpoint",
-      "go:TestWalletIssue"
+      "rust:a_vault_root_proves_itself_before_it_signs",
+      "go:TestWalletIssueProvesTheRootBeforeItSigns"
     ]
   },
   "2.2#5": {
     "hash": "448b0a994299",
     "text": "**A root certificate is issued once.** A wallet MUST NOT rebuild a root certificate for an identity that alrea",
     "held_by": [
-      "rust:a_root_the_card_signed_is_a_root",
-      "go:TestWalletIssue"
-    ]
+      "rust:a_root_the_card_signed_is_a_root"
+    ],
+    "why": "the card path is held by the test cited. On the software path `wallet_issue` answers one certificate, the leaf it issued (`der`); contract/contract.json gives its answer no member for a root, and js/parity.mjs holds both ports to that, so it hands back no rebuilt root. (go:TestWalletIssue was cited here; it rebuilds no root and checks for no rebuilding.)"
   },
   "3.#1": {
     "hash": "8afaa9bec8f1",
@@ -549,7 +553,8 @@
     "text": "base64url HPKE encapsulated key, of exactly the suite's `Npk` (RFC 9180 §7.1): 65 bytes for `PACT-SEAL-P256`, ",
     "held_by": [
       "scenario:a byte moved from the encapsulated key into the ciphertext",
-      "go:TestSmallOrderPointsAndSPKIBits"
+      "rust:an_encapsulated_key_of_the_wrong_length_is_refused_under_each_suite",
+      "go:TestAnEncapsulatedKeyOfTheWrongLengthIsRefused"
     ]
   },
   "13.1#2": {
@@ -580,7 +585,10 @@
     "hash": "7ff47a8bc4dd",
     "text": "The HPKE ephemeral MUST be fresh for every envelope — a reused one repeats the key and the nonce, and two ciph",
     "held_by": [
-      "scenario:HPKE ephemeral reuse leaks the XOR of two plaintexts; production sealing cannot take a seed"
+      "scenario:HPKE ephemeral reuse leaks the XOR of two plaintexts; production sealing cannot take a seed",
+      "scenario:a low-order X25519 recipient point",
+      "rust:refuses_a_low_order_point",
+      "go:TestALowOrderRecipientIsRefused"
     ]
   },
   "13.1#6": {
@@ -658,8 +666,11 @@
     "text": "Idempotency records for seen `msg_id`s MUST be retained until `min(exp, ts + 300 s)` — the end of the window i",
     "held_by": [
       "scenario:an envelope that asks to be remembered for a year",
-      "rust:an_envelope_asking_to_be_remembered_for_a_year_is_refused"
-    ]
+      "rust:an_envelope_asking_to_be_remembered_for_a_year_is_refused",
+      "go:TestLifetimeAndCallerSideChecks"
+    ],
+    "why": "what this library holds is the bound that makes a record kept past ts + 300 s protect nothing: the skew window and the thirty-day cap on exp − ts, which both port tests hold (a year refused, exactly thirty days accepted). Keeping the records is the host's, and both hosts keep them until exp alone today (CW-06 of the port-parity audit of 2026-09-29), so no host is named as holding the retention itself",
+    "gap": "the retention itself: keeping a seen msg_id's record until min(exp, ts + 300 s). Both hosts keep it until exp alone (the node's PutIdempotency window is the header's exp; the cloud's recordAck is until exp), which is CW-06 of the port-parity audit of 2026-09-29, its fix the node's and the cloud's"
   },
   "13.3#3": {
     "hash": "71e0e50ade5b",

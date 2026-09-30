@@ -12,6 +12,7 @@ package pactidentity
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -130,17 +131,81 @@ func isBase64Text(s string) bool {
 	return true
 }
 
-// isPrivateKeyDER is PKCS #8 or SEC1 by shape, whatever the algorithm.
+// Key material (SPEC §9.2: an importer MUST refuse anything "that decodes as a private key") is read
+// LENIENTLY, on purpose, where every other reader here is strict: what a lenient decoder reads as a key
+// is key material. This port read a base64 word with a spare bit set in its last character, and a
+// PKCS #8 whose length is written in a longer form than it needs (`81 2e`), as no key; the cloud's copy
+// of the check and OpenSSL read both as the key (CW-07, R38). So a word forgives its padding, either
+// alphabet and its spare bits, and a length may take any definite form of up to four octets, as the
+// core's export/mod.rs reads them. js/key-material.json is the list both ports' tests and the parity
+// cases read. TO REVERSE (a reading the owner may change): looseRead back to derRead and looseB64 back
+// to DecodeB64url, here and in the core.
+
+// looseNode is a DER-shaped element read for detection.
+type looseNode struct {
+	tag     byte
+	content []byte
+	end     int
+}
+
+// looseRead reads a tag and a definite length in the short form or a long form of one to four octets,
+// minimal or not.
+func looseRead(b []byte, at int) (looseNode, bool) {
+	if at+2 > len(b) {
+		return looseNode{}, false
+	}
+	tag, first := b[at], int(b[at+1])
+	length, start := first, at+2
+	if first&0x80 != 0 {
+		n := first & 0x7f
+		if n == 0 || n > 4 || at+2+n > len(b) {
+			return looseNode{}, false
+		}
+		length = 0
+		for _, o := range b[at+2 : at+2+n] {
+			length = length<<8 | int(o)
+		}
+		start = at + 2 + n
+	}
+	// Four octets wrap a 32-bit int negative: a length that is not one is no element.
+	if length < 0 || length > len(b)-start {
+		return looseNode{}, false
+	}
+	return looseNode{tag: tag, content: b[start : start+length], end: start + length}, true
+}
+
+func looseChildren(content []byte) ([]looseNode, bool) {
+	var out []looseNode
+	for at := 0; at < len(content); {
+		c, ok := looseRead(content, at)
+		if !ok {
+			return nil, false
+		}
+		out = append(out, c)
+		at = c.end
+	}
+	return out, true
+}
+
+// looseB64 decodes a word as base64 or base64url for detection: its padding, either alphabet and a last
+// character with a spare bit set are forgiven, as a lenient decoder forgives them. RawURLEncoding
+// without Strict() allows the spare bits; a word holds no \r or \n, which it would also skip.
+func looseB64(w string) ([]byte, bool) {
+	b, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(strings.NewReplacer("+", "-", "/", "_").Replace(w), "="))
+	return b, err == nil
+}
+
+// isPrivateKeyDER is PKCS #8 or SEC1 by shape, whatever the algorithm, read by looseRead.
 func isPrivateKeyDER(b []byte) bool {
-	node, err := derRead(b, 0)
-	if err != nil || node.tag != 0x30 || node.end != len(b) {
+	node, ok := looseRead(b, 0)
+	if !ok || node.tag != 0x30 || node.end != len(b) {
 		return false
 	}
-	f, err := derChildren(node)
-	if err != nil {
+	f, ok := looseChildren(node.content)
+	if !ok {
 		return false
 	}
-	version := func(n derNode, allowed ...byte) bool {
+	version := func(n looseNode, allowed ...byte) bool {
 		if n.tag != 0x02 || len(n.content) != 1 {
 			return false
 		}
@@ -153,8 +218,8 @@ func isPrivateKeyDER(b []byte) bool {
 	}
 	pkcs8 := false
 	if len(f) >= 3 && version(f[0], 0, 1) && f[1].tag == 0x30 && f[2].tag == 0x04 {
-		alg, err := derChildren(f[1])
-		pkcs8 = err == nil && len(alg) > 0 && alg[0].tag == 0x06
+		alg, ok := looseChildren(f[1].content)
+		pkcs8 = ok && len(alg) > 0 && alg[0].tag == 0x06
 	}
 	sec1 := len(f) >= 2 && len(f) <= 4 && version(f[0], 1) && f[1].tag == 0x04
 	if sec1 {
@@ -187,7 +252,7 @@ func holdsPrivateKey(text string) bool {
 			end++
 		}
 		if w := text[start:end]; len(w) > 0 && w[0] == 'M' && isBase64Text(w) {
-			if der, err := decodeB64url(w); err == nil && isPrivateKeyDER(der) {
+			if der, ok := looseB64(w); ok && isPrivateKeyDER(der) {
 				return true
 			}
 		}
@@ -243,7 +308,7 @@ func exportCertificate(cell string) (*Cert, string) {
 	if !isB64url(cell) {
 		return nil, "not base64url"
 	}
-	der, err := decodeB64url(cell)
+	der, err := DecodeB64url(cell)
 	if err != nil {
 		return nil, "not base64url"
 	}
@@ -483,9 +548,12 @@ func filesOrder(raw []byte) []string {
 
 func manifestAt(why string) error { return exportRefuse("manifest.json: " + why) }
 
-// checkManifest holds a manifest's members to §9.2, and its owner to owner when owner is not "".
+// checkManifest holds a manifest's members to §9.2, and its owner to *owner when owner is not nil —
+// the core's `Option`: nil is no owner to compare (a manifest this process is finishing or has
+// finished), and an owner that is given is compared whatever it is, "" included. "" meant "no owner"
+// here, so export_read with an owner of "" read another identity's file, which the core refuses.
 // order is the document order of `files`.
-func checkManifest(doc map[string]any, order []string, owner string) (*exportManifest, error) {
+func checkManifest(doc map[string]any, order []string, owner *string) (*exportManifest, error) {
 	if k := stranger(doc, manifestMembers); k != "" {
 		return nil, manifestAt(jsonString(k) + " is not a member of a manifest")
 	}
@@ -501,8 +569,8 @@ func checkManifest(doc map[string]any, order []string, owner string) (*exportMan
 	if !isText || !IsFingerprint(fileOwner) {
 		return nil, manifestAt("owner is not a fingerprint")
 	}
-	if owner != "" && owner != fileOwner {
-		return nil, manifestAt(fmt.Sprintf("owner: the file is %s's, not this identity's (%s)", fileOwner, owner))
+	if owner != nil && *owner != fileOwner {
+		return nil, manifestAt(fmt.Sprintf("owner: the file is %s's, not this identity's (%s)", fileOwner, *owner))
 	}
 	for _, m := range []string{"owner_name", "tool"} {
 		text, isText := doc[m].(string)
@@ -608,7 +676,7 @@ func loneSurrogate(text []byte) bool {
 	return false
 }
 
-func parseManifest(text, owner string) (*exportManifest, error) {
+func parseManifest(text string, owner *string) (*exportManifest, error) {
 	if len(text) > ExportManifestMax {
 		return nil, manifestAt(fmt.Sprintf("over %d bytes", ExportManifestMax))
 	}
@@ -628,7 +696,7 @@ func finishManifest(raw json.RawMessage, messagesSHA *string, messages uint64) (
 	if err != nil || !isObj {
 		return "", exportRefuse("partial is required")
 	}
-	before, err := checkManifest(doc, filesOrder(raw), "")
+	before, err := checkManifest(doc, filesOrder(raw), nil)
 	if err != nil {
 		return "", err
 	}
@@ -645,7 +713,7 @@ func finishManifest(raw json.RawMessage, messagesSHA *string, messages uint64) (
 	}
 	doc["counts"].(map[string]any)["messages"] = json.Number(strconv.FormatUint(messages, 10))
 	text := string(Canonical(doc))
-	if _, err := parseManifest(text, ""); err != nil {
+	if _, err := parseManifest(text, nil); err != nil {
 		return "", err
 	}
 	return text, nil
@@ -729,7 +797,7 @@ func exportRead(directory []ExportEntry, manifestText, contactsCSV, threadsCSV *
 	if manifestText == nil {
 		return nil, exportRefuse("manifest is required")
 	}
-	m, err := parseManifest(*manifestText, owner)
+	m, err := parseManifest(*manifestText, &owner)
 	if err != nil {
 		return nil, err
 	}
@@ -870,7 +938,7 @@ type exportEnd struct {
 
 // exportReadEnd is §9.2's cross-batch rules, once the host has streamed messages.jsonl.
 func exportReadEnd(manifestText string, e exportEnd) error {
-	m, err := parseManifest(manifestText, "")
+	m, err := parseManifest(manifestText, nil)
 	if err != nil {
 		return err
 	}
@@ -1422,11 +1490,24 @@ func exportWrite(owner, ownerName string, exportedAt time.Time, tool string, con
 
 // ── the merge ───────────────────────────────────────────────────────────────────────────────────
 
+// mergeRoot is a row's root, with the two other members the merge reads a meaning from held to what
+// the contract says they are (ContactRow), in export_read's words, as the core's root_of: a status
+// outside the three was read as not blocked, so a held contact written as "Blocked" lost its block on
+// an import, and an added that is no instant was carried into what the host writes (the review of
+// 2026-09-30, found by parity's nested "" cases). A member that is absent is left to the host.
 func mergeRoot(v any, what string, i int) (string, error) {
 	o, _ := v.(map[string]any)
 	r, isText := o["root"].(string)
 	if !isText || !IsFingerprint(r) {
 		return "", exportRefuse(fmt.Sprintf("%s[%d]: root is not a fingerprint", what, i))
+	}
+	if status, isText := o["status"].(string); isText && !contains(contactStatuses, status) {
+		return "", exportRefuse(fmt.Sprintf("%s[%d]: status is not active, blocked or pending_out", what, i))
+	}
+	if added, isText := o["added"].(string); isText {
+		if _, ok := parseInstantZ(added); !ok {
+			return "", exportRefuse(fmt.Sprintf("%s[%d]: added is not an RFC 3339 instant", what, i))
+		}
 	}
 	return r, nil
 }
@@ -1542,6 +1623,20 @@ func bookRows(contacts []any, exportedAt time.Time) ([]any, error) {
 				}
 			}
 		}
+		// A row carries the root and added into export_write and to the host as the contract types
+		// them, as the core's book_rows: a root that is no fingerprint, or an added that is no
+		// instant, came back in a row off the contract (the review of 2026-09-30).
+		if !IsFingerprint(o["root"].(string)) {
+			return nil, exportRefuse(fmt.Sprintf("contacts[%d]: root is not a fingerprint", i))
+		}
+		added, has := o["added"].(string)
+		if has {
+			if _, ok := parseInstantZ(added); !ok {
+				return nil, exportRefuse(fmt.Sprintf("contacts[%d]: added is not an RFC 3339 instant", i))
+			}
+		} else {
+			added = timeOut(exportedAt)
+		}
 		opt := func(m string) any {
 			if s, isText := o[m].(string); isText {
 				return s
@@ -1549,10 +1644,6 @@ func bookRows(contacts []any, exportedAt time.Time) ([]any, error) {
 			return nil
 		}
 		name, _ := o["name"].(string)
-		added, has := o["added"].(string)
-		if !has {
-			added = timeOut(exportedAt)
-		}
 		rows = append(rows, map[string]any{
 			"root": o["root"], "endpoint": o["endpoint"], "name": name, "display_name": "",
 			"status": "active", "was_active": true, "permissions": []any{}, "their_permissions": []any{},

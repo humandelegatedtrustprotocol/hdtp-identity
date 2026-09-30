@@ -66,7 +66,9 @@ export function seedIntrusions() {
 /**
  * The JSON blocks of a specification's Appendix B: everything fenced as ```json between the heading
  * `## Appendix B` and the closing line `*End of PACT`. Both markers must be there — a missing end
- * used to slice to one character short of the end of the file — and every fence must close.
+ * used to slice to one character short of the end of the file — every fence must close, and every
+ * block must be JSON. js/appendix-b-reader.json is the list of cases this and the other three readers
+ * (the CLI's, the core tests', the Go port's) are held to, refusals word for word.
  */
 export function appendixB(spec) {
   const start = spec.indexOf('## Appendix B');
@@ -81,7 +83,11 @@ export function appendixB(spec) {
     if (i < 0) return blocks;
     const j = b.indexOf('\n```', i + 8);
     if (j < 0) throw new Error('an unterminated json fence in Appendix B');
-    blocks.push(JSON.parse(b.slice(i + 8, j)));
+    try {
+      blocks.push(JSON.parse(b.slice(i + 8, j)));
+    } catch {
+      throw new Error(`Appendix B block ${blocks.length + 1} is not JSON`);
+    }
     at = j + 4;
   }
 }
