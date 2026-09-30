@@ -7,9 +7,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed as proven that did not pass.
 
-Specification: **2.2.4**. **88** normative sentences, **2537** cross-port parity cases over **54** guarded functions.
+Specification: **2.2.4**. **88** normative sentences, **2540** cross-port parity cases over **54** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 2.2.4): **5074** answers, of which **0** do not hold to the shape it declares. Of **127** declared error codes, **127** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 2.2.4): **5080** answers, of which **0** do not hold to the shape it declares. Of **127** declared error codes, **127** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 88 normative sentences of the specification
 
@@ -202,7 +202,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
-## The 2537 cross-port parity cases
+## The 2540 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -210,7 +210,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **2537** cases (**1149** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
+At the run that generated this file: **2540** cases (**1149** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
 
 ### `address_guard` — 50 cases · whole on success
 
@@ -1168,11 +1168,14 @@ At the run that generated this file: **2537** cases (**1149** of the run's cases
 - generated · export_write_messages · an undeclared member
 - generated · export_write_messages · messages absent, msg_ids "x"
 
-### `follow_renewed` — 45 cases · whole on success
+### `follow_renewed` — 48 cases · whole on success
 
 - follow_renewed on a chain to another root
 - follow_renewed on a chain that is not one
 - follow_renewed on the same leaf
+- follow_renewed on the same leaf, with a pinned_root of ""
+- follow_renewed on the same leaf, with a dialed of ""
+- follow_renewed on the same leaf, with a pinned_root and a dialed of ""
 - follow_renewed to a leaf naming https://[2001:db8::1%25eth0]/mcp
 - follow_renewed to a leaf naming https://[2001:db8::1%eth0]/mcp
 - follow_renewed with nothing to work from

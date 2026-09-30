@@ -102,7 +102,10 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   the core compares it, where the Go port read it as not given and accepted any root or address.
   The typed `ChainOpts` and `OpenOpts` keep `""` as not given for a Go caller (the node's first
   certification passes an empty root). `FollowRenewed` holds a renewed chain to its pinned root and
-  dialed address even when they are empty, as the core does; it followed one from any root. A
+  dialed address even when they are empty, as the core does; it followed one from any root. Three
+  parity cases hold `follow_renewed` to it word for word (lead 5): `pinned_root` `""` is `chain rule
+  2: root is not the one expected`, `dialed` `""` is `chain rule 5: endpoint differs from the one in
+  question`, both is rule 2; the same leaf at the real root and address is the control, followed. A
   `dns_name` given as `""` to `csr_new`, `build_leaf` or `leaf_tbs` is refused in both ports,
   `dns_name is empty`: the core wrote an empty dNSName, which rule 5 then refuses, and the Go port
   wrote none.

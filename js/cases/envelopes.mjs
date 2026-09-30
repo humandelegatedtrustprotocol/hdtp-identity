@@ -47,6 +47,19 @@ export default function envelopes({ add, expect }, f) {
   add('follow_renewed on a chain to another root', 'follow_renewed', { answer: { code: 'certificate_renewed', data: { chain: [leafDer, rootDer] } }, pinned_root: 'sha256:' + 'A'.repeat(43), pinned_leaf: leafDer, dialed: ENDPOINT, now });
   add('follow_renewed on a chain that is not one', 'follow_renewed', { answer: { code: 'certificate_renewed', data: { chain: [] } }, pinned_root: rootFp, pinned_leaf: leafDer, dialed: ENDPOINT, now });
   add('follow_renewed on the same leaf', 'follow_renewed', { answer: { code: 'certificate_renewed', data: { chain: [leafDer, rootDer] } }, pinned_root: rootFp, pinned_leaf: leafDer, dialed: ENDPOINT, now });
+  // The pinned root and the dialed address are what a renewed chain is held to, and "" is a value like
+  // any other (CONTRACT §0), never "none given": read as none, the Go port followed a renewed chain from
+  // any root at any address (lead 5 of the port-parity audit; T14). The same leaf at the real root and
+  // address, above, is the control that must be followed.
+  expect('follow_renewed on the same leaf', { follow: true, leaf: leafDer });
+  for (const [what, over, why] of [
+    ['a pinned_root of ""', { pinned_root: '' }, 'chain rule 2: root is not the one expected'],
+    ['a dialed of ""', { dialed: '' }, 'chain rule 5: endpoint differs from the one in question'],
+    ['a pinned_root and a dialed of ""', { pinned_root: '', dialed: '' }, 'chain rule 2: root is not the one expected'],
+  ]) {
+    add(`follow_renewed on the same leaf, with ${what}`, 'follow_renewed', { answer: { code: 'certificate_renewed', data: { chain: [leafDer, rootDer] } }, pinned_root: rootFp, pinned_leaf: leafDer, dialed: ENDPOINT, now, ...over });
+    expect(`follow_renewed on the same leaf, with ${what}`, { follow: false, why });
+  }
   // A renewed chain whose leaf names an IPv6 literal with a zone id fails rule 5 for the normal form,
   // before the endpoint is compared with the one dialed (T1, C1, R09).
   for (const endpoint of ZONED.slice(0, 2)) {
