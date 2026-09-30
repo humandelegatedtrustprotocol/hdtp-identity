@@ -119,6 +119,17 @@ export default function certificates({ add, expect }, f) {
       add(`parse_certificate of a root whose basicConstraints is ${what}`, 'parse_certificate', { der: root });
     }
   }
+  // What the seed's `parse` makes of a certificate, as parse_certificate answers it: the words it
+  // refuses in (`unsupported` for a key outside the profile, CONTRACT §0; `parse` for the rest), or,
+  // when it reads it, the certificate's key, beside what else the case expects of a certificate that
+  // reads (`also`).
+  const seedReads = (der, also = {}) => {
+    try {
+      return { ...also, spki: b64url(seedParse(Buffer.from(der, 'base64url')).spki) };
+    } catch (e) {
+      return { error: /^unsupported key type /.test(e.message) ? 'unsupported' : 'parse', why: e.message };
+    }
+  };
   // R33: certificates the three readers answered three ways. An empty keyUsage BIT STRING (`03 00`, no
   // initial octet, which X.690 §8.6.2 requires) was a keyUsage of no bits to the core and the seed and
   // refused by the Go port; an empty [3] was `not a v3 certificate with extensions` to the core and
@@ -140,18 +151,25 @@ export default function certificates({ add, expect }, f) {
       const [id, , value] = derChildren(e);
       return id.content.equals(Buffer.from([0x55, 0x1d, 0x0f])) ? seq(tlv(0x06, Buffer.from([0x55, 0x80, 0x1d, 0x0f])), tlv(0x01, Buffer.from([0x01])), value.raw) : e.raw;
     });
+    // Where the seed and the ports read a certificate's fields in one order — a single fault — the
+    // answer expected is the SEED's (seedReads): its words, or the key it read. So the gate fails while
+    // the seed beside it disagrees with the ports, which it did on pact-protocol main for the first
+    // three (R33's seed half: an empty keyUsage and three validity times read, an empty [3] threw a
+    // TypeError) until pact-protocol PR #10. The two with a fault in the outer algorithm are still read
+    // in another order by the seed (`signature algorithm inside and outside differ`), and are held to
+    // the ports' words.
     for (const [what, der, want] of [
-      ['a keyUsage BIT STRING with no initial octet', alinaLeaf({ label: 'parity/r33', misencode: { keyUsage: [] } }), parseFails('BIT STRING not in the DER form')],
-      ['an extensions wrapper with nothing in it', rebuilt({ 7: tlv(0xa3, Buffer.alloc(0)) }), parseFails('not a v3 certificate with extensions')],
-      ['three validity times', rebuilt({ 4: seq(notBefore, notAfter, notAfter) }), parseFails('time not in the DER form')],
+      ['a keyUsage BIT STRING with no initial octet', alinaLeaf({ label: 'parity/r33', misencode: { keyUsage: [] } }), seedReads],
+      ['an extensions wrapper with nothing in it', rebuilt({ 7: tlv(0xa3, Buffer.alloc(0)) }), seedReads],
+      ['three validity times', rebuilt({ 4: seq(notBefore, notAfter, notAfter) }), seedReads],
       ['three validity times, and a NULL after the outer algorithm', rebuilt({ 4: seq(notBefore, notAfter, notAfter) }, seq(algOid, NULL)), parseFails('time not in the DER form')],
       ['a NULL after the outer algorithm', rebuilt({}, seq(algOid, NULL)), parseFails('certificate shape')],
-      ['a keyUsage whose OID is padded and whose criticality is spelled 0x01', rebuilt({ 7: tlv(0xa3, seq(...withBadKeyUsage)) }), parseFails('BOOLEAN not in the DER form')],
+      ['a keyUsage whose OID is padded and whose criticality is spelled 0x01', rebuilt({ 7: tlv(0xa3, seq(...withBadKeyUsage)) }), seedReads],
       // The controls: a keyUsage of no bits written with its initial octet (`03 01 00`) reads, and the
-      // leaf rebuilt with nothing changed reads as the leaf.
-      ['a keyUsage of no bits, with its initial octet', alinaLeaf({ label: 'parity/r33', misencode: { keyUsage: [0] } }), { key_usage: [] }],
-      ['nothing changed (the control)', rebuilt({}), { spki: hostSpki }],
-    ]) {
+      // leaf rebuilt with nothing changed reads as the leaf — to the seed too.
+      ['a keyUsage of no bits, with its initial octet', alinaLeaf({ label: 'parity/r33', misencode: { keyUsage: [0] } }), seedReads, { key_usage: [] }],
+      ['nothing changed (the control)', rebuilt({}), seedReads, { spki: hostSpki }],
+    ].map(([what, der, want, also = {}]) => [what, der, want === seedReads ? seedReads(der, also) : want])) {
       add(`parse_certificate of a leaf with ${what}`, 'parse_certificate', { der });
       expect(`parse_certificate of a leaf with ${what}`, want);
     }
@@ -305,7 +323,9 @@ export default function certificates({ add, expect }, f) {
     const why = `unsupported key type ${oid}`, refused = { error: 'unsupported', why };
     const leaf = f.foreignLeaf(kind);
     add(`parse_certificate of a leaf holding a key outside the profile: ${kind}`, 'parse_certificate', { der: leaf });
-    expect(`parse_certificate of a leaf holding a key outside the profile: ${kind}`, refused);
+    // Held to the seed's reading (seedReads), which read all four keys on pact-protocol main until
+    // PR #10 (cluster G's seed half).
+    expect(`parse_certificate of a leaf holding a key outside the profile: ${kind}`, seedReads(leaf));
     add(`profile_error of a leaf holding a key outside the profile: ${kind}`, 'profile_error', { der: leaf, kind: 'leaf' });
     expect(`profile_error of a leaf holding a key outside the profile: ${kind}`, refused);
     add(`validate_chain of a leaf holding a key outside the profile: ${kind}`, 'validate_chain', { chain: [leaf, rootDer], now });
