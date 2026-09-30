@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { collect, CASE_FILES } from './cases/index.mjs';
-import { generate, pickBases, wrongTypeFor, wrongTypeAnswer, keyedOf, BASES, HOSTILE } from './cases/generated.mjs';
+import { generate, pickBases, wrongTypeFor, wrongTypeAnswer, keyedOf, refuses, BASES, EMPTY_IS_A_VALUE, HOSTILE } from './cases/generated.mjs';
 
 const contract = {
   sections: { build: 'The build', keys: 'Keys', cards: 'Cards' },
@@ -93,7 +93,7 @@ test('every function gets {} and the hostile members it declares; one with a bas
   // its first undeclared member before any member is read, so there is no such case (`{}` is it).
   assert.deepEqual([...byId.keys()], [
     '{}',
-    'pkcs8 absent', 'pkcs8 null', 'data absent', 'data null',
+    'pkcs8 absent', 'pkcs8 null', 'pkcs8 ""', 'data absent', 'data null', 'data ""',
     'deep "yes"',
     'an undeclared member',
     'pkcs8 absent, data 7', 'pkcs8 absent, deep "yes"', 'data absent, pkcs8 7', 'data absent, deep "yes"',
@@ -112,7 +112,26 @@ test('every function gets {} and the hostile members it declares; one with a bas
   // the wrong type, which is refused in words that name it and never read as absent.
   assert.deepEqual(expected.get('generated · sign · data null'), { error: 'bad_request', why: 'data is required' });
   assert.deepEqual(expected.get('generated · sign · deep "yes"'), { error: 'bad_request', why: /\bdeep\b/ });
-  assert.equal(expected.size, 5);
+  // A required string is sent "" and judged: it must refuse, unless EMPTY_IS_A_VALUE names it with why.
+  // `sign.data` is on that list (the bytes to sign), `sign.pkcs8` is not.
+  const pkcs8Empty = expected.get('generated · sign · pkcs8 ""'), dataEmpty = expected.get('generated · sign · data ""');
+  assert.ok('sign.data' in EMPTY_IS_A_VALUE && !('sign.pkcs8' in EMPTY_IS_A_VALUE));
+  assert.equal(pkcs8Empty({ error: 'parse', why: 'DER truncated' }), true);
+  assert.equal(pkcs8Empty({ sig: 'AA' }), false);
+  assert.equal(dataEmpty({ sig: 'AA' }), true);
+  assert.equal(dataEmpty({ error: 'parse', why: 'DER truncated' }), false);
+  assert.equal(expected.size, 7);
+});
+
+test('a refusal is judged in its function\'s own shape, and profile_error\'s {error: null} is an answer', () => {
+  for (const a of [{ error: 'parse', why: 'x' }, { ok: false, why: 'x' }, { follow: false, why: 'x' }, { result: { code: 'envelope_invalid', why: 'x' }, effects: [] }]) assert.equal(refuses(a), true, JSON.stringify(a));
+  for (const a of [{ error: null }, { error: 'a profile error' }, { ok: true }, { follow: true }, { valid: false }, { normal: false }, { result: { code: 'ok' }, effects: [] }]) assert.equal(refuses(a), false, JSON.stringify(a));
+});
+
+test('a name on EMPTY_IS_A_VALUE that is no required string member fails the run', () => {
+  const { problems } = generate(small, new Map());
+  assert.ok(problems.some((p) => /EMPTY_IS_A_VALUE names build_root\.cn, which is not a required member that takes a string/.test(p)), problems.join('\n'));
+  assert.ok(!problems.some((p) => / sign\.data,/.test(p)), 'sign.data is a required string member of the small contract');
 });
 
 test('an optional member of the wrong type is held to §0: bytes do not decode, anything else is named', () => {

@@ -1513,8 +1513,8 @@
         "required": ["fn", "version", "seal", "cert", "root", "endpoint", "expired", "ignored", "bytes", "leaf"],
         "additionalProperties": false
       },
-      "errors": ["bad_request"],
-      "notes": "Every refusal is `bad_request` with the exact `why` strings of `card.mjs`. An empty `X-PACT-VERSION` names no version (`no X-PACT-VERSION`). `X-PACT-CERT` is read as every string a port did not write is read (§0), so a stray character, whitespace or a spare bit set is `certificate does not parse: not base64url`."
+      "errors": ["bad_request", "parse"],
+      "notes": "Every refusal of a card is `bad_request` with the exact `why` strings of `card.mjs`. A `now` that is not an instant is `parse`, `not an RFC 3339 instant: <now>`, as every function that reads an instant answers it (`\"\"` included). An empty `X-PACT-VERSION` names no version (`no X-PACT-VERSION`). `X-PACT-CERT` is read as every string a port did not write is read (§0), so a stray character, whitespace or a spare bit set is `certificate does not parse: not base64url`."
     },
     "refresh_check": {
       "section": "cards",

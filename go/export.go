@@ -548,9 +548,12 @@ func filesOrder(raw []byte) []string {
 
 func manifestAt(why string) error { return exportRefuse("manifest.json: " + why) }
 
-// checkManifest holds a manifest's members to §9.2, and its owner to owner when owner is not "".
+// checkManifest holds a manifest's members to §9.2, and its owner to *owner when owner is not nil —
+// the core's `Option`: nil is no owner to compare (a manifest this process is finishing or has
+// finished), and an owner that is given is compared whatever it is, "" included. "" meant "no owner"
+// here, so export_read with an owner of "" read another identity's file, which the core refuses.
 // order is the document order of `files`.
-func checkManifest(doc map[string]any, order []string, owner string) (*exportManifest, error) {
+func checkManifest(doc map[string]any, order []string, owner *string) (*exportManifest, error) {
 	if k := stranger(doc, manifestMembers); k != "" {
 		return nil, manifestAt(jsonString(k) + " is not a member of a manifest")
 	}
@@ -566,8 +569,8 @@ func checkManifest(doc map[string]any, order []string, owner string) (*exportMan
 	if !isText || !IsFingerprint(fileOwner) {
 		return nil, manifestAt("owner is not a fingerprint")
 	}
-	if owner != "" && owner != fileOwner {
-		return nil, manifestAt(fmt.Sprintf("owner: the file is %s's, not this identity's (%s)", fileOwner, owner))
+	if owner != nil && *owner != fileOwner {
+		return nil, manifestAt(fmt.Sprintf("owner: the file is %s's, not this identity's (%s)", fileOwner, *owner))
 	}
 	for _, m := range []string{"owner_name", "tool"} {
 		text, isText := doc[m].(string)
@@ -673,7 +676,7 @@ func loneSurrogate(text []byte) bool {
 	return false
 }
 
-func parseManifest(text, owner string) (*exportManifest, error) {
+func parseManifest(text string, owner *string) (*exportManifest, error) {
 	if len(text) > ExportManifestMax {
 		return nil, manifestAt(fmt.Sprintf("over %d bytes", ExportManifestMax))
 	}
@@ -693,7 +696,7 @@ func finishManifest(raw json.RawMessage, messagesSHA *string, messages uint64) (
 	if err != nil || !isObj {
 		return "", exportRefuse("partial is required")
 	}
-	before, err := checkManifest(doc, filesOrder(raw), "")
+	before, err := checkManifest(doc, filesOrder(raw), nil)
 	if err != nil {
 		return "", err
 	}
@@ -710,7 +713,7 @@ func finishManifest(raw json.RawMessage, messagesSHA *string, messages uint64) (
 	}
 	doc["counts"].(map[string]any)["messages"] = json.Number(strconv.FormatUint(messages, 10))
 	text := string(Canonical(doc))
-	if _, err := parseManifest(text, ""); err != nil {
+	if _, err := parseManifest(text, nil); err != nil {
 		return "", err
 	}
 	return text, nil
@@ -794,7 +797,7 @@ func exportRead(directory []ExportEntry, manifestText, contactsCSV, threadsCSV *
 	if manifestText == nil {
 		return nil, exportRefuse("manifest is required")
 	}
-	m, err := parseManifest(*manifestText, owner)
+	m, err := parseManifest(*manifestText, &owner)
 	if err != nil {
 		return nil, err
 	}
@@ -935,7 +938,7 @@ type exportEnd struct {
 
 // exportReadEnd is §9.2's cross-batch rules, once the host has streamed messages.jsonl.
 func exportReadEnd(manifestText string, e exportEnd) error {
-	m, err := parseManifest(manifestText, "")
+	m, err := parseManifest(manifestText, nil)
 	if err != nil {
 		return err
 	}
