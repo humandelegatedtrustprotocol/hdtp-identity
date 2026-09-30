@@ -654,6 +654,11 @@ func TestTheTypedDecisionsRefuseAHostRootThatIsNotAFingerprint(t *testing.T) {
 		{NodeState{Pins: []Pin{{Root: fp}, {Root: "abc"}}}, "node.pins[1].root is not a fingerprint"},
 		{NodeState{Tombstones: []TombstoneRec{{Root: ""}}}, "node.tombstones[0].root is not a fingerprint"},
 		{NodeState{FormerEndpoints: []FormerEndpoint{{Root: fp[:len(fp)-1]}}}, "node.former_endpoints[0].root is not a fingerprint"},
+		// And, in the reader's order, a held key's kid first, then each pin's state and leaf fingerprint
+		// beside its root (the review of 2026-09-30: S1, S2, and the kid). A zero value is none.
+		{NodeState{Keys: []HeldKey{{Kid: "abc"}}, Pins: []Pin{{Root: "abc"}}}, "node.keys[0].kid is not a fingerprint"},
+		{NodeState{Pins: []Pin{{Root: fp, State: "Blocked"}}}, "node.pins[0].state is active, pending_out or blocked"},
+		{NodeState{Pins: []Pin{{Root: fp, LeafFingerprint: "abc"}}}, "node.pins[0].leaf_fingerprint is not a fingerprint"},
 	} {
 		if _, err := Decide(time.Now(), Envelope{}, c.node); err == nil || err.Error() != c.want {
 			t.Errorf("Decide: %v, want %q", err, c.want)
@@ -662,9 +667,15 @@ func TestTheTypedDecisionsRefuseAHostRootThatIsNotAFingerprint(t *testing.T) {
 			t.Errorf("DecideChain: %v, want %q", err, c.want)
 		}
 	}
-	_, err := OpenResult(Envelope{}, OpenOpts{Recipient: alina.leafKey, RecipientPublic: alina.leafKey.Public(), Pins: []Pin{{Root: "abc"}}})
-	if err == nil || err.Error() != "pins[0].root is not a fingerprint" {
-		t.Errorf("OpenResult: %v", err)
+	for pin, want := range map[Pin]string{
+		{Root: "abc"}:                    "pins[0].root is not a fingerprint",
+		{Root: fp, State: "removed"}:     "pins[0].state is active, pending_out or blocked",
+		{Root: fp, LeafFingerprint: "x"}: "pins[0].leaf_fingerprint is not a fingerprint",
+	} {
+		_, err := OpenResult(Envelope{}, OpenOpts{Recipient: alina.leafKey, RecipientPublic: alina.leafKey.Public(), Pins: []Pin{pin}})
+		if err == nil || err.Error() != want {
+			t.Errorf("OpenResult %+v: %v, want %q", pin, err, want)
+		}
 	}
 	// The control: fingerprints get past the roots, to what is wrong with the rest.
 	if _, err := Decide(time.Now(), Envelope{}, NodeState{Pins: []Pin{{Root: fp}}}); err != nil && strings.Contains(err.Error(), "fingerprint") {

@@ -522,6 +522,30 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   the skew window and the thirty-day cap alone, which read in PROOFS.md as holding the retention.
 - **The order `build_leaf` and `leaf_tbs` read `serial` in** is held by two parity cases (a serial
   too short and no `cn`: `serial is 8 to 20 bytes`), both ports already agreeing.
+- **A pin's `state` is one of three, and its `leaf_fingerprint` a fingerprint** (S1 and S2 of the
+  review of 2026-09-30), in `decide`, `decide_chain` and `open_result`, where each is read, and first
+  in the typed APIs: `bad_request` `<path>.state is active, pending_out or blocked` and `<path>.leaf_fingerprint
+  is not a fingerprint`. Both ports read any other state as `active`, so a blocked contact whose host
+  wrote `Blocked`, `blocked ` or `removed` was a full contact; and a `leaf_fingerprint` of `""` was a
+  claim matching no leaf to the core (`chain_required`, `unknown leaf`) and no claim at all to the Go
+  port (`ok`). A Go caller's zero values, a `State` or a `LeafFingerprint` of `""`, are still `active`
+  and none; the core's typed `Pin` refuses a `leaf_fingerprint` of `Some("")`.
+- **A held key's `kid` is a fingerprint** (found by parity's nested `""` cases, below): `decide` and
+  `decide_chain` answer `bad_request` `node.keys[<i>].kid is not a fingerprint` where the kid is read,
+  and the typed APIs first. Both ports held a key whose kid was `""` without a word, a key no envelope
+  could name.
+- **`export_merge` holds a row's `status` and `added`, and `book_rows` a contact's `root` and
+  `added`** (found the same way): `<held|rows>[<i>]: status is not active, blocked or pending_out`,
+  `<held|rows>[<i>]: added is not an RFC 3339 instant`, `contacts[<i>]: root is not a fingerprint` and
+  `contacts[<i>]: added is not an RFC 3339 instant`, export_read's words. A held row whose status was
+  `Blocked` was read as not blocked, so an import did not keep the person's block; and `book_rows`
+  answered a row whose `root` or `added` was `""`, off the contract it types them by.
+- **Parity sends `""` to every string inside a member** (S1's harness half): `js/cases/generated.mjs`
+  varies each string member of an object nested in a function's base arguments, where it varied
+  top-level members only, so no pin's `leaf_fingerprint` of `""` was ever sent. It found the three
+  entries above. Two small-form cases whose names said an unreadable pin was never parsed had tested,
+  since e49ef50, only that a root which is no fingerprint is refused; their pin's root is now one, and
+  they hold what their names say.
 
 ## 0.4.1 — 2026-09-28
 
