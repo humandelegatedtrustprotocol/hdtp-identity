@@ -41,7 +41,11 @@ the tables is `contract/CONTRACT.template.md` and is written by hand.
   inside a certificate or a request: `{"error": "unsupported", "why": "unsupported key type <OID>"}`,
   the OID the key's AlgorithmIdentifier names first (a function that answers a refusal as its result
   carries the same words: chain rule 1, `csr_check`, `card_decode`). The seed's `parse` refuses it in
-  the same words.
+  the same words, a P-256 key whose curve OID has a padded subidentifier included, and reads a
+  SubjectPublicKeyInfo as the ports do: `SubjectPublicKeyInfo shape` for anything but its
+  AlgorithmIdentifier and a key BIT STRING with no unused bits, `P-256 key is not a point` for one off
+  the curve (pact-protocol b841dd3; before it the seed named these in OpenSSL's words or as an OID not
+  in the DER form, and read a key with unused bits).
 - **Every function returns one JSON object.** Success shapes are listed per function. Failure is
   `{"error": "<code>", "why": "<one line>"}`, where `code` is one of the contract's `ErrorCode`
   ({{error_codes}}), and each function lists the codes it can fail with, which `js/parity.mjs` holds
