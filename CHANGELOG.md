@@ -427,13 +427,24 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   `vectors/appendix-b-reader.json`, byte for byte, from the pact-protocol beside this repository, as
   the gate reads it. pact-protocol's copy arrives with its PR #10, so this lands with it.
 - **The seed is held to the ports where they read alike** (R33's seed half, and clusters G and H):
-  26 parity expectations for `parse_certificate` and `card_decode` now come from the seed's own
+  33 parity expectations for `parse_certificate` and `card_decode` now come from the seed's own
   `parse` and `decodeCard` at run time, where a fixed string stood: an empty keyUsage BIT STRING, an
-  empty `[3]`, three validity times, a keyUsage whose OID is padded and whose criticality is spelled
-  `0x01`, a key outside the profile (four, in a certificate and on a card), a card's certificate
-  with a stray character (nine), and the controls. On pact-protocol main the seed read 20 of them
-  differently, so the gate fails there, and passes against pact-protocol PR #10, with which this
-  lands.
+  empty `[3]`, three validity times and one, a keyUsage whose OID is padded and whose criticality is
+  spelled `0x01`, an extension of four parts, an extnValue that is not an OCTET STRING, an extnValue
+  OCTET STRING holding two TLVs, a keyUsage with an unused bit set, a P-256 key written as its
+  compressed point, a key outside the profile (four, in a certificate and on a card), a card's
+  certificate with a stray character (nine), and the controls. On pact-protocol main the seed read 20
+  of the first 26 differently; at PR #10's a5a3e57 it still read three of the seven added on
+  2026-09-30 differently (the extnValue and the compressed point it took; four parts it called
+  `extension shape`). The gate passes against PR #10 from df57707, with which this lands.
+- **Every fault the contract lists among what parsing refuses is an intrusion scenario** (lead 6):
+  `parse_certificate`'s notes said so of all of them, and five had none. `js/intrude.mjs` gains the
+  seed's six: `DER:` a validity with three times, an extension of four parts, an extnValue that is not
+  an OCTET STRING, an extnValue OCTET STRING holding two TLVs, keyUsage with an unused bit set, and a
+  P-256 key written as its compressed point, each built by the seed before it is signed. Both ports
+  refuse all six, as the seed does from pact-protocol df57707 (138 scenarios, 138 verdicts alike on
+  each port). The notes now name the extnValue that is not an OCTET STRING (`certificate shape`), which
+  both ports refused and the list left out.
 - **MUST 13.3#2 names its gap** (CW-06): `js/musts.json` says what nothing here holds — keeping a
   seen `msg_id`'s record until `min(exp, ts + 300 s)` — and that both hosts keep it until `exp`
   alone, CW-06's fix being the node's and the cloud's; PROOFS.md marks the row. It cited the tests of
