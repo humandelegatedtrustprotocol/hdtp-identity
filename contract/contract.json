@@ -1,9 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:pact:identity:contract",
-  "title": "pact-identity: the library boundary",
-  "description": "Every function a port of pact-identity presents, as `call(name, args) -> answer`: what it takes, what it answers, and which error codes it can fail with. This file is the source; CONTRACT.md is rendered from it and js/parity.mjs holds both ports to it.",
-  "spec": "2.2.5",
+  "$id": "urn:hdtp:identity:contract",
+  "title": "hdtp-identity: the library boundary",
+  "description": "Every function a port of hdtp-identity presents, as `call(name, args) -> answer`: what it takes, what it answers, and which error codes it can fail with. This file is the source; CONTRACT.md is rendered from it and js/parity.mjs holds both ports to it.",
+  "spec": "1.0.0",
   "sections": {
     "build": "The build",
     "keys": "Keys",
@@ -53,7 +53,7 @@
     "InstantIn": {
       "type": "string",
       "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$",
-      "description": "An RFC 3339 UTC instant as an argument, in the one grammar every port reads (SPEC 2.2.2): upper-case T and Z, no offset, `.` alone before a fraction of a second, which is allowed and DROPPED, because the boundary is whole seconds."
+      "description": "An RFC 3339 UTC instant as an argument, in the one grammar every port reads: upper-case T and Z, no offset, `.` alone before a fraction of a second, which is allowed and DROPPED, because the boundary is whole seconds."
     },
     "Pkcs8": { "$ref": "#/$defs/B64url", "description": "A private key: PKCS #8 DER." },
     "Spki": { "$ref": "#/$defs/B64url", "description": "A public key: SubjectPublicKeyInfo DER." },
@@ -67,7 +67,7 @@
       "description": "A certificate serial number, 8 to 20 bytes. Absent, the core draws 8 random bytes."
     },
     "Seed32": { "$ref": "#/$defs/B64url", "description": "Exactly 32 bytes." },
-    "Suite": { "enum": ["PACT-SEAL-P256", "PACT-SEAL-X25519"], "description": "An HPKE suite (§5)." },
+    "Suite": { "enum": ["HDTP-SEAL-P256", "HDTP-SEAL-X25519"], "description": "An HPKE suite (§5)." },
     "Form": {
       "enum": ["chain", "leaf"],
       "description": "How the sender proves itself inside the plaintext: its whole chain, or the fingerprint of a leaf the recipient already holds."
@@ -503,7 +503,7 @@
     "VaultDocument": {
       "type": "object",
       "properties": {
-        "format": { "const": "pact-vault/1" },
+        "format": { "const": "hdtp-vault/1" },
         "kdf": { "$ref": "#/$defs/Kdf" },
         "salt": { "$ref": "#/$defs/B64url" },
         "nonce": { "$ref": "#/$defs/B64url" },
@@ -538,7 +538,7 @@
       "type": "object",
       "description": "manifest.json (SPEC §9.2), exactly these members.",
       "properties": {
-        "pact_export": { "const": 2 },
+        "hdtp_export": { "const": 1 },
         "owner": { "$ref": "#/$defs/Fingerprint" },
         "owner_name": { "type": "string" },
         "exported_at": { "type": "string" },
@@ -553,10 +553,10 @@
           "type": "object",
           "properties": { "contacts.csv": { "$ref": "#/$defs/Sha256Hex" }, "threads.csv": { "$ref": "#/$defs/Sha256Hex" }, "messages.jsonl": { "$ref": "#/$defs/Sha256Hex" } },
           "additionalProperties": false,
-          "description": "The text members to the sha256 of their bytes. Never a media member: each is bound by its name, the sha256 of its bytes, and counted by counts.media (SPEC 2.2.2)."
+          "description": "The text members to the sha256 of their bytes. Never a media member: each is bound by its name, the sha256 of its bytes, and counted by counts.media."
         }
       },
-      "required": ["pact_export", "owner", "owner_name", "exported_at", "tool", "counts", "files"],
+      "required": ["hdtp_export", "owner", "owner_name", "exported_at", "tool", "counts", "files"],
       "additionalProperties": false
     },
     "ContactRow": {
@@ -681,9 +681,9 @@
     },
     "VaultPlaintext": {
       "type": "object",
-      "description": "What the FILE seals: the root and nothing else (SPEC \u00a79). `prf` is the \u00a72.1 secret a derived root's record is opened with, for the wallet that has lost its credential. A `v` that is not 2 is refused at both ends and nothing converts.",
+      "description": "What the FILE seals: the root and nothing else (SPEC \u00a79). `prf` is the \u00a72.1 secret a derived root's record is opened with, for the wallet that has lost its credential. A `v` that is not 1 is refused at both ends and nothing converts.",
       "properties": {
-        "v": { "const": 2 },
+        "v": { "const": 1 },
         "roots": { "type": "array", "items": { "$ref": "#/$defs/VaultRoot" } },
         "prf": { "$ref": "#/$defs/Seed32" },
         "passkey": { "$ref": "#/$defs/VaultPasskey" }
@@ -695,7 +695,7 @@
       "type": "object",
       "description": "What the RECORD seals (SPEC \u00a79): the ledger and the contact book, the roots without their keys \u2014 or with one, once a root has been re-bound \u2014 and what the wallet page keeps beside them. Under the store key of \u00a72.1 for a wallet with a credential; beside the file, under the recovery key, for one without.",
       "properties": {
-        "v": { "const": 2 },
+        "v": { "const": 1 },
         "roots": { "type": "array", "items": { "$ref": "#/$defs/VaultRoot" } },
         "ledger": { "type": "array", "items": { "$ref": "#/$defs/LedgerEntry" } },
         "contacts": { "type": "array", "items": { "$ref": "#/$defs/VaultContact" } },
@@ -928,7 +928,7 @@
       "additionalProperties": false
     },
     "LimitsIdle": {
-      "description": "How long, in milliseconds, a bucket's row may sit untouched before it is full whatever it budgets: a host may delete a row older than this, and `limits_rules_check` refuses rules whose contact bucket takes longer to refill from empty (crates/pact-limits `IDLE_MS`, go/limits.go `LimitsIdleMS`; a test in each holds it to this).",
+      "description": "How long, in milliseconds, a bucket's row may sit untouched before it is full whatever it budgets: a host may delete a row older than this, and `limits_rules_check` refuses rules whose contact bucket takes longer to refill from empty (crates/hdtp-limits `IDLE_MS`, go/limits.go `LimitsIdleMS`; a test in each holds it to this).",
       "const": 3600000
     }
   },
@@ -943,7 +943,7 @@
         "additionalProperties": false
       },
       "errors": ["bad_request"],
-      "notes": "The build, not a rule: `spec` is the version of `pact-protocol/SPEC.md` the port implements and is the same everywhere; the other member names the port's own release, so the answers differ and nothing compares them."
+      "notes": "The build, not a rule: `spec` is the version of hdtp-spec's specification the port implements and is the same everywhere; the other member names the port's own release, so the answers differ and nothing compares them."
     },
     "generate_key": {
       "section": "keys",
@@ -981,7 +981,7 @@
         "additionalProperties": false
       },
       "errors": ["bad_request"],
-      "notes": "SPEC §2.1's fixed PRF input, `SHA-256(\"pact/vault/1\")`, and the three `info` strings. A call rather than a constant a caller copies, so the bytes live in one place and the vectors prove them."
+      "notes": "SPEC §2.1's fixed PRF input, `SHA-256(\"hdtp/vault/1\")`, and the three `info` strings. A call rather than a constant a caller copies, so the bytes live in one place and the vectors prove them."
     },
     "derive_seed": {
       "section": "keys",
@@ -1472,7 +1472,7 @@
           "cert": { "$ref": "#/$defs/CertDer" },
           "seal": {
             "type": "string",
-            "description": "`none`, `optional` or `required` (SPEC §3). **Declared, not enforced**: a non-empty value is written into `X-PACT-SEAL` as given, so a fourth word makes a card whose policy no reader implements. Narrowing it is a change to the Rust core, which costs a re-pin, so it waits for a change that pays for one. What IS refused is a control character, in this member and every other one a caller supplies."
+            "description": "`none`, `optional` or `required` (SPEC §3). **Declared, not enforced**: a non-empty value is written into `X-HDTP-SEAL` as given, so a fourth word makes a card whose policy no reader implements. Narrowing it is a change to the Rust core, which costs a re-pin, so it waits for a change that pays for one. What IS refused is a control character, in this member and every other one a caller supplies."
           },
           "extra": {
             "type": "array",
@@ -1504,7 +1504,7 @@
         "type": "object",
         "properties": {
           "fn": { "type": "string" },
-          "version": { "const": 2 },
+          "version": { "const": 1 },
           "seal": { "type": "string" },
           "cert": { "$ref": "#/$defs/CertDer" },
           "root": { "$ref": "#/$defs/Fingerprint" },
@@ -1522,7 +1522,7 @@
         "additionalProperties": false
       },
       "errors": ["bad_request", "parse"],
-      "notes": "Every refusal of a card is `bad_request` with the exact `why` strings of `card.mjs`. A `now` that is not an instant is `parse`, `not an RFC 3339 instant: <now>`, as every function that reads an instant answers it (`\"\"` included). An empty `X-PACT-VERSION` names no version (`no X-PACT-VERSION`). `X-PACT-CERT` is read as every string a port did not write is read (§0), so a stray character, whitespace or a spare bit set is `certificate does not parse: not base64url`."
+      "notes": "Every refusal of a card is `bad_request` with the exact `why` strings of `card.mjs`. A `now` that is not an instant is `parse`, `not an RFC 3339 instant: <now>`, as every function that reads an instant answers it (`\"\"` included). An empty `X-HDTP-VERSION` names no version (`no X-HDTP-VERSION`). `X-HDTP-CERT` is read as every string a port did not write is read (§0), so a stray character, whitespace or a spare bit set is `certificate does not parse: not base64url`."
     },
     "refresh_check": {
       "section": "cards",
@@ -1685,7 +1685,7 @@
       },
       "result": { "$ref": "#/$defs/Envelope" },
       "errors": ["bad_request", "envelope_invalid", "parse", "unsupported"],
-      "notes": "Exactly one of `result` and `error`, sealed as `seal_request` seals `params`. `cty` is `application/pact-result+json`. `ts` and `exp` (absent: `ts + 600`) are held as `seal_request` holds them, first."
+      "notes": "Exactly one of `result` and `error`, sealed as `seal_request` seals `params`. `cty` is `application/hdtp-result+json`. `ts` and `exp` (absent: `ts + 600`) are held as `seal_request` holds them, first."
     },
     "open_result": {
       "section": "envelopes",
@@ -1823,7 +1823,7 @@
         "additionalProperties": false
       },
       "errors": ["bad_request", "parse", "vault"],
-      "notes": "`plaintext` is a VaultPlaintext or a RecordPlaintext, and its `v` is 2: anything else is `bad_request` (`a vault plaintext is v 2: the root, or the record`). The plaintext is sealed as `seal_request` seals `params`, as the value it is. That generation is all `vault_seal` checks of the plaintext (and `vault_open` of what it opens): the two shapes are held by `wallet_issue`, where the rules read them, so a stricter seal or open cannot lock a person out of a document a wallet already keeps. Read in this order: `passphrase` (absent: `passphrase is required`; empty: `empty passphrase`), `plaintext` and its generation, then `kdf`, `salt` and `nonce`, then the nonce's length (`vault`, `nonce is 12 bytes`) and the salt's (`vault`, `salt is at least 8 bytes`: `VaultSaltMin`). `kdf` absent or null is `KdfDefault`, and one that is not an object is `bad_request` `kdf is required`. An object is read by the one reader `vault_open` reads a document's `kdf` with, except that a member left out takes the default: a `name` other than `argon2id`, or one that is not a string, is `vault` `unknown kdf`; a parameter that is not a whole number written as one (`1.0`, `-0`, `\"8192\"`), or is outside its range, is `vault` `kdf parameters out of range`, never truncated; and a member other than those four, named in any case but theirs, is `vault` `kdf holds name, m_kib, t and p, and nothing else: <member>`. `salt` and `nonce` are for tests only."
+      "notes": "`plaintext` is a VaultPlaintext or a RecordPlaintext, and its `v` is 1: anything else is `bad_request` (`a vault plaintext is v 1: the root, or the record`). The plaintext is sealed as `seal_request` seals `params`, as the value it is. That generation is all `vault_seal` checks of the plaintext (and `vault_open` of what it opens): the two shapes are held by `wallet_issue`, where the rules read them, so a stricter seal or open cannot lock a person out of a document a wallet already keeps. Read in this order: `passphrase` (absent: `passphrase is required`; empty: `empty passphrase`), `plaintext` and its generation, then `kdf`, `salt` and `nonce`, then the nonce's length (`vault`, `nonce is 12 bytes`) and the salt's (`vault`, `salt is at least 8 bytes`: `VaultSaltMin`). `kdf` absent or null is `KdfDefault`, and one that is not an object is `bad_request` `kdf is required`. An object is read by the one reader `vault_open` reads a document's `kdf` with, except that a member left out takes the default: a `name` other than `argon2id`, or one that is not a string, is `vault` `unknown kdf`; a parameter that is not a whole number written as one (`1.0`, `-0`, `\"8192\"`), or is outside its range, is `vault` `kdf parameters out of range`, never truncated; and a member other than those four, named in any case but theirs, is `vault` `kdf holds name, m_kib, t and p, and nothing else: <member>`. `salt` and `nonce` are for tests only."
     },
     "vault_open": {
       "section": "vault",
@@ -1840,7 +1840,7 @@
         "additionalProperties": false
       },
       "errors": ["bad_request", "vault"],
-      "notes": "Read in this order: `vault` (absent or null: `vault is required`), `passphrase` (absent: `passphrase is required`), then the document's header, where it does not read, all `vault`: a document that is not an object, or whose `format` is not `pact-vault/1`, is `not a pact-vault/1 document`; its `kdf` is read by the one reader `vault_seal`'s is, with all four members (`Kdf`): one that is not an object, or whose `name` is absent, not a string or not `argon2id`, is `unknown kdf`, a parameter that is absent, not a whole number written as one, or outside its range is `kdf parameters out of range`, and another member is `kdf holds name, m_kib, t and p, and nothing else: <member>`; `salt`, `nonce` and `ct` that are absent or not strings are no bytes, and one that is not base64url, or a nonce that is not 12 bytes, is the one message below; then a salt under `VaultSaltMin` bytes is `salt is at least 8 bytes`. A wrong passphrase and a tampered document are one message (`the passphrase is wrong or the vault is damaged`). A document that opens to a plaintext whose `v` is not 2 was written by an earlier wallet and is refused (`vault`, `this vault was written by an earlier wallet and is not opened: there is no conversion`); nothing converts."
+      "notes": "Read in this order: `vault` (absent or null: `vault is required`), `passphrase` (absent: `passphrase is required`), then the document's header, where it does not read, all `vault`: a document that is not an object, or whose `format` is not `hdtp-vault/1`, is `not an hdtp-vault/1 document`; its `kdf` is read by the one reader `vault_seal`'s is, with all four members (`Kdf`): one that is not an object, or whose `name` is absent, not a string or not `argon2id`, is `unknown kdf`, a parameter that is absent, not a whole number written as one, or outside its range is `kdf parameters out of range`, and another member is `kdf holds name, m_kib, t and p, and nothing else: <member>`; `salt`, `nonce` and `ct` that are absent or not strings are no bytes, and one that is not base64url, or a nonce that is not 12 bytes, is the one message below; then a salt under `VaultSaltMin` bytes is `salt is at least 8 bytes`. A wrong passphrase and a tampered document are one message (`the passphrase is wrong or the vault is damaged`). A document that opens to a plaintext whose `v` is not 1 is of another generation and is refused (`vault`, `this vault is of another generation and is not opened: there is no conversion`); nothing converts."
     },
     "wallet_issue": {
       "section": "vault",
@@ -1873,7 +1873,7 @@
         "additionalProperties": false
       },
       "errors": ["bad_request", "parse", "unsupported"],
-      "notes": "Two documents, as \u00a79 keeps them: the vault is the root and nothing else, the record holds the ledger this reads and the entry answered is appended to. A vault carrying `ledger` or `contacts` is refused (`bad_request`, `a vault holds the root and nothing else: its ledger and contacts belong in the record`); an absent or null document is `vault_plaintext is required` or `record_plaintext is required` (CONTRACT §0), and a record that is not an object `record_plaintext is required: the ledger lives there`. After `root_fingerprint`, `csr`, `now` and `valid_days` (present and not an integer: `valid_days is required`), each document is held to its schema before anything in it is read, as follows. Inside both documents, as in the arguments (CONTRACT §0), a member the document declares that is `null` is absent — an optional one is not there, a required one is named as a missing one is — and a member it does not declare is refused whatever it holds, `null` included (a vault's `ledger: null` is a vault carrying a ledger). The vault: not an object, `vault_plaintext is required: the root lives there`; then its `v`; then the first member, in sorted order, it does not hold, `vault_plaintext holds v, roots, prf and passkey, and nothing else: <member>`; then its `roots` (absent or not a list: `the vault's roots is a list`), each entry a `VaultRoot` (`the vault's root <i> does not read: <member>`: the first of `fingerprint`, `cn`, `cert` and `created` that is absent, not a string, not a fingerprint or not an instant, then an `alg`, `pkcs8`, `holder` or `rebound_at` of the wrong type, then the first member, in sorted order, it does not hold; an entry that is not an object, `the vault's root <i> does not read`); then its `prf` (32 bytes, or `the vault's prf does not read`) and its `passkey` (an object holding `credential_id`, a string, and nothing else, or `the vault's passkey does not read`). Then the record, likewise: `record_plaintext holds v, roots, ledger, contacts, passkey and backup_verified_at, and nothing else: <member>`; its `roots` where present, as the vault's (`the record's roots is a list`, `the record's root <i> does not read: <member>`); its `ledger` (not a list: `the record's ledger is a list`) and every ledger entry, every root's: an entry that is not an object, lacks a required member, has one of the wrong type, a `root` that is not a fingerprint, an empty `endpoint` or an instant that does not parse, or carries one it does not hold is refused (`the record's ledger entry <i> does not read: <member>`), never skipped — skipped, it could be the live leaf; its `contacts` (not a list: `the record's contacts is a list`), each entry a `VaultContact` (`the record's contact <i> does not read: <member>`: `root` absent or not a fingerprint, `endpoint` absent or not a string, a `name`, `leaf`, `root_cert` or `added` that is not a string or, for `added`, not an instant, then the first member, in sorted order, it does not hold; an entry that is not an object, `the record's contact <i> does not read`); its `passkey` (`the record's passkey does not read`) and its `backup_verified_at`, a whole number (`the record's backup_verified_at does not read`). A root with no `pkcs8` is refused (`this root is held on a card: wallet_issue signs only with a key the vault holds`), and one whose `pkcs8` does not read is refused in its reader's class (`parse`; `unsupported` for a key outside the profile). Then SPEC §2.2, before anything is signed: the key's fingerprint is `root_fingerprint` (`the vault's root key is not the root it is filed under`); the entry's `cert` reads (in its reader's class) and holds the key (`the vault's root certificate is not its key's`); and the key signs `PACT root proof v1`, a newline and 32 random bytes, verified under the certificate's key (`the vault's root key does not sign for its certificate`). After issuing, the chain of the leaf and that certificate is validated at `now` against `root_fingerprint` and the request's endpoint before it is answered (`the chain it issued does not validate: chain rule <n>: <reason>`). The entry answered is the endpoint and the dates, never the leaf. The wallet's rules: `csr_check` with the vault's roots as `root_spkis`; then `ledger_check`'s rules over the record's ledger (a record with no `ledger` has no entry to read): `new_host` true when no ledger entry names that endpoint's host, with the warning `new host: this endpoint's host has never been issued to`; the **live leaf is the newest one issued** (§14.3) and a second endpoint while it is unexpired is refused unless `move: true`, which instead warns `move: the live leaf at the previous endpoint is superseded once contacts see this one` (a `move` or a `move_back`); `not_before` monotonic over the ledger; `valid_days` absent means 365 and an explicit 0 is refused."
+      "notes": "Two documents, as \u00a79 keeps them: the vault is the root and nothing else, the record holds the ledger this reads and the entry answered is appended to. A vault carrying `ledger` or `contacts` is refused (`bad_request`, `a vault holds the root and nothing else: its ledger and contacts belong in the record`); an absent or null document is `vault_plaintext is required` or `record_plaintext is required` (CONTRACT §0), and a record that is not an object `record_plaintext is required: the ledger lives there`. After `root_fingerprint`, `csr`, `now` and `valid_days` (present and not an integer: `valid_days is required`), each document is held to its schema before anything in it is read, as follows. Inside both documents, as in the arguments (CONTRACT §0), a member the document declares that is `null` is absent — an optional one is not there, a required one is named as a missing one is — and a member it does not declare is refused whatever it holds, `null` included (a vault's `ledger: null` is a vault carrying a ledger). The vault: not an object, `vault_plaintext is required: the root lives there`; then its `v`; then the first member, in sorted order, it does not hold, `vault_plaintext holds v, roots, prf and passkey, and nothing else: <member>`; then its `roots` (absent or not a list: `the vault's roots is a list`), each entry a `VaultRoot` (`the vault's root <i> does not read: <member>`: the first of `fingerprint`, `cn`, `cert` and `created` that is absent, not a string, not a fingerprint or not an instant, then an `alg`, `pkcs8`, `holder` or `rebound_at` of the wrong type, then the first member, in sorted order, it does not hold; an entry that is not an object, `the vault's root <i> does not read`); then its `prf` (32 bytes, or `the vault's prf does not read`) and its `passkey` (an object holding `credential_id`, a string, and nothing else, or `the vault's passkey does not read`). Then the record, likewise: `record_plaintext holds v, roots, ledger, contacts, passkey and backup_verified_at, and nothing else: <member>`; its `roots` where present, as the vault's (`the record's roots is a list`, `the record's root <i> does not read: <member>`); its `ledger` (not a list: `the record's ledger is a list`) and every ledger entry, every root's: an entry that is not an object, lacks a required member, has one of the wrong type, a `root` that is not a fingerprint, an empty `endpoint` or an instant that does not parse, or carries one it does not hold is refused (`the record's ledger entry <i> does not read: <member>`), never skipped — skipped, it could be the live leaf; its `contacts` (not a list: `the record's contacts is a list`), each entry a `VaultContact` (`the record's contact <i> does not read: <member>`: `root` absent or not a fingerprint, `endpoint` absent or not a string, a `name`, `leaf`, `root_cert` or `added` that is not a string or, for `added`, not an instant, then the first member, in sorted order, it does not hold; an entry that is not an object, `the record's contact <i> does not read`); its `passkey` (`the record's passkey does not read`) and its `backup_verified_at`, a whole number (`the record's backup_verified_at does not read`). A root with no `pkcs8` is refused (`this root is held on a card: wallet_issue signs only with a key the vault holds`), and one whose `pkcs8` does not read is refused in its reader's class (`parse`; `unsupported` for a key outside the profile). Then SPEC §2.2, before anything is signed: the key's fingerprint is `root_fingerprint` (`the vault's root key is not the root it is filed under`); the entry's `cert` reads (in its reader's class) and holds the key (`the vault's root certificate is not its key's`); and the key signs `HDTP root proof v1`, a newline and 32 random bytes, verified under the certificate's key (`the vault's root key does not sign for its certificate`). After issuing, the chain of the leaf and that certificate is validated at `now` against `root_fingerprint` and the request's endpoint before it is answered (`the chain it issued does not validate: chain rule <n>: <reason>`). The entry answered is the endpoint and the dates, never the leaf. The wallet's rules: `csr_check` with the vault's roots as `root_spkis`; then `ledger_check`'s rules over the record's ledger (a record with no `ledger` has no entry to read): `new_host` true when no ledger entry names that endpoint's host, with the warning `new host: this endpoint's host has never been issued to`; the **live leaf is the newest one issued** (§14.3) and a second endpoint while it is unexpired is refused unless `move: true`, which instead warns `move: the live leaf at the previous endpoint is superseded once contacts see this one` (a `move` or a `move_back`); `not_before` monotonic over the ledger; `valid_days` absent means 365 and an explicit 0 is refused."
     },
     "ledger_check": {
       "section": "ledger",
@@ -1922,7 +1922,7 @@
         "additionalProperties": false
       },
       "errors": ["bad_request", "parse"],
-      "notes": "The wallet's ledger rules, as facts, in the one place they are written: `wallet_issue` applies them, the `pact` CLI applies them for a card-held root, and a wallet page or a host renders the move notice from them. In order: `root` (absent or empty: `root is required`), `endpoint`, `now`, `move` (present and not a boolean: `move is required`); then `endpoint` not in normal form is refused (`endpoint is not an https URL in normal form`); then every ledger entry, every root's, is read as `wallet_issue` reads it (`the record's ledger is a list`; `the record's ledger entry <i> does not read: <member>`, a `root` that is not a fingerprint and an empty `endpoint` included) — an entry that does not read is REFUSED, a `not_before` that does not parse included, never skipped: skipped, it could be the live leaf. The **live leaf** is this root's newest entry by `not_before` (§14.3; the first of equals, in ledger order), if its `not_after` is after `now`; an older entry still in its validity is history, not live. `notice.kind`: with no ledger, `no_ledger`; a leaf live at another endpoint, `move_back` when this endpoint has been issued to before and `move` when it has not (both with `from` and `until`, the live leaf's endpoint and `not_after`); otherwise `renew` when this endpoint has been issued to, and `new_host` when it has not. The kind does not depend on `move`; only `refusal` does."
+      "notes": "The wallet's ledger rules, as facts, in the one place they are written: `wallet_issue` applies them, the `hdtp` CLI applies them for a card-held root, and a wallet page or a host renders the move notice from them. In order: `root` (absent or empty: `root is required`), `endpoint`, `now`, `move` (present and not a boolean: `move is required`); then `endpoint` not in normal form is refused (`endpoint is not an https URL in normal form`); then every ledger entry, every root's, is read as `wallet_issue` reads it (`the record's ledger is a list`; `the record's ledger entry <i> does not read: <member>`, a `root` that is not a fingerprint and an empty `endpoint` included) — an entry that does not read is REFUSED, a `not_before` that does not parse included, never skipped: skipped, it could be the live leaf. The **live leaf** is this root's newest entry by `not_before` (§14.3; the first of equals, in ledger order), if its `not_after` is after `now`; an older entry still in its validity is history, not live. `notice.kind`: with no ledger, `no_ledger`; a leaf live at another endpoint, `move_back` when this endpoint has been issued to before and `move` when it has not (both with `from` and `until`, the live leaf's endpoint and `not_after`); otherwise `renew` when this endpoint has been issued to, and `new_host` when it has not. The kind does not depend on `move`; only `refusal` does."
     },
     "signing_request_check": {
       "section": "signing",
@@ -1988,7 +1988,7 @@
         "additionalProperties": false
       },
       "errors": ["bad_request", "parse"],
-      "notes": "SPEC §9.2's validation of everything but the messages and the media bytes, refusing the whole file at the first fault; every refusal of the file is `bad_request` whose `why` names the member, then the row (the header is row 1) and the column. In order: each directory entry, in the order given (a name that is not exactly `manifest.json`, `contacts.csv`, `threads.csv`, `messages.jsonl`, `media/` or `media/` and 64 lowercase hex: `entry \"<name>\": not a name an export holds`; `appears twice`; `encrypted`; a symbolic link; a directory but `media/`; a stated size over its bound); `manifest.json` and `contacts.csv` present; the manifest (exactly its members, `pact_export` 2, `owner` a fingerprint and the importing identity's, the counts whole numbers, `owner_name` and `tool` holding no private key, `files` naming only the text members — `contacts.csv`, `threads.csv`, `messages.jsonl` — each a lowercase hex sha256, never a media member, which is bound by its name and counted (SPEC 2.2.2)); every text member but the manifest listed in `files`, and every listed member present; `threads.csv`, `messages.jsonl` and `media/` present when counted; the media entries as many as counted; `contacts.csv` (its sha256, its header exactly, at most 5000 rows, each row's cells — a cell that holds a private key is refused before its column's rule — the root a fingerprint, unique, not the owner; the endpoint in normal form and passing the address guard; names at most 200 characters; the status; `true` or `false`; §8's permissions, single-spaced, none twice; the leaf a leaf and the root certificate a root of §14.1's profile, the latter for the row's root; `added` an instant) and its count; then `threads.csv` the same way (ids unique, the contact a root in `contacts.csv`). One leading `'` is stripped from every cell. A row's `leaf` is answered only when `[leaf, root_cert]` validates at the row's endpoint at `now` (§14.2); otherwise it is null and pins nothing. `media` is each media member's hash and stated size, sorted by hash: the host checks each file's bytes against both as it streams it."
+      "notes": "SPEC §9.2's validation of everything but the messages and the media bytes, refusing the whole file at the first fault; every refusal of the file is `bad_request` whose `why` names the member, then the row (the header is row 1) and the column. In order: each directory entry, in the order given (a name that is not exactly `manifest.json`, `contacts.csv`, `threads.csv`, `messages.jsonl`, `media/` or `media/` and 64 lowercase hex: `entry \"<name>\": not a name an export holds`; `appears twice`; `encrypted`; a symbolic link; a directory but `media/`; a stated size over its bound); `manifest.json` and `contacts.csv` present; the manifest (exactly its members, `hdtp_export` 1, `owner` a fingerprint and the importing identity's, the counts whole numbers, `owner_name` and `tool` holding no private key, `files` naming only the text members — `contacts.csv`, `threads.csv`, `messages.jsonl` — each a lowercase hex sha256, never a media member, which is bound by its name and counted); every text member but the manifest listed in `files`, and every listed member present; `threads.csv`, `messages.jsonl` and `media/` present when counted; the media entries as many as counted; `contacts.csv` (its sha256, its header exactly, at most 5000 rows, each row's cells — a cell that holds a private key is refused before its column's rule — the root a fingerprint, unique, not the owner; the endpoint in normal form and passing the address guard; names at most 200 characters; the status; `true` or `false`; §8's permissions, single-spaced, none twice; the leaf a leaf and the root certificate a root of §14.1's profile, the latter for the row's root; `added` an instant) and its count; then `threads.csv` the same way (ids unique, the contact a root in `contacts.csv`). One leading `'` is stripped from every cell. A row's `leaf` is answered only when `[leaf, root_cert]` validates at the row's endpoint at `now` (§14.2); otherwise it is null and pins nothing. `media` is each media member's hash and stated size, sorted by hash: the host checks each file's bytes against both as it streams it."
     },
     "export_read_messages": {
       "section": "export",
@@ -2319,7 +2319,7 @@
       "errors": [
         "bad_request"
       ],
-      "notes": "SPEC §12's call budgets as one decision (crates/pact-limits; go/limits.go). A call is charged one token in EVERY bucket of its charge, or in none: a refusal spends nothing. A bucket's level is `min(burst, tokens + elapsed × rate)`, `elapsed` the seconds since `updated_at` and never negative (a clock that went back refills nothing, and the row is written with the earlier time); a level under 1 refuses, with `retry_after = max(1, ceil((1 − level) / rate))`. The arithmetic is what the cloud's `RateLimiter.take` was, operation for operation in IEEE double precision, until the cloud removed it and decided through this function (pact-cloud ba68f9c); `js/cases/limits-vectors.json`, a fixed record of that TypeScript's decisions, holds every port to the same decisions and the same bits. A host may delete a row idle for over an hour: under rules `limits_rules_check` passes it is full, and no decision changes. In order: `rules` (absent: `rules is required`; not enforceable: `the limits rules cannot be enforced: <limits_rules_check's why>`), `charge` (not an object: `charge is required`; `charge.kind is required`; `charge.kind is one of …`; a member its kind does not hold, the first in sorted order: `a <kind> charge holds <members>, and nothing else: <member>`; `charge.<member> is required` for a string that is absent or empty, `charge.<member> is a whole number` for a count, `charge.root is a string or null`, `charge.source is required`, `charge.addressed is required`), `now` (absent or null: `now is required`; otherwise `now is a time in milliseconds`: a whole number from 0 to 2^53 − 1, written without a fraction or an exponent), `state` (not an object: `state is an object of rows by bucket`; a row, in sorted order of key, that does not read: `the state's row <key> does not read: <member>`)."
+      "notes": "SPEC §12's call budgets as one decision (crates/hdtp-limits; go/limits.go). A call is charged one token in EVERY bucket of its charge, or in none: a refusal spends nothing. A bucket's level is `min(burst, tokens + elapsed × rate)`, `elapsed` the seconds since `updated_at` and never negative (a clock that went back refills nothing, and the row is written with the earlier time); a level under 1 refuses, with `retry_after = max(1, ceil((1 − level) / rate))`. The arithmetic is what the cloud's `RateLimiter.take` was, operation for operation in IEEE double precision, until the cloud removed it and decided through this function (batondeck ba68f9c); `js/cases/limits-vectors.json`, a fixed record of that TypeScript's decisions, holds every port to the same decisions and the same bits. A host may delete a row idle for over an hour: under rules `limits_rules_check` passes it is full, and no decision changes. In order: `rules` (absent: `rules is required`; not enforceable: `the limits rules cannot be enforced: <limits_rules_check's why>`), `charge` (not an object: `charge is required`; `charge.kind is required`; `charge.kind is one of …`; a member its kind does not hold, the first in sorted order: `a <kind> charge holds <members>, and nothing else: <member>`; `charge.<member> is required` for a string that is absent or empty, `charge.<member> is a whole number` for a count, `charge.root is a string or null`, `charge.source is required`, `charge.addressed is required`), `now` (absent or null: `now is required`; otherwise `now is a time in milliseconds`: a whole number from 0 to 2^53 − 1, written without a fraction or an exponent), `state` (not an object: `state is an object of rows by bucket`; a row, in sorted order of key, that does not read: `the state's row <key> does not read: <member>`)."
     },
     "limits_buckets": {
       "section": "limits",
@@ -2354,7 +2354,7 @@
         "additionalProperties": false
       },
       "errors": ["bad_request"],
-      "notes": "The rows `limits_decide` reads for a charge, so a host can fetch them before it asks: the key scheme `LimitsCharge` describes, from the one place it is written (crates/pact-limits `Charge::buckets`; go/limits.go `Buckets`), where a host on the Wasm had to derive it a second time. Reads `rules` and then `charge` exactly as `limits_decide` does, in its words (`rules is required`; `the limits rules cannot be enforced: <why>`; the charge's own refusals)."
+      "notes": "The rows `limits_decide` reads for a charge, so a host can fetch them before it asks: the key scheme `LimitsCharge` describes, from the one place it is written (crates/hdtp-limits `Charge::buckets`; go/limits.go `Buckets`), where a host on the Wasm had to derive it a second time. Reads `rules` and then `charge` exactly as `limits_decide` does, in its words (`rules is required`; `the limits rules cannot be enforced: <why>`; the charge's own refusals)."
     }
   }
 }

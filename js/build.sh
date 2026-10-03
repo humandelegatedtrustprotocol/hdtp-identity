@@ -10,7 +10,7 @@
 # library: it behaves the same, and `node js/verify.mjs` will say its bytes are not the pinned ones.
 set -eu
 cd "$(dirname "$0")/.."
-CRATE=crates/pact-identity-wasm
+CRATE=crates/hdtp-identity-wasm
 # The bytes must not depend on where they were built. Without remapping, rustc embeds the absolute
 # path of every dependency's source file in panic locations: the core pinned on 2026-09-16 carried
 # its builder's home directory 76 times — a leak in an artifact every browser downloads, and the
@@ -28,11 +28,11 @@ CARGO_HOME_DIR="${CARGO_HOME:-$HOME/.cargo}"
 RUST_SRC="$(rustc --print sysroot)/lib/rustlib/src/rust"
 RUST_COMMIT="$(rustc -vV | sed -n 's/^commit-hash: //p')"
 [ -n "$RUST_COMMIT" ] || { echo "build: rustc did not say which commit it was built from" >&2; exit 1; }
-export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$HOME=/home --remap-path-prefix=$(pwd)=/pact-identity --remap-path-prefix=$CARGO_HOME_DIR=/cargo --remap-path-prefix=$RUST_SRC=/rustc/$RUST_COMMIT"
+export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$HOME=/home --remap-path-prefix=$(pwd)=/hdtp-identity --remap-path-prefix=$CARGO_HOME_DIR=/cargo --remap-path-prefix=$RUST_SRC=/rustc/$RUST_COMMIT"
 for target in web nodejs; do
   dir=js/pkg-$( [ "$target" = nodejs ] && echo node || echo web )
-  wasm-pack build "$CRATE" --release --target "$target" --out-dir "../../$dir" --out-name pact_identity_wasm --no-pack ${WASM_OPT:---no-opt} -- --locked 2>&1 | grep -v '^\[INFO\]' || true
-  [ -f "$dir/pact_identity_wasm_bg.wasm" ] || { echo "build failed for $target" >&2; exit 1; }
+  wasm-pack build "$CRATE" --release --target "$target" --out-dir "../../$dir" --out-name hdtp_identity_wasm --no-pack ${WASM_OPT:---no-opt} -- --locked 2>&1 | grep -v '^\[INFO\]' || true
+  [ -f "$dir/hdtp_identity_wasm_bg.wasm" ] || { echo "build failed for $target" >&2; exit 1; }
   # The Node package is CommonJS and the web package ESM; js/package.json says module, so each says its own.
   echo "{\"type\":\"$( [ "$target" = nodejs ] && echo commonjs || echo module )\"}" > "$dir/package.json"
 done

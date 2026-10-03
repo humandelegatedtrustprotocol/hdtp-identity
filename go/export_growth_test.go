@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 import (
 	"crypto/sha256"

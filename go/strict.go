@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 // Two strictness rules the Rust core applies and this port mirrors, so a chain reads the same in
 // both: an envelope's lifetime is bounded (§13.1), and an Ed25519 point of small order — a public

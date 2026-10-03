@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 import (
 	"encoding/json"
@@ -9,7 +9,7 @@ import (
 )
 
 // The constants the two ports each write down, held to the one copy contract/contract.json carries
-// ($defs Windows, Kdf, KdfArgs, KdfDefault and LimitsIdle). crates/pact-identity/tests/constants.rs
+// ($defs Windows, Kdf, KdfArgs, KdfDefault and LimitsIdle). crates/hdtp-identity/tests/constants.rs
 // and vault.rs's tests hold the core's to the same file. (The export's bounds are held by
 // export_limits_test.go; the canonical number table by review_test.go.)
 func contractDefs(t *testing.T) map[string]json.RawMessage {
@@ -101,7 +101,7 @@ func TestTheContractsKDFBoundsAndDefaultAreThePorts(t *testing.T) {
 	} {
 		kdf := map[string]any{"name": "argon2id", "m_kib": DefaultKDF.MKiB, "t": DefaultKDF.T, "p": DefaultKDF.P}
 		kdf[c.member] = c.value
-		args := fmt.Sprintf(`{"passphrase":"x","plaintext":{"v":2},"kdf":%s}`, mustJSON(kdf))
+		args := fmt.Sprintf(`{"passphrase":"x","plaintext":{"v":1},"kdf":%s}`, mustJSON(kdf))
 		if out := string(Call("vault_seal", json.RawMessage(args))); out != `{"error":"vault","why":"kdf parameters out of range"}` {
 			t.Errorf("vault_seal with %s %d: %s", c.member, c.value, out)
 		}
@@ -122,10 +122,10 @@ func TestTheContractsSaltFloorIsThePorts(t *testing.T) {
 		t.Fatalf("contract/contract.json's VaultSaltMin is %d and minSalt is %d", def.Const, minSalt)
 	}
 	kdf := &KDF{Name: "argon2id", MKiB: minMKiB, T: 1, P: 1}
-	if _, err := VaultSeal("x", []byte(`{"v":2}`), kdf, make([]byte, minSalt-1), nil); err == nil || err.Error() != "salt is at least 8 bytes" || codeFor(err, "") != "vault" {
+	if _, err := VaultSeal("x", []byte(`{"v":1}`), kdf, make([]byte, minSalt-1), nil); err == nil || err.Error() != "salt is at least 8 bytes" || codeFor(err, "") != "vault" {
 		t.Errorf("a salt of %d bytes: %v", minSalt-1, err)
 	}
-	sealed, err := VaultSeal("x", []byte(`{"v":2}`), kdf, make([]byte, minSalt), nil)
+	sealed, err := VaultSeal("x", []byte(`{"v":1}`), kdf, make([]byte, minSalt), nil)
 	if err != nil {
 		t.Fatalf("a salt of %d bytes: %v", minSalt, err)
 	}
@@ -145,11 +145,11 @@ func TestTheContractsSaltFloorIsThePorts(t *testing.T) {
 // (T19's mirror; the core's own test is vault.rs's a_typed_seal_is_held_to_the_range).
 func TestTheTypedSealRefusesWhatTheCoresDoes(t *testing.T) {
 	kdf := &KDF{Name: "argon2id", MKiB: minMKiB, T: 1, P: 1}
-	if _, err := VaultSeal("", []byte(`{"v":2}`), kdf, nil, nil); err == nil || err.Error() != "empty passphrase" || codeFor(err, "") != codeArgs {
+	if _, err := VaultSeal("", []byte(`{"v":1}`), kdf, nil, nil); err == nil || err.Error() != "empty passphrase" || codeFor(err, "") != codeArgs {
 		t.Errorf("an empty passphrase: %v", err)
 	}
 	for _, k := range []KDF{{Name: "argon2id", MKiB: 64, T: 1, P: 1}, {Name: "argon2id", MKiB: minMKiB, T: maxT + 1, P: 1}, {Name: "argon2id", MKiB: minMKiB, T: 1, P: 0}} {
-		if _, err := VaultSeal("x", []byte(`{"v":2}`), &k, nil, nil); err == nil || err.Error() != "kdf parameters out of range" {
+		if _, err := VaultSeal("x", []byte(`{"v":1}`), &k, nil, nil); err == nil || err.Error() != "kdf parameters out of range" {
 			t.Errorf("%+v: %v", k, err)
 		}
 	}

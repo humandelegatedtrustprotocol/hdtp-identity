@@ -8,10 +8,10 @@ export async function load() {
   if (isNode) {
     const { createRequire } = await import('node:module');
     const require = createRequire(import.meta.url);
-    return wrap(require('./pkg-node/pact_identity_wasm.js'));
+    return wrap(require('./pkg-node/hdtp_identity_wasm.js'));
   }
-  const mod = await import('./pkg-web/pact_identity_wasm.js');
-  await mod.default(); // fetches pact_identity_wasm_bg.wasm beside the module
+  const mod = await import('./pkg-web/hdtp_identity_wasm.js');
+  await mod.default(); // fetches hdtp_identity_wasm_bg.wasm beside the module
   return wrap(mod);
 }
 

@@ -1,9 +1,9 @@
 {
-  "name": "@pact-protocol/identity",
+  "name": "@hdtp/identity",
   "version": "0.4.2",
   "private": true,
   "type": "module",
-  "description": "PACT 2.0 identity core (Rust, compiled to WebAssembly): loaders for the browser, Cloudflare Workers and Node, and the Node proofs",
+  "description": "HDTP 1.0 identity core (Rust, compiled to WebAssembly): loaders for the browser, Cloudflare Workers and Node, and the Node proofs",
   "exports": {
     ".": "./index.mjs",
     "./worker": "./worker.mjs"

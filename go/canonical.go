@@ -1,6 +1,6 @@
-package pactidentity
+package hdtpidentity
 
-// RFC 8785 for the objects PACT canonicalises: members sorted by UTF-16 code unit, no whitespace,
+// RFC 8785 for the objects HDTP canonicalises: members sorted by UTF-16 code unit, no whitespace,
 // numbers in their shortest form, strings escaped as JSON.stringify escapes them.
 
 import (
@@ -57,7 +57,7 @@ const (
 	jsonNestedTooDeep      = "nested more than 127 deep"
 )
 
-// jsonLimit is the core's `json_limit` (crates/pact-identity/src/util.rs), the same scan: the first
+// jsonLimit is the core's `json_limit` (crates/hdtp-identity/src/util.rs), the same scan: the first
 // thing, in text order, that JSON text holds and one port's parser refuses while the other's reads
 // it — a number infinite as a double, or containers nested more than jsonMaxDepth deep. Strings are
 // skipped, escapes and all. "" when there is none.

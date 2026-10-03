@@ -8,7 +8,7 @@
 import { RawArgs } from '../port.mjs';
 
 export default function limits({ add, expect }) {
-  // Arbitrary numbers, unlike PACT's defaults; the guest total and the pending cap have no approved
+  // Arbitrary numbers, unlike HDTP's defaults; the guest total and the pending cap have no approved
   // numbers yet.
   const rules = {
     contact_calls_per_second: 2, contact_burst: 5, identity_capacity_per_second: 7, guest_calls_per_hour: 3,

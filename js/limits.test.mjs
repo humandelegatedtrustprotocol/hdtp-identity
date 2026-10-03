@@ -1,4 +1,4 @@
-// Both ports decide as the vectors of pact-cloud 6c771f7 say, through the contract function a host
+// Both ports decide as the vectors of batondeck 6c771f7 say, through the contract function a host
 // calls: every step of js/cases/limits-vectors.json (a fixed record of the cloud's RateLimiter.take
 // over SQLite, which the cloud removed at ba68f9c; its `about` says how it was made), sent to
 // `limits_decide` in the Wasm and in the Go adapter, each

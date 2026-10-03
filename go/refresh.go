@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 // Refreshing ONE contact's card (SPEC §3, §14.3): what a peer's answer to `get_card` proves about a
 // pinned contact, and what the pin should become. Written once, below both hosts, as the core's

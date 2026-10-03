@@ -12,10 +12,10 @@
 // target, because that is what it proves; aim it at a test identity.
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { b64url, fromB64url } from '../../pact-protocol/vectors/lib/keys.mjs';
-import { buildLeaf } from '../../pact-protocol/vectors/lib/x509.mjs';
-import { encodeCard, decodeCard } from '../../pact-protocol/vectors/lib/card.mjs';
-import { sealEnvelope } from '../../pact-protocol/vectors/lib/envelope.mjs';
+import { b64url, fromB64url } from '../../hdtp-spec/vectors/lib/keys.mjs';
+import { buildLeaf } from '../../hdtp-spec/vectors/lib/x509.mjs';
+import { encodeCard, decodeCard } from '../../hdtp-spec/vectors/lib/card.mjs';
+import { sealEnvelope } from '../../hdtp-spec/vectors/lib/envelope.mjs';
 import { load } from './index.mjs';
 import { stranger, H, D } from './cast.mjs';
 import { seedIntrusions } from './seed.mjs';
@@ -33,7 +33,7 @@ export const seedScenarioCount = () => seedIntrusions().total;
  * Takes the parsed body or the raw text. A streamable-HTTP receiver may answer as an event stream
  * (`data: {…}` lines) — the reference node does — and a tool error may arrive as the JSON-RPC
  * error, as a `code` in the tool's own text, or on the result. The Rust driver
- * (`pact vectors intrude`) has read all of these since 2026-09-18; this one read two, which was
+ * (`hdtp vectors intrude`) has read all of these since 2026-09-18; this one read two, which was
  * enough for the hosted platform and the seed's fake and for nothing else.
  */
 /** The JSON-RPC body of an answer given as text: plain JSON, or an event stream's `data:` lines. */
@@ -116,7 +116,7 @@ export function answerCode(body) {
 /**
  * The battery as data: js/live-scenarios.json names every scenario, its order, the code it must be
  * answered with, which one is the CONTROL and the skew window. This driver and the Rust one
- * (`pact vectors intrude`, which reads the same file through `include_str!`) only BUILD the envelope
+ * (`hdtp vectors intrude`, which reads the same file through `include_str!`) only BUILD the envelope
  * for an id; js/live.test.mjs and the crate's tests hold both to the file.
  */
 export const BATTERY = checkBattery(JSON.parse(readFileSync(new URL('./live-scenarios.json', import.meta.url), 'utf8')));
@@ -178,7 +178,7 @@ export function scenarios({ targetLeaf, now = Date.now(), battery = BATTERY }) {
   const slid = (e) => { const enc = fromB64url(e.enc), ct = fromB64url(e.ct); return { ...e, enc: b64url(enc.subarray(0, enc.length - 1)), ct: b64url(Buffer.concat([enc.subarray(enc.length - 1), ct])) }; };
   // The suite the target's key does NOT take, claimed in a header the envelope is sealed under.
   const realSuite = JSON.parse(fromB64url(message().protected).toString()).suite;
-  const otherSuite = realSuite === 'PACT-SEAL-X25519' ? 'PACT-SEAL-P256' : 'PACT-SEAL-X25519';
+  const otherSuite = realSuite === 'HDTP-SEAL-X25519' ? 'HDTP-SEAL-P256' : 'HDTP-SEAL-X25519';
   // Certificates the receiver must refuse: a CA-signed intermediate in the root slot
   // (there is no authority above the person), and leaves outside their validity.
   const INTER_M = buildLeaf({ cn: 'Mallory', rootCn: 'Mallory', root: rootM, hostKey: rootM, endpoint: E_M, notBefore: new Date(now - D), notAfter: new Date(now + 365 * D), cA: true, usage: [5], label: 'live/inter_m' });
@@ -212,12 +212,12 @@ export function scenarios({ targetLeaf, now = Date.now(), battery = BATTERY }) {
     'past-window': () => message({ ts: nowS - skew, exp: nowS + 300 }),
     'future-window': () => message({ ts: nowS + skew, exp: nowS + 900 }),
     'year-lifetime': () => message({ ts: nowS, exp: nowS + 365 * 86400 }),
-    // The retired generation, refused by a node that no longer implements it.
-    'retired-v1': () => message({ header: { v: 1 } }),
+    // A version other than 1, refused.
+    'unknown-v2': () => message({ header: { v: 2 } }),
     'future-v3': () => message({ header: { v: 3 } }),
     'string-times': () => message({ header: { ts: String(nowS), exp: String(nowS + 600) } }),
     'empty-msg-id': () => message({ msgId: '' }),
-    'result-as-request': () => message({ cty: 'application/pact-result+json' }),
+    'result-as-request': () => message({ cty: 'application/hdtp-result+json' }),
     'stranger-tools-list': () => env({ method: 'tools/list', params: {} }),
     'enc-byte-slid': () => slid(message()),
     // THE CONTROL: the one well-formed call from a stranger that must get through the same door —
@@ -255,7 +255,7 @@ export async function fetchTargetLeaf(endpoint, fetchImpl = fetch, cardText = nu
     cardText = await res.text();
   }
   const card = decodeCard(cardText);
-  if (card.error) throw new Error(`the target's card is not a 2.0 card: ${card.why}`);
+  if (card.error) throw new Error(`the target's card is not an HDTP card: ${card.why}`);
   return { leaf: card.cert, root: card.root, endpoint: card.endpoint };
 }
 
@@ -273,11 +273,11 @@ async function rpc(endpoint, message, fetchImpl, session) {
  *
  * Without it a receiver that keeps sessions answers every post with the same session error, and
  * this driver then reported 27 of 27 intrusions as REPRODUCING against the reference node — each
- * one an `http_400` that had never reached the PACT layer (measured 2026-09-20). A stateless
+ * one an `http_400` that had never reached the HDTP layer (measured 2026-09-20). A stateless
  * receiver hands back no session id, and then this changes nothing.
  */
 export async function initialize(endpoint, fetchImpl = fetch) {
-  const first = await rpc(endpoint, { jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'pact-identity js/live.mjs', version: '1' } } }, fetchImpl, null);
+  const first = await rpc(endpoint, { jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'hdtp-identity js/live.mjs', version: '1' } } }, fetchImpl, null);
   if (!first.session && !first.text.includes('"result"')) throw new Error(`${endpoint}: initialize was refused (HTTP ${first.status}), so no scenario could be posted: ${first.text.slice(0, 200)}`);
   if (first.session) await rpc(endpoint, { jsonrpc: '2.0', method: 'notifications/initialized' }, fetchImpl, first.session);
   return first.session;
@@ -296,7 +296,7 @@ export async function post(endpoint, envelope, fetchImpl = fetch, session = null
 // A target over a budget answers `rate_limited` (SPEC §5, with `retry_after` in seconds) or, at an
 // edge, HTTP 429. Both refuse the ATTEMPT before the target has judged the attack, so neither is a
 // verdict: a rate-limited post is paused as asked and posted again up to a bound, and one still
-// rate-limited is UNREACHED. The same constants as crates/pact/src/vectors/intrude.rs, held equal by
+// rate-limited is UNREACHED. The same constants as crates/hdtp/src/vectors/intrude.rs, held equal by
 // js/live.test.mjs.
 export const RATE_RETRIES = 3;
 export const RATE_PAUSE_MAX = 60;
@@ -329,7 +329,7 @@ export async function throughRateLimits(postOnce, pause, log = () => {}) {
   return answer;
 }
 
-/** An answer that is no PACT answer at all, or a refusal of the attempt: the scenario never reached the layer it tests. */
+/** An answer that is no HDTP answer at all, or a refusal of the attempt: the scenario never reached the layer it tests. */
 const unreached = (got) => got.split(' then ').some((c) => c.startsWith('http_') || c.startsWith('unknown') || isRateLimited(c));
 
 /** The verdict on one scenario's answer, as the Rust driver's `verdict`. */
@@ -338,7 +338,7 @@ export const verdictOf = (got, expect, control) => (got === expect ? 'blocked' :
 /**
  * `endpoint` is what gets DIALLED. It is usually the address in the target's leaf, and for a node
  * on your own machine it is not (the leaf names the public address; you dial 127.0.0.1) — so this
- * dials what it was given, as `pact vectors intrude --against` does, and seals to the card.
+ * dials what it was given, as `hdtp vectors intrude --against` does, and seals to the card.
  */
 export async function runLive({ endpoint, card = null, fetchImpl = fetch, now = Date.now(), log = console.log, pause = (s) => new Promise((r) => setTimeout(r, s * 1000)) }) {
   const dial = endpoint.replace(/\/+$/, '');
@@ -373,7 +373,7 @@ export async function runLive({ endpoint, card = null, fetchImpl = fetch, now = 
   const controlUnopened = results.filter((r) => r.verdict === 'CONTROL UNOPENED').length;
   const limited = results.filter((r) => r.verdict === 'UNREACHED' && r.got.split(' then ').some(isRateLimited)).length;
   const total = seedScenarioCount();
-  log(`\n${results.length} scenarios against ${target.endpoint}: ${results.length - reproduces - unreachedCount - controlRefused - controlUnopened} blocked, ${reproduces} reproduce, ${unreachedCount} never reached a PACT answer${limited ? ` (${limited} of them rate-limited: the target refused the attempt before judging the attack, so nothing is known of it; wait out its budget and run again)` : ''}${controlRefused ? ', and the CONTROL was refused: this receiver refuses a legitimate call too' : ''}${controlUnopened ? ", and the CONTROL's answer looked sealed and did not open: nothing here shows a call can get through" : ''}; ${Math.max(0, total - results.length)} of the seed's ${total} were not run here`);
+  log(`\n${results.length} scenarios against ${target.endpoint}: ${results.length - reproduces - unreachedCount - controlRefused - controlUnopened} blocked, ${reproduces} reproduce, ${unreachedCount} never reached an HDTP answer${limited ? ` (${limited} of them rate-limited: the target refused the attempt before judging the attack, so nothing is known of it; wait out its budget and run again)` : ''}${controlRefused ? ', and the CONTROL was refused: this receiver refuses a legitimate call too' : ''}${controlUnopened ? ", and the CONTROL's answer looked sealed and did not open: nothing here shows a call can get through" : ''}; ${Math.max(0, total - results.length)} of the seed's ${total} were not run here`);
   return { results, reproduces, unreached: unreachedCount, rateLimited: limited, controlRefused, controlUnopened, skipped: total - results.length, seedScenarios: total };
 }
 

@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 import (
 	"encoding/json"
@@ -75,7 +75,7 @@ func TestEveryFunctionDeclaresTheContractsMembers(t *testing.T) {
 
 // An empty expectation is "not given" to a Go caller of the typed API and a value at the JSON
 // boundary (CONTRACT §0). The node's first certification passes ExpectedRoot "" and must validate
-// (pact-gateway internal/identity/leaf.go, installLeaf's ValidateChain, before the account has a
+// (hdtp-gateway internal/identity/leaf.go, installLeaf's ValidateChain, before the account has a
 // root); the same chain with `expected_root: ""` handed to Call is refused, as the core refuses it.
 // FollowRenewed's pinned root and dialed address are always held.
 func TestAnEmptyExpectationIsNotGivenOnlyToAGoCaller(t *testing.T) {
@@ -242,12 +242,12 @@ func TestJSONTheCoreDoesNotReadIsNotReadHere(t *testing.T) {
 func TestAVaultPlaintextTheCoreCannotReadIsDamage(t *testing.T) {
 	kdf := &KDF{Name: "argon2id", MKiB: 8192, T: 1, P: 1}
 	for plaintext, want := range map[string]error{
-		`{"v":2,"roots":[],"n":1e400}`:          errVault,
-		`{"v":2,"roots":[],"n":"\ud800"}`:       errVault,
-		`{"v":2,"roots":[],"\udc00":1}`:         errVault,
+		`{"v":1,"roots":[],"n":1e400}`:          errVault,
+		`{"v":1,"roots":[],"n":"\ud800"}`:       errVault,
+		`{"v":1,"roots":[],"\udc00":1}`:         errVault,
 		"{\"v\":2,\"roots\":[],\"n\":\"\xff\"}": errVault,
-		`{"v":2,"roots":[],"n":1e308}`:          nil,
-		`{"v":2,"roots":[],"n":"\ud83d\ude00"}`: nil,
+		`{"v":1,"roots":[],"n":1e308}`:          nil,
+		`{"v":1,"roots":[],"n":"\ud83d\ude00"}`: nil,
 	} {
 		sealed, err := vaultSealAny("a passphrase", []byte(plaintext), kdf, nil, nil)
 		if err != nil {

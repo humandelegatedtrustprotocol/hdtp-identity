@@ -62,8 +62,8 @@ function inlineGlue(text) {
 
 const template = readFileSync(resolve(here, 'prf-check.html'), 'utf8')
 const logic = readFileSync(resolve(here, 'prf-check.js'), 'utf8')
-const glue = readFileSync(resolve(here, 'pkg-web/pact_identity_wasm.js'), 'utf8')
-const wasm = readFileSync(resolve(here, 'pkg-web/pact_identity_wasm_bg.wasm'))
+const glue = readFileSync(resolve(here, 'pkg-web/hdtp_identity_wasm.js'), 'utf8')
+const wasm = readFileSync(resolve(here, 'pkg-web/hdtp_identity_wasm_bg.wasm'))
 
 const script = `${inlineGlue(glue)}\nconst WASM_B64 = '${wasm.toString('base64')}'\n${logic}`
 const html = template.replace('{{STYLE}}', STYLE).replace('{{SCRIPT}}', script)

@@ -1,0 +1,17 @@
+[package]
+name = "hdtp-identity-wasm"
+description = "wasm-bindgen boundary of hdtp-identity: bytes in, JSON out"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+hdtp-identity = { path = "../hdtp-identity" }
+wasm-bindgen = "0.2"
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"

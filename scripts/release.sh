@@ -6,15 +6,15 @@
 # In order, stopping at the first failure:
 #   1. refuses: a VERSION that is not X.Y.Z; a branch other than $RELEASE_BRANCH (main); a dirty tree;
 #      a VERSION not above the highest vX.Y.Z tag, or one already tagged; an empty `## Unreleased`
-#      in CHANGELOG.md; a pact-protocol checkout that is dirty (its commit goes into the manifest);
+#      in CHANGELOG.md; an hdtp-spec checkout that is dirty (its commit goes into the manifest);
 #   2. runs the gate (gate.sh) on the tree as it is;
 #   3. writes VERSION into every copy (scripts/version.mjs), dates the changelog section, checks the
 #      lock file still resolves offline, and commits "Release X.Y.Z";
 #   4. pins the Wasm of THAT commit (js/reproduce.sh --pin: the container build of `git archive HEAD`),
 #      checks it (js/verify.mjs), and commits js/manifest.json;
 #   5. tags that commit vX.Y.Z and go/vX.Y.Z (annotated; the Go module lives in go/);
-#   6. packs dist/X.Y.Z/: pact-identity-wasm-web-X.Y.Z.tgz (the pinned pkg-web/),
-#      pact-identity-exportcorpus-X.Y.Z.tgz (go/exportcorpus's cases.json and zips), the `pact` CLI
+#   6. packs dist/X.Y.Z/: hdtp-identity-wasm-web-X.Y.Z.tgz (the pinned pkg-web/),
+#      hdtp-identity-exportcorpus-X.Y.Z.tgz (go/exportcorpus's cases.json and zips), the `hdtp` CLI
 #      for each target, manifest.json (scripts/release-manifest.mjs) and SHA256SUMS; the release
 #      notes go to dist/X.Y.Z-notes.md.
 # Nothing is pushed and nothing is published: that is scripts/publish.sh, a separate step, so all
@@ -35,7 +35,7 @@ PIN="${RELEASE_PIN:-sh js/reproduce.sh --pin}"
 LOCKCHECK="${RELEASE_LOCKCHECK:-cargo metadata --locked --offline --format-version 1 >/dev/null}"
 CLI="${RELEASE_CLI:-sh scripts/build-cli.sh}"
 TARGETS="${RELEASE_CLI_TARGETS:-darwin-arm64 linux-amd64 linux-arm64}"
-PROTOCOL="${PROTOCOL_DIR:-../pact-protocol}"
+PROTOCOL="${PROTOCOL_DIR:-../hdtp-spec}"
 DATE="${RELEASE_DATE:-$(date -u +%Y-%m-%d)}"
 TRAILER="${RELEASE_COMMIT_TRAILER:-}"
 
@@ -97,8 +97,8 @@ $TRAILER}"
 COMMIT="$(git rev-parse HEAD)"
 
 # 5. The tags.
-git tag -a "v$VERSION" -m "pact-identity $VERSION" "$COMMIT"
-git tag -a "go/v$VERSION" -m "pact-identity $VERSION (the Go module, github.com/pact-cloud/pact-identity/go)" "$COMMIT"
+git tag -a "v$VERSION" -m "hdtp-identity $VERSION" "$COMMIT"
+git tag -a "go/v$VERSION" -m "hdtp-identity $VERSION (the Go module, github.com/humandelegatedtrustprotocol/hdtp-identity/go)" "$COMMIT"
 
 # 6. The assets.
 DIST="dist/$VERSION"
@@ -111,7 +111,7 @@ mkdir "$STAGE/pkg-web"
 WEB_FILES="$(node -e 'for (const k of Object.keys(require("./js/manifest.json").files)) if (k.startsWith("pkg-web/")) console.log(k)')"
 [ -n "$WEB_FILES" ] || refuse "js/manifest.json lists no pkg-web/ files"
 for f in $WEB_FILES; do cp "js/$f" "$STAGE/$f"; done
-TGZ="pact-identity-wasm-web-$VERSION.tgz"
+TGZ="hdtp-identity-wasm-web-$VERSION.tgz"
 COPYFILE_DISABLE=1 tar -czf "$DIST/$TGZ" -C "$STAGE" pkg-web
 listed="$(tar -tzf "$DIST/$TGZ" | grep -v '/$' | sed 's#^\./##' | sort)"
 [ "$listed" = "$(echo "$WEB_FILES" | sort)" ] || { echo "$listed" >&2; refuse "$TGZ does not hold exactly the pinned pkg-web/ files"; }
@@ -121,16 +121,16 @@ listed="$(tar -tzf "$DIST/$TGZ" | grep -v '/$' | sed 's#^\./##' | sort)"
 # of the generator beside them.
 CORPUS_FILES="$(git ls-files -- go/exportcorpus | grep -E '^go/exportcorpus/(cases\.json|[^/]+\.zip)$' | sed 's#^go/##' | sort)"
 [ -n "$CORPUS_FILES" ] || refuse "go/exportcorpus holds no cases.json and no zip"
-CORPUS_TGZ="pact-identity-exportcorpus-$VERSION.tgz"
+CORPUS_TGZ="hdtp-identity-exportcorpus-$VERSION.tgz"
 # shellcheck disable=SC2086 # one file per word; the names hold no spaces
 COPYFILE_DISABLE=1 tar -czf "$DIST/$CORPUS_TGZ" -C go $CORPUS_FILES
 listed="$(tar -tzf "$DIST/$CORPUS_TGZ" | grep -v '/$' | sed 's#^\./##' | sort)"
 [ "$listed" = "$CORPUS_FILES" ] || { echo "$listed" >&2; refuse "$CORPUS_TGZ does not hold exactly go/exportcorpus's cases.json and zips"; }
 
-echo "release: pact CLI for $TARGETS"
+echo "release: hdtp CLI for $TARGETS"
 # shellcheck disable=SC2086 # the targets are words
 sh -c "$CLI \"\$@\"" cli "v$VERSION" "$DIST" "$VERSION" $TARGETS
-for t in $TARGETS; do [ -s "$DIST/pact-$VERSION-$t" ] || refuse "no CLI binary for $t"; done
+for t in $TARGETS; do [ -s "$DIST/hdtp-$VERSION-$t" ] || refuse "no CLI binary for $t"; done
 
 node scripts/release-manifest.mjs "$DIST" "$VERSION" "$COMMIT" "$PROTOCOL_COMMIT"
 node scripts/changelog.mjs --notes "$VERSION" > "dist/$VERSION-notes.md"

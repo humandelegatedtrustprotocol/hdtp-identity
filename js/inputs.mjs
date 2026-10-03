@@ -8,7 +8,7 @@
 //   node js/inputs.mjs --dirty    list inputs with uncommitted changes (exit 1 if any)
 //
 // The list is here and nowhere else: manifest.mjs records it, verify.mjs compares it, reproduce.sh
-// refuses to pin while it is dirty. Paths are relative to pact-identity/. The CLI crate is not on
+// refuses to pin while it is dirty. Paths are relative to hdtp-identity/. The CLI crate is not on
 // it on purpose — it is not in the Wasm — but anything it does to the lock file is, through
 // Cargo.lock. This is the early warning; the proof is still the container build
 // (js/reproduce.sh, which `make verify-release` runs again against every published release).
@@ -17,10 +17,10 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 export const INPUTS = [
-  'crates/pact-identity',
-  'crates/pact-identity-wasm',
+  'crates/hdtp-identity',
+  'crates/hdtp-identity-wasm',
   // The call budgets are compiled into the core through its dependency on them (api/limits.rs).
-  'crates/pact-limits',
+  'crates/hdtp-limits',
   'Cargo.toml',
   'Cargo.lock',
   'rust-toolchain.toml',

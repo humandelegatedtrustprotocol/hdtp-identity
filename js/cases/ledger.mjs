@@ -27,7 +27,7 @@ export default function ledger({ add, expect }, f) {
   add('ledger_check: back to an endpoint issued to before, not chosen', 'ledger_check', ask(moved));
   add('ledger_check: back to an endpoint issued to before, chosen', 'ledger_check', ask(moved, { move: true }));
   add('ledger_check: an empty ledger', 'ledger_check', ask([]));
-  // One grammar for every instant (SPEC 2.2.2): an entry's instant with an offset does not read, and
+  // One grammar for every instant: an entry's instant with an offset does not read, and
   // neither does a `now` with one. One port read both.
   add('ledger_check: an entry whose not_before has an offset', 'ledger_check', ask([{ ...here[0], not_before: here[0].not_before.replace(/Z$/, '+00:00') }]));
   expect('ledger_check: an entry whose not_before has an offset', { error: 'bad_request', why: "the record's ledger entry 0 does not read: not_before" });

@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 // The limits section of contract/contract.json: a body for each function it declares, which api.go's
 // `functions` map dispatches by name. Arguments are read as the Rust core reads them (api/limits.rs):

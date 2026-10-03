@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 // Bytes as base64url, read by one of two rules and never by a third.
 //

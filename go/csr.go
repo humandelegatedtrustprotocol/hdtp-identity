@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 // PKCS #10 (RFC 2986) with a profile as exact as the certificates': version 0, one commonName, the
 // host's key, one extensionRequest carrying one subjectAltName with one URI and at most one dNSName

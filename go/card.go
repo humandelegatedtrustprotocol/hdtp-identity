@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 // The §3 card: a vCard 4.0 with the leaf in it, folded per RFC 6350, read back with the intake rules.
 
@@ -15,7 +15,7 @@ import (
 //
 // EncodeCard writes a card, and refuses a control character in anything it is handed: a card is
 // LINES, and a line break in a name, the seal policy or an extra line writes a property of the
-// writer's choosing. The decoder reads the FIRST of a name, so `FN` "x\r\nX-PACT-SEAL:none" made a
+// writer's choosing. The decoder reads the FIRST of a name, so `FN` "x\r\nX-HDTP-SEAL:none" made a
 // card that requires sealing into one that does not.
 func EncodeCard(fn string, cert []byte, seal string, extra []string) (string, error) {
 	for _, part := range append([][2]string{{"fn", fn}, {"seal", seal}}, extraParts(extra)...) {
@@ -25,10 +25,10 @@ func EncodeCard(fn string, cert []byte, seal string, extra []string) (string, er
 			}
 		}
 	}
-	lines := []string{"BEGIN:VCARD", "VERSION:4.0", "FN:" + fn, "X-PACT-VERSION:2", "X-PACT-CERT:" + B64url(cert)}
+	lines := []string{"BEGIN:VCARD", "VERSION:4.0", "FN:" + fn, "X-HDTP-VERSION:1", "X-HDTP-CERT:" + B64url(cert)}
 	lines = append(lines, extra...)
 	if seal != "" {
-		lines = append(lines, "X-PACT-SEAL:"+seal)
+		lines = append(lines, "X-HDTP-SEAL:"+seal)
 	}
 	lines = append(lines, "END:VCARD")
 	for i, l := range lines {
@@ -66,7 +66,7 @@ func fold(line string) string {
 	return strings.Join(parts, "\r\n")
 }
 
-// Card is a decoded 2.0 card.
+// Card is a decoded card.
 type Card struct {
 	FN       string
 	Version  int
@@ -115,14 +115,14 @@ func DecodeCard(text string, now time.Time) (*Card, error) {
 		}
 		return v[0], true
 	}
-	version, ok := first("X-PACT-VERSION")
-	if version != "2" {
+	version, ok := first("X-HDTP-VERSION")
+	if version != "1" {
 		if ok && version != "" {
 			return nil, CardError{"version not implemented"}
 		}
-		return nil, CardError{"no X-PACT-VERSION"}
+		return nil, CardError{"no X-HDTP-VERSION"}
 	}
-	certs := props["X-PACT-CERT"]
+	certs := props["X-HDTP-CERT"]
 	if len(certs) != 1 {
 		return nil, CardError{fmt.Sprintf("%d certificates", len(certs))}
 	}
@@ -151,18 +151,18 @@ func DecodeCard(text string, now time.Time) (*Card, error) {
 		return nil, CardError{"validity over 398 days"}
 	}
 	fn, _ := first("FN")
-	seal, ok := first("X-PACT-SEAL")
+	seal, ok := first("X-HDTP-SEAL")
 	if !ok {
 		seal = "none"
 	}
 	var ignored []string
 	for _, k := range order {
-		if strings.HasPrefix(k, "X-PACT-") && k != "X-PACT-VERSION" && k != "X-PACT-CERT" && k != "X-PACT-SEAL" {
+		if strings.HasPrefix(k, "X-HDTP-") && k != "X-HDTP-VERSION" && k != "X-HDTP-CERT" && k != "X-HDTP-SEAL" {
 			ignored = append(ignored, k)
 		}
 	}
 	return &Card{
-		FN: fn, Version: 2, Seal: seal, Cert: leaf.DER, Leaf: leaf, Root: "sha256:" + B64url(leaf.AKI), Endpoint: leaf.URIs[0],
+		FN: fn, Version: 1, Seal: seal, Cert: leaf.DER, Leaf: leaf, Root: "sha256:" + B64url(leaf.AKI), Endpoint: leaf.URIs[0],
 		Expired: leaf.NotAfter.Before(now), Ignored: ignored, Bytes: len(text),
 	}, nil
 }

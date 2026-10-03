@@ -1,0 +1,330 @@
+//! What `hdtp vectors check` runs: the vectors, from a document's Appendix B or a vector file,
+//! proven natively against the Rust core.
+use super::{at, cast, certificates, NOW};
+use crate::io::{fail, read_input, Fail, Res};
+use hdtp_identity::envelope::{self, Form, SealRequest};
+use hdtp_identity::hpke::{self, suite_for, Suite};
+use hdtp_identity::keys::{Alg, PrivateKey};
+use hdtp_identity::time::parse_rfc3339;
+use hdtp_identity::util::{from_b64u, from_hex, hex, seed};
+use hdtp_identity::x509::{self, parse, validate_chain, ChainResult};
+use serde_json::Value;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+/// The text of one version of hdtp-spec's specification, `dir` (`docs/specification/<version>/`):
+/// its `index.md` followed by the pages its "Table of contents" links, in that order, joined as they
+/// are — the document hdtp-spec's `site/spec-source.mjs` reads.
+pub fn assemble(dir: &Path) -> Res<String> {
+    let read = |name: &str| std::fs::read_to_string(dir.join(name)).map_err(|e| Fail(format!("{}: {e}", dir.join(name).display())));
+    let index = read("index.md")?;
+    let toc = index.find("\n## Table of contents").ok_or_else(|| Fail(format!("{}: the index has no table of contents", dir.display())))?;
+    let mut out = index.clone();
+    let mut pages = 0;
+    for part in index[toc..].split("](").skip(1) {
+        let Some(end) = part.find(".md)") else { continue };
+        let name = &part[..end + 3];
+        if name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'.') {
+            out += &read(name)?;
+            pages += 1;
+        }
+    }
+    if pages == 0 {
+        return fail(format!("{}: the index links no pages", dir.display()));
+    }
+    Ok(out)
+}
+
+/// The newest released version under `base` (hdtp-spec's `docs/specification`): the directory whose
+/// name is the highest `X.Y`. `draft` is not a release.
+pub fn current(base: &Path) -> Option<PathBuf> {
+    let number = |name: &str| -> Option<(u64, u64)> {
+        let (x, y) = name.split_once('.')?;
+        Some((x.parse().ok()?, y.parse().ok()?))
+    };
+    std::fs::read_dir(base)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .filter_map(|e| number(&e.file_name().to_string_lossy()).map(|n| (n, e.path())))
+        .max_by_key(|(n, _)| *n)
+        .map(|(_, p)| p)
+}
+
+/// The JSON blocks of a document's Appendix B: everything fenced as ```json between the heading
+/// `## Appendix B` and the closing line `*End of HDTP`. Both markers must be there, every fence must
+/// close and every block must be JSON — the rule js/seed.mjs `appendixB`, the core tests and the Go
+/// port read by, each held to js/appendix-b-reader.json's cases, refusals word for word.
+fn appendix_b(spec: &str) -> Res<Vec<Value>> {
+    let start = spec.find("## Appendix B").ok_or_else(|| Fail("the document has no Appendix B".into()))?;
+    let end =
+        spec[start..].find("*End of HDTP").map(|i| start + i).ok_or_else(|| Fail("Appendix B has no end marker (*End of HDTP)".into()))?;
+    let b = &spec[start..end];
+    let mut out = Vec::new();
+    let mut rest = b;
+    while let Some(i) = rest.find("```json\n") {
+        let after = &rest[i + 8..];
+        let j = after.find("\n```").ok_or_else(|| Fail("an unterminated json fence in Appendix B".into()))?;
+        let n = out.len() + 1;
+        out.push(serde_json::from_str(&after[..j]).map_err(|_| Fail(format!("Appendix B block {n} is not JSON")))?);
+        rest = &after[j + 4..];
+    }
+    Ok(out)
+}
+
+struct Tally {
+    checks: usize,
+    failures: usize,
+}
+
+impl Tally {
+    fn ok(&mut self, cond: bool, what: impl AsRef<str>) {
+        self.checks += 1;
+        if !cond {
+            self.failures += 1;
+            println!("  FAIL {}", what.as_ref());
+        }
+    }
+}
+
+pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
+    let doc: Value = match (spec, file) {
+        (Some(s), _) => {
+            let text = if Path::new(s).is_dir() {
+                assemble(Path::new(s))?
+            } else {
+                String::from_utf8(read_input(s)?).map_err(|_| Fail("the document is not UTF-8".into()))?
+            };
+            let mut blocks = appendix_b(&text)?;
+            if blocks.is_empty() {
+                return fail("Appendix B has no vector blocks");
+            }
+            blocks.remove(0)
+        }
+        (None, Some(f)) => serde_json::from_slice(&read_input(f)?).map_err(|e| Fail(format!("{f}: {e}")))?,
+        (None, None) => {
+            let given = std::env::var("HDTP_SPEC").ok().filter(|p| !p.is_empty() && Path::new(p).exists());
+            match given.or_else(|| current(Path::new("hdtp-spec/docs/specification")).map(|p| p.display().to_string())) {
+                Some(p) => return check(Some(&p), None),
+                None => return fail("give --spec <a version directory of hdtp-spec's docs/specification, or a document with Appendix B> or --file vectors.json"),
+            }
+        }
+    };
+    // EVERY section, or this proves nothing. Each loop below reads its section with
+    // `unwrap_or_default()` and records a failure only for an item that is PRESENT, so deleting
+    // `chain_cases` from Appendix B left the checker printing a smaller `N/N checks passed` and
+    // exiting 0 — with SPEC 14.2's twelve cases no longer proven and nothing in the tree noticing.
+    // `{}` passed too, as `0/0`. The names are asserted rather than counted, so the guard cannot
+    // itself go stale as the suite grows.
+    for section in ["certificates", "chain_cases", "newest_leaf_cases", "certificate_renewed_cases", "envelopes"] {
+        if doc.get(section).is_none() {
+            return fail(format!("the document has no `{section}`: a vector suite missing a section proves less than it says"));
+        }
+    }
+
+    let mut t = Tally { checks: 0, failures: 0 };
+
+    let der: BTreeMap<String, Vec<u8>> = doc["certificates"]
+        .as_object()
+        .map(|o| o.iter().filter_map(|(k, c)| from_hex(c["der_hex"].as_str()?).ok().map(|d| (k.clone(), d))).collect())
+        .unwrap_or_default();
+    let get = |n: &str| der.get(n).cloned().unwrap_or_default();
+
+    println!("certificates rebuild from their seeds");
+    let c = cast()?;
+    let mine: BTreeMap<&str, Vec<u8>> = certificates(&c)?.into_iter().map(|(n, d, _)| (n, d)).collect();
+    for (name, bytes) in &der {
+        // A certificate the appendix marks `refused` exists to be refused (SPEC 14.1): it must not
+        // come out of parse and the profile check clean. It is not one the generator rebuilds, and
+        // it is not "in the profile as a leaf" — asserting either of those about it is the mistake
+        // this branch is here to avoid.
+        if doc["certificates"][name.as_str()]["refused"].as_bool() == Some(true) {
+            let why = match parse(bytes) {
+                Ok(cert) => x509::profile_error(&cert, "leaf"),
+                Err(e) => Some(e.why),
+            };
+            t.ok(why.is_some(), format!("{name}: marked refused, and parse + profile let it through"));
+            continue;
+        }
+        match parse(bytes) {
+            Ok(cert) => {
+                let kind = if name.starts_with("root") { "root" } else { "leaf" };
+                t.ok(cert.kind() == kind, format!("{name}: in the profile as a {kind}"));
+                t.ok(bytes.len() <= 4096, format!("{name}: under 4 KiB"));
+                match mine.get(name.as_str()) {
+                    Some(rebuilt) => {
+                        let same_tbs = parse(rebuilt).map(|r| r.tbs == cert.tbs).unwrap_or(false);
+                        let issuer = if name.ends_with("_b") { c.root_b.public() } else { c.root_a.public() };
+                        let signed = x509::verify_cert(&cert, &issuer);
+                        t.ok(
+                            same_tbs && signed && (cert.public_key.alg() == Alg::P256 || rebuilt == bytes),
+                            format!("{name}: rebuilt from the labelled seeds"),
+                        );
+                    }
+                    None => t.ok(false, format!("{name}: not one the generator knows")),
+                }
+            }
+            Err(e) => t.ok(false, format!("{name}: {}", e.why)),
+        }
+    }
+    for (name, k) in doc["leaf_keys_pkcs8_hex"].as_object().cloned().unwrap_or_default() {
+        let parsed = from_hex(k.as_str().unwrap_or("")).ok().and_then(|b| PrivateKey::from_pkcs8(&b).ok());
+        let mine_spki = c.hosts.get(name.as_str()).map(|h| h.public().spki().to_vec());
+        t.ok(
+            parsed.as_ref().map(|p| p.public().spki().to_vec()) == mine_spki && mine_spki.is_some(),
+            format!("{name}: leaf key is the seed's"),
+        );
+    }
+
+    println!("chain cases (§14.2)");
+    for case in doc["chain_cases"].as_array().cloned().unwrap_or_default() {
+        let name = case["name"].as_str().unwrap_or("?");
+        let chain: Vec<Vec<u8>> =
+            case["chain"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).map(get).collect()).unwrap_or_default();
+        let now = case["now"].as_str().and_then(|s| parse_rfc3339(s).ok()).unwrap_or(0);
+        let r = validate_chain(&chain, now, case["expected_root"].as_str(), case["expected_endpoint"].as_str());
+        let want = case["expect"].as_str().unwrap_or("");
+        match &r {
+            ChainResult::Ok(_) => t.ok(want == "accept", format!("{name}: expected {want}, got accept")),
+            ChainResult::Refused { rule, reason } => t.ok(
+                want == "refuse" && Some(*rule as u64) == case["rule"].as_u64(),
+                format!("{name}: expected {want} rule {}, got rule {rule} ({reason})", case["rule"]),
+            ),
+        }
+        println!(
+            "  {name}: {}",
+            match r {
+                ChainResult::Ok(_) => "accepted".to_string(),
+                ChainResult::Refused { rule, .. } => format!("refused by rule {rule}"),
+            }
+        );
+    }
+
+    println!("newest leaf (§14.3)");
+    for case in doc["newest_leaf_cases"].as_array().cloned().unwrap_or_default() {
+        let (p, q) = (case["pinned"].as_str().unwrap_or(""), case["presented"].as_str().unwrap_or(""));
+        let got = x509::compare_leaves(&get(p), &get(q)).unwrap_or("error");
+        t.ok(got == case["expect"].as_str().unwrap_or(""), format!("{p} vs {q}: expected {}, got {got}", case["expect"]));
+        println!("  {p} then {q}: {got}");
+    }
+
+    println!("certificate_renewed (§14.4)");
+    for case in doc["certificate_renewed_cases"].as_array().cloned().unwrap_or_default() {
+        let name = case["name"].as_str().unwrap_or("?");
+        let pinned = get(case["pinned_leaf"].as_str().unwrap_or(""));
+        let root = parse(&pinned).ok().and_then(|c| c.aki.map(|a| hdtp_identity::keys::fingerprint_of_id(&a))).unwrap_or_default();
+        let now = case["now"].as_str().and_then(|s| parse_rfc3339(s).ok()).unwrap_or(0);
+        let r = envelope::follow_renewed(&case["answer"], &root, &pinned, case["dialed"].as_str().unwrap_or(""), now);
+        let follow = r["follow"].as_bool().unwrap_or(false);
+        t.ok(follow == (case["expect"] == "follow"), format!("{name}: expected {}, got {r}", case["expect"]));
+        println!("  {name}: {}", if follow { "followed" } else { "discarded" });
+    }
+
+    println!("envelopes (§13)");
+    let now2 = doc["now"].as_str().and_then(|s| parse_rfc3339(s).ok()).unwrap_or(at(NOW));
+    for e in doc["envelopes"].as_array().cloned().unwrap_or_default() {
+        let name = e["name"].as_str().unwrap_or("?");
+        let form = e["form"].as_str().unwrap_or("chain");
+        let mut go = || -> Result<(), String> {
+            let rn = e["recipient_chain"][0].as_str().ok_or("recipient_chain")?;
+            let sn = e["sender_chain"][0].as_str().ok_or("sender_chain")?;
+            let recipient_leaf = parse(&get(rn)).map_err(|e| e.why)?;
+            let recipient = PrivateKey::from_pkcs8(&from_hex(doc["leaf_keys_pkcs8_hex"][rn].as_str().unwrap_or("")).map_err(|e| e.why)?)
+                .map_err(|e| e.why)?;
+            let aad = from_b64u(e["protected"].as_str().unwrap_or("")).map_err(|e| e.why)?;
+            let enc = from_b64u(e["enc"].as_str().unwrap_or("")).map_err(|e| e.why)?;
+            let ct = from_b64u(e["ct"].as_str().unwrap_or("")).map_err(|e| e.why)?;
+            let sig = from_b64u(e["sig"].as_str().unwrap_or("")).map_err(|e| e.why)?;
+            let header: Value = serde_json::from_slice(&aad).map_err(|e| e.to_string())?;
+            let mut members: Vec<&str> = header.as_object().map(|o| o.keys().map(|k| k.as_str()).collect()).unwrap_or_default();
+            members.sort_unstable();
+            t.ok(members.join(",") == envelope::HEADER_MEMBERS, format!("{name}: header members"));
+            let suite = suite_for(&recipient_leaf.public_key);
+            t.ok(
+                header["v"] == 1 && header["suite"] == e["suite"] && Suite::parse(e["suite"].as_str().unwrap_or("")) == Some(suite),
+                format!("{name}: version and suite"),
+            );
+            t.ok(header["kid"] == recipient_leaf.public_key.fingerprint(), format!("{name}: kid is the recipient leaf key"));
+            t.ok(recipient.public().spki() == &recipient_leaf.spki[..], format!("{name}: the recipient key is the leaf's"));
+            let pt = hpke::open(suite, &recipient, &recipient_leaf.public_key, envelope::INFO, &aad, &enc, &ct).map_err(|e| e.why)?;
+            t.ok(hex(&pt) == e["plaintext_hex"].as_str().unwrap_or(""), format!("{name}: plaintext"));
+            let body: Value = serde_json::from_slice(&pt).map_err(|e| e.to_string())?;
+            let mut signed = aad.clone();
+            signed.extend_from_slice(&enc);
+            signed.extend_from_slice(&ct);
+            let sender_leaf = parse(&get(sn)).map_err(|e| e.why)?;
+            let mut bm: Vec<&str> = body.as_object().map(|o| o.keys().map(|k| k.as_str()).collect()).unwrap_or_default();
+            bm.sort_unstable();
+            if form == "leaf" {
+                t.ok(bm.join(",") == "leaf,method,params", format!("{name}: small form carries leaf, method, params"));
+                t.ok(body["leaf"] == sender_leaf.public_key.fingerprint(), format!("{name}: leaf names the sender's held leaf"));
+                t.ok(sender_leaf.public_key.verify(&signed, &sig), format!("{name}: signature under the held leaf's key"));
+                t.ok(ct.len() < 400, format!("{name}: small form stays small ({} bytes sealed)", ct.len()));
+            } else {
+                t.ok(bm.join(",") == "chain,method,params", format!("{name}: full form carries chain, method, params"));
+                let chain: Vec<Vec<u8>> =
+                    body["chain"].as_array().map(|a| a.iter().filter_map(|x| from_b64u(x.as_str()?).ok()).collect()).unwrap_or_default();
+                match validate_chain(&chain, now2, None, None) {
+                    ChainResult::Ok(ok) => {
+                        t.ok(true, "");
+                        t.ok(chain.first() == Some(&get(sn)), format!("{name}: chain inside is the sender's"));
+                        t.ok(ok.leaf.public_key.verify(&signed, &sig), format!("{name}: signature under the chain's leaf key"));
+                    }
+                    ChainResult::Refused { rule, reason } => t.ok(false, format!("{name}: chain inside validates (rule {rule}: {reason})")),
+                }
+            }
+            // Re-sealed from the same inputs and the vector's ephemeral seed: enc and ct reproduce.
+            let sender = PrivateKey::from_pkcs8(&from_hex(doc["leaf_keys_pkcs8_hex"][sn].as_str().unwrap_or("")).map_err(|e| e.why)?)
+                .map_err(|e| e.why)?;
+            let chain: Vec<Vec<u8>> =
+                e["sender_chain"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).map(get).collect()).unwrap_or_default();
+            let wire = envelope::seal_request(SealRequest {
+                recipient: &recipient_leaf.public_key,
+                sender: &sender,
+                form: Form::parse(form).map_err(|e| e.why)?,
+                sender_chain: Some(&chain),
+                method: body["method"].as_str().unwrap_or("tools/call").into(),
+                params: body["params"].clone(),
+                msg_id: header["msg_id"].as_str().unwrap_or("").into(),
+                ts: header["ts"].as_i64().unwrap_or(0),
+                exp: header["exp"].as_i64(),
+                cty: None,
+                ephemeral_seed: Some(seed(&format!("ephemeral/{name}"))),
+            })
+            .map_err(|e| e.why)?;
+            t.ok(
+                wire.protected == e["protected"] && wire.enc == e["enc"] && wire.ct == e["ct"],
+                format!("{name}: re-sealed from the seed, enc and ct reproduce"),
+            );
+            Ok(())
+        };
+        match go() {
+            Ok(()) => println!("  {name}: opened{}", if form == "leaf" { " (by reference)" } else { "" }),
+            Err(err) => t.ok(false, format!("{name}: {err}")),
+        }
+    }
+
+    println!("{}/{} checks passed", t.checks - t.failures, t.checks);
+    Ok(if t.failures > 0 { 1 } else { 0 })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // js/appendix-b-reader.json: the cases all four Appendix B readers of this repository are held to.
+    #[test]
+    fn appendix_b_is_read_as_the_shared_cases_say_refusals_word_for_word() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../js/appendix-b-reader.json");
+        let fixture: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let cases = fixture["cases"].as_array().unwrap();
+        assert!(cases.len() >= 10);
+        for c in cases {
+            let (name, doc) = (c["name"].as_str().unwrap(), c["doc"].as_str().unwrap());
+            match c["refused"].as_str() {
+                Some(why) => assert_eq!(appendix_b(doc).map_err(|e| e.0).unwrap_err(), why, "{name}"),
+                None => assert_eq!(json!(appendix_b(doc).map_err(|e| e.0).unwrap()), c["blocks"], "{name}"),
+            }
+        }
+    }
+}

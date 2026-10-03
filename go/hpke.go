@@ -1,6 +1,6 @@
-package pactidentity
+package hdtpidentity
 
-// HPKE Base mode (RFC 9180) for the two PACT suites, and the detached signature of §13.1.
+// HPKE Base mode (RFC 9180) for the two HDTP suites, and the detached signature of §13.1.
 
 import (
 	"crypto/aes"
@@ -18,9 +18,9 @@ import (
 )
 
 const (
-	SuiteP256   = "PACT-SEAL-P256"
-	SuiteX25519 = "PACT-SEAL-X25519"
-	InfoV2      = "PACT-SEAL-v2"
+	SuiteP256   = "HDTP-SEAL-P256"
+	SuiteX25519 = "HDTP-SEAL-X25519"
+	Info        = "HDTP-SEAL-v1"
 )
 
 type suite struct {
@@ -164,7 +164,7 @@ func encap(id string, pub *PublicKey, seed []byte) (enc, ss []byte, err error) {
 // context, another AEAD key, and an open that fails.
 //
 // The private key must be the suite's own algorithm, and is asked before its material is read: a
-// P-256 key has no seed, and under PACT-SEAL-X25519 the empty seed's scalar — SHA-512 of nothing,
+// P-256 key has no seed, and under HDTP-SEAL-X25519 the empty seed's scalar — SHA-512 of nothing,
 // clamped, a public constant — stood in for one. So any P-256 key opened a seal addressed to the
 // Ed25519 key whose X25519 form is that constant times the base point: an admit (T5), where the core's
 // `key.x25519()` refuses a P-256 key. It panicked in 0.4.0; 0.4.1 removed the panic, not the cause.

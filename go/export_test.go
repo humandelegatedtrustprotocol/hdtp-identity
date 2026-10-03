@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 import (
 	"archive/zip"

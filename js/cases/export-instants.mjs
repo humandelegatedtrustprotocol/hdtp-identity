@@ -1,4 +1,4 @@
-// Instants in the export, read in the one grammar both ports read everywhere (SPEC 2.2.2):
+// Instants in the export, read in the one grammar both ports read everywhere:
 // `YYYY-MM-DDTHH:MM:SS`, an optional `.` fraction, and `Z` — upper-case T and Z only, no offset, and
 // no `,` before a fraction. A lower-case `z` and a `,` fraction were read by one port and refused by
 // the other. Called from js/cases/export.mjs, whose section this is.

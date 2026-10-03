@@ -73,7 +73,7 @@ export function adapterPort(bin, { callMs = CALL_MS } = {}) {
       const left = deadline - Date.now();
       if (left <= 0) {
         worker.postMessage({ kill: true });
-        throw new Error(`pact-identity-go gave no answer to ${fn} in ${callMs / 1000} s`);
+        throw new Error(`hdtp-identity-go gave no answer to ${fn} in ${callMs / 1000} s`);
       }
       Atomics.wait(signal, 0, seen, left);
       seen = Atomics.load(signal, 0);
@@ -88,11 +88,11 @@ export async function makePort(kind = 'wasm') {
     const core = await load();
     // Raw text goes to the module the loader wraps (the same instance, from require's cache): the
     // loader takes arguments as a value, and a value cannot hold what raw text is for.
-    const mod = createRequire(import.meta.url)('./pkg-node/pact_identity_wasm.js');
+    const mod = createRequire(import.meta.url)('./pkg-node/hdtp_identity_wasm.js');
     return { kind, call: (fn, args) => (args instanceof RawArgs ? JSON.parse(mod.call(fn, args.text)) : core.call(fn, args)) };
   }
   if (kind === 'go') {
-    const bin = fileURLToPath(new URL('../go/bin/pact-identity-go', import.meta.url));
+    const bin = fileURLToPath(new URL('../go/bin/hdtp-identity-go', import.meta.url));
     return existsSync(bin) ? adapterPort(bin) : null;
   }
   throw new Error(`unknown port ${kind}`);
