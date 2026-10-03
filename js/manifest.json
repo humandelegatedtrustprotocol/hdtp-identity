@@ -10,7 +10,7 @@
     "how": "sh js/reproduce.sh"
   },
   "source": {
-    "inputs_sha256": "e5134cd1add70a8f922a9ad9aba7149b68aeb33bfb20cd9115119003b4fc19e6",
+    "inputs_sha256": "3a6886b371e81518d3fd2ec6b4eb71ab15219a51abebb6e039a7d628524806c6",
     "files": 54,
     "paths": [
       "crates/hdtp-identity",
@@ -39,7 +39,7 @@
       "bytes": 13410
     },
     "pkg-web/hdtp_identity_wasm_bg.wasm": {
-      "sha256": "5d9542f9e60f5390eab8131a8fda71bd4c987f4c438ea55938887d65646b13c8",
+      "sha256": "792c1580e4d70dc5f9efc6428796a6fa517df08a164263e4a3232b3fac18eff9",
       "bytes": 859961
     },
     "pkg-web/hdtp_identity_wasm_bg.wasm.d.ts": {
@@ -63,7 +63,7 @@
       "bytes": 10099
     },
     "pkg-node/hdtp_identity_wasm_bg.wasm": {
-      "sha256": "5d9542f9e60f5390eab8131a8fda71bd4c987f4c438ea55938887d65646b13c8",
+      "sha256": "792c1580e4d70dc5f9efc6428796a6fa517df08a164263e4a3232b3fac18eff9",
       "bytes": 859961
     },
     "pkg-node/hdtp_identity_wasm_bg.wasm.d.ts": {
