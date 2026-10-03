@@ -67,7 +67,7 @@ command has to refuse is found before the passphrase is asked and before anythin
 refusal leaves nothing behind.
 
 `hdtp vectors check --spec hdtp-spec/docs/specification/1.0` proves Appendix B natively (the seven certificates rebuilt from their labelled seeds, every chain,
-newest-leaf and `certificate_renewed` case, every `v: 2` envelope opened and re-sealed from its
+newest-leaf and `certificate_renewed` case, every envelope opened and re-sealed from its
 ephemeral seed). `hdtp vectors gen` writes the same document from the seeds; Ed25519 certificates
 and signatures reproduce byte for byte, ECDSA signatures are one valid signature per run, and the
 P-256 leaf key is emitted in the full PKCS #8 form (the seed's Node emits the minimal form; both

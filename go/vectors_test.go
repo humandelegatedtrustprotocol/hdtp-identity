@@ -2,7 +2,7 @@ package hdtpidentity
 
 // Proves this port against Appendix B: the certificates rebuilt (byte for byte where the issuer is
 // Ed25519; the TBS, and the vector's signature verified, where it is P-256), the ones marked refused
-// refused, every chain, newest-leaf, certificate_renewed and v2 envelope case, the envelopes
+// refused, every chain, newest-leaf, certificate_renewed and envelope case, the envelopes
 // reproduced from their ephemeral seeds, decide on them, and the derivation vectors.
 
 import (

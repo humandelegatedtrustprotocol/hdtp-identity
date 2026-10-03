@@ -587,7 +587,7 @@ export default function envelopes({ add, expect }, f) {
   const { leafDerBytes, rootDerBytes, callerKey } = f;
   const sealText = ({ to, cty, msgId, body, header = (t) => t }) => {
     const suite = suiteForKey(to);
-    const aad = Buffer.from(header(canonical({ v: 2, suite, kid: fingerprint(to), msg_id: msgId, ts: at(now), exp: at(now) + 600, cty })));
+    const aad = Buffer.from(header(canonical({ v: 1, suite, kid: fingerprint(to), msg_id: msgId, ts: at(now), exp: at(now) + 600, cty })));
     const { enc, ct } = sealDeterministic(suite, to, Buffer.from('HDTP-SEAL-v1'), aad, Buffer.from(body), Buffer.alloc(32, 9));
     return { protected: b64url(aad), enc: b64url(enc), ct: b64url(ct), sig: b64url(signDetached(hostKey.priv, Buffer.concat([aad, enc, ct]))) };
   };

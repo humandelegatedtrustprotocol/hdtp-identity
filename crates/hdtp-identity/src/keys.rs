@@ -399,7 +399,7 @@ pub fn derive_seed(prf: &[u8], info: &str) -> Result<[u8; 32]> {
         return err("bad_request", format!("{info} is not one of the derivation info strings of SPEC \u{a7}2.1"));
     }
     // Zeroized on the way out. These 32 bytes are the seed a wallet turns into the person's ROOT
-    // (SPEC 2.1), and CONTRACT section 6's list of what this library scrubs reads as covering them; it
+    // (SPEC §2.1), and CONTRACT section 6's list of what this library scrubs reads as covering them; it
     // did not, because `hkdf_sha256` returned a plain `Vec` that dropped uncleared. The caller still
     // base64s the value into an answer string, which section 6 hands to the host to clear — so this is
     // defence in depth, and it makes the section true.

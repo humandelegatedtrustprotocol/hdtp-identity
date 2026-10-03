@@ -66,7 +66,7 @@ func fold(line string) string {
 	return strings.Join(parts, "\r\n")
 }
 
-// Card is a decoded 2.0 card.
+// Card is a decoded card.
 type Card struct {
 	FN       string
 	Version  int

@@ -1,7 +1,7 @@
 //! Appendix B, proven from the core: the seven certificates it builds rebuilt (byte for byte where the
 //! issuer is Ed25519; the TBS, and the vector's signature verified, where it is P-256, whose ECDSA is
 //! not reproducible), the three marked `refused` refused, every chain, newest-leaf and
-//! certificate_renewed case, every `v: 2` envelope opened and re-sealed from its ephemeral seed,
+//! certificate_renewed case, every envelope opened and re-sealed from its ephemeral seed,
 //! `decide` on the vector envelopes, a result sealed back and opened, and the derivation vectors.
 use hdtp_identity::envelope::{self, DecideInput, Form, SealRequest};
 use hdtp_identity::hpke::{self, suite_for, Suite};

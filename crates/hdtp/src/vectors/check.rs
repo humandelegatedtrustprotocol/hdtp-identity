@@ -87,7 +87,7 @@ impl Tally {
 }
 
 pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
-    let v2: Value = match (spec, file) {
+    let doc: Value = match (spec, file) {
         (Some(s), _) => {
             let text = if Path::new(s).is_dir() {
                 assemble(Path::new(s))?
@@ -116,14 +116,14 @@ pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
     // `{}` passed too, as `0/0`. The names are asserted rather than counted, so the guard cannot
     // itself go stale as the suite grows.
     for section in ["certificates", "chain_cases", "newest_leaf_cases", "certificate_renewed_cases", "envelopes"] {
-        if v2.get(section).is_none() {
+        if doc.get(section).is_none() {
             return fail(format!("the document has no `{section}`: a vector suite missing a section proves less than it says"));
         }
     }
 
     let mut t = Tally { checks: 0, failures: 0 };
 
-    let der: BTreeMap<String, Vec<u8>> = v2["certificates"]
+    let der: BTreeMap<String, Vec<u8>> = doc["certificates"]
         .as_object()
         .map(|o| o.iter().filter_map(|(k, c)| from_hex(c["der_hex"].as_str()?).ok().map(|d| (k.clone(), d))).collect())
         .unwrap_or_default();
@@ -137,7 +137,7 @@ pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
         // come out of parse and the profile check clean. It is not one the generator rebuilds, and
         // it is not "in the profile as a leaf" — asserting either of those about it is the mistake
         // this branch is here to avoid.
-        if v2["certificates"][name.as_str()]["refused"].as_bool() == Some(true) {
+        if doc["certificates"][name.as_str()]["refused"].as_bool() == Some(true) {
             let why = match parse(bytes) {
                 Ok(cert) => x509::profile_error(&cert, "leaf"),
                 Err(e) => Some(e.why),
@@ -166,7 +166,7 @@ pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
             Err(e) => t.ok(false, format!("{name}: {}", e.why)),
         }
     }
-    for (name, k) in v2["leaf_keys_pkcs8_hex"].as_object().cloned().unwrap_or_default() {
+    for (name, k) in doc["leaf_keys_pkcs8_hex"].as_object().cloned().unwrap_or_default() {
         let parsed = from_hex(k.as_str().unwrap_or("")).ok().and_then(|b| PrivateKey::from_pkcs8(&b).ok());
         let mine_spki = c.hosts.get(name.as_str()).map(|h| h.public().spki().to_vec());
         t.ok(
@@ -176,7 +176,7 @@ pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
     }
 
     println!("chain cases (§14.2)");
-    for case in v2["chain_cases"].as_array().cloned().unwrap_or_default() {
+    for case in doc["chain_cases"].as_array().cloned().unwrap_or_default() {
         let name = case["name"].as_str().unwrap_or("?");
         let chain: Vec<Vec<u8>> =
             case["chain"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).map(get).collect()).unwrap_or_default();
@@ -200,7 +200,7 @@ pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
     }
 
     println!("newest leaf (§14.3)");
-    for case in v2["newest_leaf_cases"].as_array().cloned().unwrap_or_default() {
+    for case in doc["newest_leaf_cases"].as_array().cloned().unwrap_or_default() {
         let (p, q) = (case["pinned"].as_str().unwrap_or(""), case["presented"].as_str().unwrap_or(""));
         let got = x509::compare_leaves(&get(p), &get(q)).unwrap_or("error");
         t.ok(got == case["expect"].as_str().unwrap_or(""), format!("{p} vs {q}: expected {}, got {got}", case["expect"]));
@@ -208,7 +208,7 @@ pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
     }
 
     println!("certificate_renewed (§14.4)");
-    for case in v2["certificate_renewed_cases"].as_array().cloned().unwrap_or_default() {
+    for case in doc["certificate_renewed_cases"].as_array().cloned().unwrap_or_default() {
         let name = case["name"].as_str().unwrap_or("?");
         let pinned = get(case["pinned_leaf"].as_str().unwrap_or(""));
         let root = parse(&pinned).ok().and_then(|c| c.aki.map(|a| hdtp_identity::keys::fingerprint_of_id(&a))).unwrap_or_default();
@@ -219,16 +219,16 @@ pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
         println!("  {name}: {}", if follow { "followed" } else { "discarded" });
     }
 
-    println!("v2 envelopes (§13)");
-    let now2 = v2["now"].as_str().and_then(|s| parse_rfc3339(s).ok()).unwrap_or(at(NOW));
-    for e in v2["envelopes"].as_array().cloned().unwrap_or_default() {
+    println!("envelopes (§13)");
+    let now2 = doc["now"].as_str().and_then(|s| parse_rfc3339(s).ok()).unwrap_or(at(NOW));
+    for e in doc["envelopes"].as_array().cloned().unwrap_or_default() {
         let name = e["name"].as_str().unwrap_or("?");
         let form = e["form"].as_str().unwrap_or("chain");
         let mut go = || -> Result<(), String> {
             let rn = e["recipient_chain"][0].as_str().ok_or("recipient_chain")?;
             let sn = e["sender_chain"][0].as_str().ok_or("sender_chain")?;
             let recipient_leaf = parse(&get(rn)).map_err(|e| e.why)?;
-            let recipient = PrivateKey::from_pkcs8(&from_hex(v2["leaf_keys_pkcs8_hex"][rn].as_str().unwrap_or("")).map_err(|e| e.why)?)
+            let recipient = PrivateKey::from_pkcs8(&from_hex(doc["leaf_keys_pkcs8_hex"][rn].as_str().unwrap_or("")).map_err(|e| e.why)?)
                 .map_err(|e| e.why)?;
             let aad = from_b64u(e["protected"].as_str().unwrap_or("")).map_err(|e| e.why)?;
             let enc = from_b64u(e["enc"].as_str().unwrap_or("")).map_err(|e| e.why)?;
@@ -273,7 +273,7 @@ pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
                 }
             }
             // Re-sealed from the same inputs and the vector's ephemeral seed: enc and ct reproduce.
-            let sender = PrivateKey::from_pkcs8(&from_hex(v2["leaf_keys_pkcs8_hex"][sn].as_str().unwrap_or("")).map_err(|e| e.why)?)
+            let sender = PrivateKey::from_pkcs8(&from_hex(doc["leaf_keys_pkcs8_hex"][sn].as_str().unwrap_or("")).map_err(|e| e.why)?)
                 .map_err(|e| e.why)?;
             let chain: Vec<Vec<u8>> =
                 e["sender_chain"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).map(get).collect()).unwrap_or_default();
