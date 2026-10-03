@@ -7,7 +7,7 @@ pub fn call(name: &str, args: &str) -> String {
     hdtp_identity::call(name, args)
 }
 
-/// The crate version and the spec generation it implements.
+/// The crate version and the spec version it implements.
 #[wasm_bindgen]
 pub fn version() -> String {
     hdtp_identity::call("version", "{}")

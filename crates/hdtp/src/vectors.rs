@@ -1,4 +1,4 @@
-//! The implementer's proofs: regenerate Appendix B's 2.0 vectors from their labelled seeds, prove a
+//! The implementer's proofs: regenerate Appendix B's vectors from their labelled seeds, prove a
 //! document's vectors natively, and aim the black-box intrusion scenarios at a live endpoint.
 //!
 //! The generator is here; `check` proves a document and `intrude` is the live run.

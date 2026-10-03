@@ -255,7 +255,7 @@ export async function fetchTargetLeaf(endpoint, fetchImpl = fetch, cardText = nu
     cardText = await res.text();
   }
   const card = decodeCard(cardText);
-  if (card.error) throw new Error(`the target's card is not a 2.0 card: ${card.why}`);
+  if (card.error) throw new Error(`the target's card is not an HDTP card: ${card.why}`);
   return { leaf: card.cert, root: card.root, endpoint: card.endpoint };
 }
 

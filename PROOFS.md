@@ -2,14 +2,14 @@
 
 **Generated — do not edit.** `node js/record.mjs` rewrites this file; `node js/record.mjs --check`
 regenerates and fails on any difference, which is what gate.sh runs. Both lists come from the things
-that prove them rather than from prose beside them: the MUSTs from `hdtp-spec/SPEC.md` through
+that prove them rather than from prose beside them: the MUSTs from hdtp-spec's specification through
 the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the parity cases from
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed as proven that did not pass.
 
-Specification: **2.2.5**. **88** normative sentences, **2868** cross-port parity cases over **54** guarded functions.
+Specification: **1.0.0**. **88** normative sentences, **2868** cross-port parity cases over **54** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 2.2.5): **5736** answers, of which **0** do not hold to the shape it declares. Of **128** declared error codes, **128** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 1.0.0): **5736** answers, of which **0** do not hold to the shape it declares. Of **128** declared error codes, **128** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 88 normative sentences of the specification
 
@@ -50,7 +50,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 | # | The sentence | Held by |
 |---|---|---|
 | `3.#1` | A receiving implementation MUST NOT treat `FN` as identifying, and SHOULD NOT present it as a contact's whole identity: where two pinned contacts render alike, show the fingerprint alongside. | `gateway:TestCollidingNamesCarryTheirFingerprint`, `gateway:TestLookAlikeNamesCollideToo`, `gateway:TestNoPeerFacingSurfaceCanSetAPetname` |
-| `3.#2` | A receiver MUST reject a card without `X-HDTP-CERT`, one whose certificate does not parse as §14.1 describes — no issuer key identifier or one that is not the 32 bytes a key identifier is, no endpoint or several, a validity longer than 398 days — and a card whose `X-HDTP-VERSION` names a major version it does not implement, each with `bad_request`. | `scenario:a card without a certificate`, `scenario:two X-HDTP-CERT properties`, `scenario:a card of the retired generation`, `scenario:a card whose leaf names its issuer in three bytes` |
+| `3.#2` | A receiver MUST reject a card without `X-HDTP-CERT`, one whose certificate does not parse as §14.1 describes — no issuer key identifier or one that is not the 32 bytes a key identifier is, no endpoint or several, a validity longer than 398 days — and a card whose `X-HDTP-VERSION` names a major version it does not implement, each with `bad_request`. | `scenario:a card without a certificate`, `scenario:two X-HDTP-CERT properties`, `scenario:a card naming a major that is not 1`, `scenario:a card whose leaf names its issuer in three bytes` |
 | `3.#3` | A receiver MUST also refuse, at intake and again before every dial, an endpoint whose host resolves to a loopback, link-local or private address — the resolve-and-vet guard §6.2 applies to media URLs — unless the owner has configured that network on purpose, and a guest's endpoint that names the receiver's own address, which no honest card carries. | `go:TestAddressGuardRefusesEverySpellingOfLoopback`, `go:TestAddressGuard`, `rust:guards`, `scenario:a guest whose leaf names the receiver's own address` |
 | `3.#4` | A writer MUST NOT put a control character into a card — in `FN`, in `X-HDTP-SEAL`, or in a property it adds: a card is lines, a line break writes a property of the writer's choosing, and a reader takes the first of a name, so a name of `x`, a line break and `X-HDTP-SEAL:none` made a card that requires sealing into one that does not. | `rust:nothing_that_goes_into_a_card_may_carry_a_line_break`, `go:TestNothingThatGoesIntoACardMayCarryALineBreak` |
 
@@ -78,7 +78,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `6.2#1` | A `msg_id` MUST be a non-empty string — idempotency keyed on nothing protects nothing. | `scenario:an empty msg_id` |
 | `6.2#2` | `ok` — a card refresh, or `status: pending` from a new address under `ask` (§5.3). The caller's chain is the authority: the card's certificate MUST equal the chain's leaf, and a card that names another root or carries a certificate that is not that leaf MUST be refused `bad_request`, the card-intake code of §3 | `scenario:a guest whose card carries a different certificate than the chain`, `gateway:TestACardThatDisagreesWithTheProofIsABadRequest` |
-| `6.2#3` | `get_status` answers from that fixed four-value vocabulary; an implementation whose upstream presence source knows richer states MUST map any state not listed to `busy`. | `gateway:TestOwnerPresenceTracksLiveSessionsOnly` |
+| `6.2#3` | `get_status` answers from that fixed four-value vocabulary; an implementation whose upstream presence source knows richer states MUST map any state not listed to `busy`. | `gateway:TestGetStatusClampsToTheSpecVocabulary` |
 
 ### 9. Hosting
 
@@ -147,7 +147,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 | `13.1#4` | The HPKE `info` parameter is the ASCII string `HDTP-SEAL-v1`, and an envelope sealed under any other info string MUST NOT open. | `scenario:sealed with a stale info string` |
 | `13.1#5` | The HPKE ephemeral MUST be fresh for every envelope — a reused one repeats the key and the nonce, and two ciphertexts under them leak the XOR of their plaintexts — and both sides MUST refuse an all-zero DH output, which a low-order X25519 point produces (RFC 9180 §7.1.4). | `scenario:HPKE ephemeral reuse leaks the XOR of two plaintexts; production sealing cannot take a seed`, `scenario:a low-order X25519 recipient point`, `rust:refuses_a_low_order_point`, `go:TestALowOrderRecipientIsRefused` |
 | `13.1#6` | `msg_id` is REQUIRED and MUST be non-empty — replay protection keyed on an empty string protects nothing. | `scenario:an empty msg_id` |
-| `13.1#7` | A protected header carrying a member not listed for its `v`, or one whose type is not the one listed — `v`, `ts` and `exp` are JSON integers, `suite`, `kid`, `msg_id` and `cty` JSON strings — MUST be rejected (`envelope_invalid`): the header is the AAD, and two implementations that disagree about what was signed cannot interoperate. | `scenario:a header with an extra member`, `scenario:a header without suite`, `scenario:a header whose ts and exp are strings`, `scenario:a v: 1 header, the retired generation` |
+| `13.1#7` | A protected header carrying a member not listed for its `v`, or one whose type is not the one listed — `v`, `ts` and `exp` are JSON integers, `suite`, `kid`, `msg_id` and `cty` JSON strings — MUST be rejected (`envelope_invalid`): the header is the AAD, and two implementations that disagree about what was signed cannot interoperate. | `scenario:a header with an extra member`, `scenario:a header without suite`, `scenario:a header whose ts and exp are strings`, `scenario:a v: 2 header, a version that does not exist` |
 
 ### 13.2 The `sealed_call` tool
 
@@ -482,7 +482,7 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - card_decode of a real card
 - card_decode of an empty card
 - card_decode of nothing at all
-- card_decode of a 1.x card
+- card_decode of a card naming major 2
 - card_decode of a card with two certificates
 - card_decode of a card whose certificate is not one
 - card_decode after the leaf expired
@@ -711,7 +711,7 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - decide, small form: a pin with an empty leaf_fingerprint ("")
 - decide, small form: a pin with a malformed leaf_fingerprint ("abc")
 - decide, small form: a pin with a malformed leaf_fingerprint ("sha256:short")
-- decide, small form: a pin with a malformed leaf_fingerprint ("sha256:hDHYRyehsT-zp_qi1wGfFvp7iaeykPH4DI58MWfi6Ms=")
+- decide, small form: a pin with a malformed leaf_fingerprint ("sha256:dt7LM3OksokTJHxEBS96MGmBfm75JYEPlwJxDFbSpS8=")
 - decide on a pinned contact whose state is "Blocked"
 - decide on a pinned contact whose state is "blocked "
 - decide on a pinned contact whose state is "removed"
@@ -2187,7 +2187,7 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - open_result, leaf form: a pin with an empty leaf_fingerprint ("")
 - open_result, leaf form: a pin with a malformed leaf_fingerprint ("abc")
 - open_result, leaf form: a pin with a malformed leaf_fingerprint ("sha256:short")
-- open_result, leaf form: a pin with a malformed leaf_fingerprint ("sha256:hDHYRyehsT-zp_qi1wGfFvp7iaeykPH4DI58MWfi6Ms=")
+- open_result, leaf form: a pin with a malformed leaf_fingerprint ("sha256:dt7LM3OksokTJHxEBS96MGmBfm75JYEPlwJxDFbSpS8=")
 - open_result with a pin whose state is "Blocked"
 - open_result with a pin whose state is "blocked "
 - open_result with a pin whose state is "removed"
@@ -2995,7 +2995,7 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 
 - vault_seal
 - vault_seal of a record
-- vault_seal of an earlier generation
+- vault_seal of another generation
 - vault_seal of a plaintext with no generation
 - vault_seal of a document holding a member written twice
 - vault_seal of a document holding numbers and escapes JSON.stringify does not write
@@ -3014,7 +3014,7 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - vault_seal with a KDF nobody implements
 - vault_seal with no passphrase
 - vault_seal with a passphrase that is not a string
-- vault_seal of an earlier generation under a KDF out of range
+- vault_seal of another generation under a KDF out of range
 - vault_seal of a plaintext that is a string
 - vault_seal with nothing to work from
 - vault_seal with an empty passphrase and no plaintext
@@ -3022,7 +3022,7 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - vault_seal with a kdf that is a list
 - vault_seal with a kdf that is a string, and no passphrase
 - vault_seal with a kdf nobody implements, and an empty passphrase
-- vault_seal with a kdf that is a string, and an earlier generation
+- vault_seal with a kdf that is a string, and another generation
 - vault_seal with a kdf whose name is a number
 - vault_seal with a kdf whose m_kib is a string
 - vault_seal with a kdf whose m_kib is negative
@@ -3130,11 +3130,11 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - wallet_issue with valid_days of 0
 - wallet_issue with valid_days of 999
 - wallet_issue with a vault that is a string
-- wallet_issue with a vault of an earlier generation
+- wallet_issue with a vault of another generation
 - wallet_issue with a vault with a member it does not hold
 - wallet_issue with a record that is a string
 - wallet_issue with a record that is a list
-- wallet_issue with a record of an earlier generation
+- wallet_issue with a record of another generation
 - wallet_issue with a record with a member it does not hold
 - wallet_issue with a record whose ledger is not a list
 - wallet_issue with a ledger entry with no endpoint

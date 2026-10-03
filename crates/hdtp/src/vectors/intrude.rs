@@ -568,7 +568,7 @@ pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now
     let card = match core("card_decode", json!({ "vcard": card_text, "now": instant(now) })) {
         Ok(c) => c,
         Err(e) => {
-            println!("the target's card is not a 2.0 card ({}): nothing to aim at", e.0);
+            println!("the target's card is not an HDTP card ({}): nothing to aim at", e.0);
             return Ok(2);
         }
     };

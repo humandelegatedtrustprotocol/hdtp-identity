@@ -176,9 +176,9 @@
     "hash": "5488959269bf",
     "text": "`get_status` answers from that fixed four-value vocabulary; an implementation whose upstream presence source k",
     "elsewhere": "node",
-    "why": "presence vocabulary is a host's mapping from whatever it watches; hdtp-gateway maps it (TestOwnerPresenceTracksLiveSessionsOnly)",
+    "why": "presence vocabulary is a host's mapping from whatever it watches; hdtp-gateway clamps it at the wire, feeding get_status states the vocabulary does not list and reading busy back (TestGetStatusClampsToTheSpecVocabulary)",
     "elsewhere_names": [
-      "gateway:TestOwnerPresenceTracksLiveSessionsOnly"
+      "gateway:TestGetStatusClampsToTheSpecVocabulary"
     ]
   },
   "9.#1": {
