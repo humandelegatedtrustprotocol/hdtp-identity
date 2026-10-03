@@ -1,7 +1,7 @@
 // A JSON Schema validator for exactly the keywords `contract.json` uses, and no others.
 //
 // The contract is written in JSON Schema 2020-12 so that anybody's stock validator and anybody's
-// code generator can read it. This gate does not use a stock validator: `pact-identity/js` has no
+// code generator can read it. This gate does not use a stock validator: `hdtp-identity/js` has no
 // dependency of any kind (no lock file, nothing to install before `gate.sh` runs), and one package
 // to check forty schemas is not the reason to start. What a hand-written validator must not do is
 // IGNORE a keyword it does not implement — a schema would then claim a constraint that nothing

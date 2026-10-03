@@ -5,6 +5,8 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseIntrusions, seedIntrusions, appendixB } from './seed.mjs';
+import { fileURLToPath } from 'node:url';
+import { readSpec } from '../../hdtp-spec/site/spec-source.mjs';
 
 test('the seed output parses to its scenarios, and a count that does not add up is refused', () => {
   const out = 'identity\n  blocked    one  → x\n  residual   two\n  REPRODUCES three  → y\n\n3 scenarios: 1 blocked, 1 residual by decision, 1 reproduce\n';
@@ -14,9 +16,9 @@ test('the seed output parses to its scenarios, and a count that does not add up 
 });
 
 test('within one results directory the seed runs once, and a changed input runs it again', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'pact-seed-'));
-  const before = process.env.PACT_RESULTS;
-  process.env.PACT_RESULTS = dir;
+  const dir = mkdtempSync(join(tmpdir(), 'hdtp-seed-'));
+  const before = process.env.HDTP_RESULTS;
+  process.env.HDTP_RESULTS = dir;
   try {
     const first = seedIntrusions();
     assert.equal(first.status, 0);
@@ -28,7 +30,7 @@ test('within one results directory the seed runs once, and a changed input runs 
     writeFileSync(file, JSON.stringify({ ...kept, key: 'inputs that are not these', marker: 'stale' }));
     assert.equal(seedIntrusions().marker, undefined, 'an answer kept for other inputs is not used');
   } finally {
-    if (before === undefined) delete process.env.PACT_RESULTS; else process.env.PACT_RESULTS = before;
+    if (before === undefined) delete process.env.HDTP_RESULTS; else process.env.HDTP_RESULTS = before;
   }
 });
 
@@ -42,18 +44,18 @@ test('Appendix B is read as js/appendix-b-reader.json says, refusals word for wo
   }
 });
 
-// Two repositories keep this list, and each holds its own readers to its own copy: pact-protocol's
+// Two repositories keep this list, and each holds its own readers to its own copy: hdtp-spec's
 // vectors/check.mjs holds the checker's and the splicer's reader to vectors/appendix-b-reader.json.
-// The two copies are held to each other here, byte for byte, from the pact-protocol checked out
+// The two copies are held to each other here, byte for byte, from the hdtp-spec checked out
 // beside this repository, as the gate reads it (TC-12): a case added to one list alone fails.
-test('the Appendix B cases are the same bytes in pact-protocol\'s copy', () => {
+test('the Appendix B cases are the same bytes in hdtp-spec\'s copy', () => {
   const mine = readFileSync(new URL('./appendix-b-reader.json', import.meta.url));
-  const theirs = readFileSync(new URL('../../pact-protocol/vectors/appendix-b-reader.json', import.meta.url));
-  assert.ok(mine.equals(theirs), 'js/appendix-b-reader.json and pact-protocol vectors/appendix-b-reader.json differ');
+  const theirs = readFileSync(new URL('../../hdtp-spec/vectors/appendix-b-reader.json', import.meta.url));
+  assert.ok(mine.equals(theirs), 'js/appendix-b-reader.json and hdtp-spec vectors/appendix-b-reader.json differ');
 });
 
 test('the specification\'s first block is the seed\'s vector file, unchanged', () => {
-  const spec = readFileSync(new URL('../../pact-protocol/SPEC.md', import.meta.url), 'utf8');
-  const file = JSON.parse(readFileSync(new URL('../../pact-protocol/vectors/pact-2.0-vectors.json', import.meta.url), 'utf8'));
+  const spec = readSpec(fileURLToPath(new URL('../../hdtp-spec/', import.meta.url)));
+  const file = JSON.parse(readFileSync(new URL('../../hdtp-spec/vectors/hdtp-1.0-vectors.json', import.meta.url), 'utf8'));
   assert.deepEqual(appendixB(spec)[0], file);
 });

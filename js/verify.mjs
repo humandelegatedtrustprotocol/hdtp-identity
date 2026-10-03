@@ -10,8 +10,8 @@
 // a second and needs no build.
 //
 // **What a mismatch usually means: the source moved and the pin did not.** On 2026-09-19 the
-// pinned core turned out to predate the 1.x removal by two days — it still contained the 1.x
-// compat-card encoder the source had deleted — and nothing had noticed, because this check only
+// pinned core turned out to predate a removal by two days — it still contained an
+// encoder the source had deleted — and nothing had noticed, because this check only
 // ran where somebody had just rebuilt. So the first thing to ask is whether `crates/` changed
 // since `manifest.json` did (`git log -1 -- crates js/manifest.json`); if it did, pin again with
 // `sh js/reproduce.sh --pin` and commit the manifest; hosts take the bytes from a release.
@@ -66,7 +66,7 @@ const check = (label, bytes, expected) => {
 
 const file = process.argv[2];
 if (file) {
-  const entry = process.argv[3] && !process.argv[3].startsWith('--') ? process.argv[3] : 'pkg-web/pact_identity_wasm_bg.wasm';
+  const entry = process.argv[3] && !process.argv[3].startsWith('--') ? process.argv[3] : 'pkg-web/hdtp_identity_wasm_bg.wasm';
   const expected = manifest.files[entry];
   if (!expected) {
     console.log(`FAIL ${file}: js/manifest.json has no entry named ${entry}`);

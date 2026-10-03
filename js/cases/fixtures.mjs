@@ -13,12 +13,12 @@
 // And one is made by the OTHER port on purpose: 'verify a signature the other port made'.
 import { createPublicKey, generateKeyPairSync } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { seed, ed25519FromSeed, x25519FromSeed, pkcs8Of, spkiOf, b64url, fingerprint, keyId } from '../../../pact-protocol/vectors/lib/keys.mjs';
-import { buildRoot, buildLeaf } from '../../../pact-protocol/vectors/lib/x509.mjs';
-import { encodeCard } from '../../../pact-protocol/vectors/lib/card.mjs';
-import { read as derRead, children as derChildren, seq as derSeq, oid as derOid, tlv as derTlv, int as derInt, octet as derOctet, bitstr as derBitstr } from '../../../pact-protocol/vectors/lib/der.mjs';
-import { signDetached } from '../../../pact-protocol/vectors/lib/hpke.mjs';
-import { sealEnvelope } from '../../../pact-protocol/vectors/lib/envelope.mjs';
+import { seed, ed25519FromSeed, x25519FromSeed, pkcs8Of, spkiOf, b64url, fingerprint, keyId } from '../../../hdtp-spec/vectors/lib/keys.mjs';
+import { buildRoot, buildLeaf } from '../../../hdtp-spec/vectors/lib/x509.mjs';
+import { encodeCard } from '../../../hdtp-spec/vectors/lib/card.mjs';
+import { read as derRead, children as derChildren, seq as derSeq, oid as derOid, tlv as derTlv, int as derInt, octet as derOctet, bitstr as derBitstr } from '../../../hdtp-spec/vectors/lib/der.mjs';
+import { signDetached } from '../../../hdtp-spec/vectors/lib/hpke.mjs';
+import { sealEnvelope } from '../../../hdtp-spec/vectors/lib/envelope.mjs';
 import { alina, bharat, CLOCK, BORN, DIES, ENDPOINTS } from '../cast.mjs';
 
 export function fixtures({ wasm, go }) {
@@ -40,8 +40,8 @@ export function fixtures({ wasm, go }) {
   const csr = wasm.call('csr_new', { cn: 'Alina Rao', host_pkcs8: hostPkcs8, endpoint: ENDPOINT }).der;
   const rootCsr = wasm.call('csr_new', { cn: 'Alina Rao', host_pkcs8: rootPkcs8, endpoint: ENDPOINT }).der;
   const card = encodeCard({ fn: 'Alina Rao', cert: leafDerBytes, seal: 'required' });
-  const vault = { v: 2, roots: [{ fingerprint: rootFp, cn: 'Alina Rao', pkcs8: rootPkcs8, cert: rootDer, created: now }] };
-  const record = { v: 2, ledger: [], contacts: [] };
+  const vault = { v: 1, roots: [{ fingerprint: rootFp, cn: 'Alina Rao', pkcs8: rootPkcs8, cert: rootDer, created: now }] };
+  const record = { v: 1, ledger: [], contacts: [] };
   // Port-built: the seed exposes no to-be-signed certificate.
   const leafTbs = wasm.call('leaf_tbs', { cn: 'Alina Rao', root_cn: 'Alina Rao', root_spki: rootSpki, host_spki: hostSpki, endpoint: ENDPOINT, not_before: now, not_after: '2027-09-01T00:00:00Z' });
   const rootTbs = wasm.call('root_tbs', { cn: 'Alina Rao', spki: rootSpki, not_before: now, serial: b64url(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8])) });

@@ -2,14 +2,14 @@
 
 **Generated — do not edit.** `node js/record.mjs` rewrites this file; `node js/record.mjs --check`
 regenerates and fails on any difference, which is what gate.sh runs. Both lists come from the things
-that prove them rather than from prose beside them: the MUSTs from `pact-protocol/SPEC.md` through
+that prove them rather than from prose beside them: the MUSTs from hdtp-spec's specification through
 the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the parity cases from
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed as proven that did not pass.
 
-Specification: **2.2.5**. **88** normative sentences, **2868** cross-port parity cases over **54** guarded functions.
+Specification: **1.0.0**. **88** normative sentences, **2868** cross-port parity cases over **54** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 2.2.5): **5736** answers, of which **0** do not hold to the shape it declares. Of **128** declared error codes, **128** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 1.0.0): **5736** answers, of which **0** do not hold to the shape it declares. Of **128** declared error codes, **128** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 88 normative sentences of the specification
 
@@ -41,7 +41,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `2.2#1` | Before issuing any certificate, a wallet MUST establish that the root it is about to sign with is the root the identity already has. | `rust:a_vault_entry_that_disagrees_with_its_own_certificate_signs_nothing`, `rust:a_vault_root_proves_itself_before_it_signs`, `go:TestWalletIssueProvesTheRootBeforeItSigns` |
 | `2.2#2` | A wallet MUST refuse to sign unless all three hold: | `rust:a_card_whose_certificate_and_key_disagree_gets_no_leaf`, `rust:another_card_signs_nothing_for_this_identity`, `rust:a_card_that_swaps_its_key_after_the_check_signs_nothing_that_is_kept`, `rust:a_vault_root_proves_itself_before_it_signs`, `go:TestWalletIssueProvesTheRootBeforeItSigns` |
-| `2.2#3` | The challenge MUST be domain-separated from certificate bytes — the ASCII `PACT root proof v1` followed by a newline and at least 32 random bytes — so that proving possession can never be made to sign a certificate. | *wallet, by declaration* |
+| `2.2#3` | The challenge MUST be domain-separated from certificate bytes — the ASCII `HDTP root proof v1` followed by a newline and at least 32 random bytes — so that proving possession can never be made to sign a certificate. | *wallet, by declaration* |
 | `2.2#4` | A wallet MUST validate a chain it has assembled (§14.2) against the expected root and endpoint before returning it. | `rust:a_leaf_the_card_signed_validates_to_that_root_at_its_endpoint`, `rust:a_vault_root_proves_itself_before_it_signs`, `go:TestWalletIssueProvesTheRootBeforeItSigns` |
 | `2.2#5` | **A root certificate is issued once.** A wallet MUST NOT rebuild a root certificate for an identity that already has one. | `rust:a_root_the_card_signed_is_a_root` |
 
@@ -50,15 +50,15 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 | # | The sentence | Held by |
 |---|---|---|
 | `3.#1` | A receiving implementation MUST NOT treat `FN` as identifying, and SHOULD NOT present it as a contact's whole identity: where two pinned contacts render alike, show the fingerprint alongside. | `gateway:TestCollidingNamesCarryTheirFingerprint`, `gateway:TestLookAlikeNamesCollideToo`, `gateway:TestNoPeerFacingSurfaceCanSetAPetname` |
-| `3.#2` | A receiver MUST reject a card without `X-PACT-CERT`, one whose certificate does not parse as §14.1 describes — no issuer key identifier or one that is not the 32 bytes a key identifier is, no endpoint or several, a validity longer than 398 days — and a card whose `X-PACT-VERSION` names a major version it does not implement, each with `bad_request`. | `scenario:a card without a certificate`, `scenario:two X-PACT-CERT properties`, `scenario:a card of the retired generation`, `scenario:a card whose leaf names its issuer in three bytes` |
+| `3.#2` | A receiver MUST reject a card without `X-HDTP-CERT`, one whose certificate does not parse as §14.1 describes — no issuer key identifier or one that is not the 32 bytes a key identifier is, no endpoint or several, a validity longer than 398 days — and a card whose `X-HDTP-VERSION` names a major version it does not implement, each with `bad_request`. | `scenario:a card without a certificate`, `scenario:two X-HDTP-CERT properties`, `scenario:a card naming a major that is not 1`, `scenario:a card whose leaf names its issuer in three bytes` |
 | `3.#3` | A receiver MUST also refuse, at intake and again before every dial, an endpoint whose host resolves to a loopback, link-local or private address — the resolve-and-vet guard §6.2 applies to media URLs — unless the owner has configured that network on purpose, and a guest's endpoint that names the receiver's own address, which no honest card carries. | `go:TestAddressGuardRefusesEverySpellingOfLoopback`, `go:TestAddressGuard`, `rust:guards`, `scenario:a guest whose leaf names the receiver's own address` |
-| `3.#4` | A writer MUST NOT put a control character into a card — in `FN`, in `X-PACT-SEAL`, or in a property it adds: a card is lines, a line break writes a property of the writer's choosing, and a reader takes the first of a name, so a name of `x`, a line break and `X-PACT-SEAL:none` made a card that requires sealing into one that does not. | `rust:nothing_that_goes_into_a_card_may_carry_a_line_break`, `go:TestNothingThatGoesIntoACardMayCarryALineBreak` |
+| `3.#4` | A writer MUST NOT put a control character into a card — in `FN`, in `X-HDTP-SEAL`, or in a property it adds: a card is lines, a line break writes a property of the writer's choosing, and a reader takes the first of a name, so a name of `x`, a line break and `X-HDTP-SEAL:none` made a card that requires sealing into one that does not. | `rust:nothing_that_goes_into_a_card_may_carry_a_line_break`, `go:TestNothingThatGoesIntoACardMayCarryALineBreak` |
 
 ### 4. Invites
 
 | # | The sentence | Held by |
 |---|---|---|
-| `4.#1` | The same URL serves two audiences by content negotiation: a browser gets the human landing page; a client sending `Accept: application/pact-invite+json` (or appending `?format=json`) gets `{"card","card_sig","chain"}` — the signed card and the issuer's chain (§2), whose leaf MUST byte-equal the card's `X-PACT-CERT` and which the redeemer MUST validate (§14.2) before use, so it can seal its very first call. | `gateway:TestLandingNoOracle404` |
+| `4.#1` | The same URL serves two audiences by content negotiation: a browser gets the human landing page; a client sending `Accept: application/hdtp-invite+json` (or appending `?format=json`) gets `{"card","card_sig","chain"}` — the signed card and the issuer's chain (§2), whose leaf MUST byte-equal the card's `X-HDTP-CERT` and which the redeemer MUST validate (§14.2) before use, so it can seal its very first call. | `gateway:TestLandingNoOracle404` |
 
 ### 5.2 Manual flow (vCard shared over existing channels)
 
@@ -78,7 +78,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `6.2#1` | A `msg_id` MUST be a non-empty string — idempotency keyed on nothing protects nothing. | `scenario:an empty msg_id` |
 | `6.2#2` | `ok` — a card refresh, or `status: pending` from a new address under `ask` (§5.3). The caller's chain is the authority: the card's certificate MUST equal the chain's leaf, and a card that names another root or carries a certificate that is not that leaf MUST be refused `bad_request`, the card-intake code of §3 | `scenario:a guest whose card carries a different certificate than the chain`, `gateway:TestACardThatDisagreesWithTheProofIsABadRequest` |
-| `6.2#3` | `get_status` answers from that fixed four-value vocabulary; an implementation whose upstream presence source knows richer states MUST map any state not listed to `busy`. | `gateway:TestOwnerPresenceTracksLiveSessionsOnly` |
+| `6.2#3` | `get_status` answers from that fixed four-value vocabulary; an implementation whose upstream presence source knows richer states MUST map any state not listed to `busy`. | `gateway:TestGetStatusClampsToTheSpecVocabulary` |
 
 ### 9. Hosting
 
@@ -141,22 +141,22 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 
 | # | The sentence | Held by |
 |---|---|---|
-| `13.1#1` | base64url HPKE encapsulated key, of exactly the suite's `Npk` (RFC 9180 §7.1): 65 bytes for `PACT-SEAL-P256`, an uncompressed P-256 point, and 32 for `PACT-SEAL-X25519`. A receiver MUST refuse any other length (`envelope_invalid`) — `sig` covers the three members concatenated with nothing between them, so the suite's own length is what fixes the boundary; without it a byte moved from the end of `enc` to the front of `ct` leaves the signed bytes identical | `scenario:a byte moved from the encapsulated key into the ciphertext`, `rust:an_encapsulated_key_of_the_wrong_length_is_refused_under_each_suite`, `go:TestAnEncapsulatedKeyOfTheWrongLengthIsRefused` |
+| `13.1#1` | base64url HPKE encapsulated key, of exactly the suite's `Npk` (RFC 9180 §7.1): 65 bytes for `HDTP-SEAL-P256`, an uncompressed P-256 point, and 32 for `HDTP-SEAL-X25519`. A receiver MUST refuse any other length (`envelope_invalid`) — `sig` covers the three members concatenated with nothing between them, so the suite's own length is what fixes the boundary; without it a byte moved from the end of `enc` to the front of `ct` leaves the signed bytes identical | `scenario:a byte moved from the encapsulated key into the ciphertext`, `rust:an_encapsulated_key_of_the_wrong_length_is_refused_under_each_suite`, `go:TestAnEncapsulatedKeyOfTheWrongLengthIsRefused` |
 | `13.1#2` | Each of the four members is base64url (RFC 4648 §5) without padding, in its one canonical spelling, and a receiver MUST refuse (`envelope_invalid`) a member written any other way: with a character outside that alphabet — padding, whitespace and the standard alphabet's `+` and `/` among them — or with a last character whose unused bits are not zero. | `scenario:a real envelope whose protected carries a stray character`, `scenario:a real envelope whose enc is padded`, `scenario:a real envelope whose ct has a line break in it`, `scenario:a real envelope whose signature is spelled with its spare bits set` |
 | `13.1#3` | The suite follows the recipient's key and nothing else: a receiver MUST refuse an envelope whose `suite` is not the one its key takes (`envelope_invalid`), so no choice is left on the wire for a sender to make badly. | `scenario:the wrong suite for the recipient's key` |
-| `13.1#4` | The HPKE `info` parameter is the ASCII string `PACT-SEAL-v2`, and an envelope sealed under any other info string MUST NOT open. | `scenario:sealed with a stale info string` |
+| `13.1#4` | The HPKE `info` parameter is the ASCII string `HDTP-SEAL-v1`, and an envelope sealed under any other info string MUST NOT open. | `scenario:sealed with a stale info string` |
 | `13.1#5` | The HPKE ephemeral MUST be fresh for every envelope — a reused one repeats the key and the nonce, and two ciphertexts under them leak the XOR of their plaintexts — and both sides MUST refuse an all-zero DH output, which a low-order X25519 point produces (RFC 9180 §7.1.4). | `scenario:HPKE ephemeral reuse leaks the XOR of two plaintexts; production sealing cannot take a seed`, `scenario:a low-order X25519 recipient point`, `rust:refuses_a_low_order_point`, `go:TestALowOrderRecipientIsRefused` |
 | `13.1#6` | `msg_id` is REQUIRED and MUST be non-empty — replay protection keyed on an empty string protects nothing. | `scenario:an empty msg_id` |
-| `13.1#7` | A protected header carrying a member not listed for its `v`, or one whose type is not the one listed — `v`, `ts` and `exp` are JSON integers, `suite`, `kid`, `msg_id` and `cty` JSON strings — MUST be rejected (`envelope_invalid`): the header is the AAD, and two implementations that disagree about what was signed cannot interoperate. | `scenario:a header with an extra member`, `scenario:a header without suite`, `scenario:a header whose ts and exp are strings`, `scenario:a v: 1 header, the retired generation` |
+| `13.1#7` | A protected header carrying a member not listed for its `v`, or one whose type is not the one listed — `v`, `ts` and `exp` are JSON integers, `suite`, `kid`, `msg_id` and `cty` JSON strings — MUST be rejected (`envelope_invalid`): the header is the AAD, and two implementations that disagree about what was signed cannot interoperate. | `scenario:a header with an extra member`, `scenario:a header without suite`, `scenario:a header whose ts and exp are strings`, `scenario:a v: 2 header, a version that does not exist` |
 
 ### 13.2 The `sealed_call` tool
 
 | # | The sentence | Held by |
 |---|---|---|
-| `13.2#1` | The plaintext of a request envelope is one bare JSON object (no JSON-RPC framing) of `method`, `params`, and exactly one of `chain` and `leaf`; the method MUST be `tools/call` or `tools/list`. | `go:TestV2Envelopes`, `rust:decide_on_the_vector_envelopes`, `scenario:a sealed tools/list from a stranger` |
+| `13.2#1` | The plaintext of a request envelope is one bare JSON object (no JSON-RPC framing) of `method`, `params`, and exactly one of `chain` and `leaf`; the method MUST be `tools/call` or `tools/list`. | `go:TestEnvelopesOpenAndReproduce`, `rust:decide_on_the_vector_envelopes`, `scenario:a sealed tools/list from a stranger` |
 | `13.2#2` | A sender MUST carry `chain` on first contact and in its first envelope to each contact after a renewal, and MAY carry it at any time. | `scenario:after chain_required, the chain is sent and the leaf is learned`, `scenario:a known contact from its known host sends the small form and is a contact` |
-| `13.2#3` | **The result of a sealed request MUST be sealed back to the caller** (same format, `kid` naming the caller's leaf key, the request's `msg_id` for correlation, `cty: application/pact-result+json`, and the responder's own `chain` or `leaf` in the plaintext beside the result, by the same rule — the chain when the caller has not seen this leaf, the fingerprint after; a result plaintext is one bare JSON object of `result`, the inner result, or `error`, an error object of §12, and exactly one of `chain` and `leaf`); result envelopes are never dispatched — the receiving caller decodes, opens, validates the chain or finds the named leaf among its pins, verifies the signature and correlates; a caller that cannot verify a result asks with `get_card`, which always answers with the chain — and the request-side steps of §13.3 (idempotency, tiering) do not apply to them. | `rust:a_result_seals_back_and_opens_on_the_caller_side`, `go:TestSealAndOpenResult` |
-| `13.2#4` | `chain` MUST validate (§14.2), `sig` MUST verify under its leaf key, and its leaf MUST byte-equal the `card` argument's `X-PACT-CERT`. | `scenario:a guest whose card carries a different certificate than the chain`, `scenario:a sealed tools/list from a stranger` |
+| `13.2#3` | **The result of a sealed request MUST be sealed back to the caller** (same format, `kid` naming the caller's leaf key, the request's `msg_id` for correlation, `cty: application/hdtp-result+json`, and the responder's own `chain` or `leaf` in the plaintext beside the result, by the same rule — the chain when the caller has not seen this leaf, the fingerprint after; a result plaintext is one bare JSON object of `result`, the inner result, or `error`, an error object of §12, and exactly one of `chain` and `leaf`); result envelopes are never dispatched — the receiving caller decodes, opens, validates the chain or finds the named leaf among its pins, verifies the signature and correlates; a caller that cannot verify a result asks with `get_card`, which always answers with the chain — and the request-side steps of §13.3 (idempotency, tiering) do not apply to them. | `rust:a_result_seals_back_and_opens_on_the_caller_side`, `go:TestSealAndOpenResult` |
+| `13.2#4` | `chain` MUST validate (§14.2), `sig` MUST verify under its leaf key, and its leaf MUST byte-equal the `card` argument's `X-HDTP-CERT`. | `scenario:a guest whose card carries a different certificate than the chain`, `scenario:a sealed tools/list from a stranger` |
 | `13.2#5` | Error results follow the sealing rule too: once a request envelope has been successfully opened, an error result MUST be sealed back like any other result — a plaintext error is only for an envelope that could not be opened at all, where there is no proven key to seal toward. | `gateway:TestARefusalPastTheOpenIsSealed`, `gateway:TestAPlaintextRefusalPastTheOpenIsNotThePeersAnswer` |
 
 ### 13.3 Opening
@@ -482,7 +482,7 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - card_decode of a real card
 - card_decode of an empty card
 - card_decode of nothing at all
-- card_decode of a 1.x card
+- card_decode of a card naming major 2
 - card_decode of a card with two certificates
 - card_decode of a card whose certificate is not one
 - card_decode after the leaf expired
@@ -506,7 +506,7 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - card_decode of a card whose certificate has padding at the end
 - card_decode of a card whose certificate has the standard alphabet
 - card_decode of a card whose certificate has a space
-- card_decode of a card with an empty X-PACT-VERSION
+- card_decode of a card with an empty X-HDTP-VERSION
 - generated · card_decode · {}
 - generated · card_decode · the hostile object
 - generated · card_decode · vcard absent
@@ -711,7 +711,7 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - decide, small form: a pin with an empty leaf_fingerprint ("")
 - decide, small form: a pin with a malformed leaf_fingerprint ("abc")
 - decide, small form: a pin with a malformed leaf_fingerprint ("sha256:short")
-- decide, small form: a pin with a malformed leaf_fingerprint ("sha256:hDHYRyehsT-zp_qi1wGfFvp7iaeykPH4DI58MWfi6Ms=")
+- decide, small form: a pin with a malformed leaf_fingerprint ("sha256:dt7LM3OksokTJHxEBS96MGmBfm75JYEPlwJxDFbSpS8=")
 - decide on a pinned contact whose state is "Blocked"
 - decide on a pinned contact whose state is "blocked "
 - decide on a pinned contact whose state is "removed"
@@ -729,10 +729,10 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - decide: a pending_out contact's sealed send_message waits, chain form
 - decide: a pending_out contact's sealed tools/list, chain form, the pin moving
 - decide: a pending_out contact's sealed send_message waits, chain form, the pin moving
-- decide on a PACT-SEAL-X25519 envelope whose encapsulated key is one byte short
-- decide on a PACT-SEAL-X25519 envelope whose encapsulated key is one byte long
-- decide on a PACT-SEAL-P256 envelope whose encapsulated key is one byte short
-- decide on a PACT-SEAL-P256 envelope whose encapsulated key is one byte long
+- decide on an HDTP-SEAL-X25519 envelope whose encapsulated key is one byte short
+- decide on an HDTP-SEAL-X25519 envelope whose encapsulated key is one byte long
+- decide on an HDTP-SEAL-P256 envelope whose encapsulated key is one byte short
+- decide on an HDTP-SEAL-P256 envelope whose encapsulated key is one byte long
 - decide with an envelope with no sig
 - decide with an envelope that is not an object
 - decide with a node with no endpoint
@@ -881,9 +881,9 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - derive_seed with no prf
 - derive_seed with prf as null
 - derive_seed with prf that is not base64url
-- derive_seed for pact/root/1
-- derive_seed for pact/store-key/1
-- derive_seed for pact/store-id/1
+- derive_seed for hdtp/root/1
+- derive_seed for hdtp/store-key/1
+- derive_seed for hdtp/store-id/1
 - generated · derive_seed · {}
 - generated · derive_seed · prf absent
 - generated · derive_seed · prf null
@@ -1482,16 +1482,16 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - hpke_seal with a suite nobody has
 - hpke_seal with nothing to work from
 - hpke_seal
-- hpke_seal under PACT-SEAL-X25519 to a key outside the profile: rsa
-- hpke_seal under PACT-SEAL-P256 to a key outside the profile: rsa
-- hpke_seal under PACT-SEAL-X25519 to a key outside the profile: P-384
-- hpke_seal under PACT-SEAL-P256 to a key outside the profile: P-384
-- hpke_seal under PACT-SEAL-X25519 to a key outside the profile: X25519
-- hpke_seal under PACT-SEAL-P256 to a key outside the profile: X25519
-- hpke_seal under PACT-SEAL-X25519 to a key outside the profile: Ed25519 with a NULL
-- hpke_seal under PACT-SEAL-P256 to a key outside the profile: Ed25519 with a NULL
-- hpke_seal under PACT-SEAL-X25519 to a P-256 key
-- hpke_seal under PACT-SEAL-P256 to an Ed25519 key
+- hpke_seal under HDTP-SEAL-X25519 to a key outside the profile: rsa
+- hpke_seal under HDTP-SEAL-P256 to a key outside the profile: rsa
+- hpke_seal under HDTP-SEAL-X25519 to a key outside the profile: P-384
+- hpke_seal under HDTP-SEAL-P256 to a key outside the profile: P-384
+- hpke_seal under HDTP-SEAL-X25519 to a key outside the profile: X25519
+- hpke_seal under HDTP-SEAL-P256 to a key outside the profile: X25519
+- hpke_seal under HDTP-SEAL-X25519 to a key outside the profile: Ed25519 with a NULL
+- hpke_seal under HDTP-SEAL-P256 to a key outside the profile: Ed25519 with a NULL
+- hpke_seal under HDTP-SEAL-X25519 to a P-256 key
+- hpke_seal under HDTP-SEAL-P256 to an Ed25519 key
 - hpke_seal to an Ed25519 key of small order: the identity
 - hpke_seal to an Ed25519 key of small order: y = -1
 - generated · hpke_seal · {}
@@ -2187,16 +2187,16 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - open_result, leaf form: a pin with an empty leaf_fingerprint ("")
 - open_result, leaf form: a pin with a malformed leaf_fingerprint ("abc")
 - open_result, leaf form: a pin with a malformed leaf_fingerprint ("sha256:short")
-- open_result, leaf form: a pin with a malformed leaf_fingerprint ("sha256:hDHYRyehsT-zp_qi1wGfFvp7iaeykPH4DI58MWfi6Ms=")
+- open_result, leaf form: a pin with a malformed leaf_fingerprint ("sha256:dt7LM3OksokTJHxEBS96MGmBfm75JYEPlwJxDFbSpS8=")
 - open_result with a pin whose state is "Blocked"
 - open_result with a pin whose state is "blocked "
 - open_result with a pin whose state is "removed"
 - open_result with a pin whose state is "pending_in"
 - open_result with a pin whose state is ""
-- open_result on a PACT-SEAL-X25519 answer whose encapsulated key is one byte short
-- open_result on a PACT-SEAL-X25519 answer whose encapsulated key is one byte long
-- open_result on a PACT-SEAL-P256 answer whose encapsulated key is one byte short
-- open_result on a PACT-SEAL-P256 answer whose encapsulated key is one byte long
+- open_result on an HDTP-SEAL-X25519 answer whose encapsulated key is one byte short
+- open_result on an HDTP-SEAL-X25519 answer whose encapsulated key is one byte long
+- open_result on an HDTP-SEAL-P256 answer whose encapsulated key is one byte short
+- open_result on an HDTP-SEAL-P256 answer whose encapsulated key is one byte long
 - open_result with an envelope with no ct
 - open_result with an envelope that is not an object
 - open_result with a pin with no root
@@ -2995,7 +2995,7 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 
 - vault_seal
 - vault_seal of a record
-- vault_seal of an earlier generation
+- vault_seal of another generation
 - vault_seal of a plaintext with no generation
 - vault_seal of a document holding a member written twice
 - vault_seal of a document holding numbers and escapes JSON.stringify does not write
@@ -3014,7 +3014,7 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - vault_seal with a KDF nobody implements
 - vault_seal with no passphrase
 - vault_seal with a passphrase that is not a string
-- vault_seal of an earlier generation under a KDF out of range
+- vault_seal of another generation under a KDF out of range
 - vault_seal of a plaintext that is a string
 - vault_seal with nothing to work from
 - vault_seal with an empty passphrase and no plaintext
@@ -3022,7 +3022,7 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - vault_seal with a kdf that is a list
 - vault_seal with a kdf that is a string, and no passphrase
 - vault_seal with a kdf nobody implements, and an empty passphrase
-- vault_seal with a kdf that is a string, and an earlier generation
+- vault_seal with a kdf that is a string, and another generation
 - vault_seal with a kdf whose name is a number
 - vault_seal with a kdf whose m_kib is a string
 - vault_seal with a kdf whose m_kib is negative
@@ -3130,11 +3130,11 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - wallet_issue with valid_days of 0
 - wallet_issue with valid_days of 999
 - wallet_issue with a vault that is a string
-- wallet_issue with a vault of an earlier generation
+- wallet_issue with a vault of another generation
 - wallet_issue with a vault with a member it does not hold
 - wallet_issue with a record that is a string
 - wallet_issue with a record that is a list
-- wallet_issue with a record of an earlier generation
+- wallet_issue with a record of another generation
 - wallet_issue with a record with a member it does not hold
 - wallet_issue with a record whose ledger is not a list
 - wallet_issue with a ledger entry with no endpoint

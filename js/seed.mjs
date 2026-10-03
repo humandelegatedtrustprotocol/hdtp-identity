@@ -1,12 +1,12 @@
 // What the seed says, read in one place: its intrusion suite's scenarios and verdicts, and Appendix B's
 // vector blocks.
 //
-// The seed's intrusion suite (pact-protocol/vectors/intrude.mjs) prints one line per scenario, and that
+// The seed's intrusion suite (hdtp-spec/vectors/intrude.mjs) prints one line per scenario, and that
 // output is the only exact list of them: a third of the names are built in loops. Three files each ran
 // it and each parsed the lines their own way (js/intrude.mjs, js/musts.mjs, js/live.mjs), and the gate
 // ran it six times. It is run and parsed HERE, and within one gate run it runs once: with
-// PACT_RESULTS set (gate.sh sets it), the parse is kept in that directory under a key over every file
-// the run reads — the suite, its library, SPEC.md — and the Node version, so a cached answer is the
+// HDTP_RESULTS set (gate.sh sets it), the parse is kept in that directory under a key over every file
+// the run reads — the suite, its library, the specification's pages — and the Node version, so a cached answer is the
 // answer those exact bytes give.
 //
 //   node js/seed.mjs     prints the seed's own run and exits non-zero if it failed or anything reproduces
@@ -16,14 +16,16 @@ import { readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 
-const protocol = fileURLToPath(new URL('../../pact-protocol/', import.meta.url));
+const protocol = fileURLToPath(new URL('../../hdtp-spec/', import.meta.url));
 const suite = join(protocol, 'vectors/intrude.mjs');
 const VERDICT = /^  (blocked|residual|REPRODUCES)\s+(.*?)(?:\s+→ .*)?$/;
 
 /** The files whose bytes decide the seed suite's output. */
 function inputsKey() {
   const lib = join(protocol, 'vectors/lib');
-  const files = [suite, join(protocol, 'SPEC.md'), ...readdirSync(lib).filter((f) => f.endsWith('.mjs')).sort().map((f) => join(lib, f))];
+  const text = join(protocol, 'docs/specification');
+  const pages = readdirSync(text).sort().flatMap((v) => readdirSync(join(text, v)).sort().map((p) => join(text, v, p)));
+  const files = [suite, join(protocol, 'site/spec-source.mjs'), ...pages, ...readdirSync(lib).filter((f) => f.endsWith('.mjs')).sort().map((f) => join(lib, f))];
   const h = createHash('sha256').update(process.version);
   for (const f of files) h.update(f.slice(protocol.length)).update('\0').update(readFileSync(f)).update('\0');
   return h.digest('hex');
@@ -48,7 +50,7 @@ export function parseIntrusions(stdout) {
  */
 export function seedIntrusions() {
   const key = inputsKey();
-  const dir = process.env.PACT_RESULTS;
+  const dir = process.env.HDTP_RESULTS;
   const cache = dir && join(dir, 'seed-intrude.json');
   if (cache && existsSync(cache)) {
     try {
@@ -65,7 +67,7 @@ export function seedIntrusions() {
 
 /**
  * The JSON blocks of a specification's Appendix B: everything fenced as ```json between the heading
- * `## Appendix B` and the closing line `*End of PACT`. Both markers must be there — a missing end
+ * `## Appendix B` and the closing line `*End of HDTP`. Both markers must be there — a missing end
  * used to slice to one character short of the end of the file — every fence must close, and every
  * block must be JSON. js/appendix-b-reader.json is the list of cases this and the other three readers
  * (the CLI's, the core tests', the Go port's) are held to, refusals word for word.
@@ -73,8 +75,8 @@ export function seedIntrusions() {
 export function appendixB(spec) {
   const start = spec.indexOf('## Appendix B');
   if (start < 0) throw new Error('the document has no Appendix B');
-  const end = spec.indexOf('*End of PACT', start);
-  if (end < 0) throw new Error('Appendix B has no end marker (*End of PACT)');
+  const end = spec.indexOf('*End of HDTP', start);
+  if (end < 0) throw new Error('Appendix B has no end marker (*End of HDTP)');
   const b = spec.slice(start, end);
   const blocks = [];
   let at = 0;

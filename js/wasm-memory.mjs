@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
-const glue = fileURLToPath(new URL('./pkg-node/pact_identity_wasm.js', import.meta.url));
+const glue = fileURLToPath(new URL('./pkg-node/hdtp_identity_wasm.js', import.meta.url));
 
 export function fresh() {
   const source = readFileSync(glue, 'utf8') + '\nexports.__memory = () => wasm.memory;\n';

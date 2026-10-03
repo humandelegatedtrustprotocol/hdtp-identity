@@ -29,5 +29,5 @@ done
 
 git push origin "refs/heads/$BRANCH:refs/heads/$BRANCH" "refs/tags/v$VERSION" "refs/tags/go/v$VERSION"
 # shellcheck disable=SC2046 # one argument per asset; the names hold no spaces
-$GH release create "v$VERSION" --verify-tag --title "pact-identity $VERSION" --notes-file "dist/$VERSION-notes.md" $(ls -d "$DIST"/*)
+$GH release create "v$VERSION" --verify-tag --title "hdtp-identity $VERSION" --notes-file "dist/$VERSION-notes.md" $(ls -d "$DIST"/*)
 echo "publish: v$VERSION pushed and released. make verify-release VERSION=$VERSION checks what was published."

@@ -1,5 +1,5 @@
 #!/bin/sh
-# The `pact` CLI binaries of a release, built from a COMMIT (git archive of the ref), never the tree.
+# The `hdtp` CLI binaries of a release, built from a COMMIT (git archive of the ref), never the tree.
 #
 #   sh scripts/build-cli.sh <ref> <out-dir> <version> <target>...
 #
@@ -12,7 +12,7 @@
 # The PIV feature is on by default, so both Linux builds link libpcsclite dynamically: a machine
 # that runs them needs libpcsclite1 installed (Debian/Ubuntu: `apt install libpcsclite1`).
 #
-# Each binary is written as <out-dir>/pact-<version>-<target>. Any target that fails fails the run.
+# Each binary is written as <out-dir>/hdtp-<version>-<target>. Any target that fails fails the run.
 # The Linux builds need docker and the network (apt, rustup); the binaries are not bit-reproducible.
 set -eu
 [ "$#" -ge 4 ] || { echo "usage: sh scripts/build-cli.sh <ref> <out-dir> <version> <target>..." >&2; exit 2; }
@@ -29,13 +29,13 @@ IMAGE="$(node -p "require('./js/builder.json').image")"
 
 linux() { # <rust-target> <asset-target> <setup>
   docker run --rm --platform linux/arm64 -v "$WORK/src":/src:ro -v "$OUT":/out -e OWNER="$(id -u):$(id -g)" \
-    -e RT="$1" -e NAME="pact-$VERSION-$2" "$IMAGE" sh -euc "
+    -e RT="$1" -e NAME="hdtp-$VERSION-$2" "$IMAGE" sh -euc "
     export DEBIAN_FRONTEND=noninteractive
     $3
     mkdir -p /build && cp -a /src/. /build/ && cd /build
     rustup target add \"\$RT\" >/dev/null
-    cargo build --release --locked -p pact --target \"\$RT\"
-    cp \"target/\$RT/release/pact\" \"/out/\$NAME\"
+    cargo build --release --locked -p hdtp --target \"\$RT\"
+    cp \"target/\$RT/release/hdtp\" \"/out/\$NAME\"
     chown \"\$OWNER\" \"/out/\$NAME\"
   "
 }
@@ -45,8 +45,8 @@ for t in "$@"; do
   case "$t" in
     darwin-arm64)
       [ "$(uname -s)-$(uname -m)" = "Darwin-arm64" ] || { echo "build-cli: darwin-arm64 builds only on an arm64 Mac" >&2; exit 1; }
-      ( cd "$WORK/src" && cargo build --release --locked -p pact --target aarch64-apple-darwin --target-dir "$WORK/target" )
-      cp "$WORK/target/aarch64-apple-darwin/release/pact" "$OUT/pact-$VERSION-darwin-arm64"
+      ( cd "$WORK/src" && cargo build --release --locked -p hdtp --target aarch64-apple-darwin --target-dir "$WORK/target" )
+      cp "$WORK/target/aarch64-apple-darwin/release/hdtp" "$OUT/hdtp-$VERSION-darwin-arm64"
       ;;
     linux-arm64)
       linux aarch64-unknown-linux-gnu linux-arm64 \
@@ -60,5 +60,5 @@ for t in "$@"; do
       ;;
     *) echo "build-cli: unknown target $t (darwin-arm64, linux-arm64, linux-amd64)" >&2; exit 2 ;;
   esac
-  [ -s "$OUT/pact-$VERSION-$t" ] || { echo "build-cli: $t produced nothing" >&2; exit 1; }
+  [ -s "$OUT/hdtp-$VERSION-$t" ] || { echo "build-cli: $t produced nothing" >&2; exit 1; }
 done

@@ -1,11 +1,11 @@
-package pactidentity
+package hdtpidentity
 
 import (
 	"encoding/json"
 	"testing"
 )
 
-// One grammar for every instant both ports read (SPEC 2.2.2): `YYYY-MM-DDTHH:MM:SS`, an optional
+// One grammar for every instant both ports read: `YYYY-MM-DDTHH:MM:SS`, an optional
 // `.` and digits (dropped), and `Z`. Upper-case T and Z only, no offset, no `,` before a fraction.
 // parseInstantZ is the one reader (the boundary's `instant` in api_args.go, parseInstant and the
 // export's instants all go through it); the Rust core's instants_have_one_grammar holds parse_rfc3339 to the same list.

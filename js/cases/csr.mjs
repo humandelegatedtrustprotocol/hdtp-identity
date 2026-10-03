@@ -1,7 +1,7 @@
 // §3 of the contract: certificate signing requests — make one, check one, issue from one.
-import { b64url } from '../../../pact-protocol/vectors/lib/keys.mjs';
-import { read as derRead, children as derChildren, tlv as derTlv, seq as derSeq, set as derSet, bitstr as derBitstr, int as derInt } from '../../../pact-protocol/vectors/lib/der.mjs';
-import { signDetached } from '../../../pact-protocol/vectors/lib/hpke.mjs';
+import { b64url } from '../../../hdtp-spec/vectors/lib/keys.mjs';
+import { read as derRead, children as derChildren, tlv as derTlv, seq as derSeq, set as derSet, bitstr as derBitstr, int as derInt } from '../../../hdtp-spec/vectors/lib/der.mjs';
+import { signDetached } from '../../../hdtp-spec/vectors/lib/hpke.mjs';
 import { ZONED } from './certificates.mjs';
 
 export default function csr({ add, expect }, f) {

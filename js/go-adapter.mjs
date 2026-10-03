@@ -1,4 +1,4 @@
-// The worker thread behind the Go port (js/port.mjs): it keeps ONE `pact-identity-go` process for the
+// The worker thread behind the Go port (js/port.mjs): it keeps ONE `hdtp-identity-go` process for the
 // whole suite and relays line-delimited JSON to it. The caller blocks on `signal` (Atomics) and takes
 // the answer with `receiveMessageOnPort`, so `port.call` stays synchronous, as the Wasm port's is.
 //
@@ -32,7 +32,7 @@ function start() {
   const retire = () => { if (child?.proc === me) child = null; };
   const died = (why) => {
     retire();
-    for (const id of waiting.splice(0)) reply(id, { threw: `pact-identity-go ${why}${stderr ? `: ${stderr.slice(0, 500)}` : ''}` });
+    for (const id of waiting.splice(0)) reply(id, { threw: `hdtp-identity-go ${why}${stderr ? `: ${stderr.slice(0, 500)}` : ''}` });
   };
   me.on('exit', retire);
   me.on('error', (e) => died(`could not run: ${e.message}`));

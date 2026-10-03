@@ -1,4 +1,5 @@
-// Every MUST in `pact-protocol/SPEC.md`, and the thing that holds it.
+// Every MUST in hdtp-spec's specification (its newest released version, read whole by
+// hdtp-spec/site/spec-source.mjs), and the thing that holds it.
 //
 // The suites here are imagination-driven: someone thought of an attack and wrote it
 // down. That finds what the author thought of. This finds what nobody did — it reads
@@ -44,9 +45,10 @@ import { recorder } from './results.mjs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
+import { readSpec, current } from '../../hdtp-spec/site/spec-source.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const specPath = join(here, '../../pact-protocol/SPEC.md');
+const specRoot = join(here, '../../hdtp-spec');
 
 /** Every normative sentence in the document, keyed by the section it lives in. */
 export function extract(markdown) {
@@ -150,7 +152,7 @@ const SIBLING_REPOS = ['gateway']; // invariant: constant
 
 /**
  * The holders that live in a sibling repository, checked when that repository is on
- * disk. `gateway:Name` is a Go test function anywhere in pact-gateway.
+ * disk. `gateway:Name` is a Go test function anywhere in hdtp-gateway.
  *
  * Returns the names it could confirm plus the roots it actually looked in, so a run
  * without the sibling reports what it could not check instead of passing quietly.
@@ -158,7 +160,7 @@ const SIBLING_REPOS = ['gateway']; // invariant: constant
 function siblingNames() {
   const names = new Set();
   const looked = [];
-  const gateway = join(here, '../../pact-gateway');
+  const gateway = join(here, '../../hdtp-gateway');
   if (existsSync(gateway)) {
     looked.push('gateway');
     for (const f of walkTree(gateway)) {
@@ -175,7 +177,7 @@ function siblingNames() {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();
 
 function main() {
-const musts = extract(readFileSync(specPath, 'utf8'));
+const musts = extract(readSpec(specRoot));
 const manifest = JSON.parse(readFileSync(join(here, 'musts.json'), 'utf8'));
 const names = knownNames();
 const sibling = siblingNames();
@@ -227,7 +229,7 @@ for (const m of musts) {
 for (const p of problems.filter((x) => !byId.has(problemId(x)))) rec.add(problemId(p) ?? p, 'FAIL', { reason: p });
 rec.write();
 
-console.log(`${musts.length} MUSTs in pact-protocol/SPEC.md`);
+console.log(`${musts.length} MUSTs in hdtp-spec's specification ${current(specRoot)}`);
 console.log(`  ${held} held by a test or scenario in this repository`);
 console.log(`  ${elsewhere} held elsewhere by declaration (a wallet's, a host's, a node's), each with a reason:`);
 for (const [id, e] of Object.entries(manifest)) {

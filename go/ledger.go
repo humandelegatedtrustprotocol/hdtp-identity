@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 // The wallet's ledger rules (SPEC §9; CONTRACT §6.1): what signing a leaf for an endpoint would mean,
 // read off the ledger of leaves the wallet has issued. ONE implementation of them in this port:

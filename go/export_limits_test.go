@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 import (
 	"encoding/json"
@@ -8,7 +8,7 @@ import (
 )
 
 // The export's bounds are written three times: contract/contract.json's ExportLimits, the core's
-// constants (held to the contract by crates/pact-identity/tests/limits.rs), and these. This holds
+// constants (held to the contract by crates/hdtp-identity/tests/limits.rs), and these. This holds
 // the Go port's to the contract, so the contract a host reads is the port it runs.
 func TestTheContractsExportLimitsAreThePortsConstants(t *testing.T) {
 	raw, err := os.ReadFile("../contract/contract.json")

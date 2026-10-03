@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 // The Keys section of contract/contract.json: a body for each function it declares, which
 // api.go's `functions` map dispatches by name, and the helpers only these use. Each reads its members

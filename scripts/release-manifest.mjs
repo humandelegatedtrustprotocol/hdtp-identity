@@ -7,7 +7,7 @@
 //   version          "X.Y.Z", no v
 //   commit           the 40-hex commit both tags name
 //   tags             ["vX.Y.Z", "go/vX.Y.Z"]
-//   protocol_commit  the pact-protocol commit the release's gate ran against
+//   protocol_commit  the hdtp-spec commit the release's gate ran against
 //   assets           { "<basename>": { sha256, bytes } } for every other asset in the directory
 // SHA256SUMS lists every asset but itself, manifest.json included, as `<hex>  <basename>`, sorted.
 import { createHash } from 'node:crypto';

@@ -1,5 +1,5 @@
 {
-  "about": "The live intrusion battery as data: the scenarios, their order and the code each must be answered with. Read by js/live.mjs and by `pact vectors intrude` (crates/pact/src/vectors.rs, through include_str!), each of which builds the envelope for an id and posts it. js/live.test.mjs and the crate's own tests hold both drivers to this file. `twice`: the envelope is posted twice and both answers must be the code. `control`: the one call that must get THROUGH; exactly one, and last, because it leaves the attacker pending on the target. `window_s` is SPEC §13.3's skew window and `margin_s` what a live run adds to it, so the two skew scenarios are well outside the window rather than on its edge.",
+  "about": "The live intrusion battery as data: the scenarios, their order and the code each must be answered with. Read by js/live.mjs and by `hdtp vectors intrude` (crates/hdtp/src/vectors.rs, through include_str!), each of which builds the envelope for an id and posts it. js/live.test.mjs and the crate's own tests hold both drivers to this file. `twice`: the envelope is posted twice and both answers must be the code. `control`: the one call that must get THROUGH; exactly one, and last, because it leaves the attacker pending on the target. `window_s` is SPEC §13.3's skew window and `margin_s` what a live run adds to it, so the two skew scenarios are well outside the window rather than on its edge.",
   "window_s": 300,
   "margin_s": 30,
   "scenarios": [
@@ -23,7 +23,7 @@
     { "id": "past-window", "name": "an envelope 330 seconds old", "expect": "envelope_invalid" },
     { "id": "future-window", "name": "an envelope 330 seconds in the future", "expect": "envelope_invalid" },
     { "id": "year-lifetime", "name": "an envelope asking to be remembered for a year", "expect": "envelope_invalid" },
-    { "id": "retired-v1", "name": "a v: 1 header, the retired generation", "expect": "envelope_invalid" },
+    { "id": "unknown-v2", "name": "a v: 2 header, a version that does not exist", "expect": "envelope_invalid" },
     { "id": "future-v3", "name": "a header claiming a version that does not exist yet", "expect": "envelope_invalid" },
     { "id": "string-times", "name": "a header whose ts and exp are strings", "expect": "envelope_invalid" },
     { "id": "empty-msg-id", "name": "an empty msg_id", "expect": "envelope_invalid" },

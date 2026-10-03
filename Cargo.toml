@@ -1,12 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["crates/pact-identity", "crates/pact-identity-wasm", "crates/pact", "crates/pact-limits"]
+members = ["crates/hdtp-identity", "crates/hdtp-identity-wasm", "crates/hdtp", "crates/hdtp-limits"]
 
 [workspace.package]
 version = "0.4.2"
 edition = "2021"
 license = "Apache-2.0"
-repository = "https://github.com/pact-cloud/pact-identity"
+repository = "https://github.com/humandelegatedtrustprotocol/hdtp-identity"
 
 [profile.release]
 opt-level = "z"

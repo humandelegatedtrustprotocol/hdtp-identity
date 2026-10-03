@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 // The little DER the certificate profile needs: an encoder for building, a strict walker for reading.
 // Every message here is the seed library's, verbatim, because the intrusion suite reads them.

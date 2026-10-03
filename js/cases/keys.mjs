@@ -1,6 +1,6 @@
 // §1 of the contract: keys — generate, derive, read, sign, verify.
-import { b64url } from '../../../pact-protocol/vectors/lib/keys.mjs';
-import { read as derRead, children as derChildren, tlv as derTlv, seq as derSeq } from '../../../pact-protocol/vectors/lib/der.mjs';
+import { b64url } from '../../../hdtp-spec/vectors/lib/keys.mjs';
+import { read as derRead, children as derChildren, tlv as derTlv, seq as derSeq } from '../../../hdtp-spec/vectors/lib/der.mjs';
 
 export default function keys({ add, expect }, f) {
   const { shape, hostSpki, hostPkcs8, p256Pkcs8, p256Spki, rsaSpki, B64_BAD } = f;
@@ -13,13 +13,13 @@ export default function keys({ add, expect }, f) {
   // §2.1's two refusals. Both matter more than an ordinary argument check: a port that accepted them
   // would return 32 perfectly good bytes belonging to nobody, and the caller would become a different
   // identity without an error anywhere.
-  add('derive_seed with an info string that is not one of the three', 'derive_seed', { prf: b64url(new Uint8Array(32)), info: 'pact/root/2' });
-  add('derive_seed with the wrong case in the domain separator', 'derive_seed', { prf: b64url(new Uint8Array(32)), info: 'pact/Root/1' });
-  add('derive_seed with a short prf', 'derive_seed', { prf: b64url(new Uint8Array(31)), info: 'pact/root/1' });
+  add('derive_seed with an info string that is not one of the three', 'derive_seed', { prf: b64url(new Uint8Array(32)), info: 'hdtp/root/2' });
+  add('derive_seed with the wrong case in the domain separator', 'derive_seed', { prf: b64url(new Uint8Array(32)), info: 'hdtp/Root/1' });
+  add('derive_seed with a short prf', 'derive_seed', { prf: b64url(new Uint8Array(31)), info: 'hdtp/root/1' });
   add('derive_seed with no info', 'derive_seed', { prf: b64url(new Uint8Array(32)) });
-  add('derive_seed with no prf', 'derive_seed', { info: 'pact/root/1' });
-  add('derive_seed with prf as null', 'derive_seed', { prf: null, info: 'pact/root/1' });
-  add('derive_seed with prf that is not base64url', 'derive_seed', { prf: '!!!', info: 'pact/root/1' });
+  add('derive_seed with no prf', 'derive_seed', { info: 'hdtp/root/1' });
+  add('derive_seed with prf as null', 'derive_seed', { prf: null, info: 'hdtp/root/1' });
+  add('derive_seed with prf that is not base64url', 'derive_seed', { prf: '!!!', info: 'hdtp/root/1' });
   add('key_from_seed with an unknown algorithm', 'key_from_seed', { alg: 'rsa', seed: b64url(new Uint8Array(32)) });
   // Bytes of the wrong type answer as bytes that will not decode (CONTRACT §0), as `spki: 123` does
   // above: both ports read a seed of 7 as no seed at all, `seed is required`.
@@ -61,7 +61,7 @@ export default function keys({ add, expect }, f) {
   const SEED32 = b64url(new Uint8Array(32).fill(11));
   add('key_from_seed', 'key_from_seed', { alg: 'ed25519', seed: SEED32 });
   add('prf_salt', 'prf_salt', {});
-  for (const info of ['pact/root/1', 'pact/store-key/1', 'pact/store-id/1']) add(`derive_seed for ${info}`, 'derive_seed', { prf: SEED32, info });
+  for (const info of ['hdtp/root/1', 'hdtp/store-key/1', 'hdtp/store-id/1']) add(`derive_seed for ${info}`, 'derive_seed', { prf: SEED32, info });
   add('key_from_seed of a P-256 key', 'key_from_seed', { alg: 'p256', seed: SEED32 });
   add('public_key', 'public_key', { pkcs8: hostPkcs8 });
   add('public_key of a P-256 key', 'public_key', { pkcs8: p256Pkcs8 });

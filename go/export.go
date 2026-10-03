@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 // The export (SPEC §9.2; CONTRACT §6.2): one unencrypted zip carrying a person's contacts,
 // conversations and files between hosts, and the wallet's book in the same format. The Rust core's
@@ -34,7 +34,7 @@ const (
 	ExportBodyMax        = 16 * 1024
 	ExportNameMax        = 200
 	ExportAttachmentsMax = 1
-	exportVersion        = 2
+	exportVersion        = 1
 )
 
 var (
@@ -42,7 +42,7 @@ var (
 	threadColumns    = []string{"id", "contact", "topic", "created_at", "last_at"}
 	contactStatuses  = []string{"active", "blocked", "pending_out"}
 	exportPerms      = []string{"message.text", "message.media", "status.view", "calendar.availability", "calendar.book"}
-	manifestMembers  = []string{"pact_export", "owner", "owner_name", "exported_at", "tool", "counts", "files"}
+	manifestMembers  = []string{"hdtp_export", "owner", "owner_name", "exported_at", "tool", "counts", "files"}
 	manifestCounts   = []string{"contacts", "threads", "messages", "media"}
 	manifestListed   = []string{"contacts.csv", "threads.csv", "messages.jsonl"}
 	messageMembers   = []string{"id", "thread", "contact", "msg_id", "direction", "sender", "time", "body", "reply_to", "status", "attachments"}
@@ -562,8 +562,8 @@ func checkManifest(doc map[string]any, order []string, owner *string) (*exportMa
 			return nil, manifestAt(m + " is missing")
 		}
 	}
-	if v, ok := asU64(doc["pact_export"]); !ok || v != exportVersion {
-		return nil, manifestAt("pact_export is 2")
+	if v, ok := asU64(doc["hdtp_export"]); !ok || v != exportVersion {
+		return nil, manifestAt("hdtp_export is 1")
 	}
 	fileOwner, isText := doc["owner"].(string)
 	if !isText || !IsFingerprint(fileOwner) {
@@ -623,7 +623,7 @@ func checkManifest(doc map[string]any, order []string, owner *string) (*exportMa
 		if !has {
 			continue
 		}
-		// SPEC 2.2.2, 9.2#11: files lists the text members only; a media member is bound by its
+		// SPEC 9.2#11: files lists the text members only; a media member is bound by its
 		// name, the sha256 of its bytes, and counted by counts.media.
 		if !contains(manifestListed, name) {
 			return nil, manifestAt("files: " + jsonString(name) + " is not a member an export lists")
@@ -1373,7 +1373,7 @@ func exportWrite(owner, ownerName string, exportedAt time.Time, tool string, con
 	if !IsFingerprint(owner) {
 		return nil, exportRefuse("owner is not a fingerprint")
 	}
-	// SPEC 2.2.2, 9.2#28: the owner's and the host's own strings are refused, naming the member —
+	// SPEC 9.2#28: the owner's and the host's own strings are refused, naming the member —
 	// there is nothing of a contact's to leave out.
 	for _, m := range [][2]string{{"owner_name", ownerName}, {"tool", tool}} {
 		if holdsPrivateKey(m[1]) {
@@ -1463,7 +1463,7 @@ func exportWrite(owner, ownerName string, exportedAt time.Time, tool string, con
 	if threadsCSV != nil {
 		files["threads.csv"] = sha256Hex([]byte(*threadsCSV))
 	}
-	// The media are counted, never listed: files holds the text members alone (SPEC 2.2.2, 9.2#11).
+	// The media are counted, never listed: files holds the text members alone (SPEC 9.2#11).
 	hashes := strSet{}
 	for i, item := range media {
 		o, _ := item.(map[string]any)
@@ -1480,7 +1480,7 @@ func exportWrite(owner, ownerName string, exportedAt time.Time, tool string, con
 		hashes.add(hash)
 	}
 	partial := map[string]any{
-		"pact_export": int64(exportVersion), "owner": owner, "owner_name": ownerName,
+		"hdtp_export": int64(exportVersion), "owner": owner, "owner_name": ownerName,
 		"exported_at": timeOut(exportedAt), "tool": tool,
 		"counts": map[string]any{"contacts": int64(len(rows)), "threads": int64(len(trows)), "messages": int64(0), "media": int64(len(media))},
 		"files":  files,

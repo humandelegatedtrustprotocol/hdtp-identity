@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 // The Export section of contract/contract.json: a body for each function it declares, which
 // api.go's `functions` map dispatches by name. Arguments are read in the core's order and named in

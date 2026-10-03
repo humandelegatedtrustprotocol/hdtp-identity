@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 // The Vault section of contract/contract.json: a body for each function it declares, which
 // api.go's `functions` map dispatches by name. Each reads its members as api/vault.rs does, in the
@@ -70,7 +70,7 @@ func callVaultOpen(a args) json.RawMessage {
 	dv, err := decodeJSON(raw)
 	doc, isDoc := dv.(map[string]any)
 	if err != nil || !isDoc {
-		return fail("vault", "not a pact-vault/1 document")
+		return fail("vault", "not an hdtp-vault/1 document")
 	}
 	pt, err := VaultOpenDoc(passphrase, doc)
 	if err != nil {

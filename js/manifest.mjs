@@ -20,7 +20,7 @@ const crate_version = /^version\s*=\s*"([^"]+)"/m.exec(cargo)?.[1] ?? 'unknown';
 const toolchain = JSON.parse(readFileSync(toolchainFile, 'utf8'));
 
 // EVERY file in each package, not one per package. A host does not run the `.wasm` on its own: a
-// Worker imports `pact_identity_wasm.js`, 13 KB of wasm-bindgen glue that marshals every argument
+// Worker imports `hdtp_identity_wasm.js`, 13 KB of wasm-bindgen glue that marshals every argument
 // and every answer across the boundary — vault and PRF material included — and it was vendored
 // beside the module and hashed by nothing. Editing one line of it to forward the argument string
 // somewhere passed `verify.mjs`, the vendoring host's own check and `reproduce.sh`, because the

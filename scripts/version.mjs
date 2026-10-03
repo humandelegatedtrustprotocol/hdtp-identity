@@ -1,4 +1,4 @@
-// The one version of pact-identity, and every place it is written. A release is one version for the
+// The one version of hdtp-identity, and every place it is written. A release is one version for the
 // Rust crates, the Go module and the Wasm package (tags vX.Y.Z and go/vX.Y.Z name the same commit);
 // the copies below are held equal here, because two copies of one value drift the day they are
 // written.
@@ -14,7 +14,7 @@ export const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 // The workspace's crates, read from the workspace itself: every member of Cargo.toml's `members`,
 // by the name its own Cargo.toml gives it. This was a list written here by hand, and when
-// crates/pact-limits joined the workspace (2026-09-28) the list did not: `--check` said "ok" with that
+// crates/hdtp-limits joined the workspace (2026-09-28) the list did not: `--check` said "ok" with that
 // crate's lock entry never read, and `make release` then wrote the new version into three of the four
 // crates and stopped at a lock file that no longer resolved.
 export function workspaceCrates(dir = root) {

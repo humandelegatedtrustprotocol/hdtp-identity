@@ -1,36 +1,39 @@
 // Proves Appendix B through a port (the Wasm bindings by default): checks that
-// every 2.0 vector does what the spec says. Reads the vectors from SPEC.md itself, as the seed's
+// every vector does what the spec says. Reads the vectors from the specification itself (the newest
+// released version in hdtp-spec's docs/specification/), as the seed's
 // check.mjs does, so the bytes in the document are the bytes proven — by a second implementation.
 import { readFileSync, existsSync } from 'node:fs';
 import { createPrivateKey, createPublicKey, X509Certificate } from 'node:crypto';
-import { b64url, fromB64url } from '../../pact-protocol/vectors/lib/keys.mjs';
+import { b64url, fromB64url } from '../../hdtp-spec/vectors/lib/keys.mjs';
 import { makePort, portFromArgv } from './port.mjs';
 import { makeDefender } from './defender.mjs';
 import { appendixB } from './seed.mjs';
 import { recorder } from './results.mjs';
+import { fileURLToPath } from 'node:url';
+import { readSpec, current, versions } from '../../hdtp-spec/site/spec-source.mjs';
 
 const port = await makePort(portFromArgv());
-if (!port) { console.log('the Go port is not built (go/bin/pact-identity-go)'); process.exit(2); }
+if (!port) { console.log('the Go port is not built (go/bin/hdtp-identity-go)'); process.exit(2); }
 const d = makeDefender(port);
 console.log(`port: ${port.kind} ${JSON.stringify(port.call('version', {}))}`);
 
-const specPath = new URL('../../pact-protocol/SPEC.md', import.meta.url);
-const spec = readFileSync(specPath, 'utf8');
+const specRoot = fileURLToPath(new URL('../../hdtp-spec/', import.meta.url));
+const spec = readSpec(specRoot);
 const blocks = appendixB(spec);
 if (blocks.length < 1) throw new Error('Appendix B has no vector blocks');
-const [v2] = blocks;
+const [vec] = blocks;
 
 let failures = 0, checks = 0;
 const rec = recorder(`check-${port.kind}`);
 const ok = (cond, what) => { checks++; rec.add(what, cond ? 'PASS' : 'FAIL', { reason: cond ? null : 'the check did not hold' }); if (!cond) { failures++; console.log('  FAIL ' + what); } };
 const spkiOfPkcs8 = (hexKey) => fromB64url(port.call('public_key', { pkcs8: b64url(Buffer.from(hexKey, 'hex')) }).spki);
 
-if (!v2) {
-  console.log('no 2.0 block in Appendix B yet');
+if (!vec) {
+  console.log('no vector block in Appendix B');
 } else {
-  const file = new URL('../../pact-protocol/vectors/pact-2.0-vectors.json', import.meta.url);
-  if (existsSync(file)) ok(JSON.stringify(JSON.parse(readFileSync(file, 'utf8'))) === JSON.stringify(v2), 'SPEC.md carries the generated vectors unchanged');
-  const der = Object.fromEntries(Object.entries(v2.certificates).map(([k, c]) => [k, Buffer.from(c.der_hex, 'hex')]));
+  const file = new URL('../../hdtp-spec/vectors/hdtp-1.0-vectors.json', import.meta.url);
+  if (existsSync(file)) ok(JSON.stringify(JSON.parse(readFileSync(file, 'utf8'))) === JSON.stringify(vec), `${current(specRoot)} carries the generated vectors unchanged`);
+  const der = Object.fromEntries(Object.entries(vec.certificates).map(([k, c]) => [k, Buffer.from(c.der_hex, 'hex')]));
   const chainOf = (names) => names.map((n) => der[n]);
 
   console.log('certificates parse under OpenSSL as well');
@@ -38,7 +41,7 @@ if (!v2) {
     // A certificate marked `refused` exists to be refused (§14.1): it must NOT come out of parse and
     // the profile check clean. `leaf_b_twin` is the instructive one — OpenSSL verifies it under
     // root_b, because the twin of an ECDSA signature is a valid signature; the profile is what refuses.
-    if (v2.certificates[name].refused) {
+    if (vec.certificates[name].refused) {
       // Asked of the PORT under test: `parse_certificate` either errors, or answers with a
       // `profile_error` that is not null.
       const answer = port.call('parse_certificate', { der: b64url(bytes) });
@@ -61,7 +64,7 @@ if (!v2) {
   }
 
   console.log('chain cases (§14.2)');
-  for (const c of v2.chain_cases) {
+  for (const c of vec.chain_cases) {
     const r = d.validateChain(chainOf(c.chain), { now: new Date(c.now), expectedRoot: c.expected_root, expectedEndpoint: c.expected_endpoint });
     if (c.expect === 'accept') ok(r.ok, `${c.name}: expected accept, got rule ${r.rule} (${r.reason})`);
     else ok(!r.ok && r.rule === c.rule, `${c.name}: expected refusal by rule ${c.rule}, got ${r.ok ? 'accept' : 'rule ' + r.rule + ' (' + r.reason + ')'}`);
@@ -69,32 +72,32 @@ if (!v2) {
   }
 
   console.log('newest leaf (§14.3)');
-  for (const c of v2.newest_leaf_cases) {
+  for (const c of vec.newest_leaf_cases) {
     const got = d.compareLeaves(der[c.pinned], der[c.presented]);
     ok(got === c.expect, `${c.pinned} vs ${c.presented}: expected ${c.expect}, got ${got}`);
     console.log(`  ${c.pinned} then ${c.presented}: ${got}`);
   }
 
   console.log('certificate_renewed (§14.4)');
-  for (const c of v2.certificate_renewed_cases) {
+  for (const c of vec.certificate_renewed_cases) {
     const pinned = d.parseCert(der[c.pinned_leaf]);
     const r = d.followRenewed(c.answer, 'sha256:' + pinned.aki, der[c.pinned_leaf], c.dialed, new Date(c.now));
     ok(r.follow === (c.expect === 'follow'), `${c.name}: expected ${c.expect}, got ${JSON.stringify(r)}`);
     console.log(`  ${c.name}: ${r.follow ? 'followed' : 'discarded'}${r.why ? ' (' + r.why + ')' : ''}`);
   }
 
-  console.log('v2 envelopes (§13)');
-  for (const v of v2.envelopes) {
+  console.log('envelopes (§13)');
+  for (const v of vec.envelopes) {
     const recipientLeaf = d.parseCert(der[v.recipient_chain[0]]);
-    const recipientPriv = createPrivateKey({ key: Buffer.from(v2.leaf_keys_pkcs8_hex[v.recipient_chain[0]], 'hex'), format: 'der', type: 'pkcs8' });
+    const recipientPriv = createPrivateKey({ key: Buffer.from(vec.leaf_keys_pkcs8_hex[v.recipient_chain[0]], 'hex'), format: 'der', type: 'pkcs8' });
     const aad = fromB64url(v.protected), enc = fromB64url(v.enc), ct = fromB64url(v.ct);
     const header = JSON.parse(aad.toString());
     ok(Object.keys(header).sort().join(',') === 'cty,exp,kid,msg_id,suite,ts,v', `${v.name}: header members`);
-    ok(header.v === 2 && header.suite === v.suite && header.suite === port.call('suite_for', { spki: recipientLeaf.spki }).suite, `${v.name}: version and suite`);
+    ok(header.v === 1 && header.suite === v.suite && header.suite === port.call('suite_for', { spki: recipientLeaf.spki }).suite, `${v.name}: version and suite`);
     ok(header.kid === recipientLeaf.fingerprint, `${v.name}: kid is the recipient leaf key`);
     ok(createPublicKey(recipientPriv).export({ format: 'der', type: 'spki' }).equals(fromB64url(recipientLeaf.spki)), `${v.name}: the recipient key is the leaf's`);
     let plaintext = null;
-    try { plaintext = d.open(v.suite, recipientPriv, createPublicKey({ key: fromB64url(recipientLeaf.spki), format: 'der', type: 'spki' }), Buffer.from('PACT-SEAL-v2'), aad, enc, ct); } catch (e) { ok(false, `${v.name}: open threw ${e.message}`); }
+    try { plaintext = d.open(v.suite, recipientPriv, createPublicKey({ key: fromB64url(recipientLeaf.spki), format: 'der', type: 'spki' }), Buffer.from('HDTP-SEAL-v1'), aad, enc, ct); } catch (e) { ok(false, `${v.name}: open threw ${e.message}`); }
     ok(plaintext && plaintext.toString('hex') === v.plaintext_hex, `${v.name}: plaintext`);
     if (plaintext) {
       const body = JSON.parse(plaintext.toString());
@@ -107,15 +110,15 @@ if (!v2) {
       } else {
         ok(Object.keys(body).sort().join(',') === 'chain,method,params', `${v.name}: full form carries chain, method, params`);
         const chain = body.chain.map(fromB64url);
-        const r = d.validateChain(chain, { now: new Date(v2.now) });
+        const r = d.validateChain(chain, { now: new Date(vec.now) });
         ok(r.ok, `${v.name}: chain inside validates`);
         ok(r.ok && chain[0].equals(der[v.sender_chain[0]]), `${v.name}: chain inside is the sender's`);
         ok(r.ok && d.verify(r.leafSpki, Buffer.concat([aad, enc, ct]), fromB64url(v.sig)), `${v.name}: signature under the chain's leaf key`);
       }
       // The port re-seals the same plaintext from the vector's ephemeral seed and lands on the same bytes.
       const { createHash } = await import('node:crypto');
-      const eph = createHash('sha256').update('pact-2.0-vectors/ephemeral/' + v.name).digest();
-      const sender = v2.leaf_keys_pkcs8_hex[v.sender_chain[0]];
+      const eph = createHash('sha256').update('hdtp-1.0-vectors/ephemeral/' + v.name).digest();
+      const sender = vec.leaf_keys_pkcs8_hex[v.sender_chain[0]];
       const again = port.call('seal_request', { recipient_leaf: b64url(der[v.recipient_chain[0]]), sender_pkcs8: b64url(Buffer.from(sender, 'hex')), form: v.form, sender_chain: v.sender_chain.map((n) => b64url(der[n])), method: body.method, params: body.params, msg_id: header.msg_id, ts: header.ts, exp: header.exp, ephemeral_seed: b64url(eph) });
       ok(again.protected === v.protected && again.enc === v.enc && again.ct === v.ct, `${v.name}: re-sealed from the seed, enc and ct reproduce`);
     }
@@ -127,7 +130,7 @@ if (!v2) {
   // crate computes internally.
   console.log('derivation (§2.1)');
   const seen = new Map();
-  for (const x of v2.derivation ?? []) {
+  for (const x of vec.derivation ?? []) {
     ok(port.call('prf_salt', {}).salt === x.salt, `${x.label}: the port's own salt is the vector's`);
     const got = port.call('derive_seed', { prf: x.prf, info: x.info });
     ok(got.seed === x.seed, `${x.label}: HKDF-SHA256(prf, empty salt, "${x.info}", 32)`);
@@ -140,12 +143,12 @@ if (!v2) {
     seen.set(got.seed, x.info);
     console.log(`  ${x.label} (${x.info}): ${x.fingerprint ?? 'seed only'}`);
   }
-  ok((v2.derivation ?? []).length >= 3, 'all three info strings are covered');
+  ok((vec.derivation ?? []).length >= 3, 'all three info strings are covered');
   // The refusals are the point of specifying the info strings at all — a typo would otherwise
   // succeed and hand back a key belonging to nobody.
   for (const [why, args] of [
-    ['an info string that is not one of the three', { prf: v2.derivation[0].prf, info: 'pact/root/2' }],
-    ['the wrong case in a domain separator', { prf: v2.derivation[0].prf, info: 'pact/Root/1' }],
+    ['an info string that is not one of the three', { prf: vec.derivation[0].prf, info: 'hdtp/root/2' }],
+    ['the wrong case in a domain separator', { prf: vec.derivation[0].prf, info: 'hdtp/Root/1' }],
   ]) ok(port.call('derive_seed', args).error === 'bad_request', `derive_seed refuses ${why}`);
 }
 

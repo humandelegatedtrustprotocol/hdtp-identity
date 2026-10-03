@@ -14,8 +14,8 @@
 // Nothing is stored and nothing is sent. The derivation is the real one — the same salt the wallet
 // uses and the same `key_from_seed` the core exposes — so a match here is a match in production.
 
-const SALT_INFO = 'pact/vault/1'
-const ROOT_INFO = 'pact/root/1'
+const SALT_INFO = 'hdtp/vault/1'
+const ROOT_INFO = 'hdtp/root/1'
 
 const $ = (id) => document.getElementById(id)
 const enc = new TextEncoder()
@@ -54,8 +54,8 @@ async function prfSecret({ create }) {
   if (create) {
     const cred = await navigator.credentials.create({
       publicKey: {
-        rp: { name: 'PACT PRF check', id: location.hostname },
-        user: { id: crypto.getRandomValues(new Uint8Array(16)), name: 'prf-check', displayName: 'PACT PRF check' },
+        rp: { name: 'HDTP PRF check', id: location.hostname },
+        user: { id: crypto.getRandomValues(new Uint8Array(16)), name: 'prf-check', displayName: 'HDTP PRF check' },
         challenge: challenge(),
         pubKeyCredParams: [-7, -257].map((alg) => ({ type: 'public-key', alg })),
         // Discoverable, because the second device must be able to find it with nothing to go on —

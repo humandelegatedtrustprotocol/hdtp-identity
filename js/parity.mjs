@@ -43,7 +43,7 @@ import { recorder } from './results.mjs';
 const wasm = await makePort('wasm');
 const go = await makePort('go');
 if (!go) {
-  console.log('the Go adapter is not built (go/bin/pact-identity-go): run `make build` in go/');
+  console.log('the Go adapter is not built (go/bin/hdtp-identity-go): run `make build` in go/');
   process.exit(2);
 }
 const contract = await loadContract();
@@ -204,7 +204,7 @@ for (const c of cases) {
 // cannot be judged on one.
 const source = (f) => readFileSync(new URL(f, import.meta.url), 'utf8');
 const surfaceOf = (read, f) => { try { return read(source(f)); } catch (e) { problems.push(`${f}: ${e.message}`); return new Set(); } };
-const rustNames = surfaceOf(rustDispatch, '../crates/pact-identity/src/api.rs');
+const rustNames = surfaceOf(rustDispatch, '../crates/hdtp-identity/src/api.rs');
 const goNames = surfaceOf(goDispatch, '../go/api.go');
 const contractNames = new Set(Object.keys(contract.methods));
 

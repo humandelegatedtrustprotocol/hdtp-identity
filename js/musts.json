@@ -11,7 +11,7 @@
     "hash": "56c1be33d6c9",
     "text": "A wallet that can use a WebAuthn credential MUST **derive the root's private key from one** rather than genera",
     "elsewhere": "wallet",
-    "why": "which way a root is made is the wallet's: a browser wallet derives it from the credential; the pact CLI, which cannot speak WebAuthn, generates and keeps it as §9 says (rust:a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates); a hosting platform's half is held in that platform's own MUST table, beside its code"
+    "why": "which way a root is made is the wallet's: a browser wallet derives it from the credential; the hdtp CLI, which cannot speak WebAuthn, generates and keeps it as §9 says (rust:a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates); a hosting platform's half is held in that platform's own MUST table, beside its code"
   },
   "2.1#2": {
     "hash": "e79efe20ebb8",
@@ -66,10 +66,10 @@
     ]
   },
   "2.2#3": {
-    "hash": "48f03f123375",
-    "text": "The challenge MUST be domain-separated from certificate bytes — the ASCII `PACT root proof v1` followed by a n",
+    "hash": "6b9389d642ac",
+    "text": "The challenge MUST be domain-separated from certificate bytes — the ASCII `HDTP root proof v1` followed by a n",
     "elsewhere": "wallet",
-    "why": "the challenge a wallet signs with a root it does not hold in software is the wallet's: a browser wallet signs it with the derived root, and a hosting platform's half is held in that platform's own MUST table, beside its code. This library's wallet_issue, which holds the key, signs `PACT root proof v1`, a newline and 32 random bytes and verifies the signature under the root certificate's key before it issues (vault.rs prove_root, go/vault.go proveRoot); the tests cited on 2.2#2 hold the refusals around it and the prefix"
+    "why": "the challenge a wallet signs with a root it does not hold in software is the wallet's: a browser wallet signs it with the derived root, and a hosting platform's half is held in that platform's own MUST table, beside its code. This library's wallet_issue, which holds the key, signs `HDTP root proof v1`, a newline and 32 random bytes and verifies the signature under the root certificate's key before it issues (vault.rs prove_root, go/vault.go proveRoot); the tests cited on 2.2#2 hold the refusals around it and the prefix"
   },
   "2.2#4": {
     "hash": "11306b742c60",
@@ -92,7 +92,7 @@
     "hash": "8afaa9bec8f1",
     "text": "A receiving implementation MUST NOT treat `FN` as identifying, and SHOULD NOT present it as a contact's whole ",
     "elsewhere": "node",
-    "why": "how a receiver PRESENTS a name is the host's: pact-gateway folds confusables to a compare key and appends the fingerprint on a collision (TestCollidingNamesCarryTheirFingerprint, TestLookAlikeNamesCollideToo), and no peer-facing surface can set a petname (TestNoPeerFacingSurfaceCanSetAPetname)",
+    "why": "how a receiver PRESENTS a name is the host's: hdtp-gateway folds confusables to a compare key and appends the fingerprint on a collision (TestCollidingNamesCarryTheirFingerprint, TestLookAlikeNamesCollideToo), and no peer-facing surface can set a petname (TestNoPeerFacingSurfaceCanSetAPetname)",
     "elsewhere_names": [
       "gateway:TestCollidingNamesCarryTheirFingerprint",
       "gateway:TestLookAlikeNamesCollideToo",
@@ -100,12 +100,12 @@
     ]
   },
   "3.#2": {
-    "hash": "5c80de714a23",
-    "text": "A receiver MUST reject a card without `X-PACT-CERT`, one whose certificate does not parse as §14.1 describes —",
+    "hash": "4e2f9fee0c80",
+    "text": "A receiver MUST reject a card without `X-HDTP-CERT`, one whose certificate does not parse as §14.1 describes —",
     "held_by": [
       "scenario:a card without a certificate",
-      "scenario:two X-PACT-CERT properties",
-      "scenario:a card of the retired generation",
+      "scenario:two X-HDTP-CERT properties",
+      "scenario:a card naming a major that is not 1",
       "scenario:a card whose leaf names its issuer in three bytes"
     ]
   },
@@ -120,18 +120,18 @@
     ]
   },
   "3.#4": {
-    "hash": "341778cf5c81",
-    "text": "A writer MUST NOT put a control character into a card — in `FN`, in `X-PACT-SEAL`, or in a property it adds: a",
+    "hash": "af5e48b9fcca",
+    "text": "A writer MUST NOT put a control character into a card — in `FN`, in `X-HDTP-SEAL`, or in a property it adds: a",
     "held_by": [
       "rust:nothing_that_goes_into_a_card_may_carry_a_line_break",
       "go:TestNothingThatGoesIntoACardMayCarryALineBreak"
     ]
   },
   "4.#1": {
-    "hash": "1e774464ac5f",
+    "hash": "3826b90c34f0",
     "text": "The same URL serves two audiences by content negotiation: a browser gets the human landing page; a client send",
     "elsewhere": "node",
-    "why": "content negotiation on an invite landing page is a host's route; pact-gateway serves it (TestLandingNoOracle404) and binds the chain's leaf to the card; a hosting platform's half is held in that platform's own MUST table, beside its code",
+    "why": "content negotiation on an invite landing page is a host's route; hdtp-gateway serves it (TestLandingNoOracle404) and binds the chain's leaf to the card; a hosting platform's half is held in that platform's own MUST table, beside its code",
     "elsewhere_names": [
       "gateway:TestLandingNoOracle404"
     ]
@@ -176,16 +176,16 @@
     "hash": "5488959269bf",
     "text": "`get_status` answers from that fixed four-value vocabulary; an implementation whose upstream presence source k",
     "elsewhere": "node",
-    "why": "presence vocabulary is a host's mapping from whatever it watches; pact-gateway maps it (TestOwnerPresenceTracksLiveSessionsOnly)",
+    "why": "presence vocabulary is a host's mapping from whatever it watches; hdtp-gateway clamps it at the wire, feeding get_status states the vocabulary does not list and reading busy back (TestGetStatusClampsToTheSpecVocabulary)",
     "elsewhere_names": [
-      "gateway:TestOwnerPresenceTracksLiveSessionsOnly"
+      "gateway:TestGetStatusClampsToTheSpecVocabulary"
     ]
   },
   "9.#1": {
     "hash": "63b8673a7797",
     "text": "A leaf's key does not outlive its leaf: a host MUST stop using the key of a leaf that has expired and MUST des",
     "elsewhere": "node",
-    "why": "holding and destroying a leaf's key is the host's act. pact-gateway stops offering the key on the read path from notAfter and destroys both copies — the ledger row's and the account's — at start, on the hourly sweep and on adoption, stops serving the account, and audits it (TestAnExpiredCurrentLeafLosesItsKeyInBothPlaces, TestALeafThatRunsOutStopsBeingServedAndLosesItsKey); a hosting platform's half is held in that platform's own MUST table, beside its code. Until 2026-09-19 hosts retired superseded leaves only, so the key of a leaf nobody renewed was held and used for as long as the process lived",
+    "why": "holding and destroying a leaf's key is the host's act. hdtp-gateway stops offering the key on the read path from notAfter and destroys both copies — the ledger row's and the account's — at start, on the hourly sweep and on adoption, stops serving the account, and audits it (TestAnExpiredCurrentLeafLosesItsKeyInBothPlaces, TestALeafThatRunsOutStopsBeingServedAndLosesItsKey); a hosting platform's half is held in that platform's own MUST table, beside its code. Until 2026-09-19 hosts retired superseded leaves only, so the key of a leaf nobody renewed was held and used for as long as the process lived",
     "elsewhere_names": [
       "gateway:TestAnExpiredCurrentLeafLosesItsKeyInBothPlaces",
       "gateway:TestALeafThatRunsOutStopsBeingServedAndLosesItsKey"
@@ -215,7 +215,7 @@
     "hash": "9d2a2b8b2d6c",
     "text": "A host that exports an identity toward a destination that cannot carry its chain MUST say so before the export",
     "elsewhere": "node",
-    "why": "an export warning is a host's UI; a hosting platform's half is held in that platform's own MUST table, beside its code. The pact-gateway half is prose in its own SPEC §9 and names no test — a declaration, not a proof"
+    "why": "an export warning is a host's UI; a hosting platform's half is held in that platform's own MUST table, beside its code. The hdtp-gateway half is prose in its own SPEC §9 and names no test — a declaration, not a proof"
   },
   "9.#5": {
     "hash": "f287941a9ea7",
@@ -244,7 +244,7 @@
     "hash": "f535401fac21",
     "text": "A wallet MUST refuse a request that is not a top-level navigation, as the browser's fetch metadata reports it ",
     "elsewhere": "wallet",
-    "why": "fetch metadata is a request header, read by the web wallet's page and Worker, which pact-cloud serves (the ceremony host's /sign route and ceremony.js); this library sees no request headers and shows nothing, and a hosting platform's half is held in that platform's own MUST table, beside its code"
+    "why": "fetch metadata is a request header, read by the web wallet's page and Worker, which batondeck serves (the ceremony host's /sign route and ceremony.js); this library sees no request headers and shows nothing, and a hosting platform's half is held in that platform's own MUST table, beside its code"
   },
   "9.1#2": {
     "hash": "05d8c9c42a8f",
@@ -282,19 +282,19 @@
     "hash": "f62be4c6f7fb",
     "text": "A wallet MUST prove the root against `expect_root` (§2.2) before it signs.",
     "elsewhere": "wallet",
-    "why": "proving the root takes the person's passkey, which is the web wallet's page and Worker, which pact-cloud serves (the ceremony host's /sign route and ceremony.js); this library sees no request headers and shows nothing, and a hosting platform's half is held in that platform's own MUST table, beside its code"
+    "why": "proving the root takes the person's passkey, which is the web wallet's page and Worker, which batondeck serves (the ceremony host's /sign route and ceremony.js); this library sees no request headers and shows nothing, and a hosting platform's half is held in that platform's own MUST table, beside its code"
   },
   "9.1#6": {
     "hash": "643a77ea43fa",
     "text": "It MUST show the person the asking origin, the `recipient` as the host's own claim, the endpoint, the validity",
     "elsewhere": "wallet",
-    "why": "what the person is shown is the web wallet's page and Worker, which pact-cloud serves (the ceremony host's /sign route and ceremony.js); this library sees no request headers and shows nothing, and a hosting platform's half is held in that platform's own MUST table, beside its code"
+    "why": "what the person is shown is the web wallet's page and Worker, which batondeck serves (the ceremony host's /sign route and ceremony.js); this library sees no request headers and shows nothing, and a hosting platform's half is held in that platform's own MUST table, beside its code"
   },
   "9.1#7": {
     "hash": "0e82b4c42ce1",
     "text": "The wallet MUST NOT keep anything of the request once it has answered, and MUST NOT write its body to a log.",
     "elsewhere": "wallet",
-    "why": "signing_request_check is stateless and keeps nothing; logging and storage are the web wallet's page and Worker, which pact-cloud serves (the ceremony host's /sign route and ceremony.js); this library sees no request headers and shows nothing, and a hosting platform's half is held in that platform's own MUST table, beside its code"
+    "why": "signing_request_check is stateless and keeps nothing; logging and storage are the web wallet's page and Worker, which batondeck serves (the ceremony host's /sign route and ceremony.js); this library sees no request headers and shows nothing, and a hosting platform's half is held in that platform's own MUST table, beside its code"
   },
   "9.1#8": {
     "hash": "9b7ef049cbe7",
@@ -304,7 +304,7 @@
       "gateway:TestAWebWalletsAnswerIsAcceptedOnceAndOnlyWithItsState",
       "gateway:TestTheStateIsConsumedByTheStatementThatChecksIt"
     ],
-    "why": "accepting the answer is the host's: pact-gateway mints the state with the pending request, consumes it in the statement that checks it, and installs only a chain whose leaf carries the pending key and validates at the endpoint; the node's table is pact-gateway's docs/conformance.md (the row for PACT §9.1's web wallet answer), and the hosting platform's is pact-cloud's docs/must-holders.json"
+    "why": "accepting the answer is the host's: hdtp-gateway mints the state with the pending request, consumes it in the statement that checks it, and installs only a chain whose leaf carries the pending key and validates at the endpoint; the node's table is hdtp-gateway's docs/conformance.md (the row for HDTP §9.1's web wallet answer), and the hosting platform's is batondeck's docs/must-holders.json"
   },
   "9.2#1": {
     "hash": "92584925803d",
@@ -328,13 +328,13 @@
     "held_by": [
       "rust:a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates"
     ],
-    "why": "the pact CLI writes a contact book, never a full export, and says before it writes one that the file is not encrypted, that anyone who gets it can read their contact list, and that it holds no keys: that test holds the book's words exactly, holds that they name no conversations or files, finds them ahead of the line reporting the write, and finds them said when the write itself fails (an --out that is a dangling link passes every check made before the vault is opened and refuses the create), with no file written. This library writes no full export's notice: the full export is written by hosts, whose notices are theirs to hold — the node's table is pact-gateway's docs/conformance.md, and the hosting platform's is pact-cloud's docs/must-holders.json"
+    "why": "the hdtp CLI writes a contact book, never a full export, and says before it writes one that the file is not encrypted, that anyone who gets it can read their contact list, and that it holds no keys: that test holds the book's words exactly, holds that they name no conversations or files, finds them ahead of the line reporting the write, and finds them said when the write itself fails (an --out that is a dangling link passes every check made before the vault is opened and refuses the create), with no file written. This library writes no full export's notice: the full export is written by hosts, whose notices are theirs to hold — the node's table is hdtp-gateway's docs/conformance.md, and the hosting platform's is batondeck's docs/must-holders.json"
   },
   "9.2#4": {
     "hash": "642ebd3f0504",
     "text": "A host that delivers an export over a network MUST NOT keep it at rest: it builds the file when the signed-in ",
     "elsewhere": "host",
-    "why": "delivery over a network is a host's import or export flow, which pact-gateway (the node) and pact-cloud each build over this library's export functions. No test of the node is named here; the node's table is pact-gateway's docs/conformance.md, and the hosting platform's is pact-cloud's docs/must-holders.json"
+    "why": "delivery over a network is a host's import or export flow, which hdtp-gateway (the node) and batondeck each build over this library's export functions. No test of the node is named here; the node's table is hdtp-gateway's docs/conformance.md, and the hosting platform's is batondeck's docs/must-holders.json"
   },
   "9.2#5": {
     "hash": "29667f806da5",
@@ -443,7 +443,7 @@
     "hash": "8bb2c5069814",
     "text": "It MUST show the person the contacts, and write nothing until the person agrees.",
     "elsewhere": "host",
-    "why": "asking the person is a host's import or export flow, which pact-gateway (the node) and pact-cloud each build over this library's export functions. No test of the node is named here; the node's table is pact-gateway's docs/conformance.md, and the hosting platform's is pact-cloud's docs/must-holders.json; the pact CLI's contacts import shows every difference and asks before it writes the record"
+    "why": "asking the person is a host's import or export flow, which hdtp-gateway (the node) and batondeck each build over this library's export functions. No test of the node is named here; the node's table is hdtp-gateway's docs/conformance.md, and the hosting platform's is batondeck's docs/must-holders.json; the hdtp CLI's contacts import shows every difference and asks before it writes the record"
   },
   "9.2#17": {
     "hash": "5f621f70c3a8",
@@ -460,7 +460,7 @@
     "hash": "9fb036438409",
     "text": "A host MUST NOT send a message it imported, whatever its `status`: retries belonged to the host that exported ",
     "elsewhere": "host",
-    "why": "sending is a host's import or export flow, which pact-gateway (the node) and pact-cloud each build over this library's export functions. No test of the node is named here; the node's table is pact-gateway's docs/conformance.md, and the hosting platform's is pact-cloud's docs/must-holders.json"
+    "why": "sending is a host's import or export flow, which hdtp-gateway (the node) and batondeck each build over this library's export functions. No test of the node is named here; the node's table is hdtp-gateway's docs/conformance.md, and the hosting platform's is batondeck's docs/must-holders.json"
   },
   "9.2#19": {
     "hash": "f68b533e70e4",
@@ -470,7 +470,7 @@
       "gateway:TestFirstLeafAfterADataOnlyImport",
       "gateway:TestAnImportedSlugHoldsOnlyItsRootUntilTheFirstChainInstalls"
     ],
-    "why": "ending an import with a request for a new leaf is a host's import or export flow, which pact-gateway (the node) and pact-cloud each build over this library's export functions. The node holds it in TestFirstLeafAfterADataOnlyImport and TestAnImportedSlugHoldsOnlyItsRootUntilTheFirstChainInstalls; the node's table is pact-gateway's docs/conformance.md, and the hosting platform's is pact-cloud's docs/must-holders.json"
+    "why": "ending an import with a request for a new leaf is a host's import or export flow, which hdtp-gateway (the node) and batondeck each build over this library's export functions. The node holds it in TestFirstLeafAfterADataOnlyImport and TestAnImportedSlugHoldsOnlyItsRootUntilTheFirstChainInstalls; the node's table is hdtp-gateway's docs/conformance.md, and the hosting platform's is batondeck's docs/must-holders.json"
   },
   "9.2#20": {
     "hash": "732c5dd8f556",
@@ -480,7 +480,7 @@
       "gateway:TestAfterAnImportTheNextLeafHandshakesEveryImportedContact",
       "gateway:TestTheCampaignWalksAnImportsContactsOnceAndNeverABlockedOne"
     ],
-    "why": "the handshake after the import is a host's import or export flow, which pact-gateway (the node) and pact-cloud each build over this library's export functions. The node holds it in TestAfterAnImportTheNextLeafHandshakesEveryImportedContact and TestTheCampaignWalksAnImportsContactsOnceAndNeverABlockedOne; the node's table is pact-gateway's docs/conformance.md, and the hosting platform's is pact-cloud's docs/must-holders.json"
+    "why": "the handshake after the import is a host's import or export flow, which hdtp-gateway (the node) and batondeck each build over this library's export functions. The node holds it in TestAfterAnImportTheNextLeafHandshakesEveryImportedContact and TestTheCampaignWalksAnImportsContactsOnceAndNeverABlockedOne; the node's table is hdtp-gateway's docs/conformance.md, and the hosting platform's is batondeck's docs/must-holders.json"
   },
   "9.2#21": {
     "hash": "51fb37a492ed",
@@ -490,7 +490,7 @@
       "gateway:TestAfterAnImportTheNextLeafHandshakesEveryImportedContact",
       "gateway:TestTheCampaignWalksAnImportsContactsOnceAndNeverABlockedOne"
     ],
-    "why": "the request_contact fallback is a host's import or export flow, which pact-gateway (the node) and pact-cloud each build over this library's export functions. The node holds it in TestAfterAnImportTheNextLeafHandshakesEveryImportedContact and TestTheCampaignWalksAnImportsContactsOnceAndNeverABlockedOne; the node's table is pact-gateway's docs/conformance.md, and the hosting platform's is pact-cloud's docs/must-holders.json"
+    "why": "the request_contact fallback is a host's import or export flow, which hdtp-gateway (the node) and batondeck each build over this library's export functions. The node holds it in TestAfterAnImportTheNextLeafHandshakesEveryImportedContact and TestTheCampaignWalksAnImportsContactsOnceAndNeverABlockedOne; the node's table is hdtp-gateway's docs/conformance.md, and the hosting platform's is batondeck's docs/must-holders.json"
   },
   "9.2#22": {
     "hash": "a6d2916359bc",
@@ -531,13 +531,13 @@
     "hash": "5154986a4395",
     "text": "**Ceilings.** A host MAY set import ceilings of its own, on the whole file and on counts — contacts, threads, ",
     "elsewhere": "host",
-    "why": "a host's own ceilings are the host's. The one this library's Go port sets names itself in its refusal (\"the file is over the N-byte ceiling this host sets\", TestAnExportWrittenIsReadBackWhole); the node's table is pact-gateway's docs/conformance.md, and the hosting platform's is pact-cloud's docs/must-holders.json"
+    "why": "a host's own ceilings are the host's. The one this library's Go port sets names itself in its refusal (\"the file is over the N-byte ceiling this host sets\", TestAnExportWrittenIsReadBackWhole); the node's table is hdtp-gateway's docs/conformance.md, and the hosting platform's is batondeck's docs/must-holders.json"
   },
   "9.2#27": {
     "hash": "9364e147ab0b",
     "text": "A host MUST NOT refuse to write an export because the file would exceed an import ceiling of its own, of any k",
     "elsewhere": "host",
-    "why": "this library's writers take no ceiling at all, so nothing here refuses an export for one; whether a host warns is its surface. the node's table is pact-gateway's docs/conformance.md, and the hosting platform's is pact-cloud's docs/must-holders.json"
+    "why": "this library's writers take no ceiling at all, so nothing here refuses an export for one; whether a host warns is its surface. the node's table is hdtp-gateway's docs/conformance.md, and the hosting platform's is batondeck's docs/must-holders.json"
   },
   "9.2#28": {
     "hash": "ff5bc5bb3c9f",
@@ -549,8 +549,8 @@
     "why": "export_write refuses a key in owner_name or tool, naming the member, and Go's WriteExportZip refuses it before the first byte; js/cases/export.mjs holds both ports to the same words"
   },
   "13.1#1": {
-    "hash": "8d6cee3f7408",
-    "text": "base64url HPKE encapsulated key, of exactly the suite's `Npk` (RFC 9180 §7.1): 65 bytes for `PACT-SEAL-P256`, ",
+    "hash": "f3ac410db1f0",
+    "text": "base64url HPKE encapsulated key, of exactly the suite's `Npk` (RFC 9180 §7.1): 65 bytes for `HDTP-SEAL-P256`, ",
     "held_by": [
       "scenario:a byte moved from the encapsulated key into the ciphertext",
       "rust:an_encapsulated_key_of_the_wrong_length_is_refused_under_each_suite",
@@ -575,8 +575,8 @@
     ]
   },
   "13.1#4": {
-    "hash": "4e3d2bfcb19f",
-    "text": "The HPKE `info` parameter is the ASCII string `PACT-SEAL-v2`, and an envelope sealed under any other info stri",
+    "hash": "50d220277b07",
+    "text": "The HPKE `info` parameter is the ASCII string `HDTP-SEAL-v1`, and an envelope sealed under any other info stri",
     "held_by": [
       "scenario:sealed with a stale info string"
     ]
@@ -605,14 +605,14 @@
       "scenario:a header with an extra member",
       "scenario:a header without suite",
       "scenario:a header whose ts and exp are strings",
-      "scenario:a v: 1 header, the retired generation"
+      "scenario:a v: 2 header, a version that does not exist"
     ]
   },
   "13.2#1": {
     "hash": "01354eaed081",
     "text": "The plaintext of a request envelope is one bare JSON object (no JSON-RPC framing) of `method`, `params`, and e",
     "held_by": [
-      "go:TestV2Envelopes",
+      "go:TestEnvelopesOpenAndReproduce",
       "rust:decide_on_the_vector_envelopes",
       "scenario:a sealed tools/list from a stranger"
     ]
@@ -626,7 +626,7 @@
     ]
   },
   "13.2#3": {
-    "hash": "d33e25c0eb94",
+    "hash": "894ee56e86ee",
     "text": "**The result of a sealed request MUST be sealed back to the caller** (same format, `kid` naming the caller's l",
     "held_by": [
       "rust:a_result_seals_back_and_opens_on_the_caller_side",
@@ -634,7 +634,7 @@
     ]
   },
   "13.2#4": {
-    "hash": "6abca2f492bb",
+    "hash": "61d4003b9f68",
     "text": "`chain` MUST validate (§14.2), `sig` MUST verify under its leaf key, and its leaf MUST byte-equal the `card` a",
     "held_by": [
       "scenario:a guest whose card carries a different certificate than the chain",
@@ -645,7 +645,7 @@
     "hash": "d3466aa6ceee",
     "text": "Error results follow the sealing rule too: once a request envelope has been successfully opened, an error resu",
     "elsewhere": "node",
-    "why": "sealing an error is the RECEIVER's act, past the open: pact-gateway does it (TestARefusalPastTheOpenIsSealed) and the caller refuses a plaintext code that should have been sealed (TestAPlaintextRefusalPastTheOpenIsNotThePeersAnswer). SealOpts.Error is the library's half",
+    "why": "sealing an error is the RECEIVER's act, past the open: hdtp-gateway does it (TestARefusalPastTheOpenIsSealed) and the caller refuses a plaintext code that should have been sealed (TestAPlaintextRefusalPastTheOpenIsNotThePeersAnswer). SealOpts.Error is the library's half",
     "elsewhere_names": [
       "gateway:TestARefusalPastTheOpenIsSealed",
       "gateway:TestAPlaintextRefusalPastTheOpenIsNotThePeersAnswer"
@@ -683,7 +683,7 @@
     "hash": "c537b6e341d9",
     "text": "`none` — the recipient does not accept envelopes (`sealed_call` absent; senders MUST NOT seal); `optional` — b",
     "elsewhere": "node",
-    "why": "the seal knob is a host's posture, advertised on its card; pact-gateway enforces it (TestSealNoneRefusesEnvelopes, TestPlaintextToSealRequiredAccountRefused)",
+    "why": "the seal knob is a host's posture, advertised on its card; hdtp-gateway enforces it (TestSealNoneRefusesEnvelopes, TestPlaintextToSealRequiredAccountRefused)",
     "elsewhere_names": [
       "gateway:TestSealNoneRefusesEnvelopes",
       "gateway:TestPlaintextToSealRequiredAccountRefused"
@@ -768,6 +768,6 @@
     "elsewhere_names": [
       "gateway:TestAnUnansweredConfirmationChangesNoPin"
     ],
-    "why": "confirming a pin is a verifier's act and this library holds none. There is no proactive interval to hold either: 2.1 settled on a newer leaf arriving on use — the chain in the first envelope after a renewal (§13.2), `certificate_renewed` (§14.4), `get_card` at any tier — so what remains normative is the negative, and pact-gateway holds it. A confirmation driven at a closed port leaves the root, the endpoint, the leaf, its key, the root certificate and the card byte-identical, and is audited rather than acted on (TestAnUnansweredConfirmationChangesNoPin). ValidateChain here is what the answer to any such confirmation gets judged by"
+    "why": "confirming a pin is a verifier's act and this library holds none. There is no proactive interval to hold either: the specification settles on a newer leaf arriving on use — the chain in the first envelope after a renewal (§13.2), `certificate_renewed` (§14.4), `get_card` at any tier — so what remains normative is the negative, and hdtp-gateway holds it. A confirmation driven at a closed port leaves the root, the endpoint, the leaf, its key, the root certificate and the card byte-identical, and is audited rather than acted on (TestAnUnansweredConfirmationChangesNoPin). ValidateChain here is what the answer to any such confirmation gets judged by"
   }
 }
