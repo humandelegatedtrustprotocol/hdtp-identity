@@ -1,6 +1,6 @@
 // A zip read the way js/parity.mjs needs one: the central directory, entry by entry and duplicates
 // included, and an entry's bytes. Test tooling only — the hosts read zips with their own containers
-// (Go's archive/zip, the pact CLI's zip crate, the cloud's fflate) — so it reads what the export
+// (Go's archive/zip, the hdtp CLI's zip crate, the cloud's fflate) — so it reads what the export
 // corpus holds (stored and deflated members, no ZIP64) and throws on anything else.
 import { inflateRawSync } from 'node:zlib';
 

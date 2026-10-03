@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 // The vault of §9 in the format a browser wallet and the CLI share (CONTRACT §6): Argon2id
 // to a key, AES-256-GCM over the plaintext, the document's own header as AAD.
@@ -18,7 +18,7 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
-const VaultFormat = "pact-vault/1"
+const VaultFormat = "hdtp-vault/1"
 
 // KDF are the Argon2id parameters, stored in the document.
 type KDF struct {
@@ -168,7 +168,7 @@ const (
 
 // minSalt is the shortest salt either end takes, in bytes: contract/contract.json's `VaultSaltMin`,
 // which constants_test.go holds this to (and vault.rs's tests the core's). x/crypto's argon2 takes a
-// salt of any length; this port refused one under 8 bytes as `not a pact-vault/1 document`, and the
+// salt of any length; this port refused one under 8 bytes as `not a hdtp-vault/1 document`, and the
 // core passed Argon2id's own words (`salt is too short`) into `why` (R29, C6).
 const minSalt = 8
 
@@ -185,9 +185,9 @@ func deriveKey(passphrase string, salt []byte, kdf KDF) ([]byte, error) {
 }
 
 // PlaintextV is the generation both documents carry: the file (the root and nothing else) and
-// the record (the ledger and the contacts). There is no earlier one to open: a `v` that is not
+// the record (the ledger and the contacts). There is no other one to open: a `v` that is not
 // this is refused at both ends, sealing and opening, and nothing converts.
-const PlaintextV = 2
+const PlaintextV = 1
 
 // plaintextV reads the generation off a plaintext, or -1 when it carries none.
 func plaintextV(plaintext []byte) int64 {
@@ -200,9 +200,9 @@ func plaintextV(plaintext []byte) int64 {
 	return *head.V
 }
 
-var errEarlierGeneration = errors.New("this vault was written by an earlier wallet and is not opened: there is no conversion")
+var errOtherGeneration = errors.New("this vault is of another generation and is not opened: there is no conversion")
 
-const generationWhy = "a vault plaintext is v 2: the root, or the record"
+const generationWhy = "a vault plaintext is v 1: the root, or the record"
 
 var (
 	fileMembers   = []string{"v", "roots", "prf", "passkey"}
@@ -473,7 +473,7 @@ func VaultSeal(passphrase string, plaintext []byte, kdf *KDF, salt, nonce []byte
 		return nil, parseError{"plaintext is not JSON"}
 	}
 	if plaintextV(pt) != PlaintextV {
-		return nil, errors.New("a vault plaintext is v 2: the root, or the record")
+		return nil, errors.New("a vault plaintext is v 1: the root, or the record")
 	}
 	return vaultSealAny(passphrase, pt, kdf, salt, nonce)
 }
@@ -543,7 +543,7 @@ func kdfNumber(v any) (uint64, bool) {
 // here and was damage there.
 func VaultOpenDoc(passphrase string, doc map[string]any) ([]byte, error) {
 	if format, _ := doc["format"].(string); format != VaultFormat {
-		return nil, vaultError{"not a pact-vault/1 document"}
+		return nil, vaultError{"not a hdtp-vault/1 document"}
 	}
 	kdf, err := kdfOfDocument(doc["kdf"])
 	if err != nil {
@@ -585,14 +585,14 @@ func VaultOpenDoc(passphrase string, doc map[string]any) ([]byte, error) {
 	if err != nil {
 		return nil, errVault
 	}
-	// A plaintext that is not JSON is damage, as the Rust core has it — not an earlier wallet's. JSON
+	// A plaintext that is not JSON is damage, as the Rust core has it — not another generation's. JSON
 	// is what the core's parser reads (decodeJSON): one that is not UTF-8, holds half a surrogate
 	// pair, holds a number infinite as a double, or is nested past its limit, is damage there too.
 	if _, err := decodeJSON(pt); err != nil {
 		return nil, errVault
 	}
 	if plaintextV(pt) != PlaintextV {
-		return nil, errEarlierGeneration
+		return nil, errOtherGeneration
 	}
 	return pt, nil
 }
@@ -675,9 +675,9 @@ type WalletIssued struct {
 // unless the caller says this is a move, and notBefore monotonic over the ledger. Two documents, as
 // §9 keeps them: the vault is the root and nothing else, and the record holds the ledger this
 // reads and the entry this answers is appended to.
-// rootProof is SPEC §2.2's challenge: `PACT root proof v1` and a newline, before 32 random bytes, so
+// rootProof is SPEC §2.2's challenge: `HDTP root proof v1` and a newline, before 32 random bytes, so
 // that proving possession of the root key can never be made to sign a certificate.
-const rootProof = "PACT root proof v1\n"
+const rootProof = "HDTP root proof v1\n"
 
 // proveRoot is SPEC §2.2, before any certificate is issued: the vault's root key is the root the
 // identity is known by; the root certificate parses and is that key's; and the key signs a challenge

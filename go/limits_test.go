@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 import (
 	"encoding/json"
@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// This port decides as the vectors of pact-cloud 6c771f7 say — js/cases/limits-vectors.json, a fixed
+// This port decides as the vectors of batondeck 6c771f7 say — js/cases/limits-vectors.json, a fixed
 // record of the cloud's TypeScript, which the cloud removed at ba68f9c: every step of it, replayed on
 // this port's own state (swept after every step, where the TypeScript swept at most once
 // a minute), every row compared bit for bit.

@@ -1,5 +1,5 @@
 {
-  "owner": "sha256:H4AJOf8K4oFNTYdiswQJ5PCC41Bj8Z73c2Ib5GLr8S8",
+  "owner": "sha256:YdqEDsa9XVXiuIfXSSnd1a4-Jq5iFjy06pgAeKkeZNI",
   "now": "2026-09-27T12:00:00Z",
   "cases": [
     {
@@ -12,7 +12,7 @@
         "media": 1,
         "pinned": 1,
         "leafless": [
-          "sha256:bfrVPTYIFPebr1NGsRnHeKhO2gj5MuvVAZbh5OLdajk"
+          "sha256:wfkWHDNr9Pj7Ci1sUzG2u1LLAQEjE-mUak_c65RWVPs"
         ]
       }
     },
@@ -38,7 +38,7 @@
         "media": 1,
         "pinned": 1,
         "leafless": [
-          "sha256:bfrVPTYIFPebr1NGsRnHeKhO2gj5MuvVAZbh5OLdajk"
+          "sha256:wfkWHDNr9Pj7Ci1sUzG2u1LLAQEjE-mUak_c65RWVPs"
         ]
       }
     },
@@ -148,7 +148,7 @@
       "file": "wrong-owner.zip",
       "about": "another identity's export",
       "stage": "core",
-      "refusal": "manifest.json: owner: the file is sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA's, not this identity's (sha256:H4AJOf8K4oFNTYdiswQJ5PCC41Bj8Z73c2Ib5GLr8S8)"
+      "refusal": "manifest.json: owner: the file is sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA's, not this identity's (sha256:YdqEDsa9XVXiuIfXSSnd1a4-Jq5iFjy06pgAeKkeZNI)"
     },
     {
       "file": "owner-as-contact.zip",
@@ -178,7 +178,7 @@
       "file": "key-in-a-cell.zip",
       "about": "a PKCS #8 private key in a contact's name",
       "stage": "core",
-      "refusal": "contacts.csv: row 5, column name: holds a private key"
+      "refusal": "contacts.csv: row 4, column name: holds a private key"
     },
     {
       "file": "dangling-thread-contact.zip",
@@ -280,13 +280,13 @@
       "file": "root-cert-not-a-root.zip",
       "about": "a contact whose root_cert is a leaf, not a root of §14.1's profile",
       "stage": "core",
-      "refusal": "contacts.csv: row 4, column root_cert: not a root of §14.1's profile"
+      "refusal": "contacts.csv: row 5, column root_cert: not a root of §14.1's profile"
     },
     {
       "file": "media-is-a-key.zip",
       "about": "a media file whose bytes are a PKCS #8 private key, named by its hash and attached",
       "stage": "host",
-      "refusal": "media/40cbe3b252696642b19d5245e0a8d53b66f332b68155b48f2097f361902c5c67: holds a private key"
+      "refusal": "media/38d8118e5103b197661a8398a00118ef99fbf434d54c81129bca24ef4bb2b1ac: holds a private key"
     }
   ]
 }

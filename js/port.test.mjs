@@ -8,11 +8,11 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { adapterPort, makePort, RawArgs } from './port.mjs';
 
-const real = fileURLToPath(new URL('../go/bin/pact-identity-go', import.meta.url));
+const real = fileURLToPath(new URL('../go/bin/hdtp-identity-go', import.meta.url));
 
 /** A stand-in adapter: answers `{"ok":true,"n":<line number>}`, dies on a request naming `die`, hangs on `hang`. */
 function fake() {
-  const dir = mkdtempSync(join(tmpdir(), 'pact-port-'));
+  const dir = mkdtempSync(join(tmpdir(), 'hdtp-port-'));
   const bin = join(dir, 'adapter');
   writeFileSync(bin, [
     '#!/bin/sh',
@@ -31,7 +31,7 @@ function fake() {
   return bin;
 }
 
-test('a whole suite of calls is answered by ONE adapter process', { skip: !existsSync(real) && 'go/bin/pact-identity-go is not built' }, () => {
+test('a whole suite of calls is answered by ONE adapter process', { skip: !existsSync(real) && 'go/bin/hdtp-identity-go is not built' }, () => {
   const port = adapterPort(real);
   for (let i = 0; i < 50; i++) assert.equal(port.call('prf_salt', {}).infos.length, 3);
   assert.equal(port.processes(), 1);
@@ -63,7 +63,7 @@ test('a call that hangs is failed at its deadline, and the port goes on', () => 
 // worth something only if the text arrives as written. JSON.stringify of the value would send
 // `{"x":null}` for `{"x":1e400}`, and `0` for `-0`.
 test('raw arguments reach both ports as the text written, byte for byte', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'pact-raw-'));
+  const dir = mkdtempSync(join(tmpdir(), 'hdtp-raw-'));
   const echo = join(dir, 'adapter');
   // A stand-in adapter that answers with the request line it read, in base64.
   writeFileSync(echo, ['#!/bin/sh', 'while IFS= read -r line; do', `  printf '{"line":"%s"}\\n' "$(printf '%s' "$line" | base64 | tr -d '\\n')"`, 'done', ''].join('\n'));

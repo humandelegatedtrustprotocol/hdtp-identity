@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 // Envelopes: sealing requests and results (§13.1, §13.2), the caller side of a result, following
 // certificate_renewed (§14.4), and Decide — the receiving side of §13.3 in order, §6.1 tiers, §5.3 new
@@ -21,8 +21,8 @@ const (
 	SkewSeconds   = 300
 	ClaimWindow   = 30 * 24 * time.Hour
 	Tombstone     = 30 * 24 * time.Hour
-	CtyCall       = "application/pact-call+json"
-	CtyResult     = "application/pact-result+json"
+	CtyCall       = "application/hdtp-call+json"
+	CtyResult     = "application/hdtp-result+json"
 )
 
 var (
@@ -62,7 +62,7 @@ type SealOpts struct {
 }
 
 func headerJSON(suite, kid, msgID string, ts, exp int64, cty string) []byte {
-	return Canonical(map[string]any{"v": int64(2), "suite": suite, "kid": kid, "msg_id": msgID, "ts": ts, "exp": exp, "cty": cty})
+	return Canonical(map[string]any{"v": int64(1), "suite": suite, "kid": kid, "msg_id": msgID, "ts": ts, "exp": exp, "cty": cty})
 }
 
 func proofMember(o SealOpts, signer *Signer) ([]byte, error) {
@@ -89,9 +89,9 @@ func sealBody(o SealOpts, signer *Signer, body []byte) (*Envelope, error) {
 	aad := headerJSON(suite, Fingerprint(o.RecipientKey.SPKI), o.MsgID, o.TS, o.Exp, o.Cty)
 	var enc, ct []byte
 	if o.Seed != nil {
-		enc, ct, err = sealWith(suite, o.RecipientKey, []byte(InfoV2), aad, body, o.Seed)
+		enc, ct, err = sealWith(suite, o.RecipientKey, []byte(Info), aad, body, o.Seed)
 	} else {
-		enc, ct, err = Seal(suite, o.RecipientKey, []byte(InfoV2), aad, body)
+		enc, ct, err = Seal(suite, o.RecipientKey, []byte(Info), aad, body)
 	}
 	if err != nil {
 		return nil, err
@@ -106,7 +106,7 @@ func sealBody(o SealOpts, signer *Signer, body []byte) (*Envelope, error) {
 // SealRequest seals a call to a recipient leaf key: plaintext {method, params, chain|leaf}.
 //
 // A field left at its zero value takes the default a Go caller means by leaving it out: Method
-// tools/call, Cty application/pact-call+json, Exp TS+600, Params {}. The JSON boundary cannot mean
+// tools/call, Cty application/hdtp-call+json, Exp TS+600, Params {}. The JSON boundary cannot mean
 // that — `exp: 0` and `method: ""` are values there, sealed as given, as the core and the seed seal
 // them (CONTRACT §0; C2, T7, R18) — so it resolves its own defaults and calls sealRequest.
 func SealRequest(o SealOpts) (*Envelope, error) {
@@ -169,7 +169,7 @@ func sealRequest(o SealOpts) (*Envelope, error) {
 	return sealBody(o, signer, body)
 }
 
-// SealResult seals a result back: plaintext {result|error, chain|leaf}, cty application/pact-result+json.
+// SealResult seals a result back: plaintext {result|error, chain|leaf}, cty application/hdtp-result+json.
 // An Exp left at zero is TS+600, as SealRequest's is; the JSON boundary calls sealResult with its own.
 func SealResult(o SealOpts) (*Envelope, error) {
 	if o.Exp == 0 {
@@ -387,7 +387,7 @@ func invalid(why string) Decision {
 	return Decision{Result: map[string]any{"code": "envelope_invalid", "why": why}, Effects: []map[string]any{}}
 }
 
-// parseInstant is parseInstantZ: one grammar for every instant this port reads (SPEC 2.2.2).
+// parseInstant is parseInstantZ: one grammar for every instant this port reads.
 func parseInstant(s string) (time.Time, bool) {
 	return parseInstantZ(s)
 }
@@ -497,7 +497,7 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 	}
 	v, _ := numberOf(header["v"])
 	suite, _ := header["suite"].(string)
-	if v != 2 || !SuiteKnown(suite) {
+	if v != 1 || !SuiteKnown(suite) {
 		return invalid("version or suite")
 	}
 	kid, _ := header["kid"].(string)
@@ -564,7 +564,7 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 	if len(enc) != SuiteNpk(suite) {
 		return invalid("encapsulated key is not the suite's length")
 	}
-	plaintext, err := Open(suite, priv, heldLeaf.PublicKey, []byte(InfoV2), aad, enc, ct)
+	plaintext, err := Open(suite, priv, heldLeaf.PublicKey, []byte(Info), aad, enc, ct)
 	if err != nil {
 		return invalid("does not open")
 	}
@@ -1026,7 +1026,7 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 	// an envelope wrong in both ways was refused for a different reason by each port.
 	v, _ := numberOf(header["v"])
 	suite, _ := header["suite"].(string)
-	if v != 2 || !SuiteKnown(suite) {
+	if v != 1 || !SuiteKnown(suite) {
 		return nil, errors.New("version or suite")
 	}
 	if kid, _ := header["kid"].(string); kid != Fingerprint(o.RecipientPublic.SPKI) {
@@ -1061,7 +1061,7 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 	if err != nil {
 		return nil, errors.New("signature")
 	}
-	plaintext, err := Open(suite, o.Recipient, o.RecipientPublic, []byte(InfoV2), aad, enc, ct)
+	plaintext, err := Open(suite, o.Recipient, o.RecipientPublic, []byte(Info), aad, enc, ct)
 	if err != nil {
 		return nil, errors.New("does not open")
 	}

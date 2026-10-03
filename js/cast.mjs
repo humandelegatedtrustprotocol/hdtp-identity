@@ -1,5 +1,5 @@
 // The cast every suite here shares: the people, their keys, their addresses and the clock the
-// offline suites stand at. Built from labelled seeds by the SEED library (pact-protocol/vectors/lib),
+// offline suites stand at. Built from labelled seeds by the SEED library (hdtp-spec/vectors/lib),
 // never by the port a suite is testing — a fixture the port under test made can only ever agree
 // with that port.
 //
@@ -13,8 +13,8 @@
 // The labels are the ones parity.mjs has always used for Alina and for the P-256 key, so every answer
 // its cases compare, and every byte PROOFS.md lists, is what it was before this module existed.
 import { randomBytes } from 'node:crypto';
-import { seed, ed25519FromSeed, p256FromSeed } from '../../pact-protocol/vectors/lib/keys.mjs';
-import { buildRoot, buildLeaf } from '../../pact-protocol/vectors/lib/x509.mjs';
+import { seed, ed25519FromSeed, p256FromSeed } from '../../hdtp-spec/vectors/lib/keys.mjs';
+import { buildRoot, buildLeaf } from '../../hdtp-spec/vectors/lib/x509.mjs';
 
 /** The instant the offline suites stand at, and the day their certificates begin and end. */
 export const CLOCK = '2026-09-15T12:00:00Z';

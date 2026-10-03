@@ -11,7 +11,7 @@
 <main>
   <h1>Does this passkey give the same secret on both devices?</h1>
   <p class="help">
-    The PACT design has the root key <strong>derived</strong> from a passkey rather than stored
+    The HDTP design has the root key <strong>derived</strong> from a passkey rather than stored
     anywhere — so the whole thing rests on one question this page answers: does
     <code>prf.eval</code> return the same 32 bytes when the same passkey is used somewhere else?
     If it does, an identity follows a person across devices for free. If it does not, that person
@@ -47,8 +47,8 @@
     <dl class="facts">
       <dt>PRF output</dt><dd><code id="prf"></code> <span class="muted">(the raw 32 bytes, for comparison if the core fails)</span></dd>
       <dt>Credential</dt><dd><code id="cred"></code></dd>
-      <dt>PRF salt</dt><dd><code id="salt"></code> <span class="muted">SHA-256("pact/vault/1")</span></dd>
-      <dt>Seed</dt><dd><code>HKDF-SHA256(prf, info "pact/root/1", 32 bytes)</code></dd>
+      <dt>PRF salt</dt><dd><code id="salt"></code> <span class="muted">SHA-256("hdtp/vault/1")</span></dd>
+      <dt>Seed</dt><dd><code>HKDF-SHA256(prf, info "hdtp/root/1", 32 bytes)</code></dd>
       <dt>Key</dt><dd><code>Ed25519 from seed</code> <span class="muted">— the core's own <code>key_from_seed</code></span></dd>
     </dl>
     <p class="notice" id="verdict"></p>
@@ -56,7 +56,7 @@
 
   <footer>
     One file, nothing stored, nothing sent anywhere — open the network tab and check. The passkey it
-    makes is called <code>PACT PRF check</code> and can be deleted afterwards; it is not an identity
+    makes is called <code>HDTP PRF check</code> and can be deleted afterwards; it is not an identity
     and nothing will ever use it.
   </footer>
 </main>

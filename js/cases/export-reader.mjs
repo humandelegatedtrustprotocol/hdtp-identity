@@ -97,7 +97,7 @@ export default function readerCases({ add, expect }) {
   // The control: the valid export's own lines, with the same names, read.
   add('export_read_messages: the valid export\'s lines', 'export_read_messages', { lines, ...names });
 
-  // ── 9.2#13: one instant grammar, on read (SPEC 2.2.2) ────────────────────────────────────────
+  // ── 9.2#13: one instant grammar, on read ────────────────────────────────────────
   // `Z` and `T` upper-case, no offset, `.` alone before a fraction: in a contact's `added`, a thread's
   // `created_at`, the manifest's `exported_at` and a message's `time`. The valid export is the control.
   const threadCell = (row, col, cell) => (m) => {

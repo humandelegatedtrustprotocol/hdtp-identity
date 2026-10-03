@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 // The Signing requests section of contract/contract.json: a body for each function it declares,
 // which api.go's `functions` map dispatches by name. Its members are read as api/signing.rs reads

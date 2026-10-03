@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Pre-push: the whole gate (gate.sh), here, because nothing else can run it.
 #
-# gate.sh reads the private sibling `pact-protocol` (SPEC.md, the seed under vectors/lib), which no
+# gate.sh reads the private sibling `hdtp-spec` (the specification's text, the seed under vectors/lib), which no
 # CI runner is given a credential for (the owner's decision, 2026-09-20). So it runs here or nowhere.
 # It checks the CHECKED-OUT tree — cargo, the Go port, and js/verify.mjs, whose answer is about
 # HEAD — so pushing a ref that is not HEAD gates the wrong commit; that is said, not refused.

@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 // The Cards section of contract/contract.json: a body for each function it declares, which
 // api.go's `functions` map dispatches by name. Each reads its members as api/cards.rs does, in its
@@ -58,9 +58,9 @@ func callCardDecode(a args) json.RawMessage {
 		ignored = []string{}
 	}
 	// `leaf` is the certificate read back, not a second call the caller has to make. It was
-	// missing here while the Rust core, `pact card show` and the defender all read it: a member
+	// missing here while the Rust core, `hdtp card show` and the defender all read it: a member
 	// no vector looks at, so nothing noticed.
-	return ok(map[string]any{"fn": c.FN, "version": 2, "seal": c.Seal, "cert": B64url(c.Cert), "root": c.Root, "endpoint": c.Endpoint, "expired": c.Expired, "ignored": ignored, "bytes": c.Bytes, "leaf": certOut(c.Leaf)})
+	return ok(map[string]any{"fn": c.FN, "version": 1, "seal": c.Seal, "cert": B64url(c.Cert), "root": c.Root, "endpoint": c.Endpoint, "expired": c.Expired, "ignored": ignored, "bytes": c.Bytes, "leaf": certOut(c.Leaf)})
 }
 
 // callRefreshCheck judges a peer's answer to get_card against the host's pin (RefreshCheck). Read in

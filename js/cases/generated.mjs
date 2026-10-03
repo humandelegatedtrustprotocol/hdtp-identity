@@ -163,7 +163,7 @@ export const BASES = {
   generate_key: 'generate_key',
   key_from_seed: 'key_from_seed',
   prf_salt: 'prf_salt',
-  derive_seed: 'derive_seed for pact/root/1',
+  derive_seed: 'derive_seed for hdtp/root/1',
   public_key: 'public_key',
   key_info: 'key_info',
   sign: 'sign',

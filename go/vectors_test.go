@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 // Proves this port against Appendix B: the certificates rebuilt (byte for byte where the issuer is
 // Ed25519; the TBS, and the vector's signature verified, where it is P-256), the ones marked refused
@@ -75,9 +75,52 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
+// readSpec is the newest released version of hdtp-spec's specification as one document: its
+// index.md followed by the pages its table of contents links, in that order, as hdtp-spec's
+// site/spec-source.mjs reads it. HDTP_SPEC names a version directory instead.
+func readSpec() (string, error) {
+	dir := os.Getenv("HDTP_SPEC")
+	if dir == "" {
+		base := "../../hdtp-spec/docs/specification"
+		entries, err := os.ReadDir(base)
+		if err != nil {
+			return "", err
+		}
+		best := [2]int{-1, -1}
+		for _, e := range entries {
+			var x, y int
+			if n, _ := fmt.Sscanf(e.Name(), "%d.%d", &x, &y); n == 2 && fmt.Sprintf("%d.%d", x, y) == e.Name() && (x > best[0] || x == best[0] && y > best[1]) {
+				best, dir = [2]int{x, y}, base+"/"+e.Name()
+			}
+		}
+		if dir == "" {
+			return "", errors.New("no released version under " + base)
+		}
+	}
+	index, err := os.ReadFile(dir + "/index.md")
+	if err != nil {
+		return "", err
+	}
+	at := strings.Index(string(index), "\n## Table of contents")
+	if at < 0 {
+		return "", errors.New(dir + "/index.md has no table of contents")
+	}
+	out := string(index)
+	for _, part := range strings.Split(string(index)[at:], "](")[1:] {
+		if end := strings.Index(part, ".md)"); end >= 0 {
+			page, err := os.ReadFile(dir + "/" + part[:end+3])
+			if err != nil {
+				return "", err
+			}
+			out += string(page)
+		}
+	}
+	return out, nil
+}
+
 func loadVectors(t *testing.T) vectorFile {
 	t.Helper()
-	raw, err := os.ReadFile(envOr("PACT_VECTORS", "../../pact-protocol/vectors/pact-2.0-vectors.json"))
+	raw, err := os.ReadFile(envOr("HDTP_VECTORS", "../../hdtp-spec/vectors/hdtp-1.0-vectors.json"))
 	if err != nil {
 		t.Skip("vectors not found: " + err.Error())
 	}
@@ -85,11 +128,11 @@ func loadVectors(t *testing.T) vectorFile {
 	if err := json.Unmarshal(raw, &v); err != nil {
 		t.Fatal(err)
 	}
-	spec, err := os.ReadFile(envOr("PACT_SPEC", "../../pact-protocol/SPEC.md"))
+	spec, err := readSpec()
 	if err != nil {
-		t.Skip("SPEC.md not found: " + err.Error())
+		t.Skip("the specification is not found: " + err.Error())
 	}
-	blocks, err := appendixB(string(spec))
+	blocks, err := appendixB(spec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,15 +145,15 @@ func loadVectors(t *testing.T) vectorFile {
 	a, _ := json.Marshal(inSpec)
 	b, _ := json.Marshal(inFile)
 	if !bytes.Equal(a, b) {
-		t.Error("SPEC.md does not carry the generated vectors unchanged")
+		t.Error("the specification does not carry the generated vectors unchanged")
 	}
 	return v
 }
 
 // appendixB is the JSON blocks of a specification's Appendix B: everything fenced as ```json between
-// the heading `## Appendix B` and the first `*End of PACT` after it. Both markers must be there,
+// the heading `## Appendix B` and the first `*End of HDTP` after it. Both markers must be there,
 // every fence must close and every block must be JSON — the rule js/seed.mjs `appendixB`, the CLI's
-// `appendix_b` (crates/pact/src/vectors/check.rs) and the core tests' read by, each held to
+// `appendix_b` (crates/hdtp/src/vectors/check.rs) and the core tests' read by, each held to
 // js/appendix-b-reader.json's cases, refusals word for word (TestAppendixBIsReadAsTheSharedCasesSay).
 // It sliced with two bare strings.Index calls, which panicked on a missing marker, took an end marker
 // from before the heading, and silently dropped a block whose fence never closed.
@@ -119,9 +162,9 @@ func appendixB(spec string) ([]json.RawMessage, error) {
 	if start < 0 {
 		return nil, errors.New("the document has no Appendix B")
 	}
-	end := strings.Index(spec[start:], "*End of PACT")
+	end := strings.Index(spec[start:], "*End of HDTP")
 	if end < 0 {
-		return nil, errors.New("Appendix B has no end marker (*End of PACT)")
+		return nil, errors.New("Appendix B has no end marker (*End of HDTP)")
 	}
 	b := spec[start : start+end]
 	var out []json.RawMessage
@@ -414,7 +457,7 @@ func TestV2Envelopes(t *testing.T) {
 		}
 		vv, _ := numberOf(header["v"])
 		suite, _ := SuiteForKey(recipientLeaf.PublicKey)
-		if vv != 2 || header["suite"] != e.Suite || e.Suite != suite {
+		if vv != 1 || header["suite"] != e.Suite || e.Suite != suite {
 			t.Errorf("%s: version and suite", e.Name)
 		}
 		if header["kid"] != Fingerprint(recipientLeaf.SPKI) {
@@ -423,7 +466,7 @@ func TestV2Envelopes(t *testing.T) {
 		if !bytes.Equal(recipient.Public().SPKI, recipientLeaf.SPKI) {
 			t.Errorf("%s: the recipient key is not the leaf's", e.Name)
 		}
-		pt, err := Open(e.Suite, recipient, recipientLeaf.PublicKey, []byte(InfoV2), aad, enc, ct)
+		pt, err := Open(e.Suite, recipient, recipientLeaf.PublicKey, []byte(Info), aad, enc, ct)
 		if err != nil {
 			t.Errorf("%s: open: %v", e.Name, err)
 			continue
@@ -469,7 +512,7 @@ func TestV2Envelopes(t *testing.T) {
 			}
 		}
 		// Reproduce enc and ct from the ephemeral seed.
-		enc2, ct2, err := sealWith(e.Suite, recipientLeaf.PublicKey, []byte(InfoV2), aad, pt, Seed("ephemeral/"+e.Name))
+		enc2, ct2, err := sealWith(e.Suite, recipientLeaf.PublicKey, []byte(Info), aad, pt, Seed("ephemeral/"+e.Name))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -525,7 +568,7 @@ func TestDecideOnVectors(t *testing.T) {
 	}
 	// The same through Call.
 	node := bharatNode(t, v, []Pin{pinA})
-	node.Seen = []string{"vec-v2-alina-to-bharat"}
+	node.Seen = []string{"vec-v1-alina-to-bharat"}
 	out := Call("decide", mustJSON(map[string]any{"now": v.Now, "envelope": envOf("alina-to-bharat"), "node": node}))
 	var r Decision
 	_ = json.Unmarshal(out, &r)
@@ -544,7 +587,7 @@ func TestDerivationVectors(t *testing.T) {
 	seen := map[string]string{}
 	for _, d := range v.Derivation {
 		if got := B64url(PrfSalt()); got != d.Salt {
-			t.Errorf("%s: salt is SHA-256(\"pact/vault/1\"): got %s want %s", d.Info, got, d.Salt)
+			t.Errorf("%s: salt is SHA-256(\"hdtp/vault/1\"): got %s want %s", d.Info, got, d.Salt)
 		}
 		prf, err := DecodeB64url(d.Prf)
 		if err != nil {
@@ -590,34 +633,35 @@ func TestDerivationRefusesWhatWouldSilentlyDiffer(t *testing.T) {
 		prf  []byte
 		info string
 	}{
-		{"an info string that is not one of the three", prf, "pact/root/2"},
-		{"case matters in a domain separator", prf, "pact/Root/1"},
-		{"a prf output is 32 bytes", prf[:31], "pact/root/1"},
+		{"an info string that is not one of the three", prf, "hdtp/root/2"},
+		{"case matters in a domain separator", prf, "hdtp/Root/1"},
+		{"a prf output is 32 bytes", prf[:31], "hdtp/root/1"},
 	} {
 		if _, err := DeriveSeed(c.prf, c.info); err == nil {
 			t.Errorf("expected a refusal: %s", c.why)
 		}
 	}
-	if _, err := DeriveSeed(prf, "pact/root/1"); err != nil {
+	if _, err := DeriveSeed(prf, "hdtp/root/1"); err != nil {
 		t.Errorf("the ordinary case must work: %v", err)
 	}
 }
 
 // SpecVersion is a claim about a document, and it read "2.0.0-draft" for days after that draft
-// shipped as 2.0.0 and then as 2.1.0, because a constant has nothing to fail against. SPEC.md is
-// already read here for the vectors; its own version line is what the constant must equal.
+// shipped as 2.0.0 and then as 2.1.0, because a constant has nothing to fail against. The
+// specification is already read here for the vectors; its own version line is what the constant
+// must equal.
 func TestSpecVersionIsTheDocumentsOwn(t *testing.T) {
-	spec, err := os.ReadFile(envOr("PACT_SPEC", "../../pact-protocol/SPEC.md"))
+	spec, err := readSpec()
 	if err != nil {
-		t.Skip("SPEC.md not found: " + err.Error())
+		t.Skip("the specification is not found: " + err.Error())
 	}
-	for _, line := range strings.Split(string(spec), "\n") {
+	for _, line := range strings.Split(spec, "\n") {
 		if rest, ok := strings.CutPrefix(line, "**Version "); ok {
 			if got := strings.Fields(rest)[0]; got != SpecVersion {
-				t.Fatalf("this port says it implements %s and SPEC.md is %s", SpecVersion, got)
+				t.Fatalf("this port says it implements %s and the specification is %s", SpecVersion, got)
 			}
 			return
 		}
 	}
-	t.Fatal("SPEC.md has no version line")
+	t.Fatal("the specification has no version line")
 }

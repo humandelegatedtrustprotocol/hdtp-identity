@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 // The address guard of §3 and §14.2: no loopback, link-local, private or unspecified host, and never
 // the receiver's own endpoint from a guest. Names are checked as written; resolution is the host's,

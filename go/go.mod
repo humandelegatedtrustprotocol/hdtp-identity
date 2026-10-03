@@ -1,4 +1,4 @@
-module github.com/pact-cloud/pact-identity/go
+module github.com/humandelegatedtrustprotocol/hdtp-identity/go
 
 go 1.25
 

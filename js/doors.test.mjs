@@ -15,9 +15,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makePort } from './port.mjs';
 import { fixtures } from './cases/fixtures.mjs';
-import { b64url } from '../../pact-protocol/vectors/lib/keys.mjs';
-import { buildLeaf } from '../../pact-protocol/vectors/lib/x509.mjs';
-import { encodeCard } from '../../pact-protocol/vectors/lib/card.mjs';
+import { b64url } from '../../hdtp-spec/vectors/lib/keys.mjs';
+import { buildLeaf } from '../../hdtp-spec/vectors/lib/x509.mjs';
+import { encodeCard } from '../../hdtp-spec/vectors/lib/card.mjs';
 import { ENDPOINTS, BORN, DIES } from './cast.mjs';
 
 const wasm = await makePort('wasm');

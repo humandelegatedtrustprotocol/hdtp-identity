@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pact-cloud/pact-identity/go/exportcorpus"
+	"github.com/humandelegatedtrustprotocol/hdtp-identity/go/exportcorpus"
 )
 
 func main() {

@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 // The parts the vectors do not reach: the address guard, the normal form, the CSR round trip, the vault,
 // and a wallet issuing under its rules.
@@ -131,7 +131,7 @@ func TestCSRRoundTrip(t *testing.T) {
 
 func TestVault(t *testing.T) {
 	kdf := KDF{Name: "argon2id", MKiB: 8192, T: 1, P: 1}
-	plain := []byte(`{"v":2,"roots":[]}`)
+	plain := []byte(`{"v":1,"roots":[]}`)
 	v, err := VaultSeal("correct horse", plain, &kdf, nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -154,27 +154,27 @@ func TestVault(t *testing.T) {
 		t.Fatalf("vault_seal: %s", out)
 	}
 	out = Call("vault_open", mustJSON(map[string]any{"passphrase": "p", "vault": sealed.Vault}))
-	if !bytes.Contains(out, []byte(`"plaintext":{"v":2`)) {
+	if !bytes.Contains(out, []byte(`"plaintext":{"v":1`)) {
 		t.Errorf("vault_open: %s", out)
 	}
 	out = Call("vault_open", mustJSON(map[string]any{"passphrase": "q", "vault": sealed.Vault}))
 	if !bytes.Contains(out, []byte(`"error":"vault"`)) {
 		t.Errorf("vault_open wrong passphrase: %s", out)
 	}
-	// An earlier generation is refused at both ends, and nothing converts: sealing it is a bad
-	// request; a document an earlier wallet wrote decrypts and is still not opened.
-	if _, err := VaultSeal("correct horse", []byte(`{"v":1,"roots":[],"ledger":[]}`), &kdf, nil, nil); err == nil || err.Error() != "a vault plaintext is v 2: the root, or the record" {
+	// Another generation is refused at both ends, and nothing converts: sealing it is a bad
+	// request; a document of another generation decrypts and is still not opened.
+	if _, err := VaultSeal("correct horse", []byte(`{"v":2,"roots":[],"ledger":[]}`), &kdf, nil, nil); err == nil || err.Error() != "a vault plaintext is v 1: the root, or the record" {
 		t.Errorf("sealing v 1: %v", err)
 	}
 	out = Call("vault_seal", mustJSON(map[string]any{"passphrase": "p", "plaintext": json.RawMessage(`{"roots":[]}`), "kdf": kdf}))
 	if !bytes.Contains(out, []byte(`"error":"bad_request"`)) {
 		t.Errorf("vault_seal without v: %s", out)
 	}
-	old, err := vaultSealAny("correct horse", []byte(`{"v":1,"roots":[],"ledger":[],"contacts":[]}`), &kdf, nil, nil)
+	old, err := vaultSealAny("correct horse", []byte(`{"v":2,"roots":[],"ledger":[],"contacts":[]}`), &kdf, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := VaultOpen("correct horse", *old); err == nil || err.Error() != errEarlierGeneration.Error() {
+	if _, err := VaultOpen("correct horse", *old); err == nil || err.Error() != errOtherGeneration.Error() {
 		t.Errorf("opening v 1: %v", err)
 	}
 	// The control: a wrong passphrase on that same document is still the one message.
@@ -221,7 +221,7 @@ func TestWalletIssueProvesTheRootBeforeItSigns(t *testing.T) {
 			t.Errorf("%s: %v, want %q", what, err, c.want)
 		}
 	}
-	if rootProof != "PACT root proof v1\n" {
+	if rootProof != "HDTP root proof v1\n" {
 		t.Errorf("the challenge is %q", rootProof)
 	}
 	// The control: the root, its certificate, and a chain that validates to it at the endpoint.
@@ -348,10 +348,10 @@ func TestCardRoundTrip(t *testing.T) {
 	if err != nil || c.Endpoint != endpointA || c.Seal != "required" || !bytes.Equal(c.Cert, leaf) || c.Expired {
 		t.Fatalf("decode: %v %+v", err, c)
 	}
-	if _, err := DecodeCard(strings.Replace(card, "X-PACT-VERSION:2", "X-PACT-VERSION:3", 1), mustTime(t, v.Now)); err == nil || err.Error() != "version not implemented" {
+	if _, err := DecodeCard(strings.Replace(card, "X-HDTP-VERSION:1", "X-HDTP-VERSION:3", 1), mustTime(t, v.Now)); err == nil || err.Error() != "version not implemented" {
 		t.Errorf("version: %v", err)
 	}
-	if _, err := DecodeCard("BEGIN:VCARD\r\nEND:VCARD\r\n", mustTime(t, v.Now)); err == nil || err.Error() != "no X-PACT-VERSION" {
+	if _, err := DecodeCard("BEGIN:VCARD\r\nEND:VCARD\r\n", mustTime(t, v.Now)); err == nil || err.Error() != "no X-HDTP-VERSION" {
 		t.Errorf("no version: %v", err)
 	}
 	expired := hexBytes(t, v.Certificates["leaf_a_expired"].DerHex)
@@ -500,8 +500,8 @@ func decided(t *testing.T, now time.Time, env Envelope, node NodeState) Decision
 
 // A plaintext that decrypts and is not JSON is damage, as the Rust core answers it (its open reads
 // the bytes as JSON and says "the passphrase is wrong or the vault is damaged"), not a document an
-// earlier wallet wrote. This port said the second (the review of PR #29, C11).
-func TestAPlaintextThatIsNotJSONIsDamageNotAnEarlierWallet(t *testing.T) {
+// other generation wrote. This port said the second (the review of PR #29, C11).
+func TestAPlaintextThatIsNotJSONIsDamageNotAnotherGeneration(t *testing.T) {
 	sealed, err := vaultSealAny("a passphrase", []byte("not json"), &KDF{Name: "argon2id", MKiB: 8192, T: 1, P: 1}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -514,12 +514,12 @@ func TestAPlaintextThatIsNotJSONIsDamageNotAnEarlierWallet(t *testing.T) {
 	if _, err := VaultOpenDoc("a passphrase", doc); err != errVault {
 		t.Fatalf("a plaintext that is not JSON opened as %v, want %v", err, errVault)
 	}
-	// The control: JSON with no generation is still an earlier wallet's, in both ports.
+	// The control: JSON with no generation is still another generation's, in both ports.
 	old, _ := vaultSealAny("a passphrase", []byte(`{"roots":[]}`), &KDF{Name: "argon2id", MKiB: 8192, T: 1, P: 1}, nil, nil)
 	raw, _ = json.Marshal(old)
 	_ = json.Unmarshal(raw, &doc)
-	if _, err := VaultOpenDoc("a passphrase", doc); err != errEarlierGeneration {
-		t.Fatalf("a plaintext with no generation opened as %v, want %v", err, errEarlierGeneration)
+	if _, err := VaultOpenDoc("a passphrase", doc); err != errOtherGeneration {
+		t.Fatalf("a plaintext with no generation opened as %v, want %v", err, errOtherGeneration)
 	}
 }
 
@@ -531,19 +531,19 @@ func TestOpenWithAPublicKeyThatIsNotTheRecipientsOpensNothing(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		enc, ct, err := Seal(tc.suite, r.Public(), []byte(InfoV2), []byte("aad"), []byte("hello"))
+		enc, ct, err := Seal(tc.suite, r.Public(), []byte(Info), []byte("aad"), []byte("hello"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		sameAlg, _ := KeyFromSeed(tc.alg, Seed("t/other"))
 		otherAlg, _ := KeyFromSeed(tc.other, Seed("t/r"))
 		for _, wrong := range []*PrivateKey{sameAlg, otherAlg} {
-			pt, err := Open(tc.suite, r, wrong.Public(), []byte(InfoV2), []byte("aad"), enc, ct)
+			pt, err := Open(tc.suite, r, wrong.Public(), []byte(Info), []byte("aad"), enc, ct)
 			if err == nil || err.Error() != "does not open" || pt != nil {
 				t.Fatalf("%s with a %s public key: %q, %v", tc.alg, wrong.Alg, pt, err)
 			}
 		}
-		if pt, err := Open(tc.suite, r, r.Public(), []byte(InfoV2), []byte("aad"), enc, ct); err != nil || string(pt) != "hello" {
+		if pt, err := Open(tc.suite, r, r.Public(), []byte(Info), []byte("aad"), enc, ct); err != nil || string(pt) != "hello" {
 			t.Fatalf("%s: the right public key: %q, %v", tc.alg, pt, err)
 		}
 	}
@@ -554,7 +554,7 @@ func TestOpenWithAPublicKeyThatIsNotTheRecipientsOpensNothing(t *testing.T) {
 func TestAnOpenWithAMissingKeyIsRefusedByName(t *testing.T) {
 	r, _ := KeyFromSeed(AlgEd25519, Seed("t/r"))
 	pub := r.Public()
-	enc, ct, err := Seal(SuiteX25519, pub, []byte(InfoV2), nil, []byte("hi"))
+	enc, ct, err := Seal(SuiteX25519, pub, []byte(Info), nil, []byte("hi"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -563,7 +563,7 @@ func TestAnOpenWithAMissingKeyIsRefusedByName(t *testing.T) {
 		pub  *PublicKey
 		why  string
 	}{{nil, pub, "the recipient's key is required"}, {r, nil, "the recipient's public key is required"}} {
-		pt, err := Open(SuiteX25519, tc.priv, tc.pub, []byte(InfoV2), nil, enc, ct)
+		pt, err := Open(SuiteX25519, tc.priv, tc.pub, []byte(Info), nil, enc, ct)
 		if err == nil || err.Error() != tc.why || codeFor(err, "") != codeArgs || pt != nil {
 			t.Fatalf("Open: %q, %v; want %q", pt, err, tc.why)
 		}
@@ -572,7 +572,7 @@ func TestAnOpenWithAMissingKeyIsRefusedByName(t *testing.T) {
 			t.Fatalf("OpenResult: %v; want %q", err, tc.why)
 		}
 	}
-	if pt, err := Open(SuiteX25519, r, pub, []byte(InfoV2), nil, enc, ct); err != nil || string(pt) != "hi" {
+	if pt, err := Open(SuiteX25519, r, pub, []byte(Info), nil, enc, ct); err != nil || string(pt) != "hi" {
 		t.Fatalf("the control: %q, %v", pt, err)
 	}
 }
@@ -741,20 +741,20 @@ func TestEveryTypedEntryPointRefusesAKeyThatIsNotOne(t *testing.T) {
 	}
 }
 
-// T5: an open under PACT-SEAL-X25519 with a P-256 key read the key's seed, which a P-256 key does not
+// T5: an open under HDTP-SEAL-X25519 with a P-256 key read the key's seed, which a P-256 key does not
 // have, and so used the scalar of the empty seed — SHA-512 of nothing, clamped: a public constant. Any
 // P-256 key then opened a seal addressed to the Ed25519 key whose X25519 form is that constant times
 // the base point. The private key is held to the suite's algorithm now, as the core holds it; the
 // control, the same seal opened by the key it was made for, opens.
 func TestAKeyOfTheOtherAlgorithmOpensNothing(t *testing.T) {
 	crafted := craftedEmptySeedRecipient(t)
-	enc, ct, err := Seal(SuiteX25519, crafted, []byte("PACT-SEAL-v2"), nil, []byte("admitted"))
+	enc, ct, err := Seal(SuiteX25519, crafted, []byte("HDTP-SEAL-v1"), nil, []byte("admitted"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, seed := range [][]byte{make([]byte, 32), bytes.Repeat([]byte{7}, 32)} {
 		p256, _ := KeyFromSeed(AlgP256, seed)
-		if pt, err := Open(SuiteX25519, p256, crafted, []byte("PACT-SEAL-v2"), nil, enc, ct); err == nil || err.Error() != "does not open" {
+		if pt, err := Open(SuiteX25519, p256, crafted, []byte("HDTP-SEAL-v1"), nil, enc, ct); err == nil || err.Error() != "does not open" {
 			t.Errorf("a P-256 key opened a seal to the crafted key: %q, %v", pt, err)
 		}
 	}

@@ -30,7 +30,7 @@ function cleanEnv(extra) {
 }
 
 function fixture({ branch = 'main' } = {}) {
-  const root = mkdtempSync(join(tmpdir(), 'pact-release-'));
+  const root = mkdtempSync(join(tmpdir(), 'hdtp-release-'));
   const work = join(root, 'work'), bin = join(root, 'bin'), log = join(root, 'log');
   mkdirSync(work); mkdirSync(bin); writeFileSync(log, ''); writeFileSync(join(root, 'gitconfig'), '');
   const env = cleanEnv({ GIT_CONFIG_GLOBAL: join(root, 'gitconfig'), GIT_CONFIG_NOSYSTEM: '1' });
@@ -56,7 +56,7 @@ function fixture({ branch = 'main' } = {}) {
   git(root, 'init', '-q', '--bare', 'origin.git');
   git(work, 'remote', 'add', 'origin', join(root, 'origin.git'));
   const protocol = join(root, 'protocol');
-  mkdirSync(protocol); writeFileSync(join(protocol, 'SPEC.md'), 'spec\n');
+  mkdirSync(protocol); writeFileSync(join(protocol, 'README.md'), 'spec\n');
   git(protocol, 'init', '-q');
   for (const [k, v] of [['user.name', 't'], ['user.email', 't@test.invalid']]) git(protocol, 'config', k, v);
   git(protocol, 'add', '-A'); git(protocol, 'commit', '-q', '-m', 'protocol');
@@ -69,8 +69,8 @@ v="$(node scripts/version.mjs)"
 for p in pkg-web pkg-node; do
   mkdir -p "js/$p"
   printf '*' > "js/$p/.gitignore"; printf '{"name":"x"}' > "js/$p/package.json"
-  printf 'glue %s %s' "$p" "$v" > "js/$p/pact_identity_wasm.js"; printf 'wasm %s' "$v" > "js/$p/pact_identity_wasm_bg.wasm"
-  printf 'd.ts' > "js/$p/pact_identity_wasm.d.ts"; printf 'bg d.ts' > "js/$p/pact_identity_wasm_bg.wasm.d.ts"
+  printf 'glue %s %s' "$p" "$v" > "js/$p/hdtp_identity_wasm.js"; printf 'wasm %s' "$v" > "js/$p/hdtp_identity_wasm_bg.wasm"
+  printf 'd.ts' > "js/$p/hdtp_identity_wasm.d.ts"; printf 'bg d.ts' > "js/$p/hdtp_identity_wasm_bg.wasm.d.ts"
 done
 printf '{"rustc":"rustc stub","wasm_pack":"wasm-pack stub"}' > "${join(root, 'toolchain.json')}"
 node js/manifest.mjs "${join(root, 'toolchain.json')}" >/dev/null
@@ -79,7 +79,7 @@ node js/manifest.mjs "${join(root, 'toolchain.json')}" >/dev/null
 set -eu
 tag="$1"; out="$2"; v="$3"; shift 3
 echo "cli $tag $*" >> "${log}"
-for t in "$@"; do printf 'pact %s %s' "$v" "$t" > "$out/pact-$v-$t"; done
+for t in "$@"; do printf 'hdtp %s %s' "$v" "$t" > "$out/hdtp-$v-$t"; done
 `);
   // The gh stub: records every call; \`release download <tag> --dir <d>\` copies from $GH_SOURCE.
   writeFileSync(join(bin, 'gh'), `#!/bin/sh
@@ -171,7 +171,7 @@ test('refuses an empty Unreleased section, and a dirty protocol checkout', () =>
     f.git('commit', '-q', '-am', 'fixture');
     refused(f, '0.2.0', /Unreleased' section is empty/);
     writeFileSync(cl, text); f.git('commit', '-q', '-am', 'fixture');
-    writeFileSync(join(f.protocol, 'SPEC.md'), 'edited\n');
+    writeFileSync(join(f.protocol, 'README.md'), 'edited\n');
     refused(f, '0.2.0', /has uncommitted changes/);
   } finally { f.cleanup(); }
 });
@@ -201,7 +201,7 @@ test('a release: two commits, two tags on the second, the version everywhere, ex
     assert.match(readFileSync(join(f.work, 'CHANGELOG.md'), 'utf8'), /## Unreleased\n\n## 0\.2\.0 — 2026-09-27\n\n- a change the fixture releases\n/);
     // The assets, and nothing else.
     const dist = join(f.work, 'dist/0.2.0');
-    const assets = ['pact-0.2.0-darwin-arm64', 'pact-0.2.0-linux-amd64', 'pact-0.2.0-linux-arm64', 'pact-identity-exportcorpus-0.2.0.tgz', 'pact-identity-wasm-web-0.2.0.tgz'];
+    const assets = ['hdtp-0.2.0-darwin-arm64', 'hdtp-0.2.0-linux-amd64', 'hdtp-0.2.0-linux-arm64', 'hdtp-identity-exportcorpus-0.2.0.tgz', 'hdtp-identity-wasm-web-0.2.0.tgz'];
     assert.deepEqual(readdirSync(dist).sort(), ['SHA256SUMS', 'manifest.json', ...assets].sort());
     const sums = readFileSync(join(dist, 'SHA256SUMS'), 'utf8').trim().split('\n');
     assert.deepEqual(sums.map((l) => l.split('  ')[1]), ['manifest.json', ...assets].sort());
@@ -213,11 +213,11 @@ test('a release: two commits, two tags on the second, the version everywhere, ex
     assert.equal(m.protocol_commit, f.gitIn(f.protocol, 'rev-parse', 'HEAD'));
     for (const k of Object.keys(pin)) assert.deepEqual(m[k], pin[k], `manifest.json's ${k} is not the pin's`);
     assert.deepEqual(Object.keys(m.assets).sort(), assets);
-    const listing = execFileSync('tar', ['-tzf', join(dist, 'pact-identity-wasm-web-0.2.0.tgz')], { encoding: 'utf8' }).trim().split('\n');
+    const listing = execFileSync('tar', ['-tzf', join(dist, 'hdtp-identity-wasm-web-0.2.0.tgz')], { encoding: 'utf8' }).trim().split('\n');
     assert.deepEqual(listing.filter((n) => !n.endsWith('/')).sort(), Object.keys(pin.files).filter((k) => k.startsWith('pkg-web/')).sort());
     assert.ok(listing.every((n) => n.startsWith('pkg-web/')), `the tarball has something outside pkg-web/: ${listing}`);
     // The corpus: cases.json and every zip, under exportcorpus/, and nothing of the generator.
-    const corpus = execFileSync('tar', ['-tzf', join(dist, 'pact-identity-exportcorpus-0.2.0.tgz')], { encoding: 'utf8' }).trim().split('\n').filter((n) => !n.endsWith('/')).sort();
+    const corpus = execFileSync('tar', ['-tzf', join(dist, 'hdtp-identity-exportcorpus-0.2.0.tgz')], { encoding: 'utf8' }).trim().split('\n').filter((n) => !n.endsWith('/')).sort();
     const tracked = readdirSync(join(f.work, 'go/exportcorpus')).filter((n) => n === 'cases.json' || n.endsWith('.zip')).map((n) => `exportcorpus/${n}`).sort();
     assert.ok(tracked.length > 2, 'the fixture has no corpus to pack');
     assert.deepEqual(corpus, tracked);
@@ -248,7 +248,7 @@ test('publish pushes the branch and both tags and gives gh every asset; verify-r
     ]);
     const create = f.calls().split('\n').find((l) => l.startsWith('gh release create'));
     assert.ok(create, 'gh release create was not called');
-    assert.match(create, /^gh release create v0\.2\.0 --verify-tag --title pact-identity 0\.2\.0 --notes-file dist\/0\.2\.0-notes\.md /);
+    assert.match(create, /^gh release create v0\.2\.0 --verify-tag --title hdtp-identity 0\.2\.0 --notes-file dist\/0\.2\.0-notes\.md /);
     for (const n of readdirSync(join(f.work, 'dist/0.2.0'))) assert.ok(create.includes(`dist/0.2.0/${n}`), `gh was not given ${n}`);
 
     // verify-release, against a stub gh that serves the release as it was cut.
@@ -259,43 +259,43 @@ test('publish pushes the branch and both tags and gives gh every asset; verify-r
     assert.equal(v.status, 0, v.stderr);
     assert.match(f.calls(), /^reproduce$/m, 'verify-release did not run the fresh build');
     // One byte added to the Wasm tarball is caught by SHA256SUMS.
-    const tgz = join(served, 'pact-identity-wasm-web-0.2.0.tgz');
+    const tgz = join(served, 'hdtp-identity-wasm-web-0.2.0.tgz');
     const good = readFileSync(tgz);
     writeFileSync(tgz, Buffer.concat([good, Buffer.from([0])]));
     v = verify();
     assert.notEqual(v.status, 0);
-    assert.match(v.stderr, /pact-identity-wasm-web-0\.2\.0\.tgz: its sha256 is not the one SHA256SUMS lists/);
+    assert.match(v.stderr, /hdtp-identity-wasm-web-0\.2\.0\.tgz: its sha256 is not the one SHA256SUMS lists/);
     writeFileSync(tgz, good);
     // A corpus tarball re-packed with one zip changed, its hashes rewritten in SHA256SUMS and the
     // manifest to match, is caught against the tag's go/exportcorpus.
-    const corpusTgz = join(served, 'pact-identity-exportcorpus-0.2.0.tgz');
+    const corpusTgz = join(served, 'hdtp-identity-exportcorpus-0.2.0.tgz');
     const goodCorpus = readFileSync(corpusTgz);
     const sumsBefore = readFileSync(join(served, 'SHA256SUMS'), 'utf8'), manifestBefore = readFileSync(join(served, 'manifest.json'), 'utf8');
-    const unpacked = mkdtempSync(join(tmpdir(), 'pact-corpus-'));
+    const unpacked = mkdtempSync(join(tmpdir(), 'hdtp-corpus-'));
     execFileSync('tar', ['-xzf', corpusTgz, '-C', unpacked]);
     appendFileSync(join(unpacked, 'exportcorpus/valid-book.zip'), 'x');
     execFileSync('tar', ['-czf', corpusTgz, '-C', unpacked, 'exportcorpus']);
     const forged = readFileSync(corpusTgz);
     const man = JSON.parse(manifestBefore);
-    man.assets['pact-identity-exportcorpus-0.2.0.tgz'] = { sha256: sha(forged), bytes: forged.length };
+    man.assets['hdtp-identity-exportcorpus-0.2.0.tgz'] = { sha256: sha(forged), bytes: forged.length };
     writeFileSync(join(served, 'manifest.json'), JSON.stringify(man, null, 2) + '\n');
     writeFileSync(join(served, 'SHA256SUMS'), sumsBefore
-      .replace(/^[0-9a-f]{64}(?= {2}pact-identity-exportcorpus-0\.2\.0\.tgz$)/m, sha(forged))
+      .replace(/^[0-9a-f]{64}(?= {2}hdtp-identity-exportcorpus-0\.2\.0\.tgz$)/m, sha(forged))
       .replace(/^[0-9a-f]{64}(?= {2}manifest\.json$)/m, sha(readFileSync(join(served, 'manifest.json')))));
     v = verify();
     assert.notEqual(v.status, 0);
-    assert.match(v.stderr, /pact-identity-exportcorpus-0\.2\.0\.tgz: valid-book\.zip is not the tag's/);
+    assert.match(v.stderr, /hdtp-identity-exportcorpus-0\.2\.0\.tgz: valid-book\.zip is not the tag's/);
     writeFileSync(corpusTgz, goodCorpus);
     writeFileSync(join(served, 'SHA256SUMS'), sumsBefore);
     writeFileSync(join(served, 'manifest.json'), manifestBefore);
     rmSync(unpacked, { recursive: true, force: true });
     // A replaced CLI whose SHA256SUMS line was rewritten to match is still caught, by manifest.json.
-    const cli = join(served, 'pact-0.2.0-linux-arm64');
+    const cli = join(served, 'hdtp-0.2.0-linux-arm64');
     writeFileSync(cli, 'tampered');
     const sumsFile = join(served, 'SHA256SUMS');
-    writeFileSync(sumsFile, readFileSync(sumsFile, 'utf8').replace(/^[0-9a-f]{64}(?= {2}pact-0\.2\.0-linux-arm64$)/m, sha(Buffer.from('tampered'))));
+    writeFileSync(sumsFile, readFileSync(sumsFile, 'utf8').replace(/^[0-9a-f]{64}(?= {2}hdtp-0\.2\.0-linux-arm64$)/m, sha(Buffer.from('tampered'))));
     v = verify();
     assert.notEqual(v.status, 0);
-    assert.match(v.stderr, /pact-0\.2\.0-linux-arm64: 8 bytes, sha256 \S+; manifest\.json says/);
+    assert.match(v.stderr, /hdtp-0\.2\.0-linux-arm64: 8 bytes, sha256 \S+; manifest\.json says/);
   } finally { f.cleanup(); }
 });

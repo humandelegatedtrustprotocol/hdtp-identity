@@ -1,7 +1,7 @@
 // §4 of the contract: cards — encode one, decode one.
-import { b64url } from '../../../pact-protocol/vectors/lib/keys.mjs';
-import { encodeCard, decodeCard } from '../../../pact-protocol/vectors/lib/card.mjs';
-import { signDetached } from '../../../pact-protocol/vectors/lib/hpke.mjs';
+import { b64url } from '../../../hdtp-spec/vectors/lib/keys.mjs';
+import { encodeCard, decodeCard } from '../../../hdtp-spec/vectors/lib/card.mjs';
+import { signDetached } from '../../../hdtp-spec/vectors/lib/hpke.mjs';
 
 export default function cards({ add, expect }, f) {
   const { now, leafDer, card, twinLeaf, shortAki } = f;
@@ -25,11 +25,11 @@ export default function cards({ add, expect }, f) {
   add('card_decode of a real card', 'card_decode', { vcard: card, now });
   add('card_decode of an empty card', 'card_decode', { vcard: 'BEGIN:VCARD\r\nEND:VCARD\r\n', now });
   add('card_decode of nothing at all', 'card_decode', { vcard: '', now });
-  add('card_decode of a 1.x card', 'card_decode', { vcard: 'BEGIN:VCARD\r\nVERSION:4.0\r\nX-PACT-VERSION:1\r\nEND:VCARD\r\n', now });
-  add('card_decode of a card with two certificates', 'card_decode', { vcard: card.replace('END:VCARD', `X-PACT-CERT:${leafDer}\r\nEND:VCARD`), now });
-  add('card_decode of a card whose certificate is not one', 'card_decode', { vcard: 'BEGIN:VCARD\r\nVERSION:4.0\r\nX-PACT-VERSION:2\r\nX-PACT-CERT:AAAA\r\nEND:VCARD\r\n', now });
+  add('card_decode of a card naming major 2', 'card_decode', { vcard: 'BEGIN:VCARD\r\nVERSION:4.0\r\nX-HDTP-VERSION:2\r\nEND:VCARD\r\n', now });
+  add('card_decode of a card with two certificates', 'card_decode', { vcard: card.replace('END:VCARD', `X-HDTP-CERT:${leafDer}\r\nEND:VCARD`), now });
+  add('card_decode of a card whose certificate is not one', 'card_decode', { vcard: 'BEGIN:VCARD\r\nVERSION:4.0\r\nX-HDTP-VERSION:1\r\nX-HDTP-CERT:AAAA\r\nEND:VCARD\r\n', now });
   add('card_decode after the leaf expired', 'card_decode', { vcard: card, now: '2028-01-01T00:00:00Z' });
-  // SPEC 2.1.1's high-S rule reaches a card: the leaf on it is Bharat's, whose ECDSA signature is the high twin.
+  // SPEC §14.1's high-S rule reaches a card: the leaf on it is Bharat's, whose ECDSA signature is the high twin.
   add('card_decode of a card carrying that leaf', 'card_decode', { vcard: cardOf('Bharat Mehta', twinLeaf), now });
 
   // Every member that is absent rather than empty.
@@ -41,11 +41,11 @@ export default function cards({ add, expect }, f) {
   add('card_decode of a card whose leaf names its issuer in three bytes', 'card_decode', { vcard: cardOf('Alina Rao', shortAki), now });
   // A line break in any value is a property of the attacker's choosing.
   for (const [what, args] of [
-    ['a name with CR LF', { fn: 'x\r\nX-PACT-SEAL:none', cert: leafDer, seal: 'required' }],
-    ['a name with a bare LF', { fn: 'x\nX-PACT-SEAL:none', cert: leafDer }],
+    ['a name with CR LF', { fn: 'x\r\nX-HDTP-SEAL:none', cert: leafDer, seal: 'required' }],
+    ['a name with a bare LF', { fn: 'x\nX-HDTP-SEAL:none', cert: leafDer }],
     ['a name with a NUL', { fn: 'x\u0000y', cert: leafDer }],
-    ['a seal with CR LF', { fn: 'x', cert: leafDer, seal: 'required\r\nX-PACT-VERSION:3' }],
-    ['an extra line with CR LF', { fn: 'x', cert: leafDer, extra: ['X-A:1\r\nX-PACT-SEAL:none'] }],
+    ['a seal with CR LF', { fn: 'x', cert: leafDer, seal: 'required\r\nX-HDTP-VERSION:3' }],
+    ['an extra line with CR LF', { fn: 'x', cert: leafDer, extra: ['X-A:1\r\nX-HDTP-SEAL:none'] }],
     ['a name with a comma and a semicolon', { fn: 'Rao, Alina; of Pune', cert: leafDer, seal: 'required' }],
   ]) add(`card_encode: ${what}`, 'card_encode', args);
 
@@ -60,21 +60,21 @@ export default function cards({ add, expect }, f) {
   for (const [kind, { oid }] of Object.entries(f.foreign)) {
     const vcard = encodeCard({ fn: 'Alina Rao', cert: Buffer.from(f.foreignLeaf(kind), 'base64url'), seal: 'required' });
     add(`card_decode of a card whose leaf holds a key outside the profile: ${kind}`, 'card_decode', { vcard, now });
-    // Held to the seed's reading (seedDecodes), which took all four cards on pact-protocol main until
+    // Held to the seed's reading (seedDecodes), which took all four cards on hdtp-spec main until
     // PR #10 (cluster G's seed half); there, and in both ports, the refusal names the key's OID.
     expect(`card_decode of a card whose leaf holds a key outside the profile: ${kind}`, seedDecodes(vcard));
   }
 
   // ── H: a card's certificate is bytes this port did not write, and an empty version is none ────────
   //
-  // The core read X-PACT-CERT strictly, and the Go port and the seed's card.mjs as Buffer.from does,
+  // The core read X-HDTP-CERT strictly, and the Go port and the seed's card.mjs as Buffer.from does,
   // skipping what they did not know: a stray character in the certificate was a card to two of them and
-  // a refusal to the core, which the cloud runs (R24, T11, C7). An empty X-PACT-VERSION was `version not
-  // implemented` to the core and `no X-PACT-VERSION` to the other two (C9). One reading now, in the
+  // a refusal to the core, which the cloud runs (R24, T11, C7). An empty X-HDTP-VERSION was `version not
+  // implemented` to the core and `no X-HDTP-VERSION` to the other two (C9). One reading now, in the
   // ports and the seed: the certificate as every argument's bytes are read (CONTRACT §0,
   // js/b64url-arguments.json), and an empty version as none. Hand-written, one line, so every value
   // reaches the reader as it is written here.
-  const withCert = (value) => `BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Alina Rao\r\nX-PACT-VERSION:2\r\nX-PACT-CERT:${value}\r\nX-PACT-SEAL:required\r\nEND:VCARD\r\n`;
+  const withCert = (value) => `BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Alina Rao\r\nX-HDTP-VERSION:1\r\nX-HDTP-CERT:${value}\r\nX-HDTP-SEAL:required\r\nEND:VCARD\r\n`;
   const at8 = (c) => leafDer.slice(0, 8) + c + leafDer.slice(8);
   // A spare bit needs a certificate whose length is not a multiple of three: the first of these that
   // has one, with the lowest bit of its last character set.
@@ -85,7 +85,7 @@ export default function cards({ add, expect }, f) {
   const notB64 = { error: 'bad_request', why: 'certificate does not parse: not base64url' };
   const read = { cert: leafDer, endpoint: f.ENDPOINT, root: f.rootFp };
   // Each is held to the seed's reading of the same card (seedDecodes): the Go port and the seed's
-  // card.mjs read a stray character as nothing on pact-protocol main, which took the card, until PR #10
+  // card.mjs read a stray character as nothing on hdtp-spec main, which took the card, until PR #10
   // (cluster H's seed half). `want` is what that reading is, as both ports answer it.
   for (const [what, value, want] of [
     ['a stray character', at8('!'), notB64],
@@ -106,9 +106,9 @@ export default function cards({ add, expect }, f) {
     add(`card_decode of a card whose certificate has ${what}`, 'card_decode', { vcard: withCert(value), now });
     expect(`card_decode of a card whose certificate has ${what}`, JSON.stringify(seed) === JSON.stringify(want) ? want : seed);
   }
-  add('card_decode of a card with an empty X-PACT-VERSION', 'card_decode', { vcard: card.replace('X-PACT-VERSION:2', 'X-PACT-VERSION:'), now });
-  expect('card_decode of a card with an empty X-PACT-VERSION', { error: 'bad_request', why: 'no X-PACT-VERSION' });
-  expect('card_decode of a 1.x card', { error: 'bad_request', why: 'version not implemented' });
+  add('card_decode of a card with an empty X-HDTP-VERSION', 'card_decode', { vcard: card.replace('X-HDTP-VERSION:1', 'X-HDTP-VERSION:'), now });
+  expect('card_decode of a card with an empty X-HDTP-VERSION', { error: 'bad_request', why: 'no X-HDTP-VERSION' });
+  expect('card_decode of a card naming major 2', { error: 'bad_request', why: 'version not implemented' });
 
   // ── refresh_check: a peer's answer to get_card, judged against the host's pin (CW-08) ──────────────
   //
@@ -138,7 +138,7 @@ export default function cards({ add, expect }, f) {
     ['an answer whose chain is the leaf alone', refresh({ ...good, chain: [leafDer] }), 'the answer carries 1 certificate(s); get_card answers with the chain, leaf then root (§6.1)'],
     ['an answer whose chain holds a number', refresh({ ...good, chain: [leafDer, 5] }), 'the answer carries 2 certificate(s); get_card answers with the chain, leaf then root (§6.1)'],
     ['an answer whose chain member is not base64url', refresh({ ...good, chain: ['!!!', rootDer] }), 'a chain member is not base64url'],
-    ['a card that does not decode', refresh({ ...good, card: 'BEGIN:VCARD\r\nEND:VCARD\r\n' }), 'the card does not decode: no X-PACT-VERSION'],
+    ['a card that does not decode', refresh({ ...good, card: 'BEGIN:VCARD\r\nEND:VCARD\r\n' }), 'the card does not decode: no X-HDTP-VERSION'],
     ['a card of another root', refresh({ ...signedCard(bharatLeaf), chain: [bharatLeaf, p256RootDer] }), 'the card names another root, not the pinned one'],
     ['a chain to another root', refresh({ ...good, chain: [bharatLeaf, p256RootDer] }), 'the chain it answered with fails rule 2: root is not the one expected'],
     ['a chain at another endpoint', refresh({ ...signedCard(moved), chain: [moved, rootDer] }), 'the chain it answered with fails rule 5: endpoint differs from the one in question'],
