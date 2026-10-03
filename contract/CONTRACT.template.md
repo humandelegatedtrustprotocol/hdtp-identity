@@ -129,7 +129,7 @@ the tables is `contract/CONTRACT.template.md` and is written by hand.
 
 `sign` is the leaf key's one signing primitive; a host signs exactly four structures with it
 (SPEC §13.5). The CLI exposes no signing command and no pass-through to `call`, so there is no other
-use to make of it there — by omission, not by a guard: nobody should add a `hdtp sign` believing one
+use to make of it there — by omission, not by a guard: nobody should add an `hdtp sign` believing one
 exists.
 
 ## 2. Certificates (SPEC §14.1–§14.3)

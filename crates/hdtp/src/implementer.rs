@@ -128,7 +128,7 @@ pub fn cert_show(path: &str, json: bool) -> Res<i32> {
     println!("bytes       {}", s(&c, "bytes"));
     match c["profile_error"].as_str() {
         None => println!("profile     exact (§14.1)"),
-        Some(e) => println!("profile     NOT a HDTP certificate: {e}"),
+        Some(e) => println!("profile     NOT an HDTP certificate: {e}"),
     }
     Ok(0)
 }

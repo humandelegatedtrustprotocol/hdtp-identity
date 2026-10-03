@@ -70,7 +70,7 @@ func callVaultOpen(a args) json.RawMessage {
 	dv, err := decodeJSON(raw)
 	doc, isDoc := dv.(map[string]any)
 	if err != nil || !isDoc {
-		return fail("vault", "not a hdtp-vault/1 document")
+		return fail("vault", "not an hdtp-vault/1 document")
 	}
 	pt, err := VaultOpenDoc(passphrase, doc)
 	if err != nil {

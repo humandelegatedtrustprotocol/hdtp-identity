@@ -649,7 +649,7 @@ pub fn intrude(against: &str, card_file: Option<&str>, allow_insecure: bool, now
     let unopened = results.iter().filter(|(_, _, v)| *v == "CONTROL UNOPENED").count();
     let limited = results.iter().filter(|(_, got, v)| *v == "UNREACHED" && got.split(" then ").any(is_rate_limited)).count();
     println!(
-        "{} scenarios: {} blocked, {} reproduce, {} never reached a HDTP answer{}{}{}",
+        "{} scenarios: {} blocked, {} reproduce, {} never reached an HDTP answer{}{}{}",
         results.len(),
         results.len() - reproduce - unreached - control - unopened,
         reproduce,

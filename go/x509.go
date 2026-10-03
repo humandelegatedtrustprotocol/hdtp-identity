@@ -439,7 +439,7 @@ func Parse(der []byte) (*Cert, error) {
 		// keyUsage that is an OCTET STRING whose body happens to look like a BIT STRING's was read as
 		// one, a subjectKeyIdentifier took its 32 bytes from anything, and a subjectAltName could be a
 		// SET — each a certificate that validated here (measured 2026-09-20: accepted as a chain) and
-		// that SPEC 14.1's exact profile says is not a HDTP certificate.
+		// that SPEC 14.1's exact profile says is not an HDTP certificate.
 		if want, named := extensionValueTag[id]; named && value.tag != want {
 			return nil, errors.New("extension value of another type")
 		}
@@ -591,7 +591,7 @@ func ProfileError(c *Cert, kind string) string {
 	if c.SigAlg != OIDEd25519 && c.SigAlg != OIDEcdsaSHA256 {
 		return "signature algorithm not in the profile"
 	}
-	// SPEC 14.1: of an ECDSA signature's two twins, only the low-S one is a HDTP certificate. Judged
+	// SPEC 14.1: of an ECDSA signature's two twins, only the low-S one is an HDTP certificate. Judged
 	// only where the bits ARE an ECDSA value (see EcdsaIsLowS).
 	if c.SigAlg == OIDEcdsaSHA256 {
 		if low, isSig := EcdsaIsLowS(c.Sig); isSig && !low {
