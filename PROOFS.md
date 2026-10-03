@@ -729,10 +729,10 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - decide: a pending_out contact's sealed send_message waits, chain form
 - decide: a pending_out contact's sealed tools/list, chain form, the pin moving
 - decide: a pending_out contact's sealed send_message waits, chain form, the pin moving
-- decide on a HDTP-SEAL-X25519 envelope whose encapsulated key is one byte short
-- decide on a HDTP-SEAL-X25519 envelope whose encapsulated key is one byte long
-- decide on a HDTP-SEAL-P256 envelope whose encapsulated key is one byte short
-- decide on a HDTP-SEAL-P256 envelope whose encapsulated key is one byte long
+- decide on an HDTP-SEAL-X25519 envelope whose encapsulated key is one byte short
+- decide on an HDTP-SEAL-X25519 envelope whose encapsulated key is one byte long
+- decide on an HDTP-SEAL-P256 envelope whose encapsulated key is one byte short
+- decide on an HDTP-SEAL-P256 envelope whose encapsulated key is one byte long
 - decide with an envelope with no sig
 - decide with an envelope that is not an object
 - decide with a node with no endpoint
@@ -2193,10 +2193,10 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - open_result with a pin whose state is "removed"
 - open_result with a pin whose state is "pending_in"
 - open_result with a pin whose state is ""
-- open_result on a HDTP-SEAL-X25519 answer whose encapsulated key is one byte short
-- open_result on a HDTP-SEAL-X25519 answer whose encapsulated key is one byte long
-- open_result on a HDTP-SEAL-P256 answer whose encapsulated key is one byte short
-- open_result on a HDTP-SEAL-P256 answer whose encapsulated key is one byte long
+- open_result on an HDTP-SEAL-X25519 answer whose encapsulated key is one byte short
+- open_result on an HDTP-SEAL-X25519 answer whose encapsulated key is one byte long
+- open_result on an HDTP-SEAL-P256 answer whose encapsulated key is one byte short
+- open_result on an HDTP-SEAL-P256 answer whose encapsulated key is one byte long
 - open_result with an envelope with no ct
 - open_result with an envelope that is not an object
 - open_result with a pin with no root
