@@ -433,7 +433,7 @@ func mustJSON(v any) json.RawMessage {
 	return b
 }
 
-func TestV2Envelopes(t *testing.T) {
+func TestEnvelopesOpenAndReproduce(t *testing.T) {
 	v := loadVectors(t)
 	der := func(n string) []byte { return hexBytes(t, v.Certificates[n].DerHex) }
 	now := mustTime(t, v.Now)

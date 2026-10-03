@@ -323,7 +323,7 @@ fn certificate_renewed_cases() {
 }
 
 #[test]
-fn v2_envelopes_open_and_reproduce() {
+fn envelopes_open_and_reproduce() {
     let v = vectors();
     let der = der_of(&v);
     let c = cast();
