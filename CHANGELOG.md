@@ -32,6 +32,6 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 - **The vectors and the corpus are new bytes**: Appendix B from the seeds `hdtp-1.0-vectors/{label}`,
   the export corpus from `hdtp-identity/exportcorpus/{label}`, and the live battery's version
   scenario is `unknown-v2`.
-- **The name guard replaces the 1.x guard.** `js/check-names.mjs` and `js/hdtp-names.txt`, byte for
+- **The name guard replaces the guard of retired behaviours' names.** `js/check-names.mjs` and `js/hdtp-names.txt`, byte for
   byte hdtp-spec's `scripts/` copies, fail the gate on the name the list forbids in any tracked
   path or text, and on the names of the behaviours HDTP does not have; `js/check-no-1x.mjs` and its list are gone.

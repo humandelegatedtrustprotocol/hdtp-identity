@@ -127,6 +127,21 @@ if git grep -n -I -E '(^|[^[:alnum:]_])[Aa] [`*_"(]*(X-)?(HDTP|hdtp)' -- . >&2; 
   exit 1
 fi
 
+step "No identifier and no file name carries a generation suffix"
+# HDTP has one generation. A test or a function named for another one's number says otherwise while
+# it opens envelopes of this one, and the name guard cannot see it. Refused, in any tracked text and
+# any path: a V and a number inside a camel-case name, and a v and a number joined to a snake-case
+# name by an underscore on either side. A VALUE a test feeds in is not a name and is not matched: a
+# scenario id or a label spelled with a hyphen, a quoted string. Two standard names are let through
+# by name, because they are not generations: IPv4 and IPv6 in the address guard's two functions, and
+# the curve's own name in its OID constant.
+GENERATION='([a-z0-9]V[0-9]+([A-Z_]|[^A-Za-z0-9]|$)|_v[0-9]+(_|[^A-Za-z0-9]|$)|(^|[^A-Za-z0-9_-])v[0-9]+_)'
+NOT_A_GENERATION='v[46]_private|PRIME256V1'
+if { git grep -n -I -E "$GENERATION" -- . ; git ls-files | grep -E "$GENERATION"; } | sed -E "s/($NOT_A_GENERATION)//g" | grep -E "$GENERATION" >&2; then
+  echo "gate: the lines above carry a generation's number in a name" >&2
+  exit 1
+fi
+
 step "Every MUST in the specification names something that holds it, and the record is current"
 node js/musts.mjs
 node js/record.mjs --check --manifest "$HDTP_RESULTS/parity-manifest.json"

@@ -612,7 +612,7 @@
     "hash": "01354eaed081",
     "text": "The plaintext of a request envelope is one bare JSON object (no JSON-RPC framing) of `method`, `params`, and e",
     "held_by": [
-      "go:TestV2Envelopes",
+      "go:TestEnvelopesOpenAndReproduce",
       "rust:decide_on_the_vector_envelopes",
       "scenario:a sealed tools/list from a stranger"
     ]
