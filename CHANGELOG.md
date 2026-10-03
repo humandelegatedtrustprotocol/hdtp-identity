@@ -10,6 +10,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+## 0.5.0 — 2026-10-03
+
 - **HDTP 1.0.** The library implements HDTP 1.0.0, hdtp-spec's `docs/specification/1.0/`, and
   `version` answers spec `1.0.0` in both ports. The specification's text is read through
   hdtp-spec's `site/spec-source.mjs` (the index page and the pages it links); the Rust and Go tests
