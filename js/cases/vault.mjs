@@ -268,7 +268,7 @@ export default function vault({ add, expect }, f) {
   add('vault_seal with a kdf whose name is null', 'vault_seal', sealWith({ kdf: { ...K, name: null } }));
 
   // The salt floor, in both ports' own words at both ends: the core passed Argon2id's (`salt is too
-  // short`) and the Go port said `not a hdtp-vault/1 document` (R29, C6). The first salt out and the last
+  // short`) and the Go port said `not an hdtp-vault/1 document` (R29, C6). The first salt out and the last
   // in, from contract/contract.json's VaultSaltMin; a nonce of the wrong length is judged first.
   const floor = f.defs.VaultSaltMin.const;
   const short = { error: 'vault', why: `salt is at least ${floor} bytes` };
@@ -286,7 +286,7 @@ export default function vault({ add, expect }, f) {
   // absent was the default in the core and zero in the Go port (R30, T12, F17, C5).
   const withDoc = (over) => ({ passphrase: 'a passphrase', vault: { ...doc, ...over } });
   const withKdf = (over) => withDoc({ kdf: { ...doc.kdf, ...over } });
-  const notVault = { error: 'vault', why: 'not a hdtp-vault/1 document' };
+  const notVault = { error: 'vault', why: 'not an hdtp-vault/1 document' };
   const noKdf = { ...doc };
   delete noKdf.kdf;
   const { name: _name, ...nameless } = doc.kdf;

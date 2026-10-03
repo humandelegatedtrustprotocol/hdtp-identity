@@ -168,7 +168,7 @@ const (
 
 // minSalt is the shortest salt either end takes, in bytes: contract/contract.json's `VaultSaltMin`,
 // which constants_test.go holds this to (and vault.rs's tests the core's). x/crypto's argon2 takes a
-// salt of any length; this port refused one under 8 bytes as `not a hdtp-vault/1 document`, and the
+// salt of any length; this port refused one under 8 bytes as `not an hdtp-vault/1 document`, and the
 // core passed Argon2id's own words (`salt is too short`) into `why` (R29, C6).
 const minSalt = 8
 
@@ -543,7 +543,7 @@ func kdfNumber(v any) (uint64, bool) {
 // here and was damage there.
 func VaultOpenDoc(passphrase string, doc map[string]any) ([]byte, error) {
 	if format, _ := doc["format"].(string); format != VaultFormat {
-		return nil, vaultError{"not a hdtp-vault/1 document"}
+		return nil, vaultError{"not an hdtp-vault/1 document"}
 	}
 	kdf, err := kdfOfDocument(doc["kdf"])
 	if err != nil {

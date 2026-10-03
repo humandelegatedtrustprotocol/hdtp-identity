@@ -1,5 +1,5 @@
 // The defender on a port: the seed library's shapes (`validateChain`, `open`, `seal`, `decodeCard`,
-// `makeNode` … `receive`) backed by a hdtp-identity port. Node state stays in JavaScript exactly as
+// `makeNode` … `receive`) backed by an hdtp-identity port. Node state stays in JavaScript exactly as
 // the seed keeps it; `receive` hands it to the port's pure `decide` and applies the effects it returns.
 import { createPublicKey } from 'node:crypto';
 import { b64url, fromB64url, pkcs8Of, spkiOf, fingerprint } from '../../hdtp-spec/vectors/lib/keys.mjs';

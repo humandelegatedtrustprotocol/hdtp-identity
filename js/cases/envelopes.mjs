@@ -502,10 +502,10 @@ export default function envelopes({ add, expect }, f) {
       { envelope: answerTo({ recipient_spki: bharatSpki }), args: { my_pkcs8: bharatPkcs8, my_spki: bharatSpki } }],
   ]) {
     for (const [by, what] of [[-1, 'one byte short'], [1, 'one byte long']]) {
-      const onDecide = `decide on a ${suite} envelope whose encapsulated key is ${what}`;
+      const onDecide = `decide on an ${suite} envelope whose encapsulated key is ${what}`;
       add(onDecide, 'decide', { now, envelope: moved(recipient.envelope, by), node: recipient.node });
       expect(onDecide, LENGTH);
-      const onOpen = `open_result on a ${suite} answer whose encapsulated key is ${what}`;
+      const onOpen = `open_result on an ${suite} answer whose encapsulated key is ${what}`;
       add(onOpen, 'open_result', open(moved(toResult.envelope, by), toResult.args));
       expect(onOpen, { error: LENGTH.code, why: LENGTH.why });
     }

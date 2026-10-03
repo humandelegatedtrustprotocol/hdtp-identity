@@ -327,7 +327,7 @@ pub fn parse(der_bytes: &[u8]) -> Result<Cert> {
         // a `keyUsage` that is an OCTET STRING whose body happens to look like a BIT STRING's was read
         // as one, a `subjectKeyIdentifier` took its 32 bytes from anything, and a `subjectAltName`
         // could be a SET — each a certificate that validated here (measured 2026-09-20: accepted as a
-        // chain) and that SPEC 14.1's exact profile says is not a HDTP certificate.
+        // chain) and that SPEC 14.1's exact profile says is not an HDTP certificate.
         let want_tag = match id.as_str() {
             OID_BASIC_CONSTRAINTS | OID_EKU | OID_SAN | OID_AKI => Some(0x30),
             OID_KEY_USAGE => Some(0x03),
@@ -418,7 +418,7 @@ pub fn profile_error(c: &Cert, kind: &str) -> Option<String> {
     if c.sig_alg != OID_ED25519 && c.sig_alg != OID_ECDSA_SHA256 {
         return Some("signature algorithm not in the profile".into());
     }
-    // SPEC 14.1: of an ECDSA signature's two twins, only the low-S one is a HDTP certificate. Judged
+    // SPEC 14.1: of an ECDSA signature's two twins, only the low-S one is an HDTP certificate. Judged
     // only where the bits ARE an ECDSA value (see `keys::ecdsa_is_low_s`).
     if c.sig_alg == OID_ECDSA_SHA256 && crate::keys::ecdsa_is_low_s(&c.sig) == Some(false) {
         return Some("ECDSA signature not in the low-S form".into());

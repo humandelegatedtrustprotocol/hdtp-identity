@@ -368,13 +368,13 @@ fn seal_any(passphrase: &str, plaintext: &Value, kdf: Option<Kdf>, salt: Option<
 
 /// A wrong passphrase and a tampered document are one message: nothing distinguishes them. The
 /// header is read first, in its members' order, and named where it does not read: a document that
-/// is not an object, or whose `format` is not this one, is `not a hdtp-vault/1 document` (this said
+/// is not an object, or whose `format` is not this one, is `not an hdtp-vault/1 document` (this said
 /// the passphrase was wrong when the document was not an object, and the Go port said this, T12); then
 /// its `kdf`; then `salt`, `nonce` and `ct`, of which one that does not read is damage.
 pub fn open(passphrase: &str, vault: &Value) -> Result<Value> {
     let fail = || Error::new("vault", "the passphrase is wrong or the vault is damaged");
     let Some(doc) = vault.as_object().filter(|d| d.get("format").and_then(|f| f.as_str()) == Some(FORMAT)) else {
-        return err("vault", "not a hdtp-vault/1 document");
+        return err("vault", "not an hdtp-vault/1 document");
     };
     let kdf = kdf_of_document(doc.get("kdf"))?;
     let salt = from_b64u(doc.get("salt").and_then(|s| s.as_str()).unwrap_or("")).map_err(|_| fail())?;

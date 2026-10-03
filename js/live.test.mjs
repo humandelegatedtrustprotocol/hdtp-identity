@@ -96,7 +96,7 @@ test('every black-box scenario is blocked by the seed node behind an HTTP door',
   // Every scenario in the battery file ran: the count is the file's, so it cannot go stale. (It was
   // `=== 10`, then a floor of 28 written by hand, each a number to forget when the battery changed.)
   assert.equal(out.results.length, BATTERY.scenarios.length, lines.join('\n'));
-  assert.equal(out.unreached, 0, 'every scenario reached a HDTP answer');
+  assert.equal(out.unreached, 0, 'every scenario reached an HDTP answer');
   // The total comes from the seed, so this cannot lock a stale number in: what it asserts is that
   // the two add up.
   assert.ok(out.seedScenarios >= out.results.length, 'the seed has at least the scenarios a live run covers');

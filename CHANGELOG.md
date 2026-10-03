@@ -27,7 +27,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   `application/hdtp-call+json` and `application/hdtp-result+json`; the card's `X-HDTP-VERSION:1`,
   `X-HDTP-CERT` and `X-HDTP-SEAL`; an envelope header's `v` is 1; an export's `hdtp_export` is 1;
   the vault is `hdtp-vault/1` and its plaintext's `v` is 1. Anything else is refused as before, and
-  nothing converts. The Go constant for the info string is `Info` (Rust `envelope::INFO`).
+  nothing converts. The Go constant for the info string is `Info` (Rust `envelope::INFO`). One
+  refusal a caller reads changed its article with the name: `not an hdtp-vault/1 document`.
 - **The vectors and the corpus are new bytes**: Appendix B from the seeds `hdtp-1.0-vectors/{label}`,
   the export corpus from `hdtp-identity/exportcorpus/{label}`, and the live battery's version
   scenario is `unknown-v2`.

@@ -119,6 +119,14 @@ step "No tracked path or text carries a name hdtp-names.txt forbids, and the lis
 node js/check-names.mjs --selftest
 node js/check-names.mjs
 
+step "The name takes \"an\": no tracked text writes \"a\" before it"
+# A rename leaves the old article behind ("a" before a name that now begins with a vowel sound), in
+# prose, in comments and in the refusal strings a caller reads. Bare, or behind a mark or the X- prefix.
+if git grep -n -I -E '(^|[^[:alnum:]_])[Aa] [`*_"(]*(X-)?(HDTP|hdtp)' -- . >&2; then
+  echo "gate: the lines above write \"a\" before the name; it takes \"an\"" >&2
+  exit 1
+fi
+
 step "Every MUST in the specification names something that holds it, and the record is current"
 node js/musts.mjs
 node js/record.mjs --check --manifest "$HDTP_RESULTS/parity-manifest.json"

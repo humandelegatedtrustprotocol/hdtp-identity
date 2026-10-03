@@ -6,7 +6,7 @@
 # In order, stopping at the first failure:
 #   1. refuses: a VERSION that is not X.Y.Z; a branch other than $RELEASE_BRANCH (main); a dirty tree;
 #      a VERSION not above the highest vX.Y.Z tag, or one already tagged; an empty `## Unreleased`
-#      in CHANGELOG.md; a hdtp-spec checkout that is dirty (its commit goes into the manifest);
+#      in CHANGELOG.md; an hdtp-spec checkout that is dirty (its commit goes into the manifest);
 #   2. runs the gate (gate.sh) on the tree as it is;
 #   3. writes VERSION into every copy (scripts/version.mjs), dates the changelog section, checks the
 #      lock file still resolves offline, and commits "Release X.Y.Z";
