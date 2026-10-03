@@ -1,12 +1,12 @@
 #!/bin/sh
-# The cross-language gate of pact-identity, as one command: the Rust core, the Go port and the
+# The cross-language gate of hdtp-identity, as one command: the Rust core, the Go port and the
 # pinned Wasm build must all answer Appendix B's vectors and the seed's intrusion scenarios exactly
 # as the seed does. This is the list; README.md points here, and so does the pre-push hook.
 #
 #   sh gate.sh
 #
 # IT RUNS HERE AND NOT IN CI, by the owner's decision (2026-09-20): the list reads the private
-# sibling `pact-protocol` — SPEC.md, the seed in `vectors/lib` — and no CI credential for it will
+# sibling `hdtp-spec` — the specification's text, the seed in `vectors/lib` — and no CI credential for it will
 # be created. For five days a CI job held this list and failed at its first step on every run it
 # ever had; a gate nothing can run is a comment. This repository's pre-push hook
 # (githooks/pre-push) runs it on every push, and `make release` runs it before a version is cut.
@@ -18,8 +18,8 @@
 set -eu
 cd "$(dirname "$0")"
 
-[ -f ../pact-protocol/SPEC.md ] && [ -f ../pact-protocol/vectors/lib/x509.mjs ] || {
-  echo "gate: ../pact-protocol is not checked out beside this directory (SPEC.md and vectors/lib are read from it)" >&2
+[ -f ../hdtp-spec/site/spec-source.mjs ] && [ -d ../hdtp-spec/docs/specification ] && [ -f ../hdtp-spec/vectors/lib/x509.mjs ] || {
+  echo "gate: ../hdtp-spec is not checked out beside this directory (docs/specification and vectors/lib are read from it)" >&2
   exit 2
 }
 
@@ -28,7 +28,7 @@ step() { printf '\n── %s\n' "$1"; }
 # The gate does not BUILD the Wasm (see the header), and `js/pkg-*` is gitignored — so on a fresh
 # clone, a new worktree or a second machine, `node js/verify.mjs` below used to die with an ENOENT
 # traceback naming a file, and never naming the command that makes it.
-[ -f js/pkg-web/pact_identity_wasm_bg.wasm ] && [ -f js/pkg-node/pact_identity_wasm_bg.wasm ] || {
+[ -f js/pkg-web/hdtp_identity_wasm_bg.wasm ] && [ -f js/pkg-node/hdtp_identity_wasm_bg.wasm ] || {
   echo "gate: js/pkg-web and js/pkg-node are not built, and this gate does not build them." >&2
   echo "      Run 'sh js/reproduce.sh' for the pinned container build (what the pin is OF), or" >&2
   echo "      'sh js/build.sh' for a local one — after which js/verify.mjs will refuse the bytes," >&2
@@ -60,13 +60,13 @@ step "Go port: vet, tests, adapter"
 ( cd go && go vet ./... && go test ./... && make build )
 
 step "The corpus the CLI writes for a fresh owner reads in the Go port as its cases.json says"
-# `pact vectors corpus` re-issues go/exportcorpus for another owner root. This is the one port that
+# `hdtp vectors corpus` re-issues go/exportcorpus for another owner root. This is the one port that
 # did not write it. A random root each run, so the check is of the verb and not of one output.
 REISSUED="$(mktemp -d)"
 trap 'rm -rf "$REISSUED"' EXIT
 OWNER="sha256:$(node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))")"
-cargo run -q --locked -p pact -- vectors corpus --owner "$OWNER" --out "$REISSUED/corpus"
-( cd go && PACT_REISSUED_CORPUS="$REISSUED/corpus" go test -count=1 -v -run '^TestReadExportZipAnswersTheCorpusWrittenForAnotherOwner$' . ) >"$REISSUED/go.txt" 2>&1 || {
+cargo run -q --locked -p hdtp -- vectors corpus --owner "$OWNER" --out "$REISSUED/corpus"
+( cd go && HDTP_REISSUED_CORPUS="$REISSUED/corpus" go test -count=1 -v -run '^TestReadExportZipAnswersTheCorpusWrittenForAnotherOwner$' . ) >"$REISSUED/go.txt" 2>&1 || {
   cat "$REISSUED/go.txt"
   exit 1
 }
@@ -85,16 +85,16 @@ node js/verify.mjs
 # target/gate-results, wiped here so nothing in it predates this run; the last step prints a line per
 # suite and fails if a suite wrote none. The seed's intrusion run is kept there too (js/seed.mjs), so
 # the four suites that read it run it once.
-PACT_RESULTS="$(pwd)/target/gate-results"
-PACT_RUN="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-export PACT_RESULTS PACT_RUN
-rm -rf "$PACT_RESULTS"
-mkdir -p "$PACT_RESULTS"
+HDTP_RESULTS="$(pwd)/target/gate-results"
+HDTP_RUN="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+export HDTP_RESULTS HDTP_RUN
+rm -rf "$HDTP_RESULTS"
+mkdir -p "$HDTP_RESULTS"
 node_tests() { # <suite> <files…>: node --test, with the spec reporter here and a result file there
   suite="$1"; shift
-  PACT_SUITE="$suite" node --test --test-timeout=60000 \
+  HDTP_SUITE="$suite" node --test --test-timeout=60000 \
     --test-reporter=spec --test-reporter-destination=stdout \
-    --test-reporter=./js/test-reporter.mjs --test-reporter-destination="$PACT_RESULTS/$suite.json" "$@"
+    --test-reporter=./js/test-reporter.mjs --test-reporter-destination="$HDTP_RESULTS/$suite.json" "$@"
 }
 
 step "Appendix B through the bindings, and through the Go port"
@@ -110,21 +110,21 @@ node_tests contract-tests contract/schema.test.mjs
 node contract/render.mjs --check
 
 step "The two ports answer a caller alike, and both answer as contract/contract.json says"
-node js/parity.mjs --manifest "$PACT_RESULTS/parity-manifest.json"
+node js/parity.mjs --manifest "$HDTP_RESULTS/parity-manifest.json"
 
 step "The harness's own tests: the live battery against the seed's node, the Go adapter, the readers"
 node_tests js-tests js/*.test.mjs
 
-step "No tracked file carries a name PACT 1.x had, and the list of names is the protocol's"
-node js/check-no-1x.mjs --selftest
-node js/check-no-1x.mjs
+step "No tracked path or text carries a name hdtp-names.txt forbids, and the list and guard are hdtp-spec's"
+node js/check-names.mjs --selftest
+node js/check-names.mjs
 
 step "Every MUST in the specification names something that holds it, and the record is current"
 node js/musts.mjs
-node js/record.mjs --check --manifest "$PACT_RESULTS/parity-manifest.json"
+node js/record.mjs --check --manifest "$HDTP_RESULTS/parity-manifest.json"
 
 step "The seed itself still proves the spec"
-( cd ../pact-protocol && node vectors/check.mjs )
+( cd ../hdtp-spec && node vectors/check.mjs )
 node js/seed.mjs
 
 step "One line per suite, from its result file"

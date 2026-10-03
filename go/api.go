@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 // Call is the one boundary every home of the library presents: a function name and a JSON object in,
 // one JSON object out, never a panic. The names and shapes are CONTRACT.md's.
@@ -16,7 +16,7 @@ import (
 // writes it here and holds it equal to the crates' and the Wasm package's).
 const (
 	ModuleVersion = "0.4.2"
-	SpecVersion   = "2.2.5"
+	SpecVersion   = "1.0.0"
 )
 
 type apiError struct {

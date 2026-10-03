@@ -8,10 +8,10 @@ import { join } from 'node:path';
 import { recorder, summary } from './results.mjs';
 
 const inDir = (fn) => {
-  const dir = mkdtempSync(join(tmpdir(), 'pact-results-'));
-  const before = process.env.PACT_RESULTS;
-  process.env.PACT_RESULTS = dir;
-  try { return fn(dir); } finally { if (before === undefined) delete process.env.PACT_RESULTS; else process.env.PACT_RESULTS = before; }
+  const dir = mkdtempSync(join(tmpdir(), 'hdtp-results-'));
+  const before = process.env.HDTP_RESULTS;
+  process.env.HDTP_RESULTS = dir;
+  try { return fn(dir); } finally { if (before === undefined) delete process.env.HDTP_RESULTS; else process.env.HDTP_RESULTS = before; }
 };
 
 test('a suite writes its cases in the schema, and no two share an id', () => inDir((dir) => {
@@ -20,9 +20,9 @@ test('a suite writes its cases in the schema, and no two share an id', () => inD
   r.add('one', 'FAIL', { reason: 'again', ms: 3 });
   assert.throws(() => r.add('two', 'OK'), /not a verdict/);
   const written = JSON.parse(readFileSync(r.write(), 'utf8'));
-  assert.equal(written.repo, 'pact-identity');
+  assert.equal(written.repo, 'hdtp-identity');
   assert.equal(written.suite, 'demo');
-  assert.equal(written.schema, 'pact-results/1');
+  assert.equal(written.schema, 'hdtp-results/1');
   for (const k of ['repo', 'suite', 'tier', 'run', 'cases', 'counts']) assert.ok(k in written, k);
   for (const k of ['started', 'ended', 'commit', 'target']) assert.ok(k in written.run, `run.${k}`);
   assert.deepEqual(written.cases.map(({ id, name, verdict, evidence }) => ({ id, name, verdict, evidence })), [
@@ -31,13 +31,13 @@ test('a suite writes its cases in the schema, and no two share an id', () => inD
   ]);
   assert.equal(written.cases[1].ms, 3);
   assert.ok(Object.keys(written).includes('run') && Object.keys(written).includes('tier'));
-  assert.equal(dir, process.env.PACT_RESULTS);
+  assert.equal(dir, process.env.HDTP_RESULTS);
 }));
 
 test('without a results directory nothing is written', () => {
-  const before = process.env.PACT_RESULTS;
-  delete process.env.PACT_RESULTS;
-  try { const r = recorder('demo'); r.add('x', 'PASS'); assert.equal(r.write(), null); } finally { if (before !== undefined) process.env.PACT_RESULTS = before; }
+  const before = process.env.HDTP_RESULTS;
+  delete process.env.HDTP_RESULTS;
+  try { const r = recorder('demo'); r.add('x', 'PASS'); assert.equal(r.write(), null); } finally { if (before !== undefined) process.env.HDTP_RESULTS = before; }
 });
 
 test('the summary fails a promised suite with no file, a case that is not a PASS, and a suite of no cases', () => inDir((dir) => {

@@ -1,9 +1,9 @@
-package pactidentity
+package hdtpidentity
 
 // The cryptography review of 2026-09-14, as tests: each finding it made against this port is a
-// case that failed before the fix and passes after it, mirroring crates/pact-identity/tests/review.rs.
+// case that failed before the fix and passes after it, mirroring crates/hdtp-identity/tests/review.rs.
 // P-21 of the 2026-09-23 review is held here the same way, at the end, mirroring
-// crates/pact-identity/tests/findings.rs instead.
+// crates/hdtp-identity/tests/findings.rs instead.
 
 import (
 	"bytes"
@@ -181,7 +181,7 @@ func TestAddressGuardRefusesEverySpellingOfLoopback(t *testing.T) {
 // §13.1#1: `enc` is exactly the suite's Npk, under each suite, in both directions. `sig` covers
 // protected ‖ enc ‖ ct with nothing between them, so a byte moved across the enc/ct boundary leaves
 // the signed bytes as they were: the forgery is signed, and the length is the one thing that refuses
-// it. crates/pact-identity/tests/review.rs's an_encapsulated_key_of_the_wrong_length_is_refused_under_each_suite
+// it. crates/hdtp-identity/tests/review.rs's an_encapsulated_key_of_the_wrong_length_is_refused_under_each_suite
 // is the core's twin, and js/parity.mjs holds both ports to it through decide and open_result.
 func TestAnEncapsulatedKeyOfTheWrongLengthIsRefused(t *testing.T) {
 	alina := reviewIdentity(t, "ed25519", reviewEndpoint)
@@ -264,7 +264,7 @@ func TestSmallOrderPointsAndSPKIBits(t *testing.T) {
 // HIGH 1 (this port's half) and LOW 13: the vault's rules, and its message.
 func TestVaultRulesMirrorTheCore(t *testing.T) {
 	kdf := KDF{Name: "argon2id", MKiB: 8192, T: 1, P: 1}
-	r := Call("vault_seal", json.RawMessage(`{"passphrase":"","plaintext":{"v":2,"roots":[]}}`))
+	r := Call("vault_seal", json.RawMessage(`{"passphrase":"","plaintext":{"v":1,"roots":[]}}`))
 	var fail struct {
 		Error, Why string
 	}
@@ -272,7 +272,7 @@ func TestVaultRulesMirrorTheCore(t *testing.T) {
 	if fail.Error != "bad_request" || fail.Why != "empty passphrase" {
 		t.Errorf("empty passphrase: %s", r)
 	}
-	v, err := VaultSeal("correct horse", []byte(`{"v":2}`), &kdf, nil, nil)
+	v, err := VaultSeal("correct horse", []byte(`{"v":1}`), &kdf, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -514,7 +514,7 @@ func TestTheTypedSealRefusesAHeaderIntegerItCannotCarry(t *testing.T) {
 // A four-octet DER length reaches 2^32-1. Folded into a 32-bit `int` it wrapped negative, `at+l`
 // stayed inside the buffer, and the slice panicked — from six bytes of anybody's certificate. This
 // runs on any word size. The 32-bit one is where the old reader fell over, and the test was
-// cross-compiled for linux/386 and run under Docker once, by hand, to show so (pact-gateway's
+// cross-compiled for linux/386 and run under Docker once, by hand, to show so (hdtp-gateway's
 // docs/release/review-findings-2026-09-21-plan.md, B8); no gate runs it on 32 bits.
 func TestAFourOctetLengthIsRefusedOnAnyWordSize(t *testing.T) {
 	for _, in := range [][]byte{
@@ -543,24 +543,24 @@ func TestAFourOctetLengthIsRefusedOnAnyWordSize(t *testing.T) {
 	}
 }
 
-// §3 (2.1.3): a writer puts no control character into a card. A card is LINES: a line break in a name,
+// §3: a writer puts no control character into a card. A card is LINES: a line break in a name,
 // the seal policy or an extra line writes a property of the writer's choosing, and the decoder reads
 // the FIRST of a name, so this card required sealing and said it did not.
 func TestNothingThatGoesIntoACardMayCarryALineBreak(t *testing.T) {
 	leaf := []byte{0x30, 0x00}
 	for what, in := range map[string][3]any{
-		"a name with CR LF":        {"x\r\nX-PACT-SEAL:none", "required", []string(nil)},
-		"a name with a bare LF":    {"x\nX-PACT-SEAL:none", "", []string(nil)},
+		"a name with CR LF":        {"x\r\nX-HDTP-SEAL:none", "required", []string(nil)},
+		"a name with a bare LF":    {"x\nX-HDTP-SEAL:none", "", []string(nil)},
 		"a name with a NUL":        {"x\x00y", "", []string(nil)},
-		"a seal with CR LF":        {"x", "required\r\nX-PACT-VERSION:3", []string(nil)},
-		"an extra line with CR LF": {"x", "", []string{"X-A:1\r\nX-PACT-SEAL:none"}},
+		"a seal with CR LF":        {"x", "required\r\nX-HDTP-VERSION:3", []string(nil)},
+		"an extra line with CR LF": {"x", "", []string{"X-A:1\r\nX-HDTP-SEAL:none"}},
 	} {
 		if card, err := EncodeCard(in[0].(string), leaf, in[1].(string), in[2].([]string)); err == nil {
 			t.Errorf("%s was written into a card:\n%s", what, card)
 		}
 	}
-	card, err := EncodeCard("Rao, Alina; of Pune", leaf, "required", []string{"X-PACT-FUTURE:1"})
-	if err != nil || !strings.Contains(card, "FN:Rao, Alina; of Pune\r\n") || !strings.Contains(card, "X-PACT-SEAL:required\r\n") {
+	card, err := EncodeCard("Rao, Alina; of Pune", leaf, "required", []string{"X-HDTP-FUTURE:1"})
+	if err != nil || !strings.Contains(card, "FN:Rao, Alina; of Pune\r\n") || !strings.Contains(card, "X-HDTP-SEAL:required\r\n") {
 		t.Fatalf("an honest card: %v\n%s", err, card)
 	}
 }

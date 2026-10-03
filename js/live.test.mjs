@@ -4,10 +4,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { b64url } from '../../pact-protocol/vectors/lib/keys.mjs';
-import { buildRoot, buildLeaf } from '../../pact-protocol/vectors/lib/x509.mjs';
-import { encodeCard } from '../../pact-protocol/vectors/lib/card.mjs';
-import { makeNode, receive } from '../../pact-protocol/vectors/lib/envelope.mjs';
+import { b64url } from '../../hdtp-spec/vectors/lib/keys.mjs';
+import { buildRoot, buildLeaf } from '../../hdtp-spec/vectors/lib/x509.mjs';
+import { encodeCard } from '../../hdtp-spec/vectors/lib/card.mjs';
+import { makeNode, receive } from '../../hdtp-spec/vectors/lib/envelope.mjs';
 import { readFileSync } from 'node:fs';
 import { runLive, answerCode, scenarios, BATTERY, checkBattery, verdictOf, throughRateLimits, retryAfterOf, RATE_RETRIES, RATE_PAUSE_MAX, RATE_PAUSE_DEFAULT } from './live.mjs';
 import { load } from './index.mjs';
@@ -96,7 +96,7 @@ test('every black-box scenario is blocked by the seed node behind an HTTP door',
   // Every scenario in the battery file ran: the count is the file's, so it cannot go stale. (It was
   // `=== 10`, then a floor of 28 written by hand, each a number to forget when the battery changed.)
   assert.equal(out.results.length, BATTERY.scenarios.length, lines.join('\n'));
-  assert.equal(out.unreached, 0, 'every scenario reached a PACT answer');
+  assert.equal(out.unreached, 0, 'every scenario reached a HDTP answer');
   // The total comes from the seed, so this cannot lock a stale number in: what it asserts is that
   // the two add up.
   assert.ok(out.seedScenarios >= out.results.length, 'the seed has at least the scenarios a live run covers');
@@ -156,7 +156,7 @@ test('the verdict and the retry loop: a bound, the pause asked for, and no pause
 });
 
 test('the two drivers wait alike: the Rust driver has the same bound and pauses', () => {
-  const rust = readFileSync(new URL('../crates/pact/src/vectors/intrude.rs', import.meta.url), 'utf8');
+  const rust = readFileSync(new URL('../crates/hdtp/src/vectors/intrude.rs', import.meta.url), 'utf8');
   for (const [name, value] of [['RATE_RETRIES', RATE_RETRIES], ['RATE_PAUSE_MAX', RATE_PAUSE_MAX], ['RATE_PAUSE_DEFAULT', RATE_PAUSE_DEFAULT]]) {
     assert.match(rust, new RegExp(`pub const ${name}: u\\d+ = ${value};`), `${name} in intrude.rs is not ${value}`);
   }
@@ -175,7 +175,7 @@ test('answerCode reads every shape an endpoint answers in', () => {
 
 
 /**
- * Two drivers aim this battery: this one, and `pact vectors intrude` in Rust. They were written in
+ * Two drivers aim this battery: this one, and `hdtp vectors intrude` in Rust. They were written in
  * one commit and differed on day one — 27 scenarios against 26, a control in one and not the other —
  * and for a week they were held to each other by a regex over the Rust SOURCE, with a hand tokenizer
  * for its arguments. The list is now one file, js/live-scenarios.json: its order, names and expected
@@ -190,8 +190,8 @@ test('this driver runs the battery file, in its order, expecting its codes', () 
 
 test('the Rust driver embeds the same battery file', () => {
   // The one thing the crate's tests cannot say about themselves: which file they read.
-  const rust = readFileSync(new URL('../crates/pact/src/vectors.rs', import.meta.url), 'utf8');
-  assert.ok(rust.includes('include_str!("../../../js/live-scenarios.json")'), 'crates/pact/src/vectors.rs no longer embeds js/live-scenarios.json');
+  const rust = readFileSync(new URL('../crates/hdtp/src/vectors.rs', import.meta.url), 'utf8');
+  assert.ok(rust.includes('include_str!("../../../js/live-scenarios.json")'), 'crates/hdtp/src/vectors.rs no longer embeds js/live-scenarios.json');
 });
 
 test('an id the file names and this driver cannot build, or the reverse, stops the run', () => {

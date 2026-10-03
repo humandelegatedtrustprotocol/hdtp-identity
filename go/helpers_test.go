@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 import "testing"
 
@@ -41,7 +41,7 @@ func Functions() []string {
 }
 
 // Seed derives every secret in the vectors from a label, so the generator is reproducible.
-func Seed(label string) []byte { return sha256Sum([]byte("pact-2.0-vectors/" + label)) }
+func Seed(label string) []byte { return sha256Sum([]byte("hdtp-1.0-vectors/" + label)) }
 
 // VaultOpen decrypts a typed document; a wrong passphrase and a tampered document are one message.
 func VaultOpen(passphrase string, v Vault) ([]byte, error) {

@@ -1,6 +1,6 @@
 // §3.1 of the contract: signing requests — what a web wallet decides about a host's request before a
 // person sees it. One request that must pass (the control, compared whole), and a refusal per rule.
-import { b64url } from '../../../pact-protocol/vectors/lib/keys.mjs';
+import { b64url } from '../../../hdtp-spec/vectors/lib/keys.mjs';
 
 export default function signing({ add, expect }, f) {
   const { now, csr, rootCsr, rootFp, rootDer, rootSpki, leafDer, p256RootDer } = f;
@@ -77,7 +77,7 @@ export default function signing({ add, expect }, f) {
     ['a request expiring more than ten minutes ahead', ask({ expires: at(601) }), 'the request expires more than ten minutes ahead'],
     ['an expiry with an offset', ask({ expires: '2026-09-15T14:05:00+02:00' }), 'expires is not an RFC 3339 instant'],
     ['an expiry that does not read', ask({ expires: 'soon' }), 'expires is not an RFC 3339 instant'],
-    // One grammar for every instant (SPEC 2.2.2): upper-case T and Z, no offset, `.` alone before a fraction.
+    // One grammar for every instant: upper-case T and Z, no offset, `.` alone before a fraction.
     ['an expiry with a lower-case z', ask({ expires: at(300).replace(/Z$/, 'z') }), 'expires is not an RFC 3339 instant'],
     ['an expiry with a comma before its fraction', ask({ expires: at(300).replace(/Z$/, ',5Z') }), 'expires is not an RFC 3339 instant'],
     ['an expiry with a lower-case t', ask({ expires: at(300).replace('T', 't') }), 'expires is not an RFC 3339 instant'],

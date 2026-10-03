@@ -21,7 +21,7 @@ import (
 	"strings"
 	"time"
 
-	pact "github.com/pact-cloud/pact-identity/go"
+	hdtp "github.com/humandelegatedtrustprotocol/hdtp-identity/go"
 )
 
 // Owner's seed, the importing identity's; Now is the instant the corpus is read at.
@@ -83,7 +83,7 @@ type entry struct {
 }
 
 func seed(label string) []byte {
-	s := sha256.Sum256([]byte("pact-identity/exportcorpus/" + label))
+	s := sha256.Sum256([]byte("hdtp-identity/exportcorpus/" + label))
 	return s[:]
 }
 
@@ -102,7 +102,7 @@ func call(name string, args any) (map[string]any, error) {
 		return nil, err
 	}
 	var out map[string]any
-	if err := json.Unmarshal(pact.Call(name, in), &out); err != nil {
+	if err := json.Unmarshal(hdtp.Call(name, in), &out); err != nil {
 		return nil, err
 	}
 	if why, refused := out["why"].(string); refused && out["error"] != nil {
@@ -227,7 +227,7 @@ func (x export) files() map[string]any { return x.manifest["files"].(map[string]
 func (x export) counts() map[string]any { return x.manifest["counts"].(map[string]any) }
 
 // relist sets manifest.files to the true hash of every text member: a media member is bound by its
-// name and counted, never listed (SPEC 2.2.2).
+// name and counted, never listed.
 func (x *export) relist() {
 	files := map[string]any{}
 	for _, e := range x.members {
@@ -239,34 +239,34 @@ func (x *export) relist() {
 }
 
 func (x export) zip() ([]byte, error) {
-	manifest := pact.Canonical(x.manifest)
+	manifest := hdtp.Canonical(x.manifest)
 	return zipOf(append(append([]entry{}, x.members...), entry{name: "manifest.json", data: manifest}))
 }
 
 type identity struct {
-	key  *pact.PrivateKey
+	key  *hdtp.PrivateKey
 	fp   string
 	cert string
 }
 
 func root(label, cn string) (identity, error) {
-	k, err := pact.KeyFromSeed(pact.AlgEd25519, seed(label))
+	k, err := hdtp.KeyFromSeed(hdtp.AlgEd25519, seed(label))
 	if err != nil {
 		return identity{}, err
 	}
-	der, err := pact.BuildRoot(pact.RootOpts{CN: cn, Key: k, NotBefore: born, Serial: serial(label)})
+	der, err := hdtp.BuildRoot(hdtp.RootOpts{CN: cn, Key: k, NotBefore: born, Serial: serial(label)})
 	if err != nil {
 		return identity{}, err
 	}
-	return identity{key: k, fp: pact.Fingerprint(k.Public().SPKI), cert: b64u(der)}, nil
+	return identity{key: k, fp: hdtp.Fingerprint(k.Public().SPKI), cert: b64u(der)}, nil
 }
 
 func leaf(of identity, cn, host, endpoint string) (string, error) {
-	h, err := pact.KeyFromSeed(pact.AlgEd25519, seed("host/"+host))
+	h, err := hdtp.KeyFromSeed(hdtp.AlgEd25519, seed("host/"+host))
 	if err != nil {
 		return "", err
 	}
-	der, err := pact.BuildLeaf(pact.LeafOpts{CN: cn, RootCN: cn, RootKey: of.key, HostPub: h.Public(), Endpoint: endpoint,
+	der, err := hdtp.BuildLeaf(hdtp.LeafOpts{CN: cn, RootCN: cn, RootKey: of.key, HostPub: h.Public(), Endpoint: endpoint,
 		NotBefore: born, NotAfter: dies, Serial: serial("leaf/" + host)})
 	return b64u(der), err
 }
@@ -335,7 +335,7 @@ func valid() (export, []byte, []string, error) {
 			"body": "=not a formula in JSON", "reply_to": "msg-3", "status": "failed", "attachments": []any{}},
 	}
 	w, err := call("export_write", map[string]any{"owner": owner.fp, "owner_name": OwnerCN, "exported_at": "2026-09-27T10:00:00Z",
-		"tool": "pact-identity exportcorpus", "contacts": contacts, "threads": threads, "media": []any{map[string]any{"hash": h, "size": len(media)}}})
+		"tool": "hdtp-identity exportcorpus", "contacts": contacts, "threads": threads, "media": []any{map[string]any{"hash": h, "size": len(media)}}})
 	if err != nil {
 		return fail, nil, nil, err
 	}
@@ -364,7 +364,7 @@ func valid() (export, []byte, []string, error) {
 	}}
 
 	bw, err := call("export_write", map[string]any{"owner": owner.fp, "owner_name": OwnerCN, "exported_at": "2026-09-27T10:00:00Z",
-		"tool": "pact-identity exportcorpus", "contacts": []any{contacts[0], contacts[3]}})
+		"tool": "hdtp-identity exportcorpus", "contacts": []any{contacts[0], contacts[3]}})
 	if err != nil {
 		return fail, nil, nil, err
 	}
@@ -434,7 +434,7 @@ func Build() (map[string][]byte, error) {
 		return add(c, data, err)
 	}
 	withManifest := func(v *export, extra ...entry) []entry {
-		return append(append(append([]entry{}, v.members...), entry{name: "manifest.json", data: pact.Canonical(v.manifest)}), extra...)
+		return append(append(append([]entry{}, v.members...), entry{name: "manifest.json", data: hdtp.Canonical(v.manifest)}), extra...)
 	}
 	rename := func(v *export, from, to string) {
 		for i := range v.members {
@@ -456,10 +456,10 @@ func Build() (map[string][]byte, error) {
 	}
 	withLine := func(v *export, i int, m map[string]any) {
 		lines := append([]string{}, jsonl...)
-		lines[i] = string(pact.Canonical(m)) + "\n"
+		lines[i] = string(hdtp.Canonical(m)) + "\n"
 		setLines(v, lines)
 	}
-	someKey, err := pact.KeyFromSeed(pact.AlgEd25519, seed("some-key"))
+	someKey, err := hdtp.KeyFromSeed(hdtp.AlgEd25519, seed("some-key"))
 	if err != nil {
 		return nil, err
 	}
@@ -540,13 +540,13 @@ func Build() (map[string][]byte, error) {
 			}},
 		{"oversize-manifest.zip", "a manifest over 64 KiB, as its header says", "core", `entry "manifest.json": 65537 bytes, over the 65536 an export allows`,
 			func(v *export) []entry {
-				m := pact.Canonical(v.manifest)
+				m := hdtp.Canonical(v.manifest)
 				m = append(m, bytes.Repeat([]byte(" "), 65537-len(m))...)
 				return append(append([]entry{}, v.members...), entry{name: "manifest.json", data: m})
 			}},
 		{"understated-size.zip", "a manifest whose headers state 16 bytes and which holds 70000", "host", "manifest.json: …",
 			func(v *export) []entry {
-				m := pact.Canonical(v.manifest)
+				m := hdtp.Canonical(v.manifest)
 				m = append(m, bytes.Repeat([]byte(" "), 70000-len(m))...)
 				small := uint64(16)
 				return append(append([]entry{}, v.members...), entry{name: "manifest.json", data: m, size: &small})

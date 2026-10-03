@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 // Go conveniences over the export contract functions (CONTRACT §6.2's prose names them; they are
 // not contract functions and parity does not reach them, so this port's tests hold them to the

@@ -1,9 +1,9 @@
 // §5 of the contract: envelopes — the suite, HPKE, sealing and opening, following a renewal, and the
 // receiving decision.
-import { seed, b64url, pkcs8Of, spkiOf, fingerprint, x25519FromSeed } from '../../../pact-protocol/vectors/lib/keys.mjs';
-import { buildLeaf, parse } from '../../../pact-protocol/vectors/lib/x509.mjs';
-import { sealDeterministic, signDetached, suiteForKey, open as openHpke } from '../../../pact-protocol/vectors/lib/hpke.mjs';
-import { canonical } from '../../../pact-protocol/vectors/lib/canonical.mjs';
+import { seed, b64url, pkcs8Of, spkiOf, fingerprint, x25519FromSeed } from '../../../hdtp-spec/vectors/lib/keys.mjs';
+import { buildLeaf, parse } from '../../../hdtp-spec/vectors/lib/x509.mjs';
+import { sealDeterministic, signDetached, suiteForKey, open as openHpke } from '../../../hdtp-spec/vectors/lib/hpke.mjs';
+import { canonical } from '../../../hdtp-spec/vectors/lib/canonical.mjs';
 import { ENDPOINTS, bharat, BORN, DIES } from '../cast.mjs';
 import { RawArgs } from '../port.mjs';
 import { createHash, createPublicKey } from 'node:crypto';
@@ -23,8 +23,8 @@ export default function envelopes({ add, expect }, f) {
   add('seal_request with a method nobody has', 'seal_request', { recipient_leaf: leafDer, sender_pkcs8: hostPkcs8, form: 'chain', sender_chain: [leafDer, rootDer], method: 'tools/dance', params: {}, msg_id: 'x', ts: 1, ephemeral_seed: eph(7) });
   add('seal_request with an empty msg_id', 'seal_request', { recipient_leaf: leafDer, sender_pkcs8: hostPkcs8, form: 'chain', sender_chain: [leafDer, rootDer], method: 'tools/call', params: {}, msg_id: '', ts: 1, ephemeral_seed: eph(7) });
   add('seal_request whose exp is a month past its ts', 'seal_request', { recipient_leaf: leafDer, sender_pkcs8: hostPkcs8, form: 'chain', sender_chain: [leafDer, rootDer], method: 'tools/call', params: {}, msg_id: 'x', ts: 1, exp: 1 + 31 * 86400, ephemeral_seed: eph(7) });
-  add('hpke_open of a ciphertext that is not one', 'hpke_open', { suite: 'PACT-SEAL-X25519', recipient_pkcs8: hostPkcs8, recipient_spki: hostSpki, info: 'PACT-SEAL-v2', aad: '', enc: b64url(new Uint8Array(32)), ct: b64url(new Uint8Array(32)) });
-  add('hpke_seal with a suite nobody has', 'hpke_seal', { suite: 'PACT-SEAL-ROT13', recipient_spki: hostSpki, info: 'x', aad: '', plaintext: '' });
+  add('hpke_open of a ciphertext that is not one', 'hpke_open', { suite: 'HDTP-SEAL-X25519', recipient_pkcs8: hostPkcs8, recipient_spki: hostSpki, info: 'HDTP-SEAL-v1', aad: '', enc: b64url(new Uint8Array(32)), ct: b64url(new Uint8Array(32)) });
+  add('hpke_seal with a suite nobody has', 'hpke_seal', { suite: 'HDTP-SEAL-ROT13', recipient_spki: hostSpki, info: 'x', aad: '', plaintext: '' });
   // `decide`'s refusal lives in `result.code`, not in a top-level `error`, so it too was once counted
   // as proven whole on a success it had never given. This is the one that reaches the contact tier,
   // where `tier`, `root`, `endpoint`, `method`, `form`, `params`, `leaf` and `effects` are all
@@ -180,7 +180,7 @@ export default function envelopes({ add, expect }, f) {
       const e = got?.envelope ?? got;
       if (typeof e?.protected !== 'string') return null;
       const aad = Buffer.from(e.protected, 'base64url'), { suite } = JSON.parse(aad);
-      try { return openHpke(suite, hostKey.priv, hostKey.pub, Buffer.from('PACT-SEAL-v2'), aad, Buffer.from(e.enc, 'base64url'), Buffer.from(e.ct, 'base64url')).toString(); } catch { return null; }
+      try { return openHpke(suite, hostKey.priv, hostKey.pub, Buffer.from('HDTP-SEAL-v1'), aad, Buffer.from(e.enc, 'base64url'), Buffer.from(e.ct, 'base64url')).toString(); } catch { return null; }
     };
     const holding = (text) => Object.assign((got) => plaintextOf(got)?.includes(text) ?? false, { label: `a plaintext holding ${text}` });
     for (const [what, text, sealed] of [
@@ -229,11 +229,11 @@ export default function envelopes({ add, expect }, f) {
 
   // ── one succeeding, whole-answer case per function ─────────────────────────────────────────────
   // HPKE with a fixed ephemeral is reproducible, which is what makes it comparable at all.
-  const hpkeArgs = { suite: 'PACT-SEAL-X25519', recipient_spki: hostSpki, info: 'PACT-SEAL-v2', aad: b64url(new Uint8Array([9])), plaintext: b64url(new Uint8Array([1, 2, 3])), ephemeral_seed: eph(5) };
+  const hpkeArgs = { suite: 'HDTP-SEAL-X25519', recipient_spki: hostSpki, info: 'HDTP-SEAL-v1', aad: b64url(new Uint8Array([9])), plaintext: b64url(new Uint8Array([1, 2, 3])), ephemeral_seed: eph(5) };
   add('hpke_seal', 'hpke_seal', hpkeArgs);
   // The seal the case above asks for, made by the seed from the same ephemeral seed.
-  const sealedHpke = sealDeterministic('PACT-SEAL-X25519', hostKey.pub, Buffer.from('PACT-SEAL-v2'), Buffer.from([9]), Buffer.from([1, 2, 3]), Buffer.alloc(32, 5));
-  add('hpke_open of what hpke_seal made', 'hpke_open', { suite: 'PACT-SEAL-X25519', recipient_pkcs8: hostPkcs8, recipient_spki: hostSpki, info: 'PACT-SEAL-v2', aad: b64url(new Uint8Array([9])), enc: b64url(sealedHpke.enc), ct: b64url(sealedHpke.ct) });
+  const sealedHpke = sealDeterministic('HDTP-SEAL-X25519', hostKey.pub, Buffer.from('HDTP-SEAL-v1'), Buffer.from([9]), Buffer.from([1, 2, 3]), Buffer.alloc(32, 5));
+  add('hpke_open of what hpke_seal made', 'hpke_open', { suite: 'HDTP-SEAL-X25519', recipient_pkcs8: hostPkcs8, recipient_spki: hostSpki, info: 'HDTP-SEAL-v1', aad: b64url(new Uint8Array([9])), enc: b64url(sealedHpke.enc), ct: b64url(sealedHpke.ct) });
   // A result sealed and opened: the one path a caller reads members other than `ok` from. Port-built:
   // the seed seals requests, not results.
   const resultArgs = { recipient_spki: hostSpki, sender_pkcs8: hostPkcs8, form: 'chain', sender_chain: [leafDer, rootDer], result: { ok: true, items: [1, 2] }, msg_id: 'p-1', ts: at(now), ephemeral_seed: eph(5) };
@@ -242,7 +242,7 @@ export default function envelopes({ add, expect }, f) {
 
   // ── 2026-09-28: the recipient's public key is handed in, never derived from its private key ────
   // A public key that is not the private key's must refuse, never yield a plaintext.
-  const hpkeOpen = { suite: 'PACT-SEAL-X25519', recipient_pkcs8: hostPkcs8, recipient_spki: hostSpki, info: 'PACT-SEAL-v2', aad: b64url(new Uint8Array([9])), enc: b64url(sealedHpke.enc), ct: b64url(sealedHpke.ct) };
+  const hpkeOpen = { suite: 'HDTP-SEAL-X25519', recipient_pkcs8: hostPkcs8, recipient_spki: hostSpki, info: 'HDTP-SEAL-v1', aad: b64url(new Uint8Array([9])), enc: b64url(sealedHpke.enc), ct: b64url(sealedHpke.ct) };
   add('hpke_open with a public key that is another Ed25519 key', 'hpke_open', { ...hpkeOpen, recipient_spki: rootSpki });
   expect('hpke_open with a public key that is another Ed25519 key', { error: 'envelope_invalid', why: 'does not open' });
   add('hpke_open with a public key of the other algorithm', 'hpke_open', { ...hpkeOpen, recipient_spki: p256Spki });
@@ -265,8 +265,8 @@ export default function envelopes({ add, expect }, f) {
 
   // B1 — OpenResult: Rust's words, and Rust's order.
   add('open_result with a key the envelope is not sealed to', 'open_result', open(chainForm, { my_pkcs8: rootPkcs8, my_spki: rootSpki }));
-  add('open_result whose header names a suite that is known and is not this key\'s', 'open_result', open(reheader(chainForm, { suite: 'PACT-SEAL-P256' })));
-  add('open_result with the wrong key AND the wrong suite: which is said first', 'open_result', open(reheader(chainForm, { suite: 'PACT-SEAL-P256' }), { my_pkcs8: rootPkcs8, my_spki: rootSpki }));
+  add('open_result whose header names a suite that is known and is not this key\'s', 'open_result', open(reheader(chainForm, { suite: 'HDTP-SEAL-P256' })));
+  add('open_result with the wrong key AND the wrong suite: which is said first', 'open_result', open(reheader(chainForm, { suite: 'HDTP-SEAL-P256' }), { my_pkcs8: rootPkcs8, my_spki: rootSpki }));
   add('open_result in the leaf form, naming a leaf no pin holds', 'open_result', open(leafForm));
   add('open_result in the leaf form, from a held leaf that has run out', 'open_result', open(answerTo({ form: 'leaf', ts: at('2027-10-01T00:00:00Z') }), { pins: pinned, now: '2027-10-01T00:00:00Z' }));
   add('open_result in the leaf form, with a signature that is not the held leaf\'s', 'open_result', open({ ...leafForm, sig: b64url(new Uint8Array(64)) }, { pins: pinned }));
@@ -476,8 +476,8 @@ export default function envelopes({ add, expect }, f) {
     expect(control, { code: 'pending_approval', root: rootFp, endpoint, leaf: form === 'chain' ? b64url(chainLeaf) : leafDer, form, msg_id: 'p-21' });
   }
 
-  // TC-3 — §13.1#1: `enc` is exactly the suite's Npk (65 bytes for PACT-SEAL-P256, 32 for
-  // PACT-SEAL-X25519). `sig` covers protected ‖ enc ‖ ct with nothing between them, so a byte moved
+  // TC-3 — §13.1#1: `enc` is exactly the suite's Npk (65 bytes for HDTP-SEAL-P256, 32 for
+  // HDTP-SEAL-X25519). `sig` covers protected ‖ enc ‖ ct with nothing between them, so a byte moved
   // across the enc/ct boundary leaves the signed bytes as they were: the forgery is signed, and the
   // one thing that refuses it is the length. One byte short and one byte long, under each suite, on
   // both doors a peer's envelope reaches: `decide` (a request) and `open_result` (a result). Only the
@@ -489,7 +489,7 @@ export default function envelopes({ add, expect }, f) {
       ? { ...e, enc: b64url(enc.subarray(0, enc.length - 1)), ct: b64url(Buffer.concat([enc.subarray(enc.length - 1), ct])) }
       : { ...e, enc: b64url(Buffer.concat([enc, ct.subarray(0, 1)])), ct: b64url(ct.subarray(1)) };
   };
-  // Bharat's host holds a P-256 leaf, so what is sealed to it is sealed under PACT-SEAL-P256.
+  // Bharat's host holds a P-256 leaf, so what is sealed to it is sealed under HDTP-SEAL-P256.
   const bharatLeaf = buildLeaf({ cn: bharat.cn, rootCn: bharat.cn, root: bharat.root, hostKey: bharat.host, endpoint: ENDPOINTS.bharat, notBefore: BORN, notAfter: DIES, label: 'parity/bharat-leaf' });
   const bharatNode = {
     ...node, endpoint: ENDPOINTS.bharat, chain: [b64url(bharatLeaf), f.p256RootDer],
@@ -497,8 +497,8 @@ export default function envelopes({ add, expect }, f) {
   };
   const bharatSpki = b64url(spkiOf(bharat.host.pub)), bharatPkcs8 = b64url(pkcs8Of(bharat.host.priv));
   for (const [suite, recipient, toResult] of [
-    ['PACT-SEAL-X25519', { envelope: sealed, node }, { envelope: chainForm, args: {} }],
-    ['PACT-SEAL-P256', { envelope: request({ params: { name: 'send_message' }, msgId: 'p-npk', recipientLeaf: bharatLeaf }), node: bharatNode },
+    ['HDTP-SEAL-X25519', { envelope: sealed, node }, { envelope: chainForm, args: {} }],
+    ['HDTP-SEAL-P256', { envelope: request({ params: { name: 'send_message' }, msgId: 'p-npk', recipientLeaf: bharatLeaf }), node: bharatNode },
       { envelope: answerTo({ recipient_spki: bharatSpki }), args: { my_pkcs8: bharatPkcs8, my_spki: bharatSpki } }],
   ]) {
     for (const [by, what] of [[-1, 'one byte short'], [1, 'one byte long']]) {
@@ -588,14 +588,14 @@ export default function envelopes({ add, expect }, f) {
   const sealText = ({ to, cty, msgId, body, header = (t) => t }) => {
     const suite = suiteForKey(to);
     const aad = Buffer.from(header(canonical({ v: 2, suite, kid: fingerprint(to), msg_id: msgId, ts: at(now), exp: at(now) + 600, cty })));
-    const { enc, ct } = sealDeterministic(suite, to, Buffer.from('PACT-SEAL-v2'), aad, Buffer.from(body), Buffer.alloc(32, 9));
+    const { enc, ct } = sealDeterministic(suite, to, Buffer.from('HDTP-SEAL-v1'), aad, Buffer.from(body), Buffer.alloc(32, 9));
     return { protected: b64url(aad), enc: b64url(enc), ct: b64url(ct), sig: b64url(signDetached(hostKey.priv, Buffer.concat([aad, enc, ct]))) };
   };
   const toMyself = parse(leafDerBytes).publicKey;
   const chainText = JSON.stringify([b64url(leafDerBytes), b64url(rootDerBytes)]);
   const nestedText = (n) => '['.repeat(n) + '1' + ']'.repeat(n);
   const callText = (msgId, argsText, o = {}) =>
-    sealText({ to: toMyself, cty: 'application/pact-call+json', msgId, body: `{"method":"tools/call","params":{"name":"send_message","arguments":${argsText}},"chain":${chainText}}`, ...o });
+    sealText({ to: toMyself, cty: 'application/hdtp-call+json', msgId, body: `{"method":"tools/call","params":{"name":"send_message","arguments":${argsText}},"chain":${chainText}}`, ...o });
   const pinnedNode = { ...node, pins: pinned };
   const notJSON = { code: 'envelope_invalid', why: 'does not open' };
   // The body is the first container and params the second; `arguments` is the arrays.
@@ -616,10 +616,10 @@ export default function envelopes({ add, expect }, f) {
   // `as_i64`), so a `ts` or `exp` written `-0`, or written with a fraction, is `header member types`.
   // The Go port read -0 as 0 and went on to the time window, where the core refused the header's
   // types; one envelope was two answers. The fraction both ports refused already; the seed decides it
-  // `ok` and reads -0 as 0, which pact-protocol PR #10 changes.
+  // `ok` and reads -0 as 0, which hdtp-spec PR #10 changes.
   const headerHolding = (member, text) => (t) => t.replace(member === 'ts' ? `"ts":${at(now)}` : `"exp":${at(now) + 600}`, `"${member}":${text}`);
   const typesRefused = { code: 'envelope_invalid', why: 'header member types' };
-  // With them, the other spellings the seed now judges on their text (pact-protocol PR #10): an exponent
+  // With them, the other spellings the seed now judges on their text (hdtp-spec PR #10): an exponent
   // and a number past 64 bits are no integer; past 2^53 and within 64 bits is one, judged by its time.
   add('decide on an envelope whose header holds a ts past 2^53 and within 64 bits', 'decide', { now, envelope: callText('p-s3-1-big', '{}', { header: headerHolding('ts', '9223372036854775807') }), node: pinnedNode });
   expect('decide on an envelope whose header holds a ts past 2^53 and within 64 bits', { code: 'envelope_invalid', why: 'outside the time window' });
@@ -629,12 +629,12 @@ export default function envelopes({ add, expect }, f) {
   ]) {
     add(`decide on an envelope whose header holds ${what}`, 'decide', { now, envelope: callText(`p-s3-1-${member}`, '{}', { header: headerHolding(member, text) }), node: pinnedNode });
     expect(`decide on an envelope whose header holds ${what}`, typesRefused);
-    const answer = sealText({ to: callerKey.pub, cty: 'application/pact-result+json', msgId: 'r-1', body: `{"result":{},"chain":${chainText}}`, header: headerHolding(member, text) });
+    const answer = sealText({ to: callerKey.pub, cty: 'application/hdtp-result+json', msgId: 'r-1', body: `{"result":{},"chain":${chainText}}`, header: headerHolding(member, text) });
     add(`open_result on an answer whose header holds ${what}`, 'open_result', open(answer));
     expect(`open_result on an answer whose header holds ${what}`, { error: 'envelope_invalid', why: 'header member types' });
   }
   const resultText = (resultJSON) =>
-    sealText({ to: callerKey.pub, cty: 'application/pact-result+json', msgId: 'r-1', body: `{"result":${resultJSON},"chain":${chainText}}` });
+    sealText({ to: callerKey.pub, cty: 'application/hdtp-result+json', msgId: 'r-1', body: `{"result":${resultJSON},"chain":${chainText}}` });
   add('open_result on an answer whose result holds a number past the largest double', 'open_result', open(resultText('{"n":1e400}')));
   expect('open_result on an answer whose result holds a number past the largest double', { error: 'envelope_invalid', why: 'does not open' });
   add('open_result on an answer whose result holds the largest double', 'open_result', open(resultText('{"n":1.7976931348623157e308}')));
@@ -646,11 +646,11 @@ export default function envelopes({ add, expect }, f) {
   // surrogate pair; encoding/json reads the first as U+FFFD and the second as U+FFFD too. So a call
   // whose header msg_id was "\ud800", or whose body held one or a raw 0xFF, was `protected is not JSON`
   // or `does not open` to the core (the cloud) and `ok` to the Go port (the node), and so was the
-  // seed's node until pact-protocol#10 (2ba05a1). A surrogate pair, and an escaped backslash before a
+  // seed's node until hdtp-spec#10 (2ba05a1). A surrogate pair, and an escaped backslash before a
   // `u`, are the controls. `@` in a text stands for the bytes given.
   const bytesAt = (text, ...b) => { const t = Buffer.from(text), i = t.indexOf('@'); return Buffer.concat([t.subarray(0, i), Buffer.from(b), t.subarray(i + 1)]); };
   const msgIdText = (text) => (t) => t.replace(/"msg_id":"[^"]*"/, `"msg_id":${text}`);
-  const rawBody = (msgId, argsText, ...b) => sealText({ to: toMyself, cty: 'application/pact-call+json', msgId, body: bytesAt(`{"method":"tools/call","params":{"name":"send_message","arguments":${argsText}},"chain":${chainText}}`, ...b) });
+  const rawBody = (msgId, argsText, ...b) => sealText({ to: toMyself, cty: 'application/hdtp-call+json', msgId, body: bytesAt(`{"method":"tools/call","params":{"name":"send_message","arguments":${argsText}},"chain":${chainText}}`, ...b) });
   const headerNotJSON = { code: 'envelope_invalid', why: 'protected is not JSON' };
   for (const [what, envelope, want] of [
     ['a header whose msg_id is half a surrogate pair', callText('p-m1-1', '{}', { header: msgIdText('"\\ud800"') }), headerNotJSON],
@@ -665,10 +665,10 @@ export default function envelopes({ add, expect }, f) {
     add(`decide on an envelope with ${what}`, 'decide', { now, envelope, node: pinnedNode });
     expect(`decide on an envelope with ${what}`, want);
   }
-  const rawResult = (...b) => sealText({ to: callerKey.pub, cty: 'application/pact-result+json', msgId: 'r-1', body: bytesAt(`{"result":{"text":"@"},"chain":${chainText}}`, ...b) });
+  const rawResult = (...b) => sealText({ to: callerKey.pub, cty: 'application/hdtp-result+json', msgId: 'r-1', body: bytesAt(`{"result":{"text":"@"},"chain":${chainText}}`, ...b) });
   const answerNotJSON = { error: 'envelope_invalid', why: 'does not open' };
   for (const [what, answer, want] of [
-    ['an answer whose header msg_id is half a surrogate pair', sealText({ to: callerKey.pub, cty: 'application/pact-result+json', msgId: 'r-1', body: `{"result":{},"chain":${chainText}}`, header: msgIdText('"\\ud800"') }), { error: 'envelope_invalid', why: 'protected is not JSON' }],
+    ['an answer whose header msg_id is half a surrogate pair', sealText({ to: callerKey.pub, cty: 'application/hdtp-result+json', msgId: 'r-1', body: `{"result":{},"chain":${chainText}}`, header: msgIdText('"\\ud800"') }), { error: 'envelope_invalid', why: 'protected is not JSON' }],
     ['an answer whose result holds half a surrogate pair', resultText('{"text":"\\ud800"}'), answerNotJSON],
     ['an answer whose result names a member with half a surrogate pair', resultText('{"\\udc00":1}'), answerNotJSON],
     ['an answer whose result holds bytes that are not UTF-8', rawResult(0xff, 0xfe), answerNotJSON],
@@ -684,12 +684,12 @@ export default function envelopes({ add, expect }, f) {
   // and a leaf cannot hold any other: a bare X25519 key is outside the profile, and refused where it is
   // read, as every key outside it is. The core sealed to one and the Go port refused it as a suite
   // that does not fit; both named an X25519 suite for it.
-  const info = 'PACT-SEAL-v2', plaintext = b64url(new Uint8Array([1, 2, 3]));
+  const info = 'HDTP-SEAL-v1', plaintext = b64url(new Uint8Array([1, 2, 3]));
   for (const [kind, { spki, oid }] of Object.entries(f.foreign)) {
     const refused = { error: 'unsupported', why: `unsupported key type ${oid}` };
     add(`suite_for a key outside the profile: ${kind}`, 'suite_for', { spki: b64url(spki) });
     expect(`suite_for a key outside the profile: ${kind}`, refused);
-    for (const suite of ['PACT-SEAL-X25519', 'PACT-SEAL-P256']) {
+    for (const suite of ['HDTP-SEAL-X25519', 'HDTP-SEAL-P256']) {
       add(`hpke_seal under ${suite} to a key outside the profile: ${kind}`, 'hpke_seal', { suite, recipient_spki: b64url(spki), info, plaintext });
       expect(`hpke_seal under ${suite} to a key outside the profile: ${kind}`, refused);
     }
@@ -698,7 +698,7 @@ export default function envelopes({ add, expect }, f) {
   }
   // A suite that is not the recipient key's is the envelope's refusal, in the envelope layer's words.
   // The core said `unsupported`, which hpke_seal does not declare (F6, R14).
-  for (const [suite, spki, what] of [['PACT-SEAL-X25519', p256Spki, 'a P-256 key'], ['PACT-SEAL-P256', hostSpki, 'an Ed25519 key']]) {
+  for (const [suite, spki, what] of [['HDTP-SEAL-X25519', p256Spki, 'a P-256 key'], ['HDTP-SEAL-P256', hostSpki, 'an Ed25519 key']]) {
     add(`hpke_seal under ${suite} to ${what}`, 'hpke_seal', { suite, recipient_spki: spki, info, plaintext });
     expect(`hpke_seal under ${suite} to ${what}`, { error: 'envelope_invalid', why: 'suite does not fit the key' });
   }
@@ -711,7 +711,7 @@ export default function envelopes({ add, expect }, f) {
   for (const [what, point] of Object.entries(smallOrder)) {
     const spki = Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), Buffer.from(point, 'hex')]);
     const leaf = f.alinaLeaf({ hostKey: { pub: createPublicKey({ key: spki, format: 'der', type: 'spki' }) }, label: `parity/small-order/${what}` });
-    add(`hpke_seal to an Ed25519 key of small order: ${what}`, 'hpke_seal', { suite: 'PACT-SEAL-X25519', recipient_spki: b64url(spki), info, plaintext, ephemeral_seed: eph(5) });
+    add(`hpke_seal to an Ed25519 key of small order: ${what}`, 'hpke_seal', { suite: 'HDTP-SEAL-X25519', recipient_spki: b64url(spki), info, plaintext, ephemeral_seed: eph(5) });
     expect(`hpke_seal to an Ed25519 key of small order: ${what}`, lowOrder);
     add(`seal_request to a leaf holding an Ed25519 key of small order: ${what}`, 'seal_request', { recipient_leaf: leaf, sender_pkcs8: hostPkcs8, sender_chain: [leafDer, rootDer], params: {}, msg_id: 'p-low', ts: at(now), ephemeral_seed: eph(7) });
     expect(`seal_request to a leaf holding an Ed25519 key of small order: ${what}`, lowOrder);
@@ -721,7 +721,7 @@ export default function envelopes({ add, expect }, f) {
 
   // ── T5: an open is by a key of the suite's own algorithm ─────────────────────────────────────────
   //
-  // The Go port's open read a P-256 key's seed, which it does not have, under PACT-SEAL-X25519, and so
+  // The Go port's open read a P-256 key's seed, which it does not have, under HDTP-SEAL-X25519, and so
   // used the scalar of the empty seed — SHA-512 of nothing, clamped: a public constant. Any P-256 key
   // then opened a seal to the Ed25519 key whose X25519 form is that constant's point, through
   // hpke_open and decide alike; the core refuses a P-256 key there. The crafted key is computed here
@@ -734,18 +734,18 @@ export default function envelopes({ add, expect }, f) {
   const y = (((u - 1n + P) % P) * modpow((u + 1n) % P, P - 2n)) % P;
   const craftedSpki = Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), Buffer.from(Array.from({ length: 32 }, (_, i) => Number((y >> BigInt(8 * i)) & 0xffn)))]);
   const craftedPub = createPublicKey({ key: craftedSpki, format: 'der', type: 'spki' });
-  const admitted = sealDeterministic('PACT-SEAL-X25519', craftedPub, Buffer.from('PACT-SEAL-v2'), Buffer.alloc(0), Buffer.from('admitted'), Buffer.alloc(32, 3));
+  const admitted = sealDeterministic('HDTP-SEAL-X25519', craftedPub, Buffer.from('HDTP-SEAL-v1'), Buffer.alloc(0), Buffer.from('admitted'), Buffer.alloc(32, 3));
   const doesNotOpen = { error: 'envelope_invalid', why: 'does not open' };
   for (const [who, pkcs8] of [['a P-256 key', f.p256Pkcs8], ['another P-256 key', b64url(pkcs8Of(bharat.host.priv))]]) {
-    add(`hpke_open of a seal to the empty seed's key, by ${who}`, 'hpke_open', { suite: 'PACT-SEAL-X25519', recipient_pkcs8: pkcs8, recipient_spki: b64url(craftedSpki), info: 'PACT-SEAL-v2', aad: '', enc: b64url(admitted.enc), ct: b64url(admitted.ct) });
+    add(`hpke_open of a seal to the empty seed's key, by ${who}`, 'hpke_open', { suite: 'HDTP-SEAL-X25519', recipient_pkcs8: pkcs8, recipient_spki: b64url(craftedSpki), info: 'HDTP-SEAL-v1', aad: '', enc: b64url(admitted.enc), ct: b64url(admitted.ct) });
     expect(`hpke_open of a seal to the empty seed's key, by ${who}`, doesNotOpen);
   }
   // The control: a seal opened by the key it was made for.
   expect('hpke_open of what hpke_seal made', { plaintext: b64url(new Uint8Array([1, 2, 3])) });
   // An Ed25519 key under the P-256 suite, and a P-256 key under the X25519 suite, each with the other
   // key's public half: the private key is held to the suite before anything else.
-  const toP256 = sealDeterministic('PACT-SEAL-P256', f.p256Key.pub, Buffer.from('PACT-SEAL-v2'), Buffer.alloc(0), Buffer.from('x'), Buffer.alloc(32, 4));
-  add('hpke_open under the P-256 suite by an Ed25519 key', 'hpke_open', { suite: 'PACT-SEAL-P256', recipient_pkcs8: hostPkcs8, recipient_spki: p256Spki, info: 'PACT-SEAL-v2', aad: '', enc: b64url(toP256.enc), ct: b64url(toP256.ct) });
+  const toP256 = sealDeterministic('HDTP-SEAL-P256', f.p256Key.pub, Buffer.from('HDTP-SEAL-v1'), Buffer.alloc(0), Buffer.from('x'), Buffer.alloc(32, 4));
+  add('hpke_open under the P-256 suite by an Ed25519 key', 'hpke_open', { suite: 'HDTP-SEAL-P256', recipient_pkcs8: hostPkcs8, recipient_spki: p256Spki, info: 'HDTP-SEAL-v1', aad: '', enc: b64url(toP256.enc), ct: b64url(toP256.ct) });
   expect('hpke_open under the P-256 suite by an Ed25519 key', doesNotOpen);
   add('hpke_open under the X25519 suite by a P-256 key', 'hpke_open', { ...hpkeOpen, recipient_pkcs8: f.p256Pkcs8 });
   expect('hpke_open under the X25519 suite by a P-256 key', doesNotOpen);
@@ -780,8 +780,8 @@ export default function envelopes({ add, expect }, f) {
   // (T10, X9). The plaintext's shape now, in both ports and the seed. Sealed and signed by the seed over
   // the body as written; the controls, padded, read.
   const leafText = b64url(leafDerBytes), rootText = b64url(rootDerBytes);
-  const chainCall = (msgId, chain) => sealText({ to: toMyself, cty: 'application/pact-call+json', msgId, body: JSON.stringify({ method: 'tools/call', params: { name: 'send_message', arguments: {} }, chain }) });
-  const chainAnswer = (chain) => sealText({ to: callerKey.pub, cty: 'application/pact-result+json', msgId: 'r-1', body: JSON.stringify({ result: { ok: 1 }, chain }) });
+  const chainCall = (msgId, chain) => sealText({ to: toMyself, cty: 'application/hdtp-call+json', msgId, body: JSON.stringify({ method: 'tools/call', params: { name: 'send_message', arguments: {} }, chain }) });
+  const chainAnswer = (chain) => sealText({ to: callerKey.pub, cty: 'application/hdtp-result+json', msgId: 'r-1', body: JSON.stringify({ result: { ok: 1 }, chain }) });
   for (const [what, member, reads] of [
     ['a stray character', leafText.slice(0, 8) + '!' + leafText.slice(8), false],
     ['a vertical tab', leafText.slice(0, 8) + '\u000b' + leafText.slice(8), false],

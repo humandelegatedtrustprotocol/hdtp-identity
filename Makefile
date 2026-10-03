@@ -1,4 +1,4 @@
-# pact-identity's release targets. The recipes are scripts (scripts/*.sh), so they fail the way a
+# hdtp-identity's release targets. The recipes are scripts (scripts/*.sh), so they fail the way a
 # script fails; macOS make is 3.81 and ignores .SHELLFLAGS, so nothing here relies on it.
 #
 #   make release VERSION=X.Y.Z          cut it locally: gate, version commit, pin, tags, dist/X.Y.Z/

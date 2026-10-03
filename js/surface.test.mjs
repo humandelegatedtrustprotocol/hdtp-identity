@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { rustDispatch, goDispatch } from './surface.mjs';
 
-const rust = readFileSync(new URL('../crates/pact-identity/src/api.rs', import.meta.url), 'utf8');
+const rust = readFileSync(new URL('../crates/hdtp-identity/src/api.rs', import.meta.url), 'utf8');
 const go = readFileSync(new URL('../go/api.go', import.meta.url), 'utf8');
 const contract = new Set(Object.keys(JSON.parse(readFileSync(new URL('../contract/contract.json', import.meta.url), 'utf8')).methods));
 const sorted = (s) => [...s].sort();
@@ -54,5 +54,5 @@ test('a string inside an arm body, a comment or a nested match is not a name', (
 
 test('a source with no dispatcher is an error, not an empty surface', () => {
   assert.throws(() => rustDispatch('fn other() {}'), /fn dispatch was not found/);
-  assert.throws(() => goDispatch('package pact'), /functions map was not found/);
+  assert.throws(() => goDispatch('package hdtp'), /functions map was not found/);
 });

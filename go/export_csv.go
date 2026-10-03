@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 // RFC 4180, strictly, in both directions, as the Rust core's export/csv.rs has it. Hand-written, not
 // encoding/csv: that reader skips a blank line and rewrites a quoted CRLF to LF (measured), and a

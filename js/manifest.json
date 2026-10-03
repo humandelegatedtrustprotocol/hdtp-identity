@@ -13,9 +13,9 @@
     "inputs_sha256": "c4ef6d06d8ede3742732d4260953e3e1aaee34316256612c7430e25667b7e7db",
     "files": 54,
     "paths": [
-      "crates/pact-identity",
-      "crates/pact-identity-wasm",
-      "crates/pact-limits",
+      "crates/hdtp-identity",
+      "crates/hdtp-identity-wasm",
+      "crates/hdtp-limits",
       "Cargo.toml",
       "Cargo.lock",
       "rust-toolchain.toml",
@@ -34,19 +34,19 @@
       "sha256": "1239d4d885dcad42201a27ed9324f8f0f760b78700d8db9ced39a511cffe7eae",
       "bytes": 18
     },
-    "pkg-web/pact_identity_wasm.d.ts": {
+    "pkg-web/hdtp_identity_wasm.d.ts": {
       "sha256": "c50ff2c0694b0285bf77984aaab3599be3eb07f6a2b2616893f0e8b6badea270",
       "bytes": 1712
     },
-    "pkg-web/pact_identity_wasm.js": {
+    "pkg-web/hdtp_identity_wasm.js": {
       "sha256": "b740c43940a43c3eb08f66d042bfbd19e08237a51e869d883c0c1d365f152067",
       "bytes": 13413
     },
-    "pkg-web/pact_identity_wasm_bg.wasm": {
+    "pkg-web/hdtp_identity_wasm_bg.wasm": {
       "sha256": "3793f6519e34a452f6767106c1d3ed73cedeb7ec7ece4ea5602bd27b56eb8623",
       "bytes": 859977
     },
-    "pkg-web/pact_identity_wasm_bg.wasm.d.ts": {
+    "pkg-web/hdtp_identity_wasm_bg.wasm.d.ts": {
       "sha256": "73433108b7f9e722ba01bba916f3b5a2294d42ce7ab53ae1fa7630186df89bf2",
       "bytes": 564
     },
@@ -58,19 +58,19 @@
       "sha256": "dbf8353f77358bc12169b7bb7301e1978d5b503e002ee927229a8993672818fc",
       "bytes": 20
     },
-    "pkg-node/pact_identity_wasm.d.ts": {
+    "pkg-node/hdtp_identity_wasm.d.ts": {
       "sha256": "21d9499d7471b1f693c4e3930d89db0fa0fbc05c1a805d043dc7684bac0485c5",
       "bytes": 205
     },
-    "pkg-node/pact_identity_wasm.js": {
+    "pkg-node/hdtp_identity_wasm.js": {
       "sha256": "26463f16c4a82d7a311b03959daca126ba710536a5cc46aff94d852e0fa9fbb6",
       "bytes": 10102
     },
-    "pkg-node/pact_identity_wasm_bg.wasm": {
+    "pkg-node/hdtp_identity_wasm_bg.wasm": {
       "sha256": "3793f6519e34a452f6767106c1d3ed73cedeb7ec7ece4ea5602bd27b56eb8623",
       "bytes": 859977
     },
-    "pkg-node/pact_identity_wasm_bg.wasm.d.ts": {
+    "pkg-node/hdtp_identity_wasm_bg.wasm.d.ts": {
       "sha256": "73433108b7f9e722ba01bba916f3b5a2294d42ce7ab53ae1fa7630186df89bf2",
       "bytes": 564
     }

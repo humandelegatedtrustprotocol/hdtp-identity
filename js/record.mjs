@@ -1,7 +1,7 @@
 // The record of what is proven, generated from the things that prove it.
 //
 // Two lists that were only ever a number in a console line or a README: the normative
-// sentences of `pact-protocol/SPEC.md` with what holds each one, and every cross-port
+// sentences of hdtp-spec's specification with what holds each one, and every cross-port
 // parity case with the function it guards. A reviewer asking "which 45?" or "which 270?"
 // had to run the suites and read scrollback.
 //
@@ -16,12 +16,14 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { extract } from './musts.mjs';
+import { readSpec } from '../../hdtp-spec/site/spec-source.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const out = join(here, '../PROOFS.md');
 const check = process.argv.includes('--check');
 
-const musts = extract(readFileSync(join(here, '../../pact-protocol/SPEC.md'), 'utf8'));
+const spec = readSpec(join(here, '../../hdtp-spec'));
+const musts = extract(spec);
 const map = JSON.parse(readFileSync(join(here, 'musts.json'), 'utf8'));
 
 // The parity manifest is produced by running the harness, not read from a committed file:
@@ -41,7 +43,7 @@ if (given) {
   }
   parity = JSON.parse(readFileSync(given, 'utf8'));
 } else {
-  const dir = mkdtempSync(join(tmpdir(), 'pact-record-'));
+  const dir = mkdtempSync(join(tmpdir(), 'hdtp-record-'));
   try {
     const at = join(dir, 'parity-manifest.json');
     execFileSync(process.execPath, [join(here, 'parity.mjs'), '--manifest', at], { stdio: 'pipe' });
@@ -51,7 +53,7 @@ if (given) {
   }
 }
 
-const specVersion = (readFileSync(join(here, '../../pact-protocol/SPEC.md'), 'utf8')
+const specVersion = (spec
   .match(/^\*\*Version\s+([^\s·]+)/m) || [, '(unknown)'])[1];
 
 const holder = (id) => {
@@ -69,7 +71,7 @@ L.push('# What is proven, and by what');
 L.push('');
 L.push('**Generated — do not edit.** `node js/record.mjs` rewrites this file; `node js/record.mjs --check`');
 L.push('regenerates and fails on any difference, which is what gate.sh runs. Both lists come from the things');
-L.push('that prove them rather than from prose beside them: the MUSTs from `pact-protocol/SPEC.md` through');
+L.push('that prove them rather than from prose beside them: the MUSTs from hdtp-spec\'s specification through');
 L.push("the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the parity cases from");
 L.push('`js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no');
 L.push('case can be listed as proven that did not pass.');

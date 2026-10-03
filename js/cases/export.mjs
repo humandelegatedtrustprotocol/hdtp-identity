@@ -113,7 +113,7 @@ export default function exportCases({ add, expect }, f) {
   // JSON the two ports' decoders read differently: a lone surrogate escape is refused by serde and
   // was replaced with U+FFFD by Go's encoding/json. A manifest and a message are JSON inside a string,
   // so a file carries one to both; the ports must refuse it alike. A pair is one character, and reads.
-  const manifestWith = (name) => `{"pact_export":2,"owner":"${owner}","owner_name":"${name}","exported_at":"2026-09-27T10:00:00Z","tool":"t","counts":{"contacts":0,"threads":0,"messages":0,"media":0},"files":{}}`;
+  const manifestWith = (name) => `{"hdtp_export":1,"owner":"${owner}","owner_name":"${name}","exported_at":"2026-09-27T10:00:00Z","tool":"t","counts":{"contacts":0,"threads":0,"messages":0,"media":0},"files":{}}`;
   const end = (m) => ({ manifest: m, messages_sha256: null, lines: 0, ids: [], msg_ids: [], reply_tos: [], media_seen: [], media: [] });
   add('export_read_end: a manifest with a lone surrogate escape', 'export_read_end', end(manifestWith('\\ud800')));
   expect('export_read_end: a manifest with a lone surrogate escape', { error: 'bad_request', why: 'manifest.json: not a JSON object' });
@@ -278,7 +278,7 @@ export default function exportCases({ add, expect }, f) {
   // naming the member, and so does the reader, in a manifest someone else wrote.
   add('export_write: a private key as the owner_name', 'export_write', { ...writeArgs, owner_name: f.hostPkcs8 });
   add('export_write: a private key as the tool', 'export_write', { ...writeArgs, tool: `-----BEGIN PRIVATE KEY-----\n${f.hostPkcs8}\n-----END PRIVATE KEY-----` });
-  const keyManifest = (m) => JSON.stringify({ pact_export: 2, owner, owner_name: '', exported_at: '2026-09-27T10:00:00Z', tool: 't', counts: { contacts: 0, threads: 0, messages: 0, media: 0 }, files: {}, ...m });
+  const keyManifest = (m) => JSON.stringify({ hdtp_export: 1, owner, owner_name: '', exported_at: '2026-09-27T10:00:00Z', tool: 't', counts: { contacts: 0, threads: 0, messages: 0, media: 0 }, files: {}, ...m });
   add('export_read_end: a manifest whose owner_name is a private key', 'export_read_end', end(keyManifest({ owner_name: f.hostPkcs8 })));
   add('export_read_end: a manifest whose tool is a private key', 'export_read_end', end(keyManifest({ tool: f.hostPkcs8 })));
   add('export_read_end: a manifest that lists a media member in files', 'export_read_end', end(keyManifest({ files: { [`media/${file}`]: file } })));
@@ -290,7 +290,7 @@ export default function exportCases({ add, expect }, f) {
     ['export_read_end: a manifest that lists a media member in files', `manifest.json: files: "media/${file}" is not a member an export lists`],
   ]) expect(id, { error: 'bad_request', why });
 
-  // `files` lists the text members only (SPEC 2.2.2): an export of 5000 media files still has a
+  // `files` lists the text members only: an export of 5000 media files still has a
   // manifest under 64 KiB, and the reader counts them.
   const many = Array.from({ length: 5000 }, (_, i) => ({ hash: sha(`media ${i}`), size: 1 }));
   const manyWritten = wasm.call('export_write', { owner, owner_name: '', exported_at: now, tool: 'parity', contacts: [], media: many });
@@ -306,7 +306,7 @@ export default function exportCases({ add, expect }, f) {
   }
   // The reader's refusals, one per rule §9.2 names (SPEC 9.2#10, #13, #15): js/cases/export-reader.mjs.
   readerCases({ add, expect }, f);
-  // One instant grammar in the export (SPEC 2.2.2): js/cases/export-instants.mjs.
+  // One instant grammar in the export: js/cases/export-instants.mjs.
   exportInstants({ add, expect });
 
   // media_holds_private_key: SPEC §9.2's key material over a media file, from js/key-material.json, the

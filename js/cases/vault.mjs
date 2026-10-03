@@ -1,6 +1,6 @@
 // §6 of the contract: the vault — seal it, open it, and issue a leaf from what it holds.
-import { seed, p256FromSeed, pkcs8Of, b64url, fingerprint } from '../../../pact-protocol/vectors/lib/keys.mjs';
-import { buildRoot } from '../../../pact-protocol/vectors/lib/x509.mjs';
+import { seed, p256FromSeed, pkcs8Of, b64url, fingerprint } from '../../../hdtp-spec/vectors/lib/keys.mjs';
+import { buildRoot } from '../../../hdtp-spec/vectors/lib/x509.mjs';
 import { BORN } from '../cast.mjs';
 import { RawArgs } from '../port.mjs';
 
@@ -33,13 +33,13 @@ const KDF_EDGES = [
 
 export default function vault({ add, expect }, f) {
   const { now, ENDPOINT, rootFp, csr, rootCsr, vault: held, record } = f;
-  add('vault_seal', 'vault_seal', { passphrase: 'a passphrase', plaintext: { v: 2, roots: [] }, kdf: K, salt: SALT, nonce: NONCE });
+  add('vault_seal', 'vault_seal', { passphrase: 'a passphrase', plaintext: { v: 1, roots: [] }, kdf: K, salt: SALT, nonce: NONCE });
   add('vault_seal of a record', 'vault_seal', { passphrase: 'a passphrase', plaintext: record, kdf: K, salt: SALT, nonce: NONCE });
-  // An earlier generation is refused at both ends, in the same words, and nothing converts.
-  add('vault_seal of an earlier generation', 'vault_seal', { passphrase: 'a passphrase', plaintext: { v: 1, roots: [], ledger: [], contacts: [] }, kdf: K, salt: SALT, nonce: NONCE });
+  // Another generation is refused at both ends, in the same words, and nothing converts.
+  add('vault_seal of another generation', 'vault_seal', { passphrase: 'a passphrase', plaintext: { v: 2, roots: [], ledger: [], contacts: [] }, kdf: K, salt: SALT, nonce: NONCE });
   add('vault_seal of a plaintext with no generation', 'vault_seal', { passphrase: 'a passphrase', plaintext: { roots: [] }, kdf: K, salt: SALT, nonce: NONCE });
   // Port-built: the seed has no vault.
-  const opened = { passphrase: 'a passphrase', vault: f.wasm.call('vault_seal', { passphrase: 'a passphrase', plaintext: { v: 2, roots: [] }, kdf: K, salt: SALT, nonce: NONCE }).vault };
+  const opened = { passphrase: 'a passphrase', vault: f.wasm.call('vault_seal', { passphrase: 'a passphrase', plaintext: { v: 1, roots: [] }, kdf: K, salt: SALT, nonce: NONCE }).vault };
   add('vault_open of what vault_seal made', 'vault_open', opened);
   // A KDF parameter is a whole number written as one. The same document with `t` spelled `1.0` has the
   // same canonical header, so it opened in the Go port, which read the number as a float, and was
@@ -58,15 +58,15 @@ export default function vault({ add, expect }, f) {
   // sealed what serde_json wrote and the Go port the caller's text, so one document sealed under one
   // salt and nonce was two ciphertexts (a lead of the port-parity verification, 2026-09-30).
   for (const [what, text] of [
-    ['a member written twice', '{"v":2,"roots":[],"x":1,"x":2}'],
-    ['numbers and escapes JSON.stringify does not write', '{"v":2,"roots":[],"n":123456789012345678901234567890,"f":1.50,"e":1e2,"z":-0,"s":"\\u00e9\\/"}'],
+    ['a member written twice', '{"v":1,"roots":[],"x":1,"x":2}'],
+    ['numbers and escapes JSON.stringify does not write', '{"v":1,"roots":[],"n":123456789012345678901234567890,"f":1.50,"e":1e2,"z":-0,"s":"\\u00e9\\/"}'],
   ]) {
     add(`vault_seal of a document holding ${what}`, 'vault_seal', RawArgs.edit({ passphrase: 'a passphrase', plaintext: '@@', kdf: K, salt: SALT, nonce: NONCE }, '"plaintext":"@@"', `"plaintext":${text}`));
   }
-  add('vault_seal with a nonce that is not 12 bytes', 'vault_seal', { passphrase: 'a passphrase', plaintext: { v: 2 }, kdf: K, salt: SALT, nonce: b64url(new Uint8Array(8)) });
-  add('vault_seal with an empty passphrase', 'vault_seal', { passphrase: '', plaintext: { v: 2 }, kdf: K });
+  add('vault_seal with a nonce that is not 12 bytes', 'vault_seal', { passphrase: 'a passphrase', plaintext: { v: 1 }, kdf: K, salt: SALT, nonce: b64url(new Uint8Array(8)) });
+  add('vault_seal with an empty passphrase', 'vault_seal', { passphrase: '', plaintext: { v: 1 }, kdf: K });
   add('vault_seal with no plaintext', 'vault_seal', { passphrase: 'a passphrase', kdf: K });
-  add('vault_open with a passphrase that is wrong', 'vault_open', { passphrase: 'wrong', vault: { format: 'pact-vault/1', kdf: { name: 'argon2id', ...K }, salt: b64url(new Uint8Array(16)), nonce: b64url(new Uint8Array(12)), ct: b64url(new Uint8Array(48)) } });
+  add('vault_open with a passphrase that is wrong', 'vault_open', { passphrase: 'wrong', vault: { format: 'hdtp-vault/1', kdf: { name: 'argon2id', ...K }, salt: b64url(new Uint8Array(16)), nonce: b64url(new Uint8Array(12)), ct: b64url(new Uint8Array(48)) } });
   add('vault_open of a document that is not a vault', 'vault_open', { passphrase: 'x', vault: { format: 'something-else' } });
   add('vault_open of no document at all', 'vault_open', { passphrase: 'x' });
   // C12 — the ranges at their edges, from contract/contract.json's `Kdf`, which a test in each port holds
@@ -80,14 +80,14 @@ export default function vault({ add, expect }, f) {
     ['one lane more than the contract allows', { name: 'argon2id', m_kib: M.minimum, t: 1, p: P.maximum + 1 }, false],
     ['one KiB less than the contract allows', { name: 'argon2id', m_kib: M.minimum - 1, t: 1, p: 1 }, false],
   ]) {
-    const args = { passphrase: 'a passphrase', plaintext: { v: 2 }, kdf, salt: SALT, nonce: NONCE };
+    const args = { passphrase: 'a passphrase', plaintext: { v: 1 }, kdf, salt: SALT, nonce: NONCE };
     add(`vault_seal with ${what}`, 'vault_seal', args);
     if (sealed) add(`vault_open of what vault_seal made with ${what}`, 'vault_open', { passphrase: 'a passphrase', vault: f.wasm.call('vault_seal', args).vault });
     else expect(`vault_seal with ${what}`, { error: 'vault', why: 'kdf parameters out of range' });
   }
   for (const [what, kdf] of KDF_EDGES) {
-    add(`vault_seal with ${what}`, 'vault_seal', { passphrase: 'a passphrase', plaintext: { v: 2 }, kdf, salt: SALT, nonce: NONCE });
-    add(`vault_open of a document with ${what}`, 'vault_open', { passphrase: 'a passphrase', vault: { format: 'pact-vault/1', kdf, salt: SALT, nonce: NONCE, ct: b64url(new Uint8Array(32)) } });
+    add(`vault_seal with ${what}`, 'vault_seal', { passphrase: 'a passphrase', plaintext: { v: 1 }, kdf, salt: SALT, nonce: NONCE });
+    add(`vault_open of a document with ${what}`, 'vault_open', { passphrase: 'a passphrase', vault: { format: 'hdtp-vault/1', kdf, salt: SALT, nonce: NONCE, ct: b64url(new Uint8Array(32)) } });
   }
   add('wallet_issue', 'wallet_issue', { vault_plaintext: held, record_plaintext: record, root_fingerprint: rootFp, csr, now, valid_days: 365 }, f.withoutSerial('der'));
   // A vault that carries what belongs in the record, and a missing record: refused alike.
@@ -100,7 +100,7 @@ export default function vault({ add, expect }, f) {
   const moved = { ...record, ledger: [{ root: rootFp, endpoint: 'https://elsewhere.example/mcp', not_before: '2026-09-10T00:00:00Z', not_after: '2027-09-10T00:00:00Z', issued_at: '2026-09-10T00:00:00Z' }] };
   add('wallet_issue for a second address', 'wallet_issue', { vault_plaintext: held, record_plaintext: moved, root_fingerprint: rootFp, csr, now });
   add('wallet_issue as a move', 'wallet_issue', { vault_plaintext: held, record_plaintext: moved, root_fingerprint: rootFp, csr, now, move: true }, f.withoutSerial('der'));
-  add('wallet_issue with an empty vault', 'wallet_issue', { vault_plaintext: { v: 2, roots: [] }, record_plaintext: record, root_fingerprint: rootFp, csr, now });
+  add('wallet_issue with an empty vault', 'wallet_issue', { vault_plaintext: { v: 1, roots: [] }, record_plaintext: record, root_fingerprint: rootFp, csr, now });
   // SPEC §2.2, before any certificate is issued (TC-8's behaviour half): the root key is the root the
   // identity is known by; its certificate parses and is that key's; the key signs a challenge that
   // verifies under the certificate's key; and the chain assembled validates to the root at the
@@ -122,9 +122,9 @@ export default function vault({ add, expect }, f) {
   // The review of PR #29 (C6, C8-C11, C18): every argument absent and of the wrong type, every document
   // shape the contract refuses, and every ledger entry that does not read — one answer from both ports.
   // A ledger entry that does not read is refused, never skipped: skipped, it could be the live leaf.
-  add('vault_seal with no passphrase', 'vault_seal', { plaintext: { v: 2 }, kdf: K, salt: SALT, nonce: NONCE });
-  add('vault_seal with a passphrase that is not a string', 'vault_seal', { passphrase: 5, plaintext: { v: 2 }, kdf: K, salt: SALT, nonce: NONCE });
-  add('vault_seal of an earlier generation under a KDF out of range', 'vault_seal', { passphrase: 'a passphrase', plaintext: { v: 1 }, kdf: { name: 'argon2id', m_kib: 65536, t: 17, p: 1 }, salt: SALT, nonce: NONCE });
+  add('vault_seal with no passphrase', 'vault_seal', { plaintext: { v: 1 }, kdf: K, salt: SALT, nonce: NONCE });
+  add('vault_seal with a passphrase that is not a string', 'vault_seal', { passphrase: 5, plaintext: { v: 1 }, kdf: K, salt: SALT, nonce: NONCE });
+  add('vault_seal of another generation under a KDF out of range', 'vault_seal', { passphrase: 'a passphrase', plaintext: { v: 2 }, kdf: { name: 'argon2id', m_kib: 65536, t: 17, p: 1 }, salt: SALT, nonce: NONCE });
   add('vault_seal of a plaintext that is a string', 'vault_seal', { passphrase: 'a passphrase', plaintext: 'v2', kdf: K, salt: SALT, nonce: NONCE });
   const issueWith = (over) => ({ vault_plaintext: held, record_plaintext: record, root_fingerprint: rootFp, csr, now, ...over });
   const entry = moved.ledger[0];
@@ -138,11 +138,11 @@ export default function vault({ add, expect }, f) {
     ['valid_days of 0', { valid_days: 0 }],
     ['valid_days of 999', { valid_days: 999 }],
     ['a vault that is a string', { vault_plaintext: 'the vault' }],
-    ['a vault of an earlier generation', { vault_plaintext: { ...held, v: 1 } }],
+    ['a vault of another generation', { vault_plaintext: { ...held, v: 2 } }],
     ['a vault with a member it does not hold', { vault_plaintext: { ...held, note: 'hello' } }],
     ['a record that is a string', { record_plaintext: 'the record' }],
     ['a record that is a list', { record_plaintext: [] }],
-    ['a record of an earlier generation', { record_plaintext: { ...record, v: 1 } }],
+    ['a record of another generation', { record_plaintext: { ...record, v: 2 } }],
     ['a record with a member it does not hold', { record_plaintext: { ...record, note: 'hello' } }],
     ['a record whose ledger is not a list', { record_plaintext: { ...record, ledger: {} } }],
     ['a ledger entry with no endpoint', { record_plaintext: { ...record, ledger: [{ ...entry, endpoint: undefined }] } }],
@@ -197,7 +197,7 @@ export default function vault({ add, expect }, f) {
     ['a record whose ledger is not a list', { error: 'bad_request', why: "the record's ledger is a list" }],
     ['a root held on a card, which this function cannot sign with', { error: 'bad_request', why: 'this root is held on a card: wallet_issue signs only with a key the vault holds' }],
   ]) expect(`wallet_issue with ${what}`, want);
-  expect('vault_seal of an earlier generation under a KDF out of range', { error: 'bad_request', why: 'a vault plaintext is v 2: the root, or the record' });
+  expect('vault_seal of another generation under a KDF out of range', { error: 'bad_request', why: 'a vault plaintext is v 1: the root, or the record' });
   // The contract's order: an empty passphrase is judged before a missing plaintext (T21). The core
   // named the plaintext first, and the Go port the passphrase.
   add('vault_seal with an empty passphrase and no plaintext', 'vault_seal', { passphrase: '', kdf: K });
@@ -217,7 +217,7 @@ export default function vault({ add, expect }, f) {
     ['a ct with a no-break space', { ct: at5(doc.ct, '\u00a0') }, damaged],
     ['a nonce with a stray character', { nonce: at5(doc.nonce, '!') }, damaged],
     ['a salt with a stray character', { salt: at5(doc.salt, '!') }, damaged],
-    ['a ct padded (the control)', { ct: doc.ct + '='.repeat((4 - (doc.ct.length % 4)) % 4) }, { plaintext: { v: 2, roots: [] } }],
+    ['a ct padded (the control)', { ct: doc.ct + '='.repeat((4 - (doc.ct.length % 4)) % 4) }, { plaintext: { v: 1, roots: [] } }],
   ]) {
     add(`vault_open of what vault_seal made, with ${what}`, 'vault_open', { ...opened, vault: { ...doc, ...over } });
     expect(`vault_open of what vault_seal made, with ${what}`, want);
@@ -232,13 +232,13 @@ export default function vault({ add, expect }, f) {
   // the generator sends a string for `kdf` and nothing inside it.
   const range = { error: 'vault', why: 'kdf parameters out of range' };
   const unknown = { error: 'vault', why: 'unknown kdf' };
-  const sealWith = (over) => ({ passphrase: 'a passphrase', plaintext: { v: 2 }, kdf: K, salt: SALT, nonce: NONCE, ...over });
+  const sealWith = (over) => ({ passphrase: 'a passphrase', plaintext: { v: 1 }, kdf: K, salt: SALT, nonce: NONCE, ...over });
   for (const [what, args, want] of [
     ['a kdf that is a number', sealWith({ kdf: 5 }), { error: 'bad_request', why: 'kdf is required' }],
     ['a kdf that is a list', sealWith({ kdf: [8192, 1, 1] }), { error: 'bad_request', why: 'kdf is required' }],
-    ['a kdf that is a string, and no passphrase', { plaintext: { v: 2 }, kdf: 'x' }, { error: 'bad_request', why: 'passphrase is required' }],
+    ['a kdf that is a string, and no passphrase', { plaintext: { v: 1 }, kdf: 'x' }, { error: 'bad_request', why: 'passphrase is required' }],
     ['a kdf nobody implements, and an empty passphrase', sealWith({ passphrase: '', kdf: { name: 'scrypt' } }), { error: 'bad_request', why: 'empty passphrase' }],
-    ['a kdf that is a string, and an earlier generation', sealWith({ plaintext: { v: 1 }, kdf: 'x' }), { error: 'bad_request', why: 'a vault plaintext is v 2: the root, or the record' }],
+    ['a kdf that is a string, and another generation', sealWith({ plaintext: { v: 2 }, kdf: 'x' }), { error: 'bad_request', why: 'a vault plaintext is v 1: the root, or the record' }],
     ['a kdf whose name is a number', sealWith({ kdf: { ...K, name: 5 } }), unknown],
     ['a kdf whose m_kib is a string', sealWith({ kdf: { ...K, m_kib: '8192' } }), range],
     ['a kdf whose m_kib is negative', sealWith({ kdf: { ...K, m_kib: -1 } }), range],
@@ -268,7 +268,7 @@ export default function vault({ add, expect }, f) {
   add('vault_seal with a kdf whose name is null', 'vault_seal', sealWith({ kdf: { ...K, name: null } }));
 
   // The salt floor, in both ports' own words at both ends: the core passed Argon2id's (`salt is too
-  // short`) and the Go port said `not a pact-vault/1 document` (R29, C6). The first salt out and the last
+  // short`) and the Go port said `not a hdtp-vault/1 document` (R29, C6). The first salt out and the last
   // in, from contract/contract.json's VaultSaltMin; a nonce of the wrong length is judged first.
   const floor = f.defs.VaultSaltMin.const;
   const short = { error: 'vault', why: `salt is at least ${floor} bytes` };
@@ -286,7 +286,7 @@ export default function vault({ add, expect }, f) {
   // absent was the default in the core and zero in the Go port (R30, T12, F17, C5).
   const withDoc = (over) => ({ passphrase: 'a passphrase', vault: { ...doc, ...over } });
   const withKdf = (over) => withDoc({ kdf: { ...doc.kdf, ...over } });
-  const notVault = { error: 'vault', why: 'not a pact-vault/1 document' };
+  const notVault = { error: 'vault', why: 'not a hdtp-vault/1 document' };
   const noKdf = { ...doc };
   delete noKdf.kdf;
   const { name: _name, ...nameless } = doc.kdf;
@@ -341,7 +341,7 @@ export default function vault({ add, expect }, f) {
     ['a root with a member it does not hold', withRoot({ note: 'hello' }), rootUnread('vault', 'note')],
     ['a root that is not an object', issueWith({ vault_plaintext: { ...held, roots: ['a root'] } }), rootUnread('vault', '')],
     ['roots that are not a list', issueWith({ vault_plaintext: { ...held, roots: {} } }), { error: 'bad_request', why: "the vault's roots is a list" }],
-    ['a vault with no roots', issueWith({ vault_plaintext: { v: 2 } }), { error: 'bad_request', why: "the vault's roots is a list" }],
+    ['a vault with no roots', issueWith({ vault_plaintext: { v: 1 } }), { error: 'bad_request', why: "the vault's roots is a list" }],
     ['a prf that is a number', issueWith({ vault_plaintext: { ...held, prf: 5 } }), { error: 'bad_request', why: "the vault's prf does not read" }],
     ['a prf of 31 bytes', issueWith({ vault_plaintext: { ...held, prf: b64url(new Uint8Array(31)) } }), { error: 'bad_request', why: "the vault's prf does not read" }],
     ['a passkey with nothing in it', issueWith({ vault_plaintext: { ...held, passkey: {} } }), { error: 'bad_request', why: "the vault's passkey does not read" }],

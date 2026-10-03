@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 // A function's arguments as the caller wrote them: each member's JSON text, by its exact name.
 //

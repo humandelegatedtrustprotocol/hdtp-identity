@@ -117,6 +117,6 @@ FAILED=0
 for pkg in web node; do
   # ...against its OWN entry. Single-file mode used to compare whatever it was given with pkg-web's
   # recorded hash, which passed only because the two packages happen to be byte-identical today.
-  node js/verify.mjs "$WORK/pkg-$pkg/pact_identity_wasm_bg.wasm" "pkg-$pkg/pact_identity_wasm_bg.wasm" || FAILED=1
+  node js/verify.mjs "$WORK/pkg-$pkg/hdtp_identity_wasm_bg.wasm" "pkg-$pkg/hdtp_identity_wasm_bg.wasm" || FAILED=1
 done
 exit "$FAILED"

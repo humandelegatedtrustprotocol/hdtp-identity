@@ -69,7 +69,7 @@ function topLevel(body) {
   return out;
 }
 
-/** The names `crates/pact-identity/src/api.rs` dispatches: the string patterns of `match name` in `fn dispatch`. */
+/** The names `crates/hdtp-identity/src/api.rs` dispatches: the string patterns of `match name` in `fn dispatch`. */
 export function rustDispatch(src) {
   const fn = src.search(/\bfn\s+dispatch\s*\(/);
   if (fn < 0) throw new Error('surface: fn dispatch was not found in the Rust source');

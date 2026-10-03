@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 // Keys: Ed25519 and P-256, their SPKI and PKCS #8 forms, fingerprints, deterministic derivation for
 // the vectors, and the conversions to X25519 that §13.1 names.
@@ -450,14 +450,14 @@ func mustHex(s string) []byte {
 
 // ── §2.1: a root derived from a passkey ──────────────────────────────────────────────────
 
-// PrfSalt is the fixed input handed to the authenticator's prf extension: SHA-256("pact/vault/1").
+// PrfSalt is the fixed input handed to the authenticator's prf extension: SHA-256("hdtp/vault/1").
 //
 // Fixed, not per-credential, because a wallet arriving cold on a new device has to derive before it
 // can fetch anything — a per-credential salt would have to be fetched first, and there is nothing to
 // fetch it with. The secret is still per-credential, because the PRF is keyed by the credential. The
 // name is inherited and no longer describes anything; these are normative bytes.
 func PrfSalt() []byte {
-	h := sha256.Sum256([]byte("pact/vault/1"))
+	h := sha256.Sum256([]byte("hdtp/vault/1"))
 	return h[:]
 }
 
@@ -466,7 +466,7 @@ func PrfSalt() []byte {
 // to engineer against is silently deriving a DIFFERENT identity, and a mistyped domain separator is
 // the cheapest way to do it — it would succeed, return 32 perfectly good bytes, and produce a key
 // belonging to nobody. There is no fourth use, so there is no cost.
-var DerivationInfos = []string{"pact/root/1", "pact/store-key/1", "pact/store-id/1"}
+var DerivationInfos = []string{"hdtp/root/1", "hdtp/store-key/1", "hdtp/store-id/1"}
 
 // DeriveSeed is SPEC §2.1: HKDF-SHA256(ikm = prf, salt = "", info, L = 32). HMAC pads any key
 // shorter than its block to zeros, so an empty salt and RFC 5869's "a string of HashLen zeros" are

@@ -1,4 +1,4 @@
-package pactidentity_test
+package hdtpidentity_test
 
 import (
 	"archive/zip"
@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	pact "github.com/pact-cloud/pact-identity/go"
-	"github.com/pact-cloud/pact-identity/go/exportcorpus"
+	hdtp "github.com/humandelegatedtrustprotocol/hdtp-identity/go"
+	"github.com/humandelegatedtrustprotocol/hdtp-identity/go/exportcorpus"
 )
 
 // Every file of the corpus through ReadExportZip: each hostile one refused with the refusal it
@@ -23,15 +23,15 @@ func TestReadExportZipAnswersTheWholeCorpus(t *testing.T) {
 	answersCorpus(t, exportcorpus.FS)
 }
 
-// The corpus the pact CLI writes for another owner (`pact vectors corpus --owner <root> --out <dir>`),
+// The corpus the hdtp CLI writes for another owner (`hdtp vectors corpus --owner <root> --out <dir>`),
 // read by this port: every hostile file refused with the refusal ITS cases.json names — not at the
 // owner check — and every control accepted whole. The CLI is the one writer, and this is the port it
-// did not write in. PACT_REISSUED_CORPUS names the directory. gate.sh writes one for a fresh owner,
+// did not write in. HDTP_REISSUED_CORPUS names the directory. gate.sh writes one for a fresh owner,
 // sets it, and fails unless this test PASSED; a plain `go test` has no corpus to read and skips it.
 func TestReadExportZipAnswersTheCorpusWrittenForAnotherOwner(t *testing.T) {
-	dir := os.Getenv("PACT_REISSUED_CORPUS")
+	dir := os.Getenv("HDTP_REISSUED_CORPUS")
 	if dir == "" {
-		t.Skip("PACT_REISSUED_CORPUS names no corpus written by `pact vectors corpus`; gate.sh writes one and sets it")
+		t.Skip("HDTP_REISSUED_CORPUS names no corpus written by `hdtp vectors corpus`; gate.sh writes one and sets it")
 	}
 	written, fixed := readCorpusIndex(t, os.DirFS(dir)), readCorpusIndex(t, exportcorpus.FS)
 	if written.Owner == fixed.Owner {
@@ -48,7 +48,7 @@ func TestReadExportZipAnswersTheCorpusWrittenForAnotherOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	now, _ := time.Parse(time.RFC3339, written.Now)
-	if _, err := pact.ReadExportZip(zr, written.Owner, now, 1<<30); err == nil || !strings.HasPrefix(err.Error(), "manifest.json: owner: the file is ") {
+	if _, err := hdtp.ReadExportZip(zr, written.Owner, now, 1<<30); err == nil || !strings.HasPrefix(err.Error(), "manifest.json: owner: the file is ") {
 		t.Errorf("the committed valid export read as %s: %v", written.Owner, err)
 	}
 }
@@ -82,7 +82,7 @@ func answersCorpus(t *testing.T, fsys fs.FS) {
 			t.Errorf("%s: %v", c.File, err)
 			continue
 		}
-		got, err := pact.ReadExportZip(zr, index.Owner, now, 1<<30)
+		got, err := hdtp.ReadExportZip(zr, index.Owner, now, 1<<30)
 		switch {
 		case c.Accept != nil:
 			if err != nil {
@@ -160,7 +160,7 @@ func TestWriteExportZipWritesTheCorpusControlsBack(t *testing.T) {
 		file := c.File
 		data, _ := exportcorpus.FS.ReadFile(file)
 		zr, _ := zip.NewReader(bytes.NewReader(data), int64(len(data)))
-		first, err := pact.ReadExportZip(zr, index.Owner, now, 1<<30)
+		first, err := hdtp.ReadExportZip(zr, index.Owner, now, 1<<30)
 		if err != nil {
 			t.Fatalf("%s: %v", file, err)
 		}
@@ -175,9 +175,9 @@ func TestWriteExportZipWritesTheCorpusControlsBack(t *testing.T) {
 		}
 		at, _ := time.Parse(time.RFC3339, m.ExportedAt)
 		var out bytes.Buffer
-		in := pact.ExportInput{Owner: index.Owner, OwnerName: m.OwnerName, Tool: m.Tool, ExportedAt: at,
+		in := hdtp.ExportInput{Owner: index.Owner, OwnerName: m.OwnerName, Tool: m.Tool, ExportedAt: at,
 			Contacts: first.Contacts, Threads: first.Threads, Messages: first.Messages, Media: first.Media}
-		_, err = pact.WriteExportZip(&out, in, func(hash string) (io.ReadCloser, error) { return zr.Open("media/" + hash) })
+		_, err = hdtp.WriteExportZip(&out, in, func(hash string) (io.ReadCloser, error) { return zr.Open("media/" + hash) })
 		if err != nil {
 			t.Fatalf("%s: %v", file, err)
 		}
@@ -193,7 +193,7 @@ func TestWriteExportZipWritesTheCorpusControlsBack(t *testing.T) {
 				t.Errorf("%s: %s is not written back as it was read", file, name)
 			}
 		}
-		second, err := pact.ReadExportZip(again, index.Owner, now, 1<<30)
+		second, err := hdtp.ReadExportZip(again, index.Owner, now, 1<<30)
 		if err != nil {
 			t.Fatalf("%s: what was written does not read: %v", file, err)
 		}

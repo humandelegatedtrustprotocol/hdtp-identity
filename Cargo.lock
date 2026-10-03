@@ -835,7 +835,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pact"
+name = "hdtp"
 version = "0.4.2"
 dependencies = [
  "assert_cmd",
@@ -843,7 +843,7 @@ dependencies = [
  "clap",
  "flate2",
  "p256",
- "pact-identity",
+ "hdtp-identity",
  "pcsc",
  "predicates",
  "rpassword",
@@ -857,7 +857,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pact-identity"
+name = "hdtp-identity"
 version = "0.4.2"
 dependencies = [
  "aes-gcm",
@@ -869,7 +869,7 @@ dependencies = [
  "getrandom 0.2.17",
  "hmac",
  "p256",
- "pact-limits",
+ "hdtp-limits",
  "serde",
  "serde_json",
  "sha2",
@@ -878,16 +878,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "pact-identity-wasm"
+name = "hdtp-identity-wasm"
 version = "0.4.2"
 dependencies = [
- "pact-identity",
+ "hdtp-identity",
  "wasm-bindgen",
  "wasm-bindgen-test",
 ]
 
 [[package]]
-name = "pact-limits"
+name = "hdtp-limits"
 version = "0.4.2"
 dependencies = [
  "serde_json",

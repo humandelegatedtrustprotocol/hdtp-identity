@@ -1,6 +1,6 @@
-package pactidentity
+package hdtpidentity
 
-// Signing requests (SPEC §9.1 in 2.2.0; CONTRACT §3.1): a host asking a web wallet for a leaf with
+// Signing requests (SPEC §9.1; CONTRACT §3.1): a host asking a web wallet for a leaf with
 // a form POSTed by top-level navigation. SigningRequestCheck is everything the wallet can decide
 // about one before a person sees it, in the order the Rust core decides it: the request's members
 // and their bounds, the asking origin against the redirect, the redirect's scheme and host, the
@@ -301,7 +301,7 @@ func SigningRequestCheck(request map[string]any, origin string, now time.Time, r
 	return &SigningChecked{CSR: csrText, Redirect: text["redirect"], Purpose: purpose, ValidDays: n}, nil
 }
 
-// parseInstantZ reads an instant in the one grammar both ports read everywhere (SPEC 2.2.2; the
+// parseInstantZ reads an instant in the one grammar both ports read everywhere (the
 // Rust core's parse_rfc3339): `YYYY-MM-DDTHH:MM:SS`, an optional `.` and one or more digits (the
 // fraction is dropped: the boundary is whole seconds), and `Z` — upper-case T and Z only, no offset,
 // `.` alone as the fraction separator. time.Parse is not the reader: it takes an offset, and a `,`

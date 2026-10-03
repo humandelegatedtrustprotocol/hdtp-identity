@@ -1,8 +1,8 @@
 // §2 of the contract: certificates — build, assemble, parse, the profile, chains, and the address rules.
-import { b64url } from '../../../pact-protocol/vectors/lib/keys.mjs';
-import { buildRoot, parse as seedParse, profileError as seedProfileError } from '../../../pact-protocol/vectors/lib/x509.mjs';
-import { ecdsaTwin, ecdsaIsLowS, read as derRead, children as derChildren, seq, tlv } from '../../../pact-protocol/vectors/lib/der.mjs';
-import { signDetached } from '../../../pact-protocol/vectors/lib/hpke.mjs';
+import { b64url } from '../../../hdtp-spec/vectors/lib/keys.mjs';
+import { buildRoot, parse as seedParse, profileError as seedProfileError } from '../../../hdtp-spec/vectors/lib/x509.mjs';
+import { ecdsaTwin, ecdsaIsLowS, read as derRead, children as derChildren, seq, tlv } from '../../../hdtp-spec/vectors/lib/der.mjs';
+import { signDetached } from '../../../hdtp-spec/vectors/lib/hpke.mjs';
 import { bharat, BORN } from '../cast.mjs';
 
 // An IPv6 literal with a zone id, in every spelling a URL parser might be handed one (T1, C1, R09).
@@ -87,7 +87,7 @@ export default function certificates({ add, expect }, f) {
   add('validate_chain of a real chain', 'validate_chain', { chain: [leafDer, rootDer], now });
   add('validate_chain against the root and endpoint it really has', 'validate_chain', { chain: [leafDer, rootDer], now, expected_root: rootFp, expected_endpoint: ENDPOINT });
 
-  // ── SPEC 2.1.1: the three rules added to the profile on 2026-09-20, held across the ports ─────────
+  // ── SPEC §14.1: the three rules added to the profile on 2026-09-20, held across the ports ─────────
   //
   // A P-256-rooted identity, because the first rule is about ECDSA and every other fixture here is
   // Ed25519 — which is how a port could have lacked the rule entirely with this harness green.
@@ -162,9 +162,9 @@ export default function certificates({ add, expect }, f) {
     });
     // Where the seed and the ports read a certificate's fields in one order — a single fault — the
     // answer expected is the SEED's (seedReads): its words, or the key it read. So the gate fails while
-    // the seed beside it disagrees with the ports, which it did on pact-protocol main for the first
+    // the seed beside it disagrees with the ports, which it did on hdtp-spec main for the first
     // three (R33's seed half: an empty keyUsage and three validity times read, an empty [3] threw a
-    // TypeError) until pact-protocol PR #10. The two with a fault in the outer algorithm are still read
+    // TypeError) until hdtp-spec PR #10. The two with a fault in the outer algorithm are still read
     // in another order by the seed (`signature algorithm inside and outside differ`), and are held to
     // the ports' words.
     for (const [what, der, want] of [
@@ -177,7 +177,7 @@ export default function certificates({ add, expect }, f) {
       // Five more single faults the contract lists among what parsing refuses (2026-09-30), each
       // written before signing. The seed read two of them (an extnValue that is not an OCTET STRING, a
       // compressed P-256 point) and named a third in other words (`extension shape` for four parts)
-      // until pact-protocol PR #10's df57707.
+      // until hdtp-spec PR #10's df57707.
       ['one validity time', rebuilt({ 4: seq(notBefore) }), seedReads],
       ['an extension of four parts', alinaLeaf({ label: 'parity/r33', misencode: { extensionParts: { oid: '2.5.29.14', der: '05000500' } } }), seedReads],
       ['an extnValue that is not an OCTET STRING', alinaLeaf({ label: 'parity/r33', misencode: { wrapperTag: { oid: '2.5.29.14', tag: 0x03 } } }), seedReads],
@@ -344,7 +344,7 @@ export default function certificates({ add, expect }, f) {
     const why = `unsupported key type ${oid}`, refused = { error: 'unsupported', why };
     const leaf = f.foreignLeaf(kind);
     add(`parse_certificate of a leaf holding a key outside the profile: ${kind}`, 'parse_certificate', { der: leaf });
-    // Held to the seed's reading (seedReads), which read all four keys on pact-protocol main until
+    // Held to the seed's reading (seedReads), which read all four keys on hdtp-spec main until
     // PR #10 (cluster G's seed half).
     expect(`parse_certificate of a leaf holding a key outside the profile: ${kind}`, seedReads(leaf));
     add(`profile_error of a leaf holding a key outside the profile: ${kind}`, 'profile_error', { der: leaf, kind: 'leaf' });

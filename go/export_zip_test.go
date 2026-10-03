@@ -1,4 +1,4 @@
-package pactidentity
+package hdtpidentity
 
 import (
 	"archive/zip"
@@ -181,7 +181,7 @@ func keyFileExport(t *testing.T, file []byte, h string) []byte {
 	return b.Bytes()
 }
 
-// SPEC §9.2 (2.2.2): media are bound by their names and counted, and not listed in the manifest's
+// SPEC §9.2: media are bound by their names and counted, and not listed in the manifest's
 // `files`, so an export's media are not capped by the manifest's 64 KiB. 5000 files, each carried by
 // a message, write and read back whole.
 func TestAnExportOf5000MediaWritesAndReadsBack(t *testing.T) {
@@ -212,7 +212,7 @@ func TestAnExportOf5000MediaWritesAndReadsBack(t *testing.T) {
 }
 
 // A media file is key material when its bytes are a PKCS #8 or SEC1 key in DER, or text holding one
-// in PEM or base64 (SPEC 2.2.2, 9.2#15), read leniently: js/key-material.json, the one list of cases,
+// in PEM or base64 (SPEC 9.2#15), read leniently: js/key-material.json, the one list of cases,
 // which the core's a_media_file_is_key_material_in_der_or_pem and the parity cases read too.
 func TestAMediaFileIsKeyMaterialInDEROrPEM(t *testing.T) {
 	raw, err := os.ReadFile("../js/key-material.json")

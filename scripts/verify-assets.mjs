@@ -43,10 +43,10 @@ if (!/^[0-9a-f]{40}$/.test(m.protocol_commit ?? '')) problems.push('manifest.jso
 for (const k of Object.keys(pin)) if (!same(m[k], pin[k])) problems.push(`manifest.json's ${k} is not js/manifest.json's at v${version}`);
 
 // The Wasm tarball: exactly the pinned pkg-web/ files, with the pinned bytes.
-const tgz = `pact-identity-wasm-web-${version}.tgz`;
+const tgz = `hdtp-identity-wasm-web-${version}.tgz`;
 if (!names.includes(tgz)) problems.push(`the release has no ${tgz}`);
 else {
-  const out = mkdtempSync(join(tmpdir(), 'pact-verify-'));
+  const out = mkdtempSync(join(tmpdir(), 'hdtp-verify-'));
   execFileSync('tar', ['-xzf', join(dir, tgz), '-C', out]);
   const want = Object.keys(pin.files).filter((k) => k.startsWith('pkg-web/')).sort();
   const top = readdirSync(out);
@@ -61,11 +61,11 @@ else {
 }
 
 // The export's corpus: exactly cases.json and the zips go/exportcorpus holds at the tag, byte for byte.
-const corpusTgz = `pact-identity-exportcorpus-${version}.tgz`;
+const corpusTgz = `hdtp-identity-exportcorpus-${version}.tgz`;
 if (!names.includes(corpusTgz)) problems.push(`the release has no ${corpusTgz}`);
 else if (!corpusDir) problems.push('no exportcorpus directory to judge the corpus tarball against');
 else {
-  const out = mkdtempSync(join(tmpdir(), 'pact-verify-corpus-'));
+  const out = mkdtempSync(join(tmpdir(), 'hdtp-verify-corpus-'));
   execFileSync('tar', ['-xzf', join(dir, corpusTgz), '-C', out]);
   const want = readdirSync(corpusDir).filter((n) => n === 'cases.json' || n.endsWith('.zip')).sort();
   const top = readdirSync(out);
