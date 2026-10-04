@@ -128,7 +128,7 @@
     ]
   },
   "4.#1": {
-    "hash": "3826b90c34f0",
+    "hash": "aa6b10c07158",
     "text": "The same URL serves two audiences by content negotiation: a browser gets the human landing page; a client send",
     "elsewhere": "node",
     "why": "content negotiation on an invite landing page is a host's route; hdtp-gateway serves it (TestLandingNoOracle404) and binds the chain's leaf to the card; a hosting platform's half is held in that platform's own MUST table, beside its code",
@@ -761,13 +761,13 @@
     ]
   },
   "14.3#1": {
-    "hash": "91521d109630",
-    "text": "A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an una",
+    "hash": "432f57156a6f",
+    "text": "A host MUST NOT treat an unanswered or failed refresh as a reason to refuse a contact or to un-pin one: an end",
     "held_by": [],
     "elsewhere": "node",
     "elsewhere_names": [
       "gateway:TestAnUnansweredConfirmationChangesNoPin"
     ],
-    "why": "confirming a pin is a verifier's act and this library holds none. There is no proactive interval to hold either: the specification settles on a newer leaf arriving on use — the chain in the first envelope after a renewal (§13.2), `certificate_renewed` (§14.4), `get_card` at any tier — so what remains normative is the negative, and hdtp-gateway holds it. A confirmation driven at a closed port leaves the root, the endpoint, the leaf, its key, the root certificate and the card byte-identical, and is audited rather than acted on (TestAnUnansweredConfirmationChangesNoPin). ValidateChain here is what the answer to any such confirmation gets judged by"
+    "why": "a refresh is a host's act, on its owner's request, of one contact (§14.3 Refresh), and this library holds none: no host calls refresh_check by itself. What is normative is the negative, and hdtp-gateway holds it: a refresh driven at a closed port leaves the root, the endpoint, the leaf, its key, the root certificate and the card byte-identical, and is audited rather than acted on (TestAnUnansweredConfirmationChangesNoPin). ValidateChain here is what the answer to a refresh is judged by"
   }
 }
