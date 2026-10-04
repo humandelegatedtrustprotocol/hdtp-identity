@@ -10,6 +10,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+## 0.6.0 — 2026-10-04
+
 - **A root may carry an end date (SPEC 1.0.0 as amended 2026-10-04, §14.1, §14.2, §2.2).** Every
   root still has none by default (`99991231235959Z`) and is never rotated; `build_root` and
   `root_tbs` take an optional `not_after` (Go: `RootOpts.NotAfter`, `RootTBS`'s `notAfter`), refuse
