@@ -50,6 +50,10 @@ import { readSpec, current } from '../../hdtp-spec/site/spec-source.mjs';
 const here = dirname(fileURLToPath(import.meta.url));
 const specRoot = join(here, '../../hdtp-spec');
 
+// The opening words of the specification's BCP 14 paragraph (index.md), which quotes every keyword to
+// say how they are read.
+const BCP14 = 'The key words "MUST"';
+
 /** Every normative sentence in the document, keyed by the section it lives in. */
 export function extract(markdown) {
   const lines = markdown.split('\n');
@@ -72,6 +76,8 @@ export function extract(markdown) {
   const out = [];
   const seen = new Map();
   for (const u of units) {
+    // The BCP 14 paragraph names the keywords; it states no requirement.
+    if (u.text.startsWith(BCP14)) continue;
     // One table row is one unit; splitting on cells keeps a row with two MUSTs as two.
     const pieces = u.text.startsWith('|') ? u.text.split('|').map((x) => x.trim()).filter(Boolean) : u.text.split(splitter);
     for (const p of pieces) {
