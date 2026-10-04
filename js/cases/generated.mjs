@@ -104,8 +104,6 @@ export const EMPTY_IS_A_VALUE = {
   'leaf_tbs.cn': 'as build_leaf',
   'leaf_tbs.root_cn': 'as build_root',
   'csr_new.cn': 'as build_leaf',
-  'issue_from_csr.root_cn': 'as build_root',
-  'issue_tbs_from_csr.root_cn': 'as build_root',
   'assemble_root.sig': "assembly writes the signature it is handed (the contract's note); whether it verifies is chain rule 3's question, asked where the certificate is read",
   'assemble_leaf.sig': 'as assemble_root',
   'profile_error.kind': 'declared, not enforced: anything but "root" is judged as a leaf (the contract\'s note)',

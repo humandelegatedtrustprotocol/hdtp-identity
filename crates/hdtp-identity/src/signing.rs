@@ -251,7 +251,7 @@ mod tests {
 
     fn request() -> (Value, Vec<u8>) {
         let root = PrivateKey::from_seed(Alg::Ed25519, &seed("signing/root")).unwrap();
-        let cert = x509::build_root("Alina Rao", &root, NOW, &x509::serial_of("signing/root")).unwrap();
+        let cert = x509::build_root("Alina Rao", &root, NOW, None, &x509::serial_of("signing/root")).unwrap();
         let host = PrivateKey::from_seed(Alg::P256, &seed("signing/host")).unwrap();
         let der = csr::csr_new("Alina Rao", &host, "https://agent.alina.example/mcp", None).unwrap();
         let r = json!({
@@ -312,7 +312,7 @@ mod tests {
         assert_eq!(check(&with(&[("csr", json!(b64u(&own)))]), ORIGIN, NOW, &[spki]).unwrap_err().why, "the request's key is a root");
         // A root_cert that is not the root expect_root names.
         let other = PrivateKey::from_seed(Alg::Ed25519, &seed("signing/other")).unwrap();
-        let theirs = x509::build_root("Someone", &other, NOW, &x509::serial_of("signing/other")).unwrap();
+        let theirs = x509::build_root("Someone", &other, NOW, None, &x509::serial_of("signing/other")).unwrap();
         assert_eq!(why(&with(&[("root_cert", json!(b64u(&theirs)))]), ORIGIN), "root_cert is not the root expect_root names");
     }
 

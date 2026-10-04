@@ -139,7 +139,7 @@ pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
         // this branch is here to avoid.
         if doc["certificates"][name.as_str()]["refused"].as_bool() == Some(true) {
             let why = match parse(bytes) {
-                Ok(cert) => x509::profile_error(&cert, "leaf"),
+                Ok(cert) => x509::profile_error(&cert, if name.starts_with("root") { "root" } else { "leaf" }),
                 Err(e) => Some(e.why),
             };
             t.ok(why.is_some(), format!("{name}: marked refused, and parse + profile let it through"));
@@ -153,7 +153,7 @@ pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
                 match mine.get(name.as_str()) {
                     Some(rebuilt) => {
                         let same_tbs = parse(rebuilt).map(|r| r.tbs == cert.tbs).unwrap_or(false);
-                        let issuer = if name.ends_with("_b") { c.root_b.public() } else { c.root_a.public() };
+                        let issuer = super::issuer_of(&c, name).public();
                         let signed = x509::verify_cert(&cert, &issuer);
                         t.ok(
                             same_tbs && signed && (cert.public_key.alg() == Alg::P256 || rebuilt == bytes),
@@ -189,6 +189,15 @@ pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
                 want == "refuse" && Some(*rule as u64) == case["rule"].as_u64(),
                 format!("{name}: expected {want} rule {}, got rule {rule} ({reason})", case["rule"]),
             ),
+        }
+        // A case that names its reason is held to it: rule 4 refuses for four reasons, and a guard
+        // that went missing would still refuse by rule 4 for another one.
+        if let Some(want_reason) = case["reason"].as_str() {
+            let got = match &r {
+                ChainResult::Ok(_) => "accept".to_string(),
+                ChainResult::Refused { reason, .. } => reason.clone(),
+            };
+            t.ok(got == want_reason, format!("{name}: expected the reason \"{want_reason}\", got \"{got}\""));
         }
         println!(
             "  {name}: {}",

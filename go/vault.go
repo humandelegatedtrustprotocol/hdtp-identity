@@ -741,6 +741,14 @@ func WalletIssue(plain VaultPlaintext, record RecordPlaintext, rootFingerprint s
 	if root.PKCS8 == "" && !root.pkcs8Given {
 		return nil, errors.New("this root is held on a card: wallet_issue signs only with a key the vault holds")
 	}
+	// §2.2: a root past its end date signs nothing more, not even the proof of possession below.
+	if der, err := DecodeB64url(root.Cert); err == nil {
+		if cert, err := Parse(der); err == nil {
+			if err := RefuseExpired(cert, now); err != nil {
+				return nil, err
+			}
+		}
+	}
 	// A key that does not read is refused in its reader's class, as the core's `?` has it: `parse`,
 	// or `unsupported` for a key outside the profile. This said `bad_request` `the root key does not
 	// parse` for both (F18, R31).
@@ -772,7 +780,7 @@ func WalletIssue(plain VaultPlaintext, record RecordPlaintext, rootFingerprint s
 	}
 	newHost, previous := facts.NewHost, facts.PreviousNotBefore
 	moving := facts.Kind == LedgerMove || facts.Kind == LedgerMoveBack
-	issued, err := IssueFromCSR(csr, IssueOpts{RootCN: root.CN, RootKey: rootKey, RootSPKIs: rootSPKIs, Now: now, PreviousNotBefore: previous, ValidDays: validDays})
+	issued, err := IssueFromCSR(csr, IssueOpts{Root: rootCert, RootKey: rootKey, RootSPKIs: rootSPKIs, Now: now, PreviousNotBefore: previous, ValidDays: validDays})
 	if err != nil {
 		return nil, err
 	}
@@ -792,6 +800,9 @@ func WalletIssue(plain VaultPlaintext, record RecordPlaintext, rootFingerprint s
 	}
 	if moving {
 		out.Warnings = append(out.Warnings, "move: the live leaf at the previous endpoint is superseded once contacts see this one")
+	}
+	if issued.EndsWithRoot {
+		out.Warnings = append(out.Warnings, EndsWithRootWarning(issued.NotAfter))
 	}
 	return out, nil
 }

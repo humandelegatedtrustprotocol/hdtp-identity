@@ -10,6 +10,29 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+- **A root may carry an end date (SPEC 1.0.0 as amended 2026-10-04, §14.1, §14.2, §2.2).** Every
+  root still has none by default (`99991231235959Z`) and is never rotated; `build_root` and
+  `root_tbs` take an optional `not_after` (Go: `RootOpts.NotAfter`, `RootTBS`'s `notAfter`), refuse
+  one before `not_before`, and the profile admits any root `notAfter` from its `notBefore` on.
+  `validate_chain`'s rule 4 refuses `root has expired` (first) and `leaf outlives the root` (last),
+  by one predicate in each port (`x509::root_expired`, `RootExpired`), inclusive as RFC 5280 reads
+  validity. Appendix B's five new chain cases are read with their reasons.
+- **Every wallet refuses an expired root before it signs, as `root_expired`**, a new code in the
+  library's vocabulary, never on the wire: `issue_from_csr`, `issue_tbs_from_csr` (before a `tbs`
+  exists), `wallet_issue` (before its proof of possession), and the CLI's `id issue` (before the
+  leaf is shown, the passphrase asked again or a card touched). A leaf that would outlive its root
+  ends with it, and `warnings` says so (the two issuers gained `warnings`).
+- **`issue_from_csr` and `issue_tbs_from_csr` take `root_cert`** in place of `root_cn` and
+  `root_spki` (Go: `IssueOpts.Root` in place of `RootCN` and `RootPub`): the name, key and end date
+  are read from the root's certificate, which must be a root of the profile and self-signed;
+  `root_pkcs8` must be its key. `build_leaf` and `leaf_tbs` stay raw builders for tests and vectors,
+  and judge no date against a root.
+- **`hdtp id create --ends <RFC 3339>`**, with `--piv` too: the identity's end date, refused before
+  anything is asked when it is not in the future.
+- **Cards fold at 75 octets** (RFC 6350 §3.2, as CONTRACT §4 says), never splitting a UTF-8
+  sequence, in both ports and the seed; they counted UTF-16 code units, so a name beyond ASCII
+  folded where no octet-counting reader would.
+
 ## 0.5.0 — 2026-10-03
 
 - **HDTP 1.0.** The library implements HDTP 1.0.0, hdtp-spec's `docs/specification/1.0/`, and

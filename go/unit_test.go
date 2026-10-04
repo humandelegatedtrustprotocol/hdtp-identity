@@ -12,7 +12,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf16"
 )
 
 func TestIsNormalHTTPS(t *testing.T) {
@@ -67,6 +66,7 @@ func TestCSRRoundTrip(t *testing.T) {
 	host, _ := GenerateKey(AlgP256)
 	other, _ := GenerateKey(AlgEd25519)
 	rootDer, _ := BuildRoot(RootOpts{CN: "Alina Rao", Key: root, NotBefore: now})
+	rootCert, _ := Parse(rootDer)
 	csr, err := CSRNew("Alina Rao", host, endpointA, "agent.alina.example")
 	if err != nil {
 		t.Fatal(err)
@@ -75,7 +75,7 @@ func TestCSRRoundTrip(t *testing.T) {
 	if !info.OK || info.Endpoint != endpointA || info.DNSName != "agent.alina.example" || info.Alg != AlgP256 {
 		t.Fatalf("csr_check: %+v", info)
 	}
-	issued, err := IssueFromCSR(csr, IssueOpts{RootCN: "Alina Rao", RootKey: root, RootSPKIs: [][]byte{root.Public().SPKI}, Now: now, ValidDays: 365})
+	issued, err := IssueFromCSR(csr, IssueOpts{Root: rootCert, RootKey: root, RootSPKIs: [][]byte{root.Public().SPKI}, Now: now, ValidDays: 365})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,11 +87,11 @@ func TestCSRRoundTrip(t *testing.T) {
 		t.Errorf("dates: %v %v", issued.NotBefore, issued.NotAfter)
 	}
 	prev := now.Add(time.Hour)
-	later, err := IssueFromCSR(csr, IssueOpts{RootCN: "Alina Rao", RootKey: root, Now: now, PreviousNotBefore: &prev, ValidDays: 30})
+	later, err := IssueFromCSR(csr, IssueOpts{Root: rootCert, RootKey: root, Now: now, PreviousNotBefore: &prev, ValidDays: 30})
 	if err != nil || !later.NotBefore.Equal(prev.Add(time.Second)) {
 		t.Errorf("monotonic rule: %v %v", err, later.NotBefore)
 	}
-	if _, err := IssueFromCSR(csr, IssueOpts{RootCN: "Alina Rao", RootKey: root, Now: now, ValidDays: 399}); err == nil {
+	if _, err := IssueFromCSR(csr, IssueOpts{Root: rootCert, RootKey: root, Now: now, ValidDays: 399}); err == nil {
 		t.Error("399 days should be refused")
 	}
 	// Proof of possession: a request signed by another key.
@@ -114,7 +114,7 @@ func TestCSRRoundTrip(t *testing.T) {
 		}
 	}
 	// The seam: issue the TBS, sign it outside, assemble.
-	plan, err := IssueTBSFromCSR(csr, IssueOpts{RootCN: "Alina Rao", RootPub: root.Public(), Now: now})
+	plan, err := IssueTBSFromCSR(csr, IssueOpts{Root: rootCert, Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,32 +303,36 @@ func TestNormalFormPorts(t *testing.T) {
 	}
 }
 
-// The fold threshold is UTF-16 code units, as the seed counts them (CONTRACT §0) — not octets,
-// which is what this port counted until the 2026-09-15 review.
-func TestCardFoldsOnUTF16CodeUnits(t *testing.T) {
-	short := "FN:" + strings.Repeat("é", 40) // 43 code units, 83 octets
-	if got := fold(short); got != short {
-		t.Errorf("43 code units must stay one line, got %d lines", len(strings.Split(got, "\r\n")))
+// The fold threshold is octets (RFC 6350 §3.2, CONTRACT §4), as the seed folds, and a break never
+// splits a UTF-8 sequence. Both ports counted UTF-16 code units until 2026-10-04.
+func TestCardFoldsOnOctets(t *testing.T) {
+	exact := "FN:" + strings.Repeat("é", 36) // 75 octets
+	if got := fold(exact); got != exact {
+		t.Errorf("75 octets must stay one line, got %d lines", len(strings.Split(got, "\r\n")))
 	}
-	long := "FN:" + strings.Repeat("é", 80) // 83 code units
+	long := "FN:" + strings.Repeat("é", 80)
 	lines := strings.Split(fold(long), "\r\n")
-	if len(lines) != 2 {
-		t.Fatalf("83 code units folds once, got %d lines", len(lines))
+	for n, l := range lines {
+		if len(l) > 75 {
+			t.Errorf("line %d is %d octets", n, len(l))
+		}
 	}
-	if n := len(utf16.Encode([]rune(lines[0]))); n != 75 {
-		t.Errorf("first line is %d code units, want 75", n)
+	if len(lines[0]) != 75 {
+		t.Errorf("first line is %d octets, want 75", len(lines[0]))
 	}
-	if n := len(utf16.Encode([]rune(lines[1]))); n != 9 {
-		t.Errorf("second line is %d code units, want 9 (a space and 8)", n)
-	}
-	// A break inside a surrogate pair moves one unit earlier; nothing is lost.
-	astral := "FN:" + strings.Repeat("a", 74) + strings.Repeat("\U0001F600", 3)
-	f := fold(astral)
-	if strings.ContainsRune(f, 0xFFFD) {
-		t.Errorf("a surrogate pair was split: %q", f)
-	}
-	if got := unfoldRE.ReplaceAllString(f, ""); got != astral {
+	if got := unfoldRE.ReplaceAllString(fold(long), ""); got != long {
 		t.Errorf("unfold round trip: %q", got)
+	}
+	// A break that would land inside a character moves back to its start; nothing is lost.
+	for _, tail := range []string{"€€€", "\U0001F600\U0001F600"} {
+		line := "FN:" + strings.Repeat("a", 71) + tail
+		f := fold(line)
+		if first := strings.Split(f, "\r\n")[0]; len(first) != 74 {
+			t.Errorf("%s: first line is %d octets, want 74", tail, len(first))
+		}
+		if got := unfoldRE.ReplaceAllString(f, ""); got != line {
+			t.Errorf("%s: unfold round trip: %q", tail, got)
+		}
 	}
 }
 
@@ -662,7 +666,7 @@ func TestEveryTypedEntryPointRefusesAKeyThatIsNotOne(t *testing.T) {
 	_, err = IssueFromCSR(csr, IssueOpts{})
 	refused("IssueFromCSR(csr, IssueOpts{})", err, "the root's key")
 	_, err = IssueTBSFromCSR(csr, IssueOpts{})
-	refused("IssueTBSFromCSR(csr, IssueOpts{})", err, "the root's public key")
+	refused("IssueTBSFromCSR(csr, IssueOpts{})", err, "root_cert")
 	_, err = SealRequest(SealOpts{})
 	refused("SealRequest(SealOpts{})", err, "the sender's key")
 	_, err = SealResult(SealOpts{})
@@ -701,7 +705,7 @@ func TestEveryTypedEntryPointRefusesAKeyThatIsNotOne(t *testing.T) {
 		refused("OpenResult, Recipient "+what, err, "the recipient's key")
 	}
 	for what, p := range noPublic {
-		_, _, err := RootTBS("A", p, now, nil)
+		_, _, err := RootTBS("A", p, now, time.Time{}, nil)
 		refused("RootTBS, "+what, err, "the root's public key")
 		_, _, err = LeafTBS(LeafOpts{RootPub: p, HostPub: host.Public()})
 		refused("LeafTBS, RootPub "+what, err, "the root's public key")
@@ -709,8 +713,6 @@ func TestEveryTypedEntryPointRefusesAKeyThatIsNotOne(t *testing.T) {
 		refused("LeafTBS, HostPub "+what, err, "the host's public key")
 		_, err = BuildLeaf(LeafOpts{RootKey: root, HostPub: p})
 		refused("BuildLeaf, HostPub "+what, err, "the host's public key")
-		_, err = IssueTBSFromCSR(csr, IssueOpts{RootPub: p, Now: now})
-		refused("IssueTBSFromCSR, RootPub "+what, err, "the root's public key")
 		_, _, err = Seal(SuiteX25519, p, nil, nil, []byte("x"))
 		refused("Seal, "+what, err, "the recipient's public key")
 		_, err = Open(SuiteX25519, root, p, nil, nil, make([]byte, 32), make([]byte, 16))
@@ -733,7 +735,9 @@ func TestEveryTypedEntryPointRefusesAKeyThatIsNotOne(t *testing.T) {
 	if _, err := BuildRoot(RootOpts{CN: "A", Key: root, NotBefore: now}); err != nil {
 		t.Errorf("the control, BuildRoot: %v", err)
 	}
-	if _, err := IssueFromCSR(csr, IssueOpts{RootCN: "A", RootKey: root, Now: now}); err != nil {
+	controlDer, _ := BuildRoot(RootOpts{CN: "A", Key: root, NotBefore: now})
+	controlRoot, _ := Parse(controlDer)
+	if _, err := IssueFromCSR(csr, IssueOpts{Root: controlRoot, RootKey: root, Now: now}); err != nil {
 		t.Errorf("the control, IssueFromCSR: %v", err)
 	}
 	if _, err := SignDetached(host, []byte("x")); err != nil {
@@ -807,5 +811,97 @@ func TestAnEd25519KeyThatIsNotAPointDoesNotRead(t *testing.T) {
 		if _, err := ParseSPKI(spki(first)); err != nil {
 			t.Errorf("y = %d is a point: %v", first, err)
 		}
+	}
+}
+
+// SPEC §2.2 and §14.2 rule 4, as the core's a_root_with_an_end_date and a_vault_root_with_an_end_date
+// hold them: a root with an end date issues before it (the control), ends a leaf that would outlive it
+// and says so, and past it signs nothing — `root_expired`, by every door, before a TBS exists.
+func TestARootWithAnEndDate(t *testing.T) {
+	now := time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC)
+	day := 24 * time.Hour
+	root, _ := KeyFromSeed(AlgEd25519, Seed("csr/root"))
+	ending := func(end time.Time) (*Cert, []byte) {
+		der, err := BuildRoot(RootOpts{CN: "Alina Rao", Key: root, NotBefore: now.Add(-30 * day), NotAfter: end, Serial: SerialOf("csr/root")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		c, _ := Parse(der)
+		return c, der
+	}
+	host, _ := KeyFromSeed(AlgP256, Seed("csr/host"))
+	csr, _ := CSRNew("Alina Rao", host, endpointA, "")
+	expired := func(what string, err error) {
+		t.Helper()
+		if err == nil || codeFor(err, "") != "root_expired" {
+			t.Errorf("%s: %v, want root_expired", what, err)
+		}
+	}
+
+	// The control: an end date a year and a half away leaves a year's leaf as asked.
+	far, farDer := ending(now.Add(548 * day))
+	issued, err := IssueFromCSR(csr, IssueOpts{Root: far, RootKey: root, Now: now, ValidDays: 365})
+	if err != nil || issued.EndsWithRoot || !issued.NotAfter.Equal(now.Add(-time.Hour).Add(365*day)) {
+		t.Fatalf("the control: %v %+v", err, issued)
+	}
+	if r := ValidateChain([][]byte{issued.DER, farDer}, ChainOpts{Now: now}); !r.OK {
+		t.Errorf("the control's chain: rule %d %s", r.Rule, r.Reason)
+	}
+	// A hundred days away: the leaf ends with the root, by both doors.
+	near, nearDer := ending(now.Add(100 * day))
+	issued, err = IssueFromCSR(csr, IssueOpts{Root: near, RootKey: root, Now: now, ValidDays: 365})
+	if err != nil || !issued.EndsWithRoot || !issued.NotAfter.Equal(near.NotAfter) {
+		t.Fatalf("ended with the root: %v %+v", err, issued)
+	}
+	if r := ValidateChain([][]byte{issued.DER, nearDer}, ChainOpts{Now: now}); !r.OK {
+		t.Errorf("ended with the root, chain: rule %d %s", r.Rule, r.Reason)
+	}
+	if plan, err := IssueTBSFromCSR(csr, IssueOpts{Root: near, Now: now, ValidDays: 365}); err != nil || !plan.EndsWithRoot || !plan.NotAfter.Equal(near.NotAfter) {
+		t.Errorf("the seam, ended with the root: %v %+v", err, plan)
+	}
+	// The last second is the root's; one past it, nothing.
+	today, todayDer := ending(now)
+	if _, err := IssueFromCSR(csr, IssueOpts{Root: today, RootKey: root, Now: now, ValidDays: 365}); err != nil {
+		t.Errorf("the last second: %v", err)
+	}
+	later := now.Add(time.Second)
+	_, err = IssueFromCSR(csr, IssueOpts{Root: today, RootKey: root, Now: later, ValidDays: 365})
+	expired("IssueFromCSR", err)
+	_, err = IssueTBSFromCSR(csr, IssueOpts{Root: today, Now: later, ValidDays: 365})
+	expired("IssueTBSFromCSR", err)
+	_, err = IssuingRoot(todayDer, later)
+	expired("IssuingRoot", err)
+	if _, err := IssuingRoot(todayDer, now); err != nil {
+		t.Errorf("IssuingRoot at the last second: %v", err)
+	}
+	// A leaf that could only begin after its root ends.
+	after := near.NotAfter
+	_, err = IssueTBSFromCSR(csr, IssueOpts{Root: near, Now: now, PreviousNotBefore: &after, ValidDays: 30})
+	expired("a leaf beginning after its root", err)
+	// A key that is not the certificate's signs nothing.
+	other, _ := KeyFromSeed(AlgEd25519, Seed("csr/other"))
+	if _, err := IssueFromCSR(csr, IssueOpts{Root: far, RootKey: other, Now: now}); err == nil || err.Error() != "root_pkcs8 is not the key of root_cert" {
+		t.Errorf("another key: %v", err)
+	}
+
+	// The vault: the same rules, with the warning among its own.
+	pkcs8, _ := root.PKCS8()
+	fp := Fingerprint(root.Public().SPKI)
+	plain := VaultPlaintext{V: 2, Roots: []VaultRoot{{Fingerprint: fp, CN: "Alina Rao", PKCS8: B64url(pkcs8), Cert: B64url(nearDer), Created: now.Format(time.RFC3339)}}}
+	out, err := WalletIssue(plain, RecordPlaintext{V: 2}, fp, csr, now, 365, false)
+	if err != nil || out.Entry.NotAfter != timeOut(near.NotAfter) || out.Warnings[len(out.Warnings)-1] != EndsWithRootWarning(near.NotAfter) {
+		t.Fatalf("the vault, ended with the root: %v %+v", err, out)
+	}
+	_, err = WalletIssue(plain, RecordPlaintext{V: 2}, fp, csr, near.NotAfter.Add(time.Second), 365, false)
+	expired("WalletIssue", err)
+	// Refused before the proof of possession: an entry whose expired certificate is not even its key's
+	// is told it has expired, not that its key does not sign for it; unexpired, the proof refuses it.
+	vaultOther, _ := KeyFromSeed(AlgEd25519, Seed("vault/other"))
+	otherDer, _ := BuildRoot(RootOpts{CN: "Mallory", Key: vaultOther, NotBefore: now, NotAfter: near.NotAfter})
+	mismatched := VaultPlaintext{V: 2, Roots: []VaultRoot{{Fingerprint: fp, CN: "Alina Rao", PKCS8: B64url(pkcs8), Cert: B64url(otherDer), Created: now.Format(time.RFC3339)}}}
+	_, err = WalletIssue(mismatched, RecordPlaintext{V: 2}, fp, csr, near.NotAfter.Add(time.Second), 365, false)
+	expired("WalletIssue, a mismatched entry", err)
+	if _, err := WalletIssue(mismatched, RecordPlaintext{V: 2}, fp, csr, now, 365, false); err == nil || err.Error() != "the vault's root certificate is not its key's" {
+		t.Errorf("the control, a mismatched entry unexpired: %v", err)
 	}
 }
