@@ -6,14 +6,14 @@ use crate::{address, x509};
 pub(super) fn build_root(a: &Value) -> Result<Value> {
     Ok({
         let k = private(a, "pkcs8")?;
-        let der = x509::build_root(s(a, "cn")?, &k, instant(a, "not_before")?, &serial(a)?)?;
+        let der = x509::build_root(s(a, "cn")?, &k, instant(a, "not_before")?, opt_instant(a, "not_after")?, &serial(a)?)?;
         json!({ "der": b64u(&der), "fingerprint": k.public().fingerprint() })
     })
 }
 
 pub(super) fn root_tbs(a: &Value) -> Result<Value> {
     Ok({
-        let u = x509::root_tbs(s(a, "cn")?, &public(a, "spki")?, instant(a, "not_before")?, &serial(a)?)?;
+        let u = x509::root_tbs(s(a, "cn")?, &public(a, "spki")?, instant(a, "not_before")?, opt_instant(a, "not_after")?, &serial(a)?)?;
         json!({ "tbs": b64u(&u.tbs), "sig_alg": b64u(&x509::sig_alg(&u.sig_alg)) })
     })
 }

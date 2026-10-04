@@ -34,6 +34,7 @@ type vectorFile struct {
 		Now              string   `json:"now"`
 		Expect           string   `json:"expect"`
 		Rule             int      `json:"rule"`
+		Reason           string   `json:"reason"`
 	} `json:"chain_cases"`
 	NewestLeafCases []struct {
 		Pinned, Presented, Expect string
@@ -262,10 +263,12 @@ func hexBytes(t *testing.T, s string) []byte {
 const (
 	endpointA = "https://agent.alina.example/mcp"
 	endpointB = "https://agent.bharat.example/mcp"
+	endpointC = "https://agent.chandra.example/mcp"
+	rootCEnds = "2028-01-01T00:00:00Z"
 )
 
 type cast struct {
-	rootA, rootB, leafA, leafANext, leafB *PrivateKey
+	rootA, rootB, rootC, leafA, leafANext, leafB, leafC *PrivateKey
 }
 
 func theCast(t *testing.T) cast {
@@ -278,8 +281,9 @@ func theCast(t *testing.T) cast {
 		return p
 	}
 	return cast{
-		rootA: k(AlgEd25519, "root/alina"), rootB: k(AlgP256, "root/bharat"),
+		rootA: k(AlgEd25519, "root/alina"), rootB: k(AlgP256, "root/bharat"), rootC: k(AlgEd25519, "root/chandra"),
 		leafA: k(AlgEd25519, "host/alina/2026"), leafANext: k(AlgEd25519, "host/alina/2027"), leafB: k(AlgP256, "host/bharat/2026"),
+		leafC: k(AlgEd25519, "host/chandra/2026"),
 	}
 }
 
@@ -305,12 +309,26 @@ func rebuild(t *testing.T, c cast) map[string][]byte {
 	if err != nil {
 		t.Fatal(err)
 	}
+	rootC, err := BuildRoot(RootOpts{CN: "Chandra Iyer", Key: c.rootC, NotBefore: at("2026-09-01T00:00:00Z"), NotAfter: at(rootCEnds), Serial: SerialOf("root_c")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafC := func(label, nb, na string) []byte {
+		der, err := BuildLeaf(LeafOpts{CN: "Chandra Iyer", RootCN: "Chandra Iyer", RootKey: c.rootC, HostPub: c.leafC.Public(), Endpoint: endpointC, NotBefore: at(nb), NotAfter: at(na), Serial: SerialOf(label)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return der
+	}
 	return map[string][]byte{
-		"root_a": rootA, "root_b": rootB, "leaf_b": leafB,
-		"leaf_a":         leafA("leaf_a", c.leafA, "agent.alina.example", "2026-09-01T00:00:00Z", "2027-09-01T00:00:00Z"),
-		"leaf_a_expired": leafA("leaf_a_expired", c.leafA, "", "2025-06-01T00:00:00Z", "2026-06-01T00:00:00Z"),
-		"leaf_a_long":    leafA("leaf_a_long", c.leafA, "", "2026-09-01T00:00:00Z", "2027-10-10T00:00:00Z"),
-		"leaf_a_next":    leafA("leaf_a_next", c.leafANext, "", "2027-08-02T00:00:00Z", "2028-08-01T00:00:00Z"),
+		"root_a": rootA, "root_b": rootB, "leaf_b": leafB, "root_c": rootC,
+		"leaf_c":          leafC("leaf_c", "2026-09-01T00:00:00Z", "2027-09-01T00:00:00Z"),
+		"leaf_c_last":     leafC("leaf_c_last", "2027-01-01T00:00:00Z", rootCEnds),
+		"leaf_c_outlives": leafC("leaf_c_outlives", "2027-06-01T00:00:00Z", "2028-06-01T00:00:00Z"),
+		"leaf_a":          leafA("leaf_a", c.leafA, "agent.alina.example", "2026-09-01T00:00:00Z", "2027-09-01T00:00:00Z"),
+		"leaf_a_expired":  leafA("leaf_a_expired", c.leafA, "", "2025-06-01T00:00:00Z", "2026-06-01T00:00:00Z"),
+		"leaf_a_long":     leafA("leaf_a_long", c.leafA, "", "2026-09-01T00:00:00Z", "2027-10-10T00:00:00Z"),
+		"leaf_a_next":     leafA("leaf_a_next", c.leafANext, "", "2027-08-02T00:00:00Z", "2028-08-01T00:00:00Z"),
 	}
 }
 
@@ -324,6 +342,8 @@ func TestCertificatesReproduce(t *testing.T) {
 			why := ""
 			if parsed, err := Parse(want); err != nil {
 				why = err.Error()
+			} else if strings.HasPrefix(name, "root") {
+				why = ProfileError(parsed, "root")
 			} else {
 				why = ProfileError(parsed, "leaf")
 			}
@@ -349,8 +369,11 @@ func TestCertificatesReproduce(t *testing.T) {
 			t.Errorf("%s: TBS differs", name)
 		}
 		issuer := c.rootA.Public()
-		if name == "root_b" || name == "leaf_b" {
+		switch strings.Split(name, "_")[1] {
+		case "b":
 			issuer = c.rootB.Public()
+		case "c":
+			issuer = c.rootC.Public()
 		}
 		if !verifyCert(wc, issuer) {
 			t.Errorf("%s: the vector's signature does not verify under its issuer", name)
@@ -402,6 +425,11 @@ func TestChainCases(t *testing.T) {
 		}
 		if c.Expect == "refuse" && (r.OK || r.Rule != c.Rule) {
 			t.Errorf("%s: expected rule %d, got ok=%v rule %d (%s)", c.Name, c.Rule, r.OK, r.Rule, r.Reason)
+		}
+		// A case that names its reason is held to it: rule 4 refuses for four reasons, and a guard
+		// that went missing would still refuse by rule 4 for another one.
+		if c.Reason != "" && (r.OK || r.Reason != c.Reason) {
+			t.Errorf("%s: expected the reason %q, got ok=%v %q", c.Name, c.Reason, r.OK, r.Reason)
 		}
 	}
 	for _, c := range v.NewestLeafCases {

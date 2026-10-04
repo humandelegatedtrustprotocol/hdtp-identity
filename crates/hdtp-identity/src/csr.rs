@@ -3,7 +3,7 @@
 use crate::address::address_guard;
 use crate::der::{self, children, read, read_oid_strict};
 use crate::keys::{PrivateKey, PublicKey};
-use crate::time::{DAY, HOUR};
+use crate::time::{format_rfc3339, DAY, HOUR};
 use crate::util::{err, Result};
 use crate::x509::{self, is_normal_https, name, LeafSpec, MAX_LEAF_DAYS, OID_SAN};
 
@@ -150,6 +150,8 @@ pub struct Issued {
     pub der: Vec<u8>,
     pub not_before: i64,
     pub not_after: i64,
+    /// The leaf was ended with its root, sooner than the validity asked (§2.2).
+    pub ends_with_root: bool,
 }
 
 /// The monotonic rule of §14.1: notBefore is the later of one hour ago and one second after the
@@ -167,19 +169,53 @@ pub fn validity(now: i64, previous_not_before: Option<i64>, valid_days: i64) -> 
     Ok((not_before, not_before + valid_days * DAY))
 }
 
+/// The root a leaf is about to be issued under, as its certificate (§2.2): a root of the profile,
+/// self-signed, and not past its end date. Every issuer asks this BEFORE anything is signed, so an
+/// expired root never reaches a key, a passkey or a card.
+pub fn issuing_root(der: &[u8], now: i64) -> Result<x509::Cert> {
+    let root = x509::parse(der)?;
+    if let Some(why) = x509::profile_error(&root, "root") {
+        return err("bad_request", format!("root_cert is not a root of the profile: {why}"));
+    }
+    if !x509::verify_cert(&root, &root.public_key) {
+        return err("bad_request", "root_cert is not self-signed");
+    }
+    refuse_expired(&root, now)?;
+    Ok(root)
+}
+
+/// The wallet's refusal of a root past its end date (§2.2), named `root_expired`.
+pub fn refuse_expired(root: &x509::Cert, now: i64) -> Result<()> {
+    if x509::root_expired(root, now) {
+        return err("root_expired", format!("the root ended at {}: it signs nothing more", format_rfc3339(root.not_after)));
+    }
+    Ok(())
+}
+
+/// What a wallet tells the person when a leaf was ended with its root (§2.2).
+pub fn ends_with_root_warning(not_after: i64) -> String {
+    format!("the leaf ends with its root, at {}: sooner than the validity asked", format_rfc3339(not_after))
+}
+
+/// The leaf's TBS under `root`, which `issuing_root` has already judged. The validity is the
+/// monotonic rule's, ended with the root where it would run past it (§14.2 rule 4).
 pub fn issue_tbs(
     csr: &Csr,
-    root_cn: &str,
-    root: &PublicKey,
+    root: &x509::Cert,
     now: i64,
     previous_not_before: Option<i64>,
     valid_days: i64,
-) -> Result<(x509::Unsigned, i64, i64)> {
-    let (not_before, not_after) = validity(now, previous_not_before, valid_days)?;
+) -> Result<(x509::Unsigned, i64, i64, bool)> {
+    refuse_expired(root, now)?;
+    let (not_before, asked_not_after) = validity(now, previous_not_before, valid_days)?;
+    if not_before > root.not_after {
+        return err("root_expired", format!("the root ends at {}, before this leaf could begin", format_rfc3339(root.not_after)));
+    }
+    let not_after = asked_not_after.min(root.not_after);
     let spec = LeafSpec {
         cn: &csr.cn,
-        root_cn,
-        issuer: root,
+        root_cn: &root.subject,
+        issuer: &root.public_key,
         host_key: &csr.key,
         uris: vec![csr.endpoint.clone()],
         dns_name: csr.dns_name.clone(),
@@ -190,13 +226,24 @@ pub fn issue_tbs(
         usage: None,
         aki: None,
     };
-    Ok((x509::leaf_tbs(&spec)?, not_before, not_after))
+    Ok((x509::leaf_tbs(&spec)?, not_before, not_after, not_after < asked_not_after))
 }
 
-pub fn issue(csr: &Csr, root_cn: &str, root: &PrivateKey, now: i64, previous_not_before: Option<i64>, valid_days: i64) -> Result<Issued> {
-    let signer = root.signer();
-    let (u, not_before, not_after) = issue_tbs(csr, root_cn, &signer.public(), now, previous_not_before, valid_days)?;
-    Ok(Issued { der: x509::assemble(&u.tbs, &u.sig_alg, &signer.sign(&u.tbs)), not_before, not_after })
+/// `issue_tbs` signed by the root's key, which must be the certificate's.
+pub fn issue(
+    csr: &Csr,
+    root: &x509::Cert,
+    key: &PrivateKey,
+    now: i64,
+    previous_not_before: Option<i64>,
+    valid_days: i64,
+) -> Result<Issued> {
+    let signer = key.signer();
+    if signer.public().spki() != root.spki.as_slice() {
+        return err("bad_request", "root_pkcs8 is not the key of root_cert");
+    }
+    let (u, not_before, not_after, ends_with_root) = issue_tbs(csr, root, now, previous_not_before, valid_days)?;
+    Ok(Issued { der: x509::assemble(&u.tbs, &u.sig_alg, &signer.sign(&u.tbs)), not_before, not_after, ends_with_root })
 }
 
 #[cfg(test)]
@@ -209,13 +256,15 @@ mod tests {
     #[test]
     fn round_trip_and_refusals() {
         let root = PrivateKey::from_seed(Alg::Ed25519, &seed("csr/root")).unwrap();
-        let root_der = x509::build_root("Alina Rao", &root, 1_700_000_000, &x509::serial_of("csr/root")).unwrap();
+        let root_der = x509::build_root("Alina Rao", &root, 1_700_000_000, None, &x509::serial_of("csr/root")).unwrap();
         let host = PrivateKey::from_seed(Alg::P256, &seed("csr/host")).unwrap();
         let csr = csr_new("Alina Rao", &host, "https://agent.alina.example/mcp", Some("agent.alina.example")).unwrap();
         let parsed = check(&csr, &[root.public().spki().to_vec()]).unwrap();
         assert_eq!(parsed.endpoint, "https://agent.alina.example/mcp");
         let now = 1_789_214_400;
-        let issued = issue(&parsed, "Alina Rao", &root, now, None, 365).unwrap();
+        let root_cert = x509::parse(&root_der).unwrap();
+        let issued = issue(&parsed, &root_cert, &root, now, None, 365).unwrap();
+        assert!(!issued.ends_with_root, "a root without an end date never shortens a leaf");
         assert_eq!(issued.not_before, now - HOUR);
         match validate_chain(&[issued.der.clone(), root_der], now, None, Some("https://agent.alina.example/mcp")) {
             ChainResult::Ok(ok) => assert_eq!(ok.leaf.dns, vec!["agent.alina.example"]),
@@ -234,5 +283,54 @@ mod tests {
         assert_eq!(nb, now + 11);
         assert!(validity(now, None, 399).is_err());
         assert!(check(&csr_new("x", &host, "https://127.0.0.1/mcp", None).unwrap(), &[]).is_err());
+    }
+
+    /// §2.2 and §14.2 rule 4: a root with an end date issues normally before it (the control), ends
+    /// a leaf that would outlive it, and signs nothing after it — refused as `root_expired`, before
+    /// a TBS exists.
+    #[test]
+    fn a_root_with_an_end_date() {
+        let now = 1_789_214_400;
+        let root = PrivateKey::from_seed(Alg::Ed25519, &seed("csr/root")).unwrap();
+        let root_ending = |end: i64| {
+            x509::parse(&x509::build_root("Alina Rao", &root, now - 30 * DAY, Some(end), &x509::serial_of("csr/root")).unwrap()).unwrap()
+        };
+        let host = PrivateKey::from_seed(Alg::P256, &seed("csr/host")).unwrap();
+        let req = check(&csr_new("Alina Rao", &host, "https://agent.alina.example/mcp", None).unwrap(), &[]).unwrap();
+        let valid = |issued: &Issued, root: &x509::Cert, at: i64| {
+            matches!(validate_chain(&[issued.der.clone(), root.der.clone()], at, None, None), ChainResult::Ok(_))
+        };
+
+        // The control: an end date a year and a half away leaves a year's leaf as asked.
+        let far = root_ending(now + 548 * DAY);
+        let issued = issue(&req, &far, &root, now, None, 365).unwrap();
+        assert_eq!((issued.not_after, issued.ends_with_root), (now - HOUR + 365 * DAY, false));
+        assert!(valid(&issued, &far, now));
+
+        // An end date a hundred days away: the leaf ends with the root, and says so.
+        let near = root_ending(now + 100 * DAY);
+        let issued = issue(&req, &near, &root, now, None, 365).unwrap();
+        assert_eq!((issued.not_after, issued.ends_with_root), (now + 100 * DAY, true));
+        assert!(valid(&issued, &near, now));
+        let (_, _, na, ends) = issue_tbs(&req, &near, now, None, 365).unwrap();
+        assert_eq!((na, ends), (now + 100 * DAY, true));
+
+        // The last second of the root is still the root's (RFC 5280 reads validity inclusively)…
+        let today = root_ending(now);
+        assert!(issue(&req, &today, &root, now, None, 365).is_ok());
+        // …and one second past it, nothing is signed, by either door.
+        let refused = |r: Result<()>| r.err().map(|e| e.code);
+        assert_eq!(refused(issue(&req, &today, &root, now + 1, None, 365).map(|_| ())), Some("root_expired".to_string()));
+        assert_eq!(refused(issue_tbs(&req, &today, now + 1, None, 365).map(|_| ())), Some("root_expired".to_string()));
+        assert_eq!(refused(issuing_root(&today.der, now + 1).map(|_| ())), Some("root_expired".to_string()));
+        assert!(issuing_root(&today.der, now).is_ok());
+        // A leaf that could only begin after its root ends is refused the same way.
+        assert_eq!(refused(issue_tbs(&req, &near, now, Some(now + 100 * DAY), 30).map(|_| ())), Some("root_expired".to_string()));
+        // A key that is not the certificate's signs nothing.
+        let other = PrivateKey::from_seed(Alg::Ed25519, &seed("csr/other")).unwrap();
+        assert_eq!(
+            issue(&req, &far, &other, now, None, 365).err().map(|e| e.why),
+            Some("root_pkcs8 is not the key of root_cert".to_string())
+        );
     }
 }

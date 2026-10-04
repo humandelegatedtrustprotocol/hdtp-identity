@@ -73,7 +73,7 @@ fn card_proves_it_holds(card: &dyn CardSigner, key: &hdtp_identity::keys::Public
 /// The root certificate a card's key signs for itself, through the seam: the core builds the bytes,
 /// the card signs them, the core assembles, and the signature is checked here before a vault is
 /// written — a card that signed with another key must not become an identity on disk.
-fn root_from_card(card: &dyn CardSigner, name: &str, now: i64) -> Res<(Vec<u8>, hdtp_identity::keys::PublicKey)> {
+fn root_from_card(card: &dyn CardSigner, name: &str, now: i64, ends: Option<i64>) -> Res<(Vec<u8>, hdtp_identity::keys::PublicKey)> {
     let key = card.public_key()?;
     if key.alg().name() != "p256" {
         return fail(format!(
@@ -82,7 +82,11 @@ fn root_from_card(card: &dyn CardSigner, name: &str, now: i64) -> Res<(Vec<u8>, 
         ));
     }
     let serial = x509::random_serial().map_err(|e| Fail(e.why))?;
-    let u = core("root_tbs", json!({ "cn": name, "spki": b64u(key.spki()), "not_before": instant(now), "serial": b64u(&serial) }))?;
+    let mut ask = json!({ "cn": name, "spki": b64u(key.spki()), "not_before": instant(now), "serial": b64u(&serial) });
+    if let Some(end) = ends {
+        ask["not_after"] = json!(instant(end));
+    }
+    let u = core("root_tbs", ask)?;
     let tbs = from_b64u(u["tbs"].as_str().unwrap_or("")).map_err(|e| Fail(e.why))?;
     let sig = card.sign_digest(&digest_of(&tbs))?;
     if !key.verify(&tbs, &sig) {
@@ -130,6 +134,10 @@ pub(super) fn issue_on_card(
     valid_days: i64,
 ) -> Res<Value> {
     let pinned = root_key(root)?;
+    // §2.2: a root past its end date signs nothing more — refused before the card is touched, by the
+    // core's own test of it, so no PIN is asked for a signature that could only be refused.
+    let cert = x509::parse(&from_b64u(root["cert"].as_str().unwrap_or("")).map_err(|e| Fail(e.why))?).map_err(|e| Fail(e.why))?;
+    hdtp_identity::csr::refuse_expired(&cert, now).map_err(|e| Fail(format!("{}: {}", e.code, e.why)))?;
     // The card in hand is this root's card. `id_issue` asked already; asking here too is what makes
     // this function safe to call from anywhere, which is how the gap above it arrived.
     match_root(root, card)?;
@@ -140,8 +148,7 @@ pub(super) fn issue_on_card(
     let every_root = vault_roots.iter().map(|r| root_key(r).map(|k| b64u(k.spki()))).collect::<Res<Vec<String>>>()?;
     let mut args = json!({
         "csr": b64u(csr_der),
-        "root_cn": root["cn"].as_str().unwrap_or(""),
-        "root_spki": b64u(pinned.spki()),
+        "root_cert": root["cert"].clone(),
         "root_spkis": every_root,
         "now": instant(now),
         "valid_days": valid_days,
@@ -166,7 +173,9 @@ pub(super) fn issue_on_card(
 
 /// An identity whose root is a card: the certificate is built from the slot's public key and signed
 /// by the slot, so no private key exists anywhere but the card, including here.
-pub fn id_create_piv(name: &str, slot: &str, reader: Option<&str>, vault: &str) -> Res<i32> {
+pub fn id_create_piv(name: &str, slot: &str, reader: Option<&str>, vault: &str, ends: Option<&str>) -> Res<i32> {
+    let now = now_or(None)?;
+    let ends = super::id::end_date(ends, now)?;
     let (record, record_real) = record_of(vault);
     for (taken, really) in [(vault, real(vault)), (record.as_str(), record_real.clone())] {
         if Path::new(&really).exists() {
@@ -181,8 +190,7 @@ pub fn id_create_piv(name: &str, slot: &str, reader: Option<&str>, vault: &str) 
     eprintln!("card        {}", info.serial.clone().unwrap_or_else(|| "serial unknown".into()));
     eprintln!("slot        {}", info.slot);
     let pass = passphrase(true)?;
-    let now = now_or(None)?;
-    let (cert, key) = root_from_card(card.as_ref(), name, now)?;
+    let (cert, key) = root_from_card(card.as_ref(), name, now, ends)?;
     eprintln!("root        {}", key.fingerprint());
     let plaintext = json!({
         "v": 1,
@@ -283,7 +291,11 @@ mod card_tests {
     const ENDPOINT: &str = "https://agent.alina.example/mcp";
 
     fn root_of(card: &FakeCard) -> Res<(Vec<u8>, Value)> {
-        let (cert, key) = root_from_card(card, "Alina Rao", NOW)?;
+        root_ending(card, None)
+    }
+
+    fn root_ending(card: &FakeCard, ends: Option<i64>) -> Res<(Vec<u8>, Value)> {
+        let (cert, key) = root_from_card(card, "Alina Rao", NOW, ends)?;
         let root = json!({
             "fingerprint": key.fingerprint(),
             "cn": "Alina Rao",
@@ -314,6 +326,27 @@ mod card_tests {
         assert_eq!(parsed["fingerprint"].as_str(), root["fingerprint"].as_str());
     }
 
+    /// §2.2 on the card path: a root with an end date signs a leaf that ends with it (the control),
+    /// and past the end date nothing is asked of the card at all — not even its public key.
+    #[test]
+    fn a_card_root_with_an_end_date() {
+        let card = FakeCard::p256("7777");
+        let ends = NOW + 100 * 86_400;
+        let (cert, root) = root_ending(&card, Some(ends)).expect("a root with an end date");
+        let parsed = core("parse_certificate", json!({ "der": b64u(&cert) })).expect("parsed");
+        assert_eq!(parsed["not_after"].as_str(), Some(instant(ends).as_str()));
+        let out = issue_on_card(&card, &root, std::slice::from_ref(&root), &a_request(ENDPOINT), NOW, None, 365).expect("a leaf");
+        assert_eq!(out["not_after"].as_str(), Some(instant(ends).as_str()), "the leaf ends with its root");
+        let r = core("validate_chain", json!({ "chain": [out["der"].clone(), b64u(&cert)], "now": instant(NOW) })).expect("an answer");
+        assert_eq!(r["ok"], json!(true), "the chain validates: {r}");
+
+        let before = card.calls.get();
+        let e =
+            issue_on_card(&card, &root, std::slice::from_ref(&root), &a_request(ENDPOINT), ends + 1, None, 365).map(|_| ()).unwrap_err();
+        assert!(e.0.starts_with("root_expired: "), "{}", e.0);
+        assert_eq!(card.calls.get(), before, "the card was not asked anything");
+    }
+
     #[test]
     fn a_leaf_the_card_signed_validates_to_that_root_at_its_endpoint() {
         let card = FakeCard::p256("7777");
@@ -335,12 +368,12 @@ mod card_tests {
         let csr = a_request(ENDPOINT);
 
         // An empty slot cannot even be read.
-        let e = root_from_card(&FakeCard::empty_slot(), "Alina Rao", NOW).map(|_| ()).unwrap_err();
+        let e = root_from_card(&FakeCard::empty_slot(), "Alina Rao", NOW, None).map(|_| ()).unwrap_err();
         assert!(e.0.contains("no certificate"), "{}", e.0);
 
         // A slot holding an RSA key: the CARD refuses the parameters (6A80), and that message says
         // the profile signs with P-256. This is not the wallet's own guard — see the test below.
-        let e = root_from_card(&FakeCard::rsa(), "Alina Rao", NOW).map(|_| ()).unwrap_err();
+        let e = root_from_card(&FakeCard::rsa(), "Alina Rao", NOW, None).map(|_| ()).unwrap_err();
         assert!(e.0.contains("P-256"), "{}", e.0);
 
         // A wrong PIN comes back with the tries left, because that is what a person needs next.
@@ -353,7 +386,7 @@ mod card_tests {
     // reaches the guard; a slot that reports an Ed25519 key — which a newer PIV token can — does.
     #[test]
     fn a_card_reporting_an_ed25519_key_is_refused_by_the_guard_itself() {
-        let e = root_from_card(&FakeCard::reports_ed25519(), "Alina Rao", NOW).map(|_| ()).unwrap_err();
+        let e = root_from_card(&FakeCard::reports_ed25519(), "Alina Rao", NOW, None).map(|_| ()).unwrap_err();
         assert!(e.0.contains("that slot holds a ed25519 key") && e.0.contains("a card-held root is P-256"), "{}", e.0);
     }
 
@@ -365,7 +398,7 @@ mod card_tests {
         let card = FakeCard::p256("7777");
         let root = root_of(&card).expect("a root").1;
         let sibling_key = PrivateKey::generate(Alg::Ed25519).expect("a key");
-        let sibling_cert = x509::build_root("Alina at work", &sibling_key, NOW, &x509::serial_of("sibling")).expect("a root");
+        let sibling_cert = x509::build_root("Alina at work", &sibling_key, NOW, None, &x509::serial_of("sibling")).expect("a root");
         let sibling = json!({ "fingerprint": sibling_key.public().fingerprint(), "cn": "Alina at work", "cert": b64u(&sibling_cert) });
         let csr = csr_mod::csr_new("A Host", &sibling_key, ENDPOINT, None).expect("a request");
 
@@ -443,7 +476,7 @@ mod card_tests {
         let e = issue_on_card(&gone, &root, std::slice::from_ref(&root), &a_request(ENDPOINT), NOW, None, 365).map(|_| ()).unwrap_err();
         assert!(e.0.contains("no longer in") || e.0.contains("a different card"), "{}", e.0);
         // And a card gone before the first word is the same refusal, not a panic.
-        let e = root_from_card(&FakeCard::vanishes_after(0), "Alina Rao", NOW).map(|_| ()).unwrap_err();
+        let e = root_from_card(&FakeCard::vanishes_after(0), "Alina Rao", NOW, None).map(|_| ()).unwrap_err();
         assert!(e.0.contains("no longer in"), "{}", e.0);
     }
 

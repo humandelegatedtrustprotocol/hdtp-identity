@@ -254,11 +254,11 @@ func CSRCheck(der []byte, rootSPKIs [][]byte) CSRInfo {
 	return out
 }
 
-// IssueOpts is what a wallet decides when it signs a request.
+// IssueOpts is what a wallet decides when it signs a request. Root is the issuing root as its
+// certificate (SPEC §2.2): its name, key and end date are read from it. IssuingRoot judges one.
 type IssueOpts struct {
-	RootCN            string
-	RootKey           *PrivateKey // for IssueFromCSR
-	RootPub           *PublicKey  // for IssueTBSFromCSR (the seam)
+	Root              *Cert
+	RootKey           *PrivateKey // for IssueFromCSR: the certificate's key
 	RootSPKIs         [][]byte
 	Now               time.Time
 	PreviousNotBefore *time.Time
@@ -266,31 +266,68 @@ type IssueOpts struct {
 	Serial            []byte
 }
 
-// Issued is the leaf a wallet produced and the dates it chose.
+// Issued is the leaf a wallet produced and the dates it chose. EndsWithRoot says the leaf was ended
+// with its root, sooner than the validity asked (SPEC §2.2).
 type Issued struct {
-	DER       []byte
-	TBS, Alg  []byte
-	Endpoint  string
-	NotBefore time.Time
-	NotAfter  time.Time
+	DER          []byte
+	TBS, Alg     []byte
+	Endpoint     string
+	NotBefore    time.Time
+	NotAfter     time.Time
+	EndsWithRoot bool
 }
 
-func issuePlan(csr []byte, o IssueOpts) (LeafOpts, error) {
-	info := CSRCheck(csr, o.RootSPKIs)
-	if !info.OK {
-		return LeafOpts{}, info.err
+// rootExpiredError is the wallet's refusal of a root past its end date, `root_expired` (SPEC §2.2).
+type rootExpiredError struct{ why string }
+
+func (e rootExpiredError) Error() string { return e.why }
+
+// RefuseExpired is the wallet's refusal of a root past its end date (SPEC §2.2), by RootExpired.
+func RefuseExpired(root *Cert, now time.Time) error {
+	if RootExpired(root, now) {
+		return rootExpiredError{"the root ended at " + timeOut(root.NotAfter) + ": it signs nothing more"}
 	}
-	return planOf(info, o)
+	return nil
 }
 
-// planOf is the leaf a checked request is issued as, under the wallet's monotonic rule.
-func planOf(info CSRInfo, o IssueOpts) (LeafOpts, error) {
+// IssuingRoot is the root a leaf is about to be issued under, as its certificate (SPEC §2.2): a root
+// of the profile, self-signed, and not past its end date. Every issuer asks this BEFORE anything is
+// signed, so an expired root never reaches a key, a passkey or a card.
+func IssuingRoot(der []byte, now time.Time) (*Cert, error) {
+	root, err := Parse(der)
+	if err != nil {
+		return nil, err
+	}
+	if why := ProfileError(root, "root"); why != "" {
+		return nil, errArg("root_cert is not a root of the profile: " + why)
+	}
+	if !verifyCert(root, root.PublicKey) {
+		return nil, errArg("root_cert is not self-signed")
+	}
+	if err := RefuseExpired(root, now); err != nil {
+		return nil, err
+	}
+	return root, nil
+}
+
+// EndsWithRootWarning is what a wallet tells the person when a leaf was ended with its root (SPEC §2.2).
+func EndsWithRootWarning(notAfter time.Time) string {
+	return "the leaf ends with its root, at " + timeOut(notAfter) + ": sooner than the validity asked"
+}
+
+// planOf is the leaf a checked request is issued as, under the wallet's monotonic rule, ended with the
+// root where it would run past it (SPEC §14.2 rule 4). The second answer says it was.
+func planOf(info CSRInfo, o IssueOpts) (LeafOpts, bool, error) {
+	// Every caller has refused an expired root already (IssuingRoot, IssueFromCSR, IssueTBSFromCSR).
+	if o.Root == nil {
+		return LeafOpts{}, false, errArg("root_cert is required")
+	}
 	days := o.ValidDays
 	if days == 0 {
 		days = 365 // a Go caller that omits the field takes the default; the JSON boundary refuses an explicit 0
 	}
 	if days < 1 || days > MaxLeafDays {
-		return LeafOpts{}, errArg("validity must be between one and 398 days")
+		return LeafOpts{}, false, errArg("validity must be between one and 398 days")
 	}
 	notBefore := o.Now.UTC().Add(-time.Hour).Truncate(time.Second)
 	if o.PreviousNotBefore != nil {
@@ -298,51 +335,85 @@ func planOf(info CSRInfo, o IssueOpts) (LeafOpts, error) {
 			notBefore = p
 		}
 	}
-	notAfter := notBefore.Add(time.Duration(days) * 24 * time.Hour)
+	if notBefore.After(o.Root.NotAfter) {
+		return LeafOpts{}, false, rootExpiredError{"the root ends at " + timeOut(o.Root.NotAfter) + ", before this leaf could begin"}
+	}
+	asked := notBefore.Add(time.Duration(days) * 24 * time.Hour)
+	notAfter := asked
+	if notAfter.After(o.Root.NotAfter) {
+		notAfter = o.Root.NotAfter
+	}
 	return LeafOpts{
-		CN: info.CN, RootCN: o.RootCN, RootKey: o.RootKey, RootPub: o.RootPub, HostPub: info.Key,
+		CN: info.CN, RootCN: o.Root.Subject, RootKey: o.RootKey, RootPub: o.Root.PublicKey, HostPub: info.Key,
 		Endpoint: info.Endpoint, DNSName: info.DNSName, NotBefore: notBefore, NotAfter: notAfter, Serial: o.Serial,
-	}, nil
+	}, notAfter.Before(asked), nil
 }
 
-// IssueFromCSR is CSRCheck followed by BuildLeaf under the wallet's monotonic rule. The root's key is
-// asked for first, as the core's issue_from_csr reads root_pkcs8 first.
+// keyOfRoot refuses a root key that is not the issuing certificate's.
+func keyOfRoot(o IssueOpts) error {
+	if o.Root != nil && !bytes.Equal(o.RootKey.Public().SPKI, o.Root.SPKI) {
+		return errArg("root_pkcs8 is not the key of root_cert")
+	}
+	return nil
+}
+
+// IssueFromCSR is CSRCheck followed by BuildLeaf under the wallet's monotonic rule, under o.Root signed
+// by o.RootKey, which must be its key. A root past its end date is refused before anything is signed.
 func IssueFromCSR(csr []byte, o IssueOpts) (Issued, error) {
 	if err := needPrivate(o.RootKey, "the root's key"); err != nil {
 		return Issued{}, err
 	}
-	lo, err := issuePlan(csr, o)
+	if o.Root != nil {
+		if err := RefuseExpired(o.Root, o.Now); err != nil {
+			return Issued{}, err
+		}
+	}
+	info := CSRCheck(csr, o.RootSPKIs)
+	if !info.OK {
+		return Issued{}, info.err
+	}
+	if err := keyOfRoot(o); err != nil {
+		return Issued{}, err
+	}
+	lo, ends, err := planOf(info, o)
 	if err != nil {
 		return Issued{}, err
 	}
-	return issuedLeaf(lo)
+	return issuedLeaf(lo, ends)
 }
 
-func issuedLeaf(lo LeafOpts) (Issued, error) {
+func issuedLeaf(lo LeafOpts, ends bool) (Issued, error) {
 	der, err := BuildLeaf(lo)
 	if err != nil {
 		return Issued{}, err
 	}
-	return Issued{DER: der, Endpoint: lo.Endpoint, NotBefore: lo.NotBefore, NotAfter: lo.NotAfter}, nil
+	return Issued{DER: der, Endpoint: lo.Endpoint, NotBefore: lo.NotBefore, NotAfter: lo.NotAfter, EndsWithRoot: ends}, nil
 }
 
-// IssueTBSFromCSR is the same plan for a root that signs elsewhere; the root's public key first, as
-// the core's issue_tbs_from_csr reads root_spki first.
+// IssueTBSFromCSR is the same plan for a root that signs elsewhere: the bytes it must sign, which
+// AssembleLeaf takes back. A root past its end date is refused before a TBS exists.
 func IssueTBSFromCSR(csr []byte, o IssueOpts) (Issued, error) {
-	if err := needPublic(o.RootPub, "the root's public key"); err != nil {
+	if o.Root == nil {
+		return Issued{}, errArg("root_cert is required")
+	}
+	if err := RefuseExpired(o.Root, o.Now); err != nil {
 		return Issued{}, err
 	}
-	lo, err := issuePlan(csr, o)
+	info := CSRCheck(csr, o.RootSPKIs)
+	if !info.OK {
+		return Issued{}, info.err
+	}
+	lo, ends, err := planOf(info, o)
 	if err != nil {
 		return Issued{}, err
 	}
-	return issuedTBS(lo)
+	return issuedTBS(lo, ends)
 }
 
-func issuedTBS(lo LeafOpts) (Issued, error) {
+func issuedTBS(lo LeafOpts, ends bool) (Issued, error) {
 	tbs, alg, err := LeafTBS(lo)
 	if err != nil {
 		return Issued{}, err
 	}
-	return Issued{TBS: tbs, Alg: alg, Endpoint: lo.Endpoint, NotBefore: lo.NotBefore, NotAfter: lo.NotAfter}, nil
+	return Issued{TBS: tbs, Alg: alg, Endpoint: lo.Endpoint, NotBefore: lo.NotBefore, NotAfter: lo.NotAfter, EndsWithRoot: ends}, nil
 }

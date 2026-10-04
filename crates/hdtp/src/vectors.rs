@@ -23,6 +23,8 @@ pub use intrude::intrude;
 const NOW: &str = "2026-09-13T12:00:00Z";
 const ENDPOINT_A: &str = "https://agent.alina.example/mcp";
 const ENDPOINT_B: &str = "https://agent.bharat.example/mcp";
+const ENDPOINT_C: &str = "https://agent.chandra.example/mcp";
+const ROOT_C_ENDS: &str = "2028-01-01T00:00:00Z";
 const TEXT: &str = "hello from the HDTP test vectors";
 
 fn at(s: &str) -> i64 {
@@ -32,6 +34,7 @@ fn at(s: &str) -> i64 {
 struct Cast {
     root_a: PrivateKey,
     root_b: PrivateKey,
+    root_c: PrivateKey,
     hosts: BTreeMap<&'static str, PrivateKey>,
 }
 
@@ -41,7 +44,13 @@ fn cast() -> Res<Cast> {
     hosts.insert("leaf_a", k(Alg::Ed25519, "host/alina/2026")?);
     hosts.insert("leaf_a_next", k(Alg::Ed25519, "host/alina/2027")?);
     hosts.insert("leaf_b", k(Alg::P256, "host/bharat/2026")?);
-    Ok(Cast { root_a: k(Alg::Ed25519, "root/alina")?, root_b: k(Alg::P256, "root/bharat")?, hosts })
+    hosts.insert("leaf_c", k(Alg::Ed25519, "host/chandra/2026")?);
+    Ok(Cast {
+        root_a: k(Alg::Ed25519, "root/alina")?,
+        root_b: k(Alg::P256, "root/bharat")?,
+        root_c: k(Alg::Ed25519, "root/chandra")?,
+        hosts,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -64,19 +73,35 @@ fn leaf(cn: &str, root: &PrivateKey, host: &PublicKey, endpoint: &str, dns: Opti
     x509::build_leaf(&spec, root).map_err(|e| Fail(e.why))
 }
 
-/// The seven certificates of Appendix B, in the generator's order, from their labelled seeds.
+/// The issuer of a certificate of Appendix B, read from its name (`root_b`, `leaf_c_last`, …).
+fn issuer_of<'a>(c: &'a Cast, name: &str) -> &'a PrivateKey {
+    match name.split('_').nth(1) {
+        Some("b") => &c.root_b,
+        Some("c") => &c.root_c,
+        _ => &c.root_a,
+    }
+}
+
+/// The eleven certificates of Appendix B in the profile, in the generator's order, from their
+/// labelled seeds (the four marked `refused` are not rebuilt).
 fn certificates(c: &Cast) -> Res<Vec<(&'static str, Vec<u8>, String)>> {
     let a = |n: &str| c.hosts[n].public();
     Ok(vec![
         (
             "root_a",
-            x509::build_root("Alina Rao", &c.root_a, at("2026-09-01T00:00:00Z"), &serial_of("root_a")).map_err(|e| Fail(e.why))?,
+            x509::build_root("Alina Rao", &c.root_a, at("2026-09-01T00:00:00Z"), None, &serial_of("root_a")).map_err(|e| Fail(e.why))?,
             "Ed25519 root, self-signed, CN \"Alina Rao\", notAfter 9999-12-31".into(),
         ),
         (
             "root_b",
-            x509::build_root("Bharat Mehta", &c.root_b, at("2026-09-01T00:00:00Z"), &serial_of("root_b")).map_err(|e| Fail(e.why))?,
+            x509::build_root("Bharat Mehta", &c.root_b, at("2026-09-01T00:00:00Z"), None, &serial_of("root_b")).map_err(|e| Fail(e.why))?,
             "P-256 root, self-signed, CN \"Bharat Mehta\"".into(),
+        ),
+        (
+            "root_c",
+            x509::build_root("Chandra Iyer", &c.root_c, at("2026-09-01T00:00:00Z"), Some(at(ROOT_C_ENDS)), &serial_of("root_c"))
+                .map_err(|e| Fail(e.why))?,
+            format!("Ed25519 root, self-signed, CN \"Chandra Iyer\", with the end date its person chose: notAfter {}", &ROOT_C_ENDS[..10]),
         ),
         (
             "leaf_a",
@@ -121,6 +146,30 @@ fn certificates(c: &Cast) -> Res<Vec<(&'static str, Vec<u8>, String)>> {
             )?,
             "a fresh key for the same endpoint, 2027-08-02 to 2028-08-01: the renewal that supersedes leaf_a".into(),
         ),
+        (
+            "leaf_c",
+            leaf("Chandra Iyer", &c.root_c, &a("leaf_c"), ENDPOINT_C, None, "2026-09-01T00:00:00Z", "2027-09-01T00:00:00Z", "leaf_c")?,
+            format!("Ed25519 leaf under root_c for {ENDPOINT_C}, 2026-09-01 to 2027-09-01, ending before its root"),
+        ),
+        (
+            "leaf_c_last",
+            leaf("Chandra Iyer", &c.root_c, &a("leaf_c"), ENDPOINT_C, None, "2027-01-01T00:00:00Z", ROOT_C_ENDS, "leaf_c_last")?,
+            format!("leaf_c's key and endpoint, 2027-01-01 to {}: ends the second its root does", &ROOT_C_ENDS[..10]),
+        ),
+        (
+            "leaf_c_outlives",
+            leaf(
+                "Chandra Iyer",
+                &c.root_c,
+                &a("leaf_c"),
+                ENDPOINT_C,
+                None,
+                "2027-06-01T00:00:00Z",
+                "2028-06-01T00:00:00Z",
+                "leaf_c_outlives",
+            )?,
+            "leaf_c's key and endpoint, 2027-06-01 to 2028-06-01: ends after its root, which rule 4 refuses".into(),
+        ),
     ])
 }
 
@@ -149,6 +198,15 @@ fn chain_case(
     Value::Object(m)
 }
 
+/// A chain case judged at another instant than NOW, and the reason it must give when it names one.
+fn at_now(mut case: Value, now: &str, reason: Option<&str>) -> Value {
+    case["now"] = json!(now);
+    if let Some(r) = reason {
+        case["reason"] = json!(r);
+    }
+    case
+}
+
 pub fn gen(out: Option<&str>) -> Res<i32> {
     let c = cast()?;
     let certs = certificates(&c)?;
@@ -169,6 +227,22 @@ pub fn gen(out: Option<&str>) -> Res<i32> {
         chain_case("leaf not yet valid", &["leaf_a_next", "root_a"], None, None, "refuse", Some(4)),
         chain_case("leaf longer than 398 days", &["leaf_a_long", "root_a"], None, None, "refuse", Some(4)),
         chain_case("endpoint mismatch", &["leaf_a", "root_a"], None, Some(&format!("{ENDPOINT_A}/")), "refuse", Some(5)),
+        chain_case("a root with an end date not yet reached", &["leaf_c", "root_c"], Some(fp("root_c")), Some(ENDPOINT_C), "accept", None),
+        at_now(
+            chain_case("a root at the last second of its end date", &["leaf_c_last", "root_c"], None, None, "accept", None),
+            ROOT_C_ENDS,
+            None,
+        ),
+        at_now(
+            chain_case("a root past its end date", &["leaf_c_last", "root_c"], None, None, "refuse", Some(4)),
+            "2028-01-01T00:00:01Z",
+            Some("root has expired"),
+        ),
+        at_now(
+            chain_case("a leaf that outlives its root", &["leaf_c_outlives", "root_c"], None, None, "refuse", Some(4)),
+            "2027-09-01T00:00:00Z",
+            Some("leaf outlives the root"),
+        ),
     ];
     let newest = json!([
         { "pinned": "leaf_a", "presented": "leaf_a", "expect": "same" },
@@ -273,7 +347,7 @@ mod tests {
     fn the_generator_agrees_with_the_core_tests() {
         let c = cast().unwrap();
         let certs = certificates(&c).unwrap();
-        assert_eq!(certs.len(), 7);
+        assert_eq!(certs.len(), 11);
         for (name, der, _) in &certs {
             let parsed = parse(der).unwrap();
             assert_eq!(parsed.kind(), if name.starts_with("root") { "root" } else { "leaf" });

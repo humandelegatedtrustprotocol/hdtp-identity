@@ -75,6 +75,10 @@ func codeFor(err error, fallback string) string {
 	if errors.As(err, &v) {
 		return "vault"
 	}
+	var r rootExpiredError
+	if errors.As(err, &r) {
+		return "root_expired"
+	}
 	return fallback
 }
 
@@ -213,8 +217,8 @@ var functions = map[string]function{
 	"verify":        {[]string{"spki", "data", "sig"}, callVerify},
 
 	// Certificates: api_certificates.go
-	"build_root":        {[]string{"cn", "pkcs8", "not_before", "serial"}, callBuildRoot},
-	"root_tbs":          {[]string{"cn", "spki", "not_before", "serial"}, callRootTBS},
+	"build_root":        {[]string{"cn", "pkcs8", "not_before", "not_after", "serial"}, callBuildRoot},
+	"root_tbs":          {[]string{"cn", "spki", "not_before", "not_after", "serial"}, callRootTBS},
 	"assemble_root":     {[]string{"tbs", "sig", "sig_alg"}, assembleFn},
 	"assemble_leaf":     {[]string{"tbs", "sig", "sig_alg"}, assembleFn},
 	"build_leaf":        {[]string{"cn", "root_cn", "host_spki", "endpoint", "dns_name", "not_before", "not_after", "serial", "root_pkcs8"}, callBuildLeaf},
@@ -230,8 +234,8 @@ var functions = map[string]function{
 	// Certificate signing requests: api_csr.go
 	"csr_new":            {[]string{"cn", "host_pkcs8", "endpoint", "dns_name"}, callCSRNew},
 	"csr_check":          {[]string{"der", "root_spkis"}, callCSRCheck},
-	"issue_from_csr":     {[]string{"csr", "root_cn", "root_spkis", "now", "previous_not_before", "valid_days", "root_pkcs8"}, callIssueFromCSR},
-	"issue_tbs_from_csr": {[]string{"csr", "root_cn", "root_spkis", "now", "previous_not_before", "valid_days", "root_spki"}, callIssueTBSFromCSR},
+	"issue_from_csr":     {[]string{"csr", "root_cert", "root_spkis", "now", "previous_not_before", "valid_days", "root_pkcs8"}, callIssueFromCSR},
+	"issue_tbs_from_csr": {[]string{"csr", "root_cert", "root_spkis", "now", "previous_not_before", "valid_days"}, callIssueTBSFromCSR},
 
 	// Signing requests: api_signing.go
 	"signing_request_check": {[]string{"request", "origin", "now", "root_spkis"}, callSigningRequestCheck},

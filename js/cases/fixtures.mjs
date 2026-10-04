@@ -161,9 +161,18 @@ export function fixtures({ wasm, go }) {
   const defs = JSON.parse(readFileSync(new URL('../../contract/contract.json', import.meta.url), 'utf8')).$defs;
   // An instant `seconds` before `now`, as an argument writes one.
   const before = (seconds) => new Date((at(now) - seconds) * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  // Roots with an end date (SPEC §14.1), the seed's, around `now`: a hundred days on, a year and a half
+  // on, exactly now, and a second ago; and what every issuer answers under the last.
+  const t0 = at(now), DAY = 86_400;
+  const iso = (t) => new Date(t * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const rootEnding = (end) => b64url(buildRoot({ cn: 'Alina Rao', key: rootKey, notBefore: new Date((t0 - 30 * DAY) * 1000), notAfter: new Date(end * 1000), label: 'parity/root-ends' }));
+  const ending = {
+    t0, iso, near: rootEnding(t0 + 100 * DAY), far: rootEnding(t0 + 548 * DAY), today: rootEnding(t0), ended: rootEnding(t0 - 1),
+    endedWhy: { error: 'root_expired', why: `the root ended at ${iso(t0 - 1)}: it signs nothing more` },
+  };
 
   return {
-    wasm, go, now, at, ENDPOINT, defs, before,
+    wasm, go, now, at, ENDPOINT, defs, before, ending,
     rootKey, hostKey, p256Key, callerKey,
     rootDer, leafDer, rootDerBytes, leafDerBytes,
     rootPkcs8, hostPkcs8, p256Pkcs8, callerPkcs8,

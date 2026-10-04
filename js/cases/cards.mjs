@@ -10,6 +10,22 @@ export default function cards({ add, expect }, f) {
   add('card_encode with a name outside ASCII', 'card_encode', { fn: 'é'.repeat(80), cert: leafDer, seal: 'required' });
   add('card_encode with a name that straddles the fold', 'card_encode', { fn: 'a'.repeat(70) + 'ü'.repeat(10), cert: leafDer });
   add('card_encode with an emoji name', 'card_encode', { fn: '👋'.repeat(40), cert: leafDer });
+  // RFC 6350 §3.2 (CONTRACT §4): a line is folded at 75 OCTETS, and a break never splits a UTF-8
+  // sequence. Each name puts a multi-byte character across the boundary, and the answer is the seed's
+  // card byte for byte: "FN:" and 36 two-byte letters is 75 octets and one line, 37 is 77 and folds;
+  // 71 ASCII letters then a three-byte euro sign starts it at octet 74, so the break moves before it;
+  // the same with a four-byte emoji; and two-byte letters across a continuation line's 74.
+  for (const [what, fn] of [
+    ['two-byte letters filling 75 octets exactly', 'é'.repeat(36)],
+    ['two-byte letters one past 75 octets', 'é'.repeat(37)],
+    ['a three-byte character across octet 75', 'a'.repeat(71) + '€€€'],
+    ['a four-byte character across octet 75', 'a'.repeat(71) + '👋👋'],
+    ['two-byte letters across the second line', 'a'.repeat(72) + 'ü'.repeat(80)],
+    ['the earlier cases\' accented name', 'é'.repeat(80)],
+  ]) {
+    add(`card_encode folding at octets: ${what}`, 'card_encode', { fn, cert: leafDer, seal: 'required' });
+    expect(`card_encode folding at octets: ${what}`, { vcard: encodeCard({ fn, cert: Buffer.from(leafDer, 'base64url'), seal: 'required' }) });
+  }
   add('card_encode with a seal nobody has', 'card_encode', { fn: 'A', cert: leafDer, seal: 'maybe' });
   add('card_encode of a certificate that is not one', 'card_encode', { fn: 'A', cert: b64url(new Uint8Array(4)) });
   // A certificate is bytes (CONTRACT §0): one that is not a string does not decode, which the contract

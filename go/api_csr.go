@@ -55,20 +55,44 @@ func callCSRCheck(a args) json.RawMessage {
 // issueArgs is what both issue functions read after the root: the request, checked before anything
 // else of it is read (csr::check, whose refusal keeps its class: bytes that do not read are `parse`),
 // then `root_cn`, `now`, `previous_not_before` and `valid_days`, in the core's order (R27, T15, F3).
-func issueArgs(a args, roots [][]byte, o IssueOpts) (CSRInfo, IssueOpts, json.RawMessage) {
+// issueArgs reads what both issuers share, in the core's order: `now`; `root_cert`, judged by
+// IssuingRoot before anything is signed; then (for issue_from_csr) the caller reads `root_pkcs8`
+// through key; then `root_spkis`, the request (checked with the issuing root added), `previous_not_before`
+// and `valid_days`.
+func issueArgs(a args, key func(*Cert) (*PrivateKey, json.RawMessage)) (CSRInfo, IssueOpts, json.RawMessage) {
+	var o IssueOpts
+	now, err := a.instant("now")
+	if err != nil {
+		return CSRInfo{}, o, failAs("parse", err)
+	}
+	o.Now = now
+	der, err := a.bytes("root_cert")
+	if err != nil {
+		return CSRInfo{}, o, failAs(codeArgs, err)
+	}
+	if o.Root, err = IssuingRoot(der, now); err != nil {
+		return CSRInfo{}, o, failAs("parse", err)
+	}
+	if key != nil {
+		var bad json.RawMessage
+		if o.RootKey, bad = key(o.Root); bad != nil {
+			return CSRInfo{}, o, bad
+		}
+	}
+	// §9's refusal covers the root that is signing, whether or not the caller listed it: a wallet
+	// that omits `root_spkis` still cannot be talked into issuing a leaf for its own root key.
+	roots, err := a.optChain("root_spkis")
+	if err != nil {
+		return CSRInfo{}, o, failAs(codeArgs, err)
+	}
+	o.RootSPKIs = append(roots, o.Root.SPKI)
 	csr, err := a.bytes("csr")
 	if err != nil {
 		return CSRInfo{}, o, failAs(codeArgs, err)
 	}
-	info := CSRCheck(csr, roots)
+	info := CSRCheck(csr, o.RootSPKIs)
 	if !info.OK {
 		return info, o, failAs(codeArgs, info.err)
-	}
-	if o.RootCN, err = a.str("root_cn"); err != nil {
-		return info, o, failAs(codeArgs, err)
-	}
-	if o.Now, err = a.instant("now"); err != nil {
-		return info, o, failAs("parse", err)
 	}
 	if o.PreviousNotBefore, err = a.optInstant("previous_not_before"); err != nil {
 		return info, o, failAs("parse", err)
@@ -79,52 +103,51 @@ func issueArgs(a args, roots [][]byte, o IssueOpts) (CSRInfo, IssueOpts, json.Ra
 	return info, o, nil
 }
 
+// warningsOf is the `warnings` an issuer answers: the line saying a leaf ends with its root, or none.
+func warningsOf(issued Issued) []string {
+	if issued.EndsWithRoot {
+		return []string{EndsWithRootWarning(issued.NotAfter)}
+	}
+	return []string{}
+}
+
 func callIssueFromCSR(a args) json.RawMessage {
-	root, err := a.priv("root_pkcs8")
-	if err != nil {
-		return failAs("parse", err)
-	}
-	// §9's refusal covers the root that is signing, whether or not the caller listed it: a wallet
-	// that omits `root_spkis` still cannot be talked into issuing a leaf for its own root key.
-	roots, err := a.optChain("root_spkis")
-	if err != nil {
-		return failAs(codeArgs, err)
-	}
-	info, o, bad := issueArgs(a, append(roots, root.Public().SPKI), IssueOpts{RootKey: root})
+	info, o, bad := issueArgs(a, func(*Cert) (*PrivateKey, json.RawMessage) {
+		k, err := a.priv("root_pkcs8")
+		if err != nil {
+			return nil, failAs("parse", err)
+		}
+		return k, nil
+	})
 	if bad != nil {
 		return bad
 	}
-	lo, err := planOf(info, o)
+	if err := keyOfRoot(o); err != nil {
+		return failAs(codeArgs, err)
+	}
+	lo, ends, err := planOf(info, o)
 	if err != nil {
 		return failAs(codeArgs, err)
 	}
-	issued, err := issuedLeaf(lo)
+	issued, err := issuedLeaf(lo, ends)
 	if err != nil {
 		return failAs(codeArgs, err)
 	}
-	return ok(map[string]any{"der": B64url(issued.DER), "endpoint": issued.Endpoint, "not_before": timeOut(issued.NotBefore), "not_after": timeOut(issued.NotAfter)})
+	return ok(map[string]any{"der": B64url(issued.DER), "endpoint": issued.Endpoint, "not_before": timeOut(issued.NotBefore), "not_after": timeOut(issued.NotAfter), "warnings": warningsOf(issued)})
 }
 
 func callIssueTBSFromCSR(a args) json.RawMessage {
-	rootPub, err := a.pub("root_spki")
-	if err != nil {
-		return failAs("parse", err)
-	}
-	roots, err := a.optChain("root_spkis")
-	if err != nil {
-		return failAs(codeArgs, err)
-	}
-	info, o, bad := issueArgs(a, append(roots, rootPub.SPKI), IssueOpts{RootPub: rootPub})
+	info, o, bad := issueArgs(a, nil)
 	if bad != nil {
 		return bad
 	}
-	lo, err := planOf(info, o)
+	lo, ends, err := planOf(info, o)
 	if err != nil {
 		return failAs(codeArgs, err)
 	}
-	issued, err := issuedTBS(lo)
+	issued, err := issuedTBS(lo, ends)
 	if err != nil {
 		return failAs(codeArgs, err)
 	}
-	return ok(map[string]any{"tbs": B64url(issued.TBS), "sig_alg": B64url(issued.Alg), "endpoint": issued.Endpoint, "not_before": timeOut(issued.NotBefore), "not_after": timeOut(issued.NotAfter)})
+	return ok(map[string]any{"tbs": B64url(issued.TBS), "sig_alg": B64url(issued.Alg), "endpoint": issued.Endpoint, "not_before": timeOut(issued.NotBefore), "not_after": timeOut(issued.NotAfter), "warnings": warningsOf(issued)})
 }
