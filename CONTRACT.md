@@ -163,7 +163,8 @@ exists.
 
 Serial numbers: random 8 bytes by default; when `serial` is supplied it is used as given, which is
 how the vectors reproduce (`serial = SHA-256("serial/" + label)[0..8]`). Times encode as UTCTime
-before 2050 and GeneralizedTime from 2050; the root's `not_after` is always `99991231235959Z`.
+before 2050 and GeneralizedTime from 2050; the root's `not_after` is `99991231235959Z` unless the
+caller gives the end date its person chose (`build_root`, `root_tbs`).
 Signature algorithm OIDs, extension order, criticality, key-usage bit encoding and every other byte
 follow `x509.mjs` — the vector certificates must reproduce exactly from the same inputs.
 
