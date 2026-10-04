@@ -162,8 +162,8 @@
     ]
   },
   "6.2#2": {
-    "hash": "bb79bfc5aece",
-    "text": "`ok` — a card refresh, or `status: pending` from a new address under `ask` (§5.3). The caller's chain is the a",
+    "hash": "23de3c014e37",
+    "text": "`{\"status\": \"ok\"}` — a card refresh, or `{\"status\": \"pending\"}` from a new address under `ask` (§5.3). The cal",
     "held_by": [
       "scenario:a guest whose card carries a different certificate than the chain"
     ],
