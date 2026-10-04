@@ -131,7 +131,7 @@
     "elsewhere_names": [
       "gateway:TestParsedNameIsCappedAndStripped"
     ],
-    "why": "rendering a peer's name is a host's act: hdtp-gateway strips control and format characters (bidirectional ones among them) from FN when it reads a card (internal/contacts/vcard.go), held by TestParsedNameIsCappedAndStripped. batondeck does not strip a peer's FN today; that is its defect 2.16 of the spec-quality code-defect list (security), whose fix lands before production, and it is not cited here as a holder",
+    "why": "rendering a peer's name is a host's act: hdtp-gateway strips control and format characters (bidirectional ones among them) from FN when it reads a card (internal/contacts/vcard.go), held by TestParsedNameIsCappedAndStripped; a hosting platform's half is held in that platform's own MUST table, beside its code (batondeck strips a peer's FN in gateway/src/identity/contact-fields.ts, tested by gateway/test/contact-fields.test.ts)",
     "hash": "d950d5ad3dfc",
     "text": "`FN` is untrusted display input: a receiver **MUST** strip control and bidirectional-format characters from it"
   },
@@ -156,8 +156,8 @@
     ]
   },
   "3.#6": {
-    "hash": "2ed086154a89",
-    "text": "A writer MUST NOT put a control character into a card — in `FN`, in `X-HDTP-SEAL`, or in a property it adds: a",
+    "hash": "7ebdee768178",
+    "text": "A writer **MUST NOT** put a control character into a card — in `FN`, in `X-HDTP-SEAL`, or in a property it add",
     "held_by": [
       "rust:nothing_that_goes_into_a_card_may_carry_a_line_break",
       "go:TestNothingThatGoesIntoACardMayCarryALineBreak"
@@ -266,8 +266,8 @@
     ]
   },
   "9.#3": {
-    "hash": "3f2620f0c84c",
-    "text": "**Moving** is the person issuing a leaf to the new host, the data carried across as an archive — the person's ",
+    "hash": "6f3969f6e860",
+    "text": "A host that makes an archive **MUST NOT** put key material of any kind in it, and a host that imports one **MU",
     "held_by": [
       "rust:read_export_answers_the_whole_corpus",
       "go:TestReadExportZipAnswersTheWholeCorpus",
@@ -694,8 +694,8 @@
     ]
   },
   "13.2#3": {
-    "hash": "894ee56e86ee",
-    "text": "**The result of a sealed request MUST be sealed back to the caller** (same format, `kid` naming the caller's l",
+    "hash": "bb9ee10c15ef",
+    "text": "**Results.** The result of a sealed request **MUST** be sealed back to the caller, in the same format:",
     "held_by": [
       "rust:a_result_seals_back_and_opens_on_the_caller_side",
       "go:TestSealAndOpenResult"
@@ -720,8 +720,8 @@
     ]
   },
   "13.3#1": {
-    "hash": "30f6c54f573c",
-    "text": "Receivers MUST validate in this order, rejecting at the first failure: decode `protected`; check `v` and `suit",
+    "hash": "249e75bcb18f",
+    "text": "Receivers **MUST** validate in this order, rejecting at the first failure:",
     "held_by": [
       "go:TestDecideOnVectors",
       "rust:decide_on_the_vector_envelopes",
@@ -773,7 +773,7 @@
     ]
   },
   "14.1#2": {
-    "hash": "cceb6e9b5e72",
+    "hash": "b43122b0e7dd",
     "text": "The algorithm identifier inside the `tbsCertificate` and the outer `signatureAlgorithm` **MUST** be byte-equal",
     "held_by": [
       "scenario:one algorithm inside the TBS, another outside it",
