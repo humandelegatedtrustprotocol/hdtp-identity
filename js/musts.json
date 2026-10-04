@@ -10,9 +10,10 @@
   "2.#2": {
     "elsewhere": "node",
     "elsewhere_names": [
+      "gateway:TestStaleKidIsAnsweredWithTheCurrentChain",
       "gateway:TestLeafSignupThenRenewThenMove"
     ],
-    "why": "keeping a superseded leaf's key until its notAfter is a host's store, and this library holds none: hdtp-gateway serves the current and every superseded key before its notAfter and retires each after it (internal/identity/leaf.go ActiveLeafKeypairsFor, RetireExpiredLeafKeys); TestLeafSignupThenRenewThenMove opens an envelope sealed to the superseded key after a renewal",
+    "why": "keeping a superseded leaf's key until its notAfter is a host's store, and this library holds none. hdtp-gateway holds it in two tests: TestStaleKidIsAnsweredWithTheCurrentChain seals an envelope to the current key, renews, and opens that envelope under the now superseded key, then, past the old leaf's notAfter, gets certificate_renewed for it; TestLeafSignupThenRenewThenMove asserts that after a renewal ActiveLeafKeypairs serves both the new and the superseded key, and that past the superseded leaf's notAfter it serves only the new one",
     "hash": "453feec1c4e8",
     "text": "A host **MUST** keep a superseded leaf's private key until that leaf's `notAfter`, so an envelope sealed to it"
   },
@@ -126,7 +127,7 @@
     "elsewhere_names": [
       "gateway:TestParsedNameIsCappedAndStripped"
     ],
-    "why": "rendering a peer's name is a host's act: hdtp-gateway strips control and format characters (bidirectional ones among them) from FN when it reads a card (internal/contacts/vcard.go), held by TestParsedNameIsCappedAndStripped",
+    "why": "rendering a peer's name is a host's act: hdtp-gateway strips control and format characters (bidirectional ones among them) from FN when it reads a card (internal/contacts/vcard.go), held by TestParsedNameIsCappedAndStripped. batondeck does not strip a peer's FN today; that is its defect 2.16 of the spec-quality code-defect list (security), whose fix lands before production, and it is not cited here as a holder",
     "hash": "d950d5ad3dfc",
     "text": "`FN` is untrusted display input: a receiver **MUST** strip control and bidirectional-format characters from it"
   },
