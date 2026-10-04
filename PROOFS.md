@@ -24,7 +24,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 | # | The sentence | Held by |
 |---|---|---|
 | `2.#1` | When both proofs are present their leaf keys **MUST** match, else `envelope_invalid`. | `scenario:Mallory seals with Alina's chain inside and her own signature` |
-| `2.#2` | A host **MUST** keep a superseded leaf's private key until that leaf's `notAfter`, so an envelope sealed to it by a contact that has not yet heard still opens; an envelope sealed to a key the host once held and holds no longer is answered `certificate_renewed` with the current chain (§14.4). | `gateway:TestLeafSignupThenRenewThenMove` |
+| `2.#2` | A host **MUST** keep a superseded leaf's private key until that leaf's `notAfter`, so an envelope sealed to it by a contact that has not yet heard still opens; an envelope sealed to a key the host once held and holds no longer is answered `certificate_renewed` with the current chain (§14.4). | `gateway:TestStaleKidIsAnsweredWithTheCurrentChain`, `gateway:TestLeafSignupThenRenewThenMove` |
 
 ### 2.1 Deriving the root from a passkey
 
