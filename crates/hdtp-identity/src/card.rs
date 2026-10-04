@@ -4,34 +4,23 @@ use crate::time::DAY;
 use crate::util::{b64u, err, from_b64u, Result};
 use crate::x509::{self, Cert, MAX_LEAF_DAYS};
 
-/// RFC 6350 folding, counted in **UTF-16 code units** — what the seed library counts, and so the
-/// definition every port follows (CONTRACT §0). Counting code points (as this once did) or octets
-/// (as the Go port once did) makes three implementations that agree only on ASCII.
-///
-/// One deliberate difference from the seed: where a break would fall between the halves of a
-/// surrogate pair the break moves one unit earlier, so the pair stays whole. The seed emits a lone
-/// surrogate there, which is not a thing UTF-8 can carry — a card's bytes could not hold it.
+/// RFC 6350 §3.2 folding: a line is at most 75 octets, a continuation a space and at most 74 more,
+/// and a break never falls inside a UTF-8 sequence — it moves back to the start of the character.
+/// The seed folds the same way (CONTRACT §4), so the ports agree beyond ASCII.
 fn fold(line: &str) -> String {
-    let units: Vec<u16> = line.encode_utf16().collect();
-    if units.len() <= 75 {
+    if line.len() <= 75 {
         return line.to_string();
     }
-    let whole = |i: usize| -> usize {
-        // A high surrogate at the break means its pair continues past it: step back one unit.
-        if i > 0 && i < units.len() && (0xD800..0xDC00).contains(&units[i - 1]) {
-            i - 1
-        } else {
-            i
+    let mut parts = Vec::new();
+    let (mut i, mut width) = (0, 75);
+    while i < line.len() {
+        let mut end = (i + width).min(line.len());
+        while !line.is_char_boundary(end) {
+            end -= 1;
         }
-    };
-    let decode = |r: &[u16]| String::from_utf16_lossy(r);
-    let first = whole(75);
-    let mut parts = vec![decode(&units[..first])];
-    let mut i = first;
-    while i < units.len() {
-        let end = whole((i + 74).min(units.len()));
-        parts.push(format!(" {}", decode(&units[i..end])));
+        parts.push(if i == 0 { line[..end].to_string() } else { format!(" {}", &line[i..end]) });
         i = end;
+        width = 74;
     }
     parts.join("\r\n")
 }
@@ -178,26 +167,26 @@ pub fn decode(text: &str, now: i64) -> Result<Card> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    /// The threshold is UTF-16 code units, as the seed counts them: a name of accented letters
-    /// folds where JavaScript would fold it, not where its bytes or its code points would.
+    /// The threshold is octets (RFC 6350 §3.2), and a break never splits a UTF-8 sequence.
     #[test]
-    fn folds_on_utf16_code_units() {
-        // 40 two-byte characters: 40 code units, 80 octets. "FN:" + 40 = 43 units, under 75 — one line.
-        let short = format!("FN:{}", "é".repeat(40));
-        assert_eq!(fold(&short), short, "43 code units is one line, though it is 83 octets");
-        // 80 of them is 83 units: folded once, at unit 75.
+    fn folds_on_octets() {
+        // "FN:" and 36 two-byte letters is 75 octets: one line. 37 is 77: folded once.
+        let exact = format!("FN:{}", "é".repeat(36));
+        assert_eq!(fold(&exact), exact, "75 octets is one line");
         let long = format!("FN:{}", "é".repeat(80));
         let folded = fold(&long);
-        let lines: Vec<&str> = folded.split("\r\n").collect();
-        assert_eq!(lines.len(), 2);
-        assert_eq!(lines[0].encode_utf16().count(), 75);
-        assert_eq!(lines[1].encode_utf16().count(), 1 + 8); // one space, the remaining 8 units
+        for (n, line) in folded.split("\r\n").enumerate() {
+            assert!(line.len() <= 75, "line {n} is {} octets", line.len());
+        }
+        assert_eq!(folded.split("\r\n").next().unwrap().len(), 75);
         assert_eq!(unfold(&format!("{folded}\r\nEND:VCARD\r\n"))[0], long);
-        // A break that would land inside a surrogate pair moves one unit earlier, and the pair survives.
-        let astral = format!("FN:{}{}", "a".repeat(74), "\u{1F600}".repeat(3));
-        let f = fold(&astral);
-        assert!(!f.contains('\u{FFFD}'), "no half of a pair is lost: {f}");
-        assert_eq!(unfold(&format!("{f}\r\nEND:VCARD\r\n"))[0], astral);
+        // A break that would land inside a character moves back to its start, and nothing is lost.
+        for tail in ["€€€", "\u{1F600}\u{1F600}"] {
+            let line = format!("FN:{}{tail}", "a".repeat(71));
+            let f = fold(&line);
+            assert_eq!(f.split("\r\n").next().unwrap().len(), 74, "{tail}: the break moves before the character");
+            assert_eq!(unfold(&format!("{f}\r\nEND:VCARD\r\n"))[0], line);
+        }
     }
 
     #[test]

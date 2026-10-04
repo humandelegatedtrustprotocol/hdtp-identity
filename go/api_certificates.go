@@ -23,11 +23,15 @@ func callBuildRoot(a args) json.RawMessage {
 	if err != nil {
 		return failAs("parse", err)
 	}
+	na, err := a.optInstant("not_after")
+	if err != nil {
+		return failAs("parse", err)
+	}
 	serial, err := a.serial()
 	if err != nil {
 		return failAs(codeArgs, err)
 	}
-	der, err := BuildRoot(RootOpts{CN: cn, Key: priv, NotBefore: nb, Serial: serial})
+	der, err := BuildRoot(RootOpts{CN: cn, Key: priv, NotBefore: nb, NotAfter: orZero(na), Serial: serial})
 	if err != nil {
 		return failAs("parse", err)
 	}
@@ -47,13 +51,17 @@ func callRootTBS(a args) json.RawMessage {
 	if err != nil {
 		return failAs("parse", err)
 	}
+	na, err := a.optInstant("not_after")
+	if err != nil {
+		return failAs("parse", err)
+	}
 	serial, err := a.serial()
 	if err != nil {
 		return failAs(codeArgs, err)
 	}
-	tbs, alg, err := RootTBS(cn, pub, nb, serial)
+	tbs, alg, err := RootTBS(cn, pub, nb, orZero(na), serial)
 	if err != nil {
-		return failErr("internal", err)
+		return failAs("internal", err)
 	}
 	return ok(map[string]any{"tbs": B64url(tbs), "sig_alg": B64url(alg)})
 }
@@ -307,4 +315,12 @@ func leafSpec(a args) (LeafOpts, error) {
 		return LeafOpts{}, err
 	}
 	return LeafOpts{CN: cn, RootCN: rootCN, HostPub: host, Endpoint: endpoint, DNSName: dns, NotBefore: nb, NotAfter: na, Serial: serial}, nil
+}
+
+// orZero is an optional instant as RootOpts reads one: absent is the zero time.
+func orZero(t *time.Time) time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+	return *t
 }

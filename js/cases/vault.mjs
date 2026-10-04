@@ -399,4 +399,12 @@ export default function vault({ add, expect }, f) {
     vault_plaintext: { ...held, roots: [{ ...root0, alg: 'ed25519', holder: { kind: 'piv' } }], prf: b64url(new Uint8Array(32).fill(7)), passkey: { credential_id: 'a-credential' } },
     record_plaintext: { ...record, roots: [{ ...uncreated, created: now, rebound_at: 1789214400000 }], contacts: [{ root: 'sha256:' + 'C'.repeat(43), endpoint: ENDPOINT, name: 'Bharat', added: now }], passkey: { credential_id: 'a-credential' }, backup_verified_at: 1789214400000 },
   }), f.withoutSerial('der'));
+
+  // SPEC §2.2 in the vault: past its root's end date nothing is signed, and before it a leaf that would
+  // outlive the root ends with it, among the vault's own warnings (fixtures.mjs `ending`).
+  const { near, ended, endedWhy } = f.ending;
+  const under = (cert) => ({ v: 1, roots: [{ fingerprint: f.rootFp, cn: 'Alina Rao', pkcs8: f.rootPkcs8, cert, created: now }] });
+  add('wallet_issue under a root past its end date', 'wallet_issue', { vault_plaintext: under(ended), record_plaintext: f.record, root_fingerprint: f.rootFp, csr: f.csr, now });
+  expect('wallet_issue under a root past its end date', endedWhy);
+  add('wallet_issue under a root that ends before the leaf would', 'wallet_issue', { vault_plaintext: under(near), record_plaintext: f.record, root_fingerprint: f.rootFp, csr: f.csr, now }, f.withoutSerial('der'));
 }

@@ -31,8 +31,8 @@
   },
   "$defs": {
     "ErrorCode": {
-      "enum": ["bad_request", "parse", "unsupported", "envelope_invalid", "vault", "key", "internal"],
-      "description": "Why a call failed. `bad_request`: an argument is missing or unusable as asked. `parse`: bytes that are there and will not read. `unsupported`: an algorithm or a function this library does not have. `envelope_invalid`: SPEC §12's code, for an envelope that does not open or prove itself. `vault`: the vault refused. `key` and `internal` are declared so a caller's switch has a name for them; no input known reaches either."
+      "enum": ["bad_request", "parse", "unsupported", "envelope_invalid", "vault", "root_expired", "key", "internal"],
+      "description": "Why a call failed. `bad_request`: an argument is missing or unusable as asked. `parse`: bytes that are there and will not read. `unsupported`: an algorithm or a function this library does not have. `envelope_invalid`: SPEC §12's code, for an envelope that does not open or prove itself. `vault`: the vault refused. `root_expired`: a wallet asked to sign under a root past its `notAfter` (SPEC §2.2) — the library's refusal, never a code on the wire; a verifier meeting such a root in a chain refuses it by rule 4 of `validate_chain`. `key` and `internal` are declared so a caller's switch has a name for them; no input known reaches either."
     },
     "B64url": {
       "type": "string",
@@ -1086,6 +1086,7 @@
           "cn": { "type": "string" },
           "pkcs8": { "$ref": "#/$defs/Pkcs8" },
           "not_before": { "$ref": "#/$defs/InstantIn" },
+          "not_after": { "$ref": "#/$defs/InstantIn", "description": "The identity's end date, which its person chose (SPEC §14.1). Absent or null, the root never expires: `99991231235959Z`. Before `not_before` is refused (`bad_request`, `not_after is before not_before`); one already past is the wallet's to refuse, since only the wallet knows the time." },
           "serial": { "$ref": "#/$defs/Serial" }
         },
         "required": ["cn", "pkcs8", "not_before"],
@@ -1097,7 +1098,8 @@
         "required": ["der", "fingerprint"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "parse", "unsupported"]
+      "errors": ["bad_request", "parse", "unsupported"],
+      "notes": "Members are read in their declared order: `cn`, `pkcs8`, `not_before`, `not_after`, `serial`."
     },
     "root_tbs": {
       "section": "certificates",
@@ -1107,6 +1109,7 @@
           "cn": { "type": "string" },
           "spki": { "$ref": "#/$defs/Spki" },
           "not_before": { "$ref": "#/$defs/InstantIn" },
+          "not_after": { "$ref": "#/$defs/InstantIn", "description": "The identity's end date, which its person chose (SPEC §14.1). Absent or null, the root never expires: `99991231235959Z`. Before `not_before` is refused (`bad_request`, `not_after is before not_before`); one already past is the wallet's to refuse, since only the wallet knows the time." },
           "serial": { "$ref": "#/$defs/Serial" }
         },
         "required": ["cn", "spki", "not_before"],
@@ -1167,7 +1170,7 @@
         "additionalProperties": false
       },
       "errors": ["bad_request", "parse", "unsupported"],
-      "notes": "Refuses a validity over 398 days and an endpoint that is not an https URL in normal form."
+      "notes": "A raw profile builder, for tests and the vectors: it judges no date against a root and no root against the clock, so it builds a leaf that outlives its root or starts after it, which a verifier must refuse. A wallet issues through `issue_from_csr`, `issue_tbs_from_csr` or `wallet_issue`, which do. Refuses a validity over 398 days and an endpoint that is not an https URL in normal form."
     },
     "leaf_tbs": {
       "section": "certificates",
@@ -1194,7 +1197,7 @@
         "additionalProperties": false
       },
       "errors": ["bad_request", "parse", "unsupported"],
-      "notes": "The same seam for leaves: `build_leaf` with the root's public key in place of its private one."
+      "notes": "The same seam for leaves: `build_leaf` with the root's public key in place of its private one, and as raw: for tests and the vectors, never a wallet's way to issue."
     },
     "assemble_leaf": {
       "section": "certificates",
@@ -1267,7 +1270,7 @@
       },
       "result": { "oneOf": [{ "$ref": "#/$defs/ChainAccepted" }, { "$ref": "#/$defs/ChainRefused" }] },
       "errors": ["bad_request", "parse"],
-      "notes": "SPEC §14.2's rules in order. A refusal is an answer, not a failure of the call: `rule` says which one refused."
+      "notes": "SPEC §14.2's rules in order. A refusal is an answer, not a failure of the call: `rule` says which one refused. Rule 4 refuses, in this order, `root has expired` (the clock past the root's `notAfter`), `leaf outside its validity`, `leaf longer than 398 days` and `leaf outlives the root`; it never reads the root's `notBefore`."
     },
     "compare_leaves": {
       "section": "certificates",
@@ -1408,14 +1411,14 @@
         "type": "object",
         "properties": {
           "csr": { "$ref": "#/$defs/Csr" },
-          "root_cn": { "type": "string" },
+          "root_cert": { "$ref": "#/$defs/CertDer", "description": "The root the leaf is issued under, as its certificate (SPEC §2.2): its commonName, key and end date are read from it. It must be a root of the profile and self-signed, and not past its `notAfter` at `now`." },
           "root_spkis": { "type": "array", "items": { "$ref": "#/$defs/Spki" } },
           "now": { "$ref": "#/$defs/InstantIn" },
           "previous_not_before": { "$ref": "#/$defs/InstantIn" },
           "valid_days": { "type": "integer", "minimum": 1, "maximum": 398 },
           "root_pkcs8": { "$ref": "#/$defs/Pkcs8" }
         },
-        "required": ["csr", "root_cn", "root_pkcs8", "now"],
+        "required": ["csr", "root_cert", "root_pkcs8", "now"],
         "additionalProperties": false
       },
       "result": {
@@ -1424,13 +1427,14 @@
           "der": { "$ref": "#/$defs/CertDer" },
           "endpoint": { "type": "string" },
           "not_before": { "$ref": "#/$defs/Instant" },
-          "not_after": { "$ref": "#/$defs/Instant" }
+          "not_after": { "$ref": "#/$defs/Instant" },
+          "warnings": { "type": "array", "items": { "type": "string" } }
         },
-        "required": ["der", "endpoint", "not_before", "not_after"],
+        "required": ["der", "endpoint", "not_before", "not_after", "warnings"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "parse", "unsupported"],
-      "notes": "`csr_check` first — with the issuing root added to `root_spkis` — then `build_leaf` under the monotonic rule. `valid_days` absent is 365; an explicit 0 is refused."
+      "errors": ["bad_request", "parse", "unsupported", "root_expired"],
+      "notes": "Read in this order: `now`; `root_cert`, judged before anything is signed — not a certificate, `parse`; not a root of the profile, `bad_request` `root_cert is not a root of the profile: <why>`; not self-signed, `bad_request` `root_cert is not self-signed`; past its `notAfter` at `now` (RFC 5280's inclusive reading), `root_expired` `the root ended at <instant>: it signs nothing more`; then `root_pkcs8`, which must be the certificate's key (`bad_request` `root_pkcs8 is not the key of root_cert`, after the request is checked); then `root_spkis`, then `csr_check` with the issuing root added to `root_spkis`, then `previous_not_before` and `valid_days`, and the leaf under the monotonic rule. `valid_days` absent is 365; an explicit 0 is refused. A leaf ends no later than its root (SPEC §14.2 rule 4): where the validity asked would run past the root's `notAfter`, `not_after` is the root's and `warnings` says `the leaf ends with its root, at <instant>: sooner than the validity asked`; otherwise `warnings` is empty. A `not_before` the monotonic rule puts after the root's `notAfter` is `root_expired` `the root ends at <instant>, before this leaf could begin`."
     },
     "issue_tbs_from_csr": {
       "section": "csr",
@@ -1438,14 +1442,13 @@
         "type": "object",
         "properties": {
           "csr": { "$ref": "#/$defs/Csr" },
-          "root_cn": { "type": "string" },
+          "root_cert": { "$ref": "#/$defs/CertDer", "description": "The root the leaf is issued under, as its certificate (SPEC §2.2): its commonName, key and end date are read from it. It must be a root of the profile and self-signed, and not past its `notAfter` at `now`." },
           "root_spkis": { "type": "array", "items": { "$ref": "#/$defs/Spki" } },
           "now": { "$ref": "#/$defs/InstantIn" },
           "previous_not_before": { "$ref": "#/$defs/InstantIn" },
-          "valid_days": { "type": "integer", "minimum": 1, "maximum": 398 },
-          "root_spki": { "$ref": "#/$defs/Spki" }
+          "valid_days": { "type": "integer", "minimum": 1, "maximum": 398 }
         },
-        "required": ["csr", "root_cn", "root_spki", "now"],
+        "required": ["csr", "root_cert", "now"],
         "additionalProperties": false
       },
       "result": {
@@ -1455,13 +1458,14 @@
           "sig_alg": { "$ref": "#/$defs/SigAlg" },
           "endpoint": { "type": "string" },
           "not_before": { "$ref": "#/$defs/Instant" },
-          "not_after": { "$ref": "#/$defs/Instant" }
+          "not_after": { "$ref": "#/$defs/Instant" },
+          "warnings": { "type": "array", "items": { "type": "string" } }
         },
-        "required": ["tbs", "sig_alg", "endpoint", "not_before", "not_after"],
+        "required": ["tbs", "sig_alg", "endpoint", "not_before", "not_after", "warnings"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "parse", "unsupported"],
-      "notes": "As `issue_from_csr`, for the seam: assembled with `assemble_leaf`."
+      "errors": ["bad_request", "parse", "unsupported", "root_expired"],
+      "notes": "As `issue_from_csr`, for the seam, with no `root_pkcs8`: the root's key signs `tbs` elsewhere, and `assemble_leaf` builds the leaf. An expired root is refused before a `tbs` exists, so nothing is ever put in front of a passkey or a card for it."
     },
     "card_encode": {
       "section": "cards",
@@ -1872,8 +1876,8 @@
         "required": ["der", "endpoint", "not_before", "not_after", "ledger_entry", "new_host", "warnings"],
         "additionalProperties": false
       },
-      "errors": ["bad_request", "parse", "unsupported"],
-      "notes": "Two documents, as \u00a79 keeps them: the vault is the root and nothing else, the record holds the ledger this reads and the entry answered is appended to. A vault carrying `ledger` or `contacts` is refused (`bad_request`, `a vault holds the root and nothing else: its ledger and contacts belong in the record`); an absent or null document is `vault_plaintext is required` or `record_plaintext is required` (CONTRACT §0), and a record that is not an object `record_plaintext is required: the ledger lives there`. After `root_fingerprint`, `csr`, `now` and `valid_days` (present and not an integer: `valid_days is required`), each document is held to its schema before anything in it is read, as follows. Inside both documents, as in the arguments (CONTRACT §0), a member the document declares that is `null` is absent — an optional one is not there, a required one is named as a missing one is — and a member it does not declare is refused whatever it holds, `null` included (a vault's `ledger: null` is a vault carrying a ledger). The vault: not an object, `vault_plaintext is required: the root lives there`; then its `v`; then the first member, in sorted order, it does not hold, `vault_plaintext holds v, roots, prf and passkey, and nothing else: <member>`; then its `roots` (absent or not a list: `the vault's roots is a list`), each entry a `VaultRoot` (`the vault's root <i> does not read: <member>`: the first of `fingerprint`, `cn`, `cert` and `created` that is absent, not a string, not a fingerprint or not an instant, then an `alg`, `pkcs8`, `holder` or `rebound_at` of the wrong type, then the first member, in sorted order, it does not hold; an entry that is not an object, `the vault's root <i> does not read`); then its `prf` (32 bytes, or `the vault's prf does not read`) and its `passkey` (an object holding `credential_id`, a string, and nothing else, or `the vault's passkey does not read`). Then the record, likewise: `record_plaintext holds v, roots, ledger, contacts, passkey and backup_verified_at, and nothing else: <member>`; its `roots` where present, as the vault's (`the record's roots is a list`, `the record's root <i> does not read: <member>`); its `ledger` (not a list: `the record's ledger is a list`) and every ledger entry, every root's: an entry that is not an object, lacks a required member, has one of the wrong type, a `root` that is not a fingerprint, an empty `endpoint` or an instant that does not parse, or carries one it does not hold is refused (`the record's ledger entry <i> does not read: <member>`), never skipped — skipped, it could be the live leaf; its `contacts` (not a list: `the record's contacts is a list`), each entry a `VaultContact` (`the record's contact <i> does not read: <member>`: `root` absent or not a fingerprint, `endpoint` absent or not a string, a `name`, `leaf`, `root_cert` or `added` that is not a string or, for `added`, not an instant, then the first member, in sorted order, it does not hold; an entry that is not an object, `the record's contact <i> does not read`); its `passkey` (`the record's passkey does not read`) and its `backup_verified_at`, a whole number (`the record's backup_verified_at does not read`). A root with no `pkcs8` is refused (`this root is held on a card: wallet_issue signs only with a key the vault holds`), and one whose `pkcs8` does not read is refused in its reader's class (`parse`; `unsupported` for a key outside the profile). Then SPEC §2.2, before anything is signed: the key's fingerprint is `root_fingerprint` (`the vault's root key is not the root it is filed under`); the entry's `cert` reads (in its reader's class) and holds the key (`the vault's root certificate is not its key's`); and the key signs `HDTP root proof v1`, a newline and 32 random bytes, verified under the certificate's key (`the vault's root key does not sign for its certificate`). After issuing, the chain of the leaf and that certificate is validated at `now` against `root_fingerprint` and the request's endpoint before it is answered (`the chain it issued does not validate: chain rule <n>: <reason>`). The entry answered is the endpoint and the dates, never the leaf. The wallet's rules: `csr_check` with the vault's roots as `root_spkis`; then `ledger_check`'s rules over the record's ledger (a record with no `ledger` has no entry to read): `new_host` true when no ledger entry names that endpoint's host, with the warning `new host: this endpoint's host has never been issued to`; the **live leaf is the newest one issued** (§14.3) and a second endpoint while it is unexpired is refused unless `move: true`, which instead warns `move: the live leaf at the previous endpoint is superseded once contacts see this one` (a `move` or a `move_back`); `not_before` monotonic over the ledger; `valid_days` absent means 365 and an explicit 0 is refused."
+      "errors": ["bad_request", "parse", "unsupported", "root_expired"],
+      "notes": "Two documents, as \u00a79 keeps them: the vault is the root and nothing else, the record holds the ledger this reads and the entry answered is appended to. A vault carrying `ledger` or `contacts` is refused (`bad_request`, `a vault holds the root and nothing else: its ledger and contacts belong in the record`); an absent or null document is `vault_plaintext is required` or `record_plaintext is required` (CONTRACT §0), and a record that is not an object `record_plaintext is required: the ledger lives there`. After `root_fingerprint`, `csr`, `now` and `valid_days` (present and not an integer: `valid_days is required`), each document is held to its schema before anything in it is read, as follows. Inside both documents, as in the arguments (CONTRACT §0), a member the document declares that is `null` is absent — an optional one is not there, a required one is named as a missing one is — and a member it does not declare is refused whatever it holds, `null` included (a vault's `ledger: null` is a vault carrying a ledger). The vault: not an object, `vault_plaintext is required: the root lives there`; then its `v`; then the first member, in sorted order, it does not hold, `vault_plaintext holds v, roots, prf and passkey, and nothing else: <member>`; then its `roots` (absent or not a list: `the vault's roots is a list`), each entry a `VaultRoot` (`the vault's root <i> does not read: <member>`: the first of `fingerprint`, `cn`, `cert` and `created` that is absent, not a string, not a fingerprint or not an instant, then an `alg`, `pkcs8`, `holder` or `rebound_at` of the wrong type, then the first member, in sorted order, it does not hold; an entry that is not an object, `the vault's root <i> does not read`); then its `prf` (32 bytes, or `the vault's prf does not read`) and its `passkey` (an object holding `credential_id`, a string, and nothing else, or `the vault's passkey does not read`). Then the record, likewise: `record_plaintext holds v, roots, ledger, contacts, passkey and backup_verified_at, and nothing else: <member>`; its `roots` where present, as the vault's (`the record's roots is a list`, `the record's root <i> does not read: <member>`); its `ledger` (not a list: `the record's ledger is a list`) and every ledger entry, every root's: an entry that is not an object, lacks a required member, has one of the wrong type, a `root` that is not a fingerprint, an empty `endpoint` or an instant that does not parse, or carries one it does not hold is refused (`the record's ledger entry <i> does not read: <member>`), never skipped — skipped, it could be the live leaf; its `contacts` (not a list: `the record's contacts is a list`), each entry a `VaultContact` (`the record's contact <i> does not read: <member>`: `root` absent or not a fingerprint, `endpoint` absent or not a string, a `name`, `leaf`, `root_cert` or `added` that is not a string or, for `added`, not an instant, then the first member, in sorted order, it does not hold; an entry that is not an object, `the record's contact <i> does not read`); its `passkey` (`the record's passkey does not read`) and its `backup_verified_at`, a whole number (`the record's backup_verified_at does not read`). A root with no `pkcs8` is refused (`this root is held on a card: wallet_issue signs only with a key the vault holds`), and one whose `pkcs8` does not read is refused in its reader's class (`parse`; `unsupported` for a key outside the profile). Then SPEC §2.2, before anything is signed: a root whose entry's `cert` reads and is past its `notAfter` at `now` is refused as `issue_from_csr` refuses it (`root_expired`), before the proof of possession below; the key's fingerprint is `root_fingerprint` (`the vault's root key is not the root it is filed under`); the entry's `cert` reads (in its reader's class) and holds the key (`the vault's root certificate is not its key's`); and the key signs `HDTP root proof v1`, a newline and 32 random bytes, verified under the certificate's key (`the vault's root key does not sign for its certificate`). After issuing, the chain of the leaf and that certificate is validated at `now` against `root_fingerprint` and the request's endpoint before it is answered (`the chain it issued does not validate: chain rule <n>: <reason>`). The entry answered is the endpoint and the dates, never the leaf. The wallet's rules: `csr_check` with the vault's roots as `root_spkis`; then `ledger_check`'s rules over the record's ledger (a record with no `ledger` has no entry to read): `new_host` true when no ledger entry names that endpoint's host, with the warning `new host: this endpoint's host has never been issued to`; the **live leaf is the newest one issued** (§14.3) and a second endpoint while it is unexpired is refused unless `move: true`, which instead warns `move: the live leaf at the previous endpoint is superseded once contacts see this one` (a `move` or a `move_back`); `not_before` monotonic over the ledger; `valid_days` absent means 365 and an explicit 0 is refused. A leaf ends no later than its root, and `warnings` then carries `issue_from_csr`'s line saying so."
     },
     "ledger_check": {
       "section": "ledger",

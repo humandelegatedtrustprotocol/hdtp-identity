@@ -292,6 +292,10 @@ enum IdCmd {
         /// long as that file does — and the vault keeps it, so a lost card is not a lost identity.
         #[arg(long, conflicts_with = "piv")]
         key_out: Option<String>,
+        /// The identity's end date, RFC 3339 (SPEC §14.1): past it, this wallet signs nothing more
+        /// and every contact refuses the identity. Absent, the root never expires; it is never rotated
+        #[arg(long)]
+        ends: Option<String>,
     },
     /// Issue a leaf for a request, after showing what it names and asking
     Issue {
@@ -399,9 +403,9 @@ fn run(cli: Cli) -> Res<i32> {
             }
         },
         Cmd::Id { cmd } => match cmd {
-            IdCmd::Create { name, alg, vault, piv, reader, key_out } => match piv {
-                Some(slot) => wallet::id_create_piv(&name, &slot, reader.as_deref(), &vault),
-                None => wallet::id_create(&name, &alg, &vault, key_out.as_deref()),
+            IdCmd::Create { name, alg, vault, piv, reader, key_out, ends } => match piv {
+                Some(slot) => wallet::id_create_piv(&name, &slot, reader.as_deref(), &vault, ends.as_deref()),
+                None => wallet::id_create(&name, &alg, &vault, key_out.as_deref(), ends.as_deref()),
             },
             IdCmd::Issue { common: c, moving } => wallet::id_issue(wallet::IssueArgs {
                 vault: &c.vault,

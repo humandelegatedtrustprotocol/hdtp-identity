@@ -7,13 +7,13 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed as proven that did not pass.
 
-Specification: **1.0.0**. **99** normative sentences, **2868** cross-port parity cases over **54** guarded functions.
+Specification: **1.0.0**. **100** normative sentences, **2889** cross-port parity cases over **54** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 1.0.0): **5736** answers, of which **0** do not hold to the shape it declares. Of **128** declared error codes, **128** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 1.0.0): **5778** answers, of which **0** do not hold to the shape it declares. Of **131** declared error codes, **131** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
-## The 99 normative sentences of the specification
+## The 100 normative sentences of the specification
 
-A sentence carrying MUST, MUST NOT or REQUIRED, one row each, in document order. **69** are
+A sentence carrying MUST, MUST NOT or REQUIRED, one row each, in document order. **70** are
 held by a test or an intrusion scenario in this repository; **30** belong to a wallet, a host
 or a node, and name the artefact that holds them there — checked against the sibling repository
 whenever it is on disk. A row with nothing in its last column would fail `js/musts.mjs`.
@@ -41,7 +41,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 | # | The sentence | Held by |
 |---|---|---|
 | `2.2#1` | Before issuing any certificate, a wallet **MUST** establish that the root it is about to sign with is the root the identity already has. | `rust:a_vault_entry_that_disagrees_with_its_own_certificate_signs_nothing`, `rust:a_vault_root_proves_itself_before_it_signs`, `go:TestWalletIssueProvesTheRootBeforeItSigns` |
-| `2.2#2` | A wallet **MUST** refuse to sign unless all three hold: | `rust:a_card_whose_certificate_and_key_disagree_gets_no_leaf`, `rust:another_card_signs_nothing_for_this_identity`, `rust:a_card_that_swaps_its_key_after_the_check_signs_nothing_that_is_kept`, `rust:a_vault_root_proves_itself_before_it_signs`, `go:TestWalletIssueProvesTheRootBeforeItSigns` |
+| `2.2#2` | A wallet **MUST** refuse to sign unless all four hold: | `rust:a_card_whose_certificate_and_key_disagree_gets_no_leaf`, `rust:another_card_signs_nothing_for_this_identity`, `rust:a_card_that_swaps_its_key_after_the_check_signs_nothing_that_is_kept`, `rust:a_vault_root_proves_itself_before_it_signs`, `go:TestWalletIssueProvesTheRootBeforeItSigns`, `rust:a_root_with_an_end_date`, `rust:a_vault_root_with_an_end_date`, `rust:a_card_root_with_an_end_date`, `go:TestARootWithAnEndDate` |
 | `2.2#3` | The challenge **MUST** be domain-separated from certificate bytes — the ASCII `HDTP root proof v1` followed by a newline and at least 32 random bytes — so that proving possession can never be made to sign a certificate. | *wallet, by declaration* |
 | `2.2#4` | A wallet **MUST** validate a chain it has assembled (§14.2) against the expected root and endpoint before returning it. | `rust:a_leaf_the_card_signed_validates_to_that_root_at_its_endpoint`, `rust:a_vault_root_proves_itself_before_it_signs`, `go:TestWalletIssueProvesTheRootBeforeItSigns` |
 | `2.2#5` | **A root certificate is issued once.** A wallet **MUST NOT** rebuild a root certificate for an identity that already has one. | `rust:a_root_the_card_signed_is_a_root` |
@@ -210,9 +210,10 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 |---|---|---|
 | `14.2#1` | A verifier handed a chain **MUST** apply these in order and **MUST** refuse at the first failure — `envelope_invalid` in an envelope, a refused handshake for a client certificate, `bad_request` for a card: | `rust:chain_cases`, `go:TestChainCases` |
 | `14.2#2` | When the verifier already holds a fingerprint for the identity in question — from a pin, or from the issuer key identifier of a card's certificate — the two **MUST** be equal. | `scenario:Alina's leaf presented under Mallory's root`, `scenario:the leaf presented as its own root`, `go:TestChainCases`, `rust:chain_cases` |
-| `14.2#3` | When the verifier knows which address is in question — the URL it dialed, the endpoint it pinned, the endpoint in the card — the URI **MUST** equal it byte for byte — both are the normal form of §14.1, so nothing is normalised at comparison time. | `scenario:endpoint: userinfo in the URI`, `scenario:endpoint: uppercase host`, `scenario:endpoint: trailing slash`, `go:TestNormalFormPorts`, `rust:normal_form` |
-| `14.2#4` | A `dNSName` beside the URI **MUST** equal its host, and the address guard of §3 — no loopback, link-local or private host; never the verifier's own endpoint from a guest — applies before any dial. | `scenario:endpoint: dNSName of another host`, `scenario:a guest whose leaf names the receiver's own address` |
-| `14.2#5` | A verifier therefore **MUST NOT** refuse a chain on the root's `notBefore` — including a root whose `notBefore` is later than the leaf's, which is the ordinary case for a new identity, since §14.1 backdates a first leaf up to an hour for clock skew while the root was made minutes ago. | `scenario:a root whose notBefore is years away is not a refusal` |
+| `14.2#3` | The verifier's clock is not past the root's `notAfter`, and is within the leaf's `notBefore` and `notAfter`; the leaf's `notAfter − notBefore` is at most 398 days; and the leaf's `notAfter` **MUST NOT** be after the root's. | `rust:chain_cases`, `go:TestChainCases`, `scenario:a leaf that outlives its root`, `rust:a_root_with_an_end_date`, `go:TestARootWithAnEndDate` |
+| `14.2#4` | When the verifier knows which address is in question — the URL it dialed, the endpoint it pinned, the endpoint in the card — the URI **MUST** equal it byte for byte — both are the normal form of §14.1, so nothing is normalised at comparison time. | `scenario:endpoint: userinfo in the URI`, `scenario:endpoint: uppercase host`, `scenario:endpoint: trailing slash`, `go:TestNormalFormPorts`, `rust:normal_form` |
+| `14.2#5` | A `dNSName` beside the URI **MUST** equal its host, and the address guard of §3 — no loopback, link-local or private host; never the verifier's own endpoint from a guest — applies before any dial. | `scenario:endpoint: dNSName of another host`, `scenario:a guest whose leaf names the receiver's own address` |
+| `14.2#6` | A verifier therefore **MUST NOT** refuse a chain on the root's `notBefore` — including a root whose `notBefore` is later than the leaf's, which is the ordinary case for a new identity, since §14.1 backdates a first leaf up to an hour for clock skew while the root was made minutes ago. | `scenario:a root whose notBefore is years away is not a refusal` |
 
 ### 14.3 The newest leaf wins
 
@@ -228,7 +229,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 | `14.4#1` | An endpoint **MUST** keep the key identifiers of every leaf it has held for an identity it still serves — fingerprints, never keys past their `notAfter`. | `scenario:a former key of a still-served identity gets the current chain`, `gateway:TestStaleKidIsAnsweredWithTheCurrentChain` |
 | `14.4#2` | A caller **MUST** follow `certificate_renewed` at most once per call, and only when the chain it carries is newer than or equal to its pin (§14.3): an older chain, a chain to another root, or a chain naming another address is discarded and the call fails as it would have. | `rust:certificate_renewed_cases`, `go:TestChainCases` |
 
-## The 2868 cross-port parity cases
+## The 2889 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -236,7 +237,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **2868** cases (**1418** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
+At the run that generated this file: **2889** cases (**1417** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
 
 ### `address_guard` — 51 cases · whole on success
 
@@ -471,7 +472,7 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - generated · build_leaf · root_pkcs8 absent, not_after 7
 - generated · build_leaf · root_pkcs8 absent, serial 7
 
-### `build_root` — 29 cases · whole on success
+### `build_root` — 37 cases · whole on success
 
 - build_root with no key
 - build_root
@@ -479,6 +480,9 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - build_root with an instant that is not one
 - build_root with nothing to work from
 - build_root with CN, not cn
+- build_root with an end date
+- build_root with an end date before its start
+- build_root with an end date at its start
 - generated · build_root · {}
 - generated · build_root · cn absent
 - generated · build_root · cn null
@@ -489,18 +493,23 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - generated · build_root · not_before absent
 - generated · build_root · not_before null
 - generated · build_root · not_before ""
+- generated · build_root · not_after ""
+- generated · build_root · not_after 7
 - generated · build_root · serial ""
 - generated · build_root · serial 7
 - generated · build_root · an undeclared member
 - generated · build_root · pkcs8 holding a key outside the profile
 - generated · build_root · cn absent, pkcs8 7
 - generated · build_root · cn absent, not_before 7
+- generated · build_root · cn absent, not_after 7
 - generated · build_root · cn absent, serial 7
 - generated · build_root · pkcs8 absent, cn 7
 - generated · build_root · pkcs8 absent, not_before 7
+- generated · build_root · pkcs8 absent, not_after 7
 - generated · build_root · pkcs8 absent, serial 7
 - generated · build_root · not_before absent, cn 7
 - generated · build_root · not_before absent, pkcs8 7
+- generated · build_root · not_before absent, not_after 7
 - generated · build_root · not_before absent, serial 7
 
 ### `card_decode` — 39 cases · whole on success
@@ -545,12 +554,18 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - generated · card_decode · vcard absent, now 7
 - generated · card_decode · now absent, vcard 7
 
-### `card_encode` — 34 cases · whole on success
+### `card_encode` — 40 cases · whole on success
 
 - card_encode
 - card_encode with a name outside ASCII
 - card_encode with a name that straddles the fold
 - card_encode with an emoji name
+- card_encode folding at octets: two-byte letters filling 75 octets exactly
+- card_encode folding at octets: two-byte letters one past 75 octets
+- card_encode folding at octets: a three-byte character across octet 75
+- card_encode folding at octets: a four-byte character across octet 75
+- card_encode folding at octets: two-byte letters across the second line
+- card_encode folding at octets: the earlier cases' accented name
 - card_encode with a seal nobody has
 - card_encode of a certificate that is not one
 - card_encode with a certificate that is not a string
@@ -1654,7 +1669,7 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - generated · is_normal_https · url ""
 - generated · is_normal_https · an undeclared member
 
-### `issue_from_csr` — 61 cases · whole on success
+### `issue_from_csr` — 68 cases · whole on success
 
 - issue_from_csr with an explicit zero validity
 - issue_from_csr over 398 days
@@ -1671,14 +1686,20 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - issue_from_csr of a request carrying a key outside the profile: P-384
 - issue_from_csr of a request carrying a key outside the profile: X25519
 - issue_from_csr of a request carrying a key outside the profile: Ed25519 with a NULL
+- issue_from_csr under a root with an end date not yet reached
+- issue_from_csr under a root that ends before the leaf would
+- issue_from_csr at the last second of its root
+- issue_from_csr under a root past its end date
+- issue_from_csr with a root_cert that is a leaf
+- issue_from_csr with a root_pkcs8 that is not the key of root_cert
 - generated · issue_from_csr · {}
 - generated · issue_from_csr · the hostile object
 - generated · issue_from_csr · csr absent
 - generated · issue_from_csr · csr null
 - generated · issue_from_csr · csr ""
-- generated · issue_from_csr · root_cn absent
-- generated · issue_from_csr · root_cn null
-- generated · issue_from_csr · root_cn ""
+- generated · issue_from_csr · root_cert absent
+- generated · issue_from_csr · root_cert null
+- generated · issue_from_csr · root_cert ""
 - generated · issue_from_csr · root_pkcs8 absent
 - generated · issue_from_csr · root_pkcs8 null
 - generated · issue_from_csr · root_pkcs8 ""
@@ -1691,50 +1712,50 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - generated · issue_from_csr · valid_days "7"
 - generated · issue_from_csr · an undeclared member
 - generated · issue_from_csr · csr holding a key outside the profile
+- generated · issue_from_csr · root_cert holding a key outside the profile
 - generated · issue_from_csr · root_spkis holding a key outside the profile
 - generated · issue_from_csr · root_pkcs8 holding a key outside the profile
-- generated · issue_from_csr · csr absent, root_cn 7
+- generated · issue_from_csr · csr absent, root_cert 7
 - generated · issue_from_csr · csr absent, root_spkis "x"
 - generated · issue_from_csr · csr absent, now 7
 - generated · issue_from_csr · csr absent, previous_not_before 7
 - generated · issue_from_csr · csr absent, valid_days "7"
 - generated · issue_from_csr · csr absent, root_pkcs8 7
-- generated · issue_from_csr · root_cn absent, csr 7
-- generated · issue_from_csr · root_cn absent, root_spkis "x"
-- generated · issue_from_csr · root_cn absent, now 7
-- generated · issue_from_csr · root_cn absent, previous_not_before 7
-- generated · issue_from_csr · root_cn absent, valid_days "7"
-- generated · issue_from_csr · root_cn absent, root_pkcs8 7
+- generated · issue_from_csr · root_cert absent, csr 7
+- generated · issue_from_csr · root_cert absent, root_spkis "x"
+- generated · issue_from_csr · root_cert absent, now 7
+- generated · issue_from_csr · root_cert absent, previous_not_before 7
+- generated · issue_from_csr · root_cert absent, valid_days "7"
+- generated · issue_from_csr · root_cert absent, root_pkcs8 7
 - generated · issue_from_csr · root_pkcs8 absent, csr 7
-- generated · issue_from_csr · root_pkcs8 absent, root_cn 7
+- generated · issue_from_csr · root_pkcs8 absent, root_cert 7
 - generated · issue_from_csr · root_pkcs8 absent, root_spkis "x"
 - generated · issue_from_csr · root_pkcs8 absent, now 7
 - generated · issue_from_csr · root_pkcs8 absent, previous_not_before 7
 - generated · issue_from_csr · root_pkcs8 absent, valid_days "7"
 - generated · issue_from_csr · now absent, csr 7
-- generated · issue_from_csr · now absent, root_cn 7
+- generated · issue_from_csr · now absent, root_cert 7
 - generated · issue_from_csr · now absent, root_spkis "x"
 - generated · issue_from_csr · now absent, previous_not_before 7
 - generated · issue_from_csr · now absent, valid_days "7"
 - generated · issue_from_csr · now absent, root_pkcs8 7
 
-### `issue_tbs_from_csr` — 50 cases · whole on success
+### `issue_tbs_from_csr` — 40 cases · whole on success
 
 - issue_tbs_from_csr of a request that is a truncated SEQUENCE
 - issue_tbs_from_csr
 - issue_tbs_from_csr of a request naming https://[2001:db8::1%25eth0]/mcp
 - issue_tbs_from_csr of a request naming https://[2001:db8::1%eth0]/mcp
+- issue_tbs_from_csr under a root that ends before the leaf would
+- issue_tbs_from_csr under a root past its end date
 - generated · issue_tbs_from_csr · {}
 - generated · issue_tbs_from_csr · the hostile object
 - generated · issue_tbs_from_csr · csr absent
 - generated · issue_tbs_from_csr · csr null
 - generated · issue_tbs_from_csr · csr ""
-- generated · issue_tbs_from_csr · root_cn absent
-- generated · issue_tbs_from_csr · root_cn null
-- generated · issue_tbs_from_csr · root_cn ""
-- generated · issue_tbs_from_csr · root_spki absent
-- generated · issue_tbs_from_csr · root_spki null
-- generated · issue_tbs_from_csr · root_spki ""
+- generated · issue_tbs_from_csr · root_cert absent
+- generated · issue_tbs_from_csr · root_cert null
+- generated · issue_tbs_from_csr · root_cert ""
 - generated · issue_tbs_from_csr · now absent
 - generated · issue_tbs_from_csr · now null
 - generated · issue_tbs_from_csr · now ""
@@ -1744,32 +1765,23 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - generated · issue_tbs_from_csr · valid_days "7"
 - generated · issue_tbs_from_csr · an undeclared member
 - generated · issue_tbs_from_csr · csr holding a key outside the profile
+- generated · issue_tbs_from_csr · root_cert holding a key outside the profile
 - generated · issue_tbs_from_csr · root_spkis holding a key outside the profile
-- generated · issue_tbs_from_csr · root_spki holding a key outside the profile
-- generated · issue_tbs_from_csr · csr absent, root_cn 7
+- generated · issue_tbs_from_csr · csr absent, root_cert 7
 - generated · issue_tbs_from_csr · csr absent, root_spkis "x"
 - generated · issue_tbs_from_csr · csr absent, now 7
 - generated · issue_tbs_from_csr · csr absent, previous_not_before 7
 - generated · issue_tbs_from_csr · csr absent, valid_days "7"
-- generated · issue_tbs_from_csr · csr absent, root_spki 7
-- generated · issue_tbs_from_csr · root_cn absent, csr 7
-- generated · issue_tbs_from_csr · root_cn absent, root_spkis "x"
-- generated · issue_tbs_from_csr · root_cn absent, now 7
-- generated · issue_tbs_from_csr · root_cn absent, previous_not_before 7
-- generated · issue_tbs_from_csr · root_cn absent, valid_days "7"
-- generated · issue_tbs_from_csr · root_cn absent, root_spki 7
-- generated · issue_tbs_from_csr · root_spki absent, csr 7
-- generated · issue_tbs_from_csr · root_spki absent, root_cn 7
-- generated · issue_tbs_from_csr · root_spki absent, root_spkis "x"
-- generated · issue_tbs_from_csr · root_spki absent, now 7
-- generated · issue_tbs_from_csr · root_spki absent, previous_not_before 7
-- generated · issue_tbs_from_csr · root_spki absent, valid_days "7"
+- generated · issue_tbs_from_csr · root_cert absent, csr 7
+- generated · issue_tbs_from_csr · root_cert absent, root_spkis "x"
+- generated · issue_tbs_from_csr · root_cert absent, now 7
+- generated · issue_tbs_from_csr · root_cert absent, previous_not_before 7
+- generated · issue_tbs_from_csr · root_cert absent, valid_days "7"
 - generated · issue_tbs_from_csr · now absent, csr 7
-- generated · issue_tbs_from_csr · now absent, root_cn 7
+- generated · issue_tbs_from_csr · now absent, root_cert 7
 - generated · issue_tbs_from_csr · now absent, root_spkis "x"
 - generated · issue_tbs_from_csr · now absent, previous_not_before 7
 - generated · issue_tbs_from_csr · now absent, valid_days "7"
-- generated · issue_tbs_from_csr · now absent, root_spki 7
 
 ### `key_from_seed` — 16 cases · whole on success
 
@@ -2498,7 +2510,7 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - generated · refresh_check · answer absent, now 7
 - generated · refresh_check · now absent, pin "x"
 
-### `root_tbs` — 30 cases · whole on success
+### `root_tbs` — 38 cases · whole on success
 
 - root_tbs
 - root_tbs with no key
@@ -2507,6 +2519,9 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - root_tbs of a key outside the profile: P-384
 - root_tbs of a key outside the profile: X25519
 - root_tbs of a key outside the profile: Ed25519 with a NULL
+- root_tbs with an end date
+- root_tbs with an end date before its start
+- root_tbs with an end date at its start
 - generated · root_tbs · {}
 - generated · root_tbs · cn absent
 - generated · root_tbs · cn null
@@ -2517,18 +2532,23 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - generated · root_tbs · not_before absent
 - generated · root_tbs · not_before null
 - generated · root_tbs · not_before ""
+- generated · root_tbs · not_after ""
+- generated · root_tbs · not_after 7
 - generated · root_tbs · serial ""
 - generated · root_tbs · serial 7
 - generated · root_tbs · an undeclared member
 - generated · root_tbs · spki holding a key outside the profile
 - generated · root_tbs · cn absent, spki 7
 - generated · root_tbs · cn absent, not_before 7
+- generated · root_tbs · cn absent, not_after 7
 - generated · root_tbs · cn absent, serial 7
 - generated · root_tbs · spki absent, cn 7
 - generated · root_tbs · spki absent, not_before 7
+- generated · root_tbs · spki absent, not_after 7
 - generated · root_tbs · spki absent, serial 7
 - generated · root_tbs · not_before absent, cn 7
 - generated · root_tbs · not_before absent, spki 7
+- generated · root_tbs · not_before absent, not_after 7
 - generated · root_tbs · not_before absent, serial 7
 
 ### `seal_request` — 111 cases · whole on success
@@ -3132,7 +3152,7 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - version with a number past the largest double before containers nested 129 deep
 - version with containers nested 129 deep before a number past the largest double
 
-### `wallet_issue` — 139 cases · whole on success
+### `wallet_issue` — 141 cases · whole on success
 
 - wallet_issue
 - wallet_issue from a vault that carries a ledger
@@ -3216,6 +3236,8 @@ At the run that generated this file: **2868** cases (**1418** of the run's cases
 - wallet_issue from documents whose every optional member is null
 - wallet_issue from a record whose ledger and contacts are null
 - wallet_issue from documents with every member they may hold
+- wallet_issue under a root past its end date
+- wallet_issue under a root that ends before the leaf would
 - generated · wallet_issue · {}
 - generated · wallet_issue · the hostile object
 - generated · wallet_issue · vault_plaintext absent

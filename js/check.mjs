@@ -68,6 +68,9 @@ if (!vec) {
     const r = d.validateChain(chainOf(c.chain), { now: new Date(c.now), expectedRoot: c.expected_root, expectedEndpoint: c.expected_endpoint });
     if (c.expect === 'accept') ok(r.ok, `${c.name}: expected accept, got rule ${r.rule} (${r.reason})`);
     else ok(!r.ok && r.rule === c.rule, `${c.name}: expected refusal by rule ${c.rule}, got ${r.ok ? 'accept' : 'rule ' + r.rule + ' (' + r.reason + ')'}`);
+    // A case that names its reason is held to it: rule 4 refuses for four reasons, and a guard that
+    // went missing would still refuse by rule 4 for another one.
+    if (c.reason) ok(!r.ok && r.reason === c.reason, `${c.name}: expected the reason "${c.reason}", got ${r.ok ? 'accept' : '"' + r.reason + '"'}`);
     console.log(`  ${c.name}: ${r.ok ? 'accepted' : 'refused by rule ' + r.rule}`);
   }
 

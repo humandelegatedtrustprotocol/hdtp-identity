@@ -25,7 +25,7 @@ struct Cast {
 fn cast() -> Cast {
     let root = PrivateKey::generate(Alg::Ed25519).unwrap();
     let host = PrivateKey::generate(Alg::Ed25519).unwrap();
-    let root_der = x509::build_root("Alina Rao", &root, NOW - 3600, &x509::serial_of("findings/root")).unwrap();
+    let root_der = x509::build_root("Alina Rao", &root, NOW - 3600, None, &x509::serial_of("findings/root")).unwrap();
     Cast { root, host, root_der }
 }
 fn leaf(c: &Cast, endpoint: &str, dns: Option<&str>, aki: Option<Vec<u8>>) -> Vec<u8> {
@@ -183,7 +183,7 @@ fn a_sender_chain_that_will_not_read_is_said_to_be_that() {
 fn a_request_carrying_a_card_held_siblings_key_is_refused_on_the_software_path() {
     let c = cast();
     let sibling = PrivateKey::generate(Alg::P256).unwrap();
-    let sibling_der = x509::build_root("Alina at work", &sibling, NOW - 3600, &x509::serial_of("findings/sibling")).unwrap();
+    let sibling_der = x509::build_root("Alina at work", &sibling, NOW - 3600, None, &x509::serial_of("findings/sibling")).unwrap();
     let plaintext = json!({
         "v": 1,
         "roots": [

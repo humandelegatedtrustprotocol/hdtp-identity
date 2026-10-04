@@ -467,9 +467,13 @@ pub fn wallet_issue(
     let Some(pkcs8) = root.get("pkcs8").and_then(|p| p.as_str()) else {
         return err("bad_request", "this root is held on a card: wallet_issue signs only with a key the vault holds");
     };
+    // §2.2: a root past its end date signs nothing more, not even the proof of possession below.
+    if let Some(cert) = root.get("cert").and_then(|c| c.as_str()).and_then(|c| from_b64u(c).ok()).and_then(|d| crate::x509::parse(&d).ok())
+    {
+        csr::refuse_expired(&cert, now)?;
+    }
     let root_key = PrivateKey::from_pkcs8(&Zeroizing::new(from_b64u(pkcs8)?))?;
     let root_cert = prove_root(root, &root_key, root_fingerprint)?;
-    let root_cn = root.get("cn").and_then(|c| c.as_str()).unwrap_or("");
     let request = csr::check(csr_der, &root_spkis)?;
     // The ledger's rules, in the one place they are written (ledger.rs): the record was read whole
     // above, so what is refused here is the one live leaf per identity, and nothing else.
@@ -486,7 +490,10 @@ pub fn wallet_issue(
         warnings.push(json!("move: the live leaf at the previous endpoint is superseded once contacts see this one"));
     }
     let previous = facts.previous_not_before;
-    let issued = csr::issue(&request, root_cn, &root_key, now, previous, valid_days)?;
+    let issued = csr::issue(&request, &root_cert, &root_key, now, previous, valid_days)?;
+    if issued.ends_with_root {
+        warnings.push(json!(csr::ends_with_root_warning(issued.not_after)));
+    }
     // §2.2: a chain the wallet assembled is validated against the expected root and endpoint before it
     // is returned — a chain that fails is the wallet's defect, and returned it would be the host's to find.
     if let crate::x509::ChainResult::Refused { rule, reason } =
@@ -620,8 +627,8 @@ mod tests {
         let root = PrivateKey::from_seed(Alg::Ed25519, &seed("vault/root")).unwrap();
         let other = PrivateKey::from_seed(Alg::Ed25519, &seed("vault/other")).unwrap();
         let now = 1_789_214_400;
-        let cert = x509::build_root("Alina Rao", &root, now, &x509::serial_of("vault/root")).unwrap();
-        let other_cert = x509::build_root("Mallory", &other, now, &x509::serial_of("vault/other")).unwrap();
+        let cert = x509::build_root("Alina Rao", &root, now, None, &x509::serial_of("vault/root")).unwrap();
+        let other_cert = x509::build_root("Mallory", &other, now, None, &x509::serial_of("vault/other")).unwrap();
         let fp = root.public().fingerprint();
         let endpoint = "https://agent.alina.example/mcp";
         // A certificate of the root's own key that is no root: a leaf, under the root.
@@ -660,11 +667,48 @@ mod tests {
         assert!(matches!(x509::validate_chain(&[leaf, cert], now, Some(&fp), Some(endpoint)), x509::ChainResult::Ok(_)));
     }
 
+    /// §2.2: under a root with an end date the vault issues a leaf that ends with it, and says so;
+    /// past the end date it refuses as `root_expired`. A root without one is the control above.
+    #[test]
+    fn a_vault_root_with_an_end_date() {
+        let root = PrivateKey::from_seed(Alg::Ed25519, &seed("vault/root")).unwrap();
+        let now = 1_789_214_400;
+        let ends = now + 100 * crate::time::DAY;
+        let cert = x509::build_root("Alina Rao", &root, now, Some(ends), &x509::serial_of("vault/root")).unwrap();
+        let fp = root.public().fingerprint();
+        let plaintext = json!({"v": 1, "roots": [{"fingerprint": fp, "cn": "Alina Rao", "pkcs8": b64u(&root.to_pkcs8()), "cert": b64u(&cert), "created": format_rfc3339(now)}]});
+        let record = json!({"v": 1, "ledger": [], "contacts": []});
+        let host = PrivateKey::from_seed(Alg::Ed25519, &seed("vault/host")).unwrap();
+        let req = csr::csr_new("Alina Rao", &host, "https://agent.alina.example/mcp", None).unwrap();
+        let out = wallet_issue(&plaintext, &record, &fp, &req, now, 365, false).unwrap();
+        assert_eq!(out["not_after"], json!(format_rfc3339(ends)));
+        assert!(out["warnings"].as_array().unwrap().contains(&json!(csr::ends_with_root_warning(ends))), "{out}");
+        assert_eq!(
+            wallet_issue(&plaintext, &record, &fp, &req, ends, 365, false).map(|_| ()).err().map(|e| e.code),
+            None,
+            "the last second is the root's"
+        );
+        let refused = wallet_issue(&plaintext, &record, &fp, &req, ends + 1, 365, false).unwrap_err();
+        assert_eq!(refused.code, "root_expired", "{}", refused.why);
+        // Refused before the proof of possession: an entry whose expired certificate is not even its
+        // key's is told it has expired, not that its key does not sign for it.
+        let other = PrivateKey::from_seed(Alg::Ed25519, &seed("vault/other")).unwrap();
+        let mut mismatched = plaintext.clone();
+        mismatched["roots"][0]["cert"] =
+            json!(b64u(&x509::build_root("Mallory", &other, now, Some(ends), &x509::serial_of("vault/other")).unwrap()));
+        assert_eq!(wallet_issue(&mismatched, &record, &fp, &req, ends + 1, 365, false).unwrap_err().code, "root_expired");
+        assert_eq!(
+            wallet_issue(&mismatched, &record, &fp, &req, now, 365, false).unwrap_err().why,
+            "the vault's root certificate is not its key's",
+            "the control: unexpired, the same entry is refused by the proof"
+        );
+    }
+
     #[test]
     fn issues_from_the_vault() {
         let root = PrivateKey::from_seed(Alg::Ed25519, &seed("vault/root")).unwrap();
         let now = 1_789_214_400;
-        let cert = x509::build_root("Alina Rao", &root, now, &x509::serial_of("vault/root")).unwrap();
+        let cert = x509::build_root("Alina Rao", &root, now, None, &x509::serial_of("vault/root")).unwrap();
         let fp = root.public().fingerprint();
         let plaintext = json!({"v": 1, "roots": [{"fingerprint": fp, "cn": "Alina Rao", "pkcs8": b64u(&root.to_pkcs8()), "cert": b64u(&cert), "created": format_rfc3339(now)}]});
         let record = json!({"v": 1, "ledger": [], "contacts": []});

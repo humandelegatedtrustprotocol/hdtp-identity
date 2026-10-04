@@ -386,4 +386,16 @@ export default function certificates({ add, expect }, f) {
     add(`parse_certificate of a CA certificate ${what}`, 'parse_certificate', { der });
     expect(`parse_certificate of a CA certificate ${what}`, { kind: 'other', ca: true, profile_error: seedProfileError(c, as) });
   }
+
+  // SPEC §14.1: a root may carry the end date its person chose; one before its start is refused.
+  const { iso, t0 } = f.ending;
+  add('build_root with an end date', 'build_root', { cn: 'Alina Rao', pkcs8: rootPkcs8, not_before: now, not_after: '2030-01-01T00:00:00Z', serial: f.SERIAL });
+  add('root_tbs with an end date', 'root_tbs', { cn: 'Alina Rao', spki: rootSpki, not_before: now, not_after: '2030-01-01T00:00:00Z', serial: f.SERIAL });
+  for (const fn of ['build_root', 'root_tbs']) {
+    const key = fn === 'build_root' ? { pkcs8: rootPkcs8 } : { spki: rootSpki };
+    add(`${fn} with an end date before its start`, fn, { cn: 'Alina Rao', ...key, not_before: now, not_after: iso(t0 - 1), serial: f.SERIAL });
+    expect(`${fn} with an end date before its start`, { error: 'bad_request', why: 'not_after is before not_before' });
+    add(`${fn} with an end date at its start`, fn, { cn: 'Alina Rao', ...key, not_before: now, not_after: now, serial: f.SERIAL });
+  }
 }
+
