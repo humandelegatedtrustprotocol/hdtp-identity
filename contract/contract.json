@@ -37,7 +37,7 @@
     "B64url": {
       "type": "string",
       "pattern": "^[A-Za-z0-9_-]*$",
-      "description": "Bytes, as base64url without padding. An ANSWER always spells them this way. An ARGUMENT is read forgivingly about padding and the standard alphabet, and about nothing else: whitespace of any kind is refused (§0). The members of an envelope that travelled are not read forgivingly at all (§5)."
+      "description": "Bytes, as base64url without padding, in exactly this alphabet. Every answer spells them this way, and every wire object of the specification is read this strictly: an envelope's members, an export's certificates, a signing request. A library argument outside those objects is also read with padding or the standard alphabet, and never with whitespace (CONTRACT §0)."
     },
     "Alg": { "enum": ["ed25519", "p256"], "description": "A key algorithm. A key of any other is refused where it is read (CONTRACT §0)." },
     "Fingerprint": {
@@ -93,7 +93,7 @@
       },
       "required": ["protected", "enc", "ct", "sig"],
       "additionalProperties": false,
-      "description": "A sealed envelope as this library WRITES one (SPEC §13.1)."
+      "description": "A sealed envelope: its four members (SPEC §13.1)."
     },
     "ArrivedEnvelope": {
       "type": "object",
@@ -523,7 +523,7 @@
         "redirect": { "type": "string", "maxLength": 2048, "description": "Where the answer goes: https, or http to a loopback host; no userinfo, no fragment." },
         "state": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$", "description": "32 random bytes, base64url, echoed back." },
         "recipient": { "type": "string", "maxLength": 200, "description": "What the host calls itself: shown as its claim, never trusted." },
-        "valid_days": { "type": "string", "pattern": "^[1-9][0-9]{0,2}$", "description": "The validity the host asks for, 1 to 398, as the form's text: a suggestion; the person chooses." },
+        "valid_days": { "type": "string", "pattern": "^(?:[1-9][0-9]?|[12][0-9]{2}|3[0-8][0-9]|39[0-8])$", "description": "The validity the host asks for, 1 to 398, as the form's text: a suggestion; the person chooses." },
         "expires": { "type": "string", "description": "RFC 3339 UTC, after now and at most ten minutes ahead." }
       },
       "required": ["csr", "purpose", "expect_root", "redirect", "state", "recipient", "valid_days", "expires"],
@@ -541,7 +541,7 @@
         "hdtp_export": { "const": 1 },
         "owner": { "$ref": "#/$defs/Fingerprint" },
         "owner_name": { "type": "string" },
-        "exported_at": { "type": "string" },
+        "exported_at": { "$ref": "#/$defs/InstantIn" },
         "tool": { "type": "string" },
         "counts": {
           "type": "object",
