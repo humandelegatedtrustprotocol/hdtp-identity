@@ -1,20 +1,29 @@
 {
   "2.#1": {
-    "hash": "c34cb1bf9baf",
+    "hash": "d9903949fd5d",
     "text": "When both proofs are present their leaf keys MUST match, else `envelope_invalid`.",
     "held_by": [
       "scenario:Mallory seals with Alina's chain inside and her own signature"
     ],
     "why": "the receiver-side half is the node's: internal/public/decide.go compares the transport chain's leaf key against the envelope's (TestHandshakeAcceptsEveryCertificateAndBelievesOnlyAChain)"
   },
+  "2.#2": {
+    "elsewhere": "node",
+    "elsewhere_names": [
+      "gateway:TestLeafSignupThenRenewThenMove"
+    ],
+    "why": "keeping a superseded leaf's key until its notAfter is a host's store, and this library holds none: hdtp-gateway serves the current and every superseded key before its notAfter and retires each after it (internal/identity/leaf.go ActiveLeafKeypairsFor, RetireExpiredLeafKeys); TestLeafSignupThenRenewThenMove opens an envelope sealed to the superseded key after a renewal",
+    "hash": "453feec1c4e8",
+    "text": "A host **MUST** keep a superseded leaf's private key until that leaf's `notAfter`, so an envelope sealed to it"
+  },
   "2.1#1": {
-    "hash": "56c1be33d6c9",
+    "hash": "1cb50401513a",
     "text": "A wallet that can use a WebAuthn credential MUST **derive the root's private key from one** rather than genera",
     "elsewhere": "wallet",
     "why": "which way a root is made is the wallet's: a browser wallet derives it from the credential; the hdtp CLI, which cannot speak WebAuthn, generates and keeps it as §9 says (rust:a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates); a hosting platform's half is held in that platform's own MUST table, beside its code"
   },
   "2.1#2": {
-    "hash": "e79efe20ebb8",
+    "hash": "595e8d2aeb92",
     "text": "A wallet MUST use exactly these values.",
     "held_by": [
       "rust:derivation_vectors",
@@ -24,21 +33,21 @@
     ]
   },
   "2.1#3": {
-    "hash": "82415d63414e",
+    "hash": "f608525f2389",
     "text": "A wallet MUST NOT present this as a guarantee: whether a given provider carries the PRF secret across its own ",
     "elsewhere": "wallet",
     "why": "a claim a wallet's interface makes or does not make about its provider's sync; there is no wire artefact to test"
   },
   "2.1#4": {
-    "hash": "1192a8910f37",
-    "text": "A wallet holding more than one credential for its origin MUST name the intended credential when it knows which",
+    "hash": "a3f434717c2f",
+    "text": "A wallet that knows which credential it needs names that credential in its request to the authenticator; wheth",
     "held_by": [
       "rust:a_vault_entry_that_disagrees_with_its_own_certificate_signs_nothing",
       "go:TestVaultRulesMirrorTheCore"
     ]
   },
   "2.1#5": {
-    "hash": "0383cc3a9bf0",
+    "hash": "560f98f3c2d1",
     "text": "A wallet that derives its root MUST still be able to export it (§9).",
     "held_by": [
       "rust:issues_from_the_vault",
@@ -46,7 +55,7 @@
     ]
   },
   "2.2#1": {
-    "hash": "bb19da6a5ea2",
+    "hash": "dcab5736b36c",
     "text": "Before issuing any certificate, a wallet MUST establish that the root it is about to sign with is the root the",
     "held_by": [
       "rust:a_vault_entry_that_disagrees_with_its_own_certificate_signs_nothing",
@@ -55,7 +64,7 @@
     ]
   },
   "2.2#2": {
-    "hash": "dc3dbec818f9",
+    "hash": "5fe166548983",
     "text": "A wallet MUST refuse to sign unless all three hold:",
     "held_by": [
       "rust:a_card_whose_certificate_and_key_disagree_gets_no_leaf",
@@ -66,13 +75,13 @@
     ]
   },
   "2.2#3": {
-    "hash": "6b9389d642ac",
+    "hash": "ca8cf2d953b6",
     "text": "The challenge MUST be domain-separated from certificate bytes — the ASCII `HDTP root proof v1` followed by a n",
     "elsewhere": "wallet",
     "why": "the challenge a wallet signs with a root it does not hold in software is the wallet's: a browser wallet signs it with the derived root, and a hosting platform's half is held in that platform's own MUST table, beside its code. This library's wallet_issue, which holds the key, signs `HDTP root proof v1`, a newline and 32 random bytes and verifies the signature under the root certificate's key before it issues (vault.rs prove_root, go/vault.go proveRoot); the tests cited on 2.2#2 hold the refusals around it and the prefix"
   },
   "2.2#4": {
-    "hash": "11306b742c60",
+    "hash": "2ab307c0acb8",
     "text": "A wallet MUST validate a chain it has assembled (§14.2) against the expected root and endpoint before returnin",
     "held_by": [
       "rust:a_leaf_the_card_signed_validates_to_that_root_at_its_endpoint",
@@ -81,7 +90,7 @@
     ]
   },
   "2.2#5": {
-    "hash": "448b0a994299",
+    "hash": "e15107e6dae4",
     "text": "**A root certificate is issued once.** A wallet MUST NOT rebuild a root certificate for an identity that alrea",
     "held_by": [
       "rust:a_root_the_card_signed_is_a_root"
@@ -89,7 +98,20 @@
     "why": "the card path is held by the test cited. On the software path `wallet_issue` answers one certificate, the leaf it issued (`der`); contract/contract.json gives its answer no member for a root, and js/parity.mjs holds both ports to that, so it hands back no rebuilt root. (go:TestWalletIssue was cited here; it rebuilds no root and checks for no rebuilding.)"
   },
   "3.#1": {
-    "hash": "8afaa9bec8f1",
+    "held_by": [
+      "scenario:an unknown endpoint property on a card is ignored; the address comes from the leaf",
+      "scenario:X-HDTP-KEY appended to a card in flight is ignored",
+      "scenario:X-HDTP-GATEWAY appended to a card in flight buys no store-and-forward"
+    ],
+    "elsewhere_names": [
+      "gateway:TestACardCarriesItsIdentityInTheCertificate"
+    ],
+    "why": "the reading half is this library's card decoder, which lists what it ignores (the scenarios); the writing half is a host's, since this library's encoder takes extra lines on request: hdtp-gateway writes VERSION, CERT and SEAL and nothing else (TestACardCarriesItsIdentityInTheCertificate)",
+    "hash": "c885a612c3fb",
+    "text": "An implementation **MUST NOT** write any other `X-HDTP-*` property, and **MUST** ignore any it reads — an endp"
+  },
+  "3.#2": {
+    "hash": "8d7ec59ad6e3",
     "text": "A receiving implementation MUST NOT treat `FN` as identifying, and SHOULD NOT present it as a contact's whole ",
     "elsewhere": "node",
     "why": "how a receiver PRESENTS a name is the host's: hdtp-gateway folds confusables to a compare key and appends the fingerprint on a collision (TestCollidingNamesCarryTheirFingerprint, TestLookAlikeNamesCollideToo), and no peer-facing surface can set a petname (TestNoPeerFacingSurfaceCanSetAPetname)",
@@ -99,8 +121,17 @@
       "gateway:TestNoPeerFacingSurfaceCanSetAPetname"
     ]
   },
-  "3.#2": {
-    "hash": "4e2f9fee0c80",
+  "3.#3": {
+    "elsewhere": "node",
+    "elsewhere_names": [
+      "gateway:TestParsedNameIsCappedAndStripped"
+    ],
+    "why": "rendering a peer's name is a host's act: hdtp-gateway strips control and format characters (bidirectional ones among them) from FN when it reads a card (internal/contacts/vcard.go), held by TestParsedNameIsCappedAndStripped",
+    "hash": "d950d5ad3dfc",
+    "text": "`FN` is untrusted display input: a receiver **MUST** strip control and bidirectional-format characters from it"
+  },
+  "3.#4": {
+    "hash": "d72782458af7",
     "text": "A receiver MUST reject a card without `X-HDTP-CERT`, one whose certificate does not parse as §14.1 describes —",
     "held_by": [
       "scenario:a card without a certificate",
@@ -109,8 +140,8 @@
       "scenario:a card whose leaf names its issuer in three bytes"
     ]
   },
-  "3.#3": {
-    "hash": "d722e3b06b88",
+  "3.#5": {
+    "hash": "e2b9336f14b5",
     "text": "A receiver MUST also refuse, at intake and again before every dial, an endpoint whose host resolves to a loopb",
     "held_by": [
       "go:TestAddressGuardRefusesEverySpellingOfLoopback",
@@ -119,8 +150,8 @@
       "scenario:a guest whose leaf names the receiver's own address"
     ]
   },
-  "3.#4": {
-    "hash": "af5e48b9fcca",
+  "3.#6": {
+    "hash": "2ed086154a89",
     "text": "A writer MUST NOT put a control character into a card — in `FN`, in `X-HDTP-SEAL`, or in a property it adds: a",
     "held_by": [
       "rust:nothing_that_goes_into_a_card_may_carry_a_line_break",
@@ -128,7 +159,7 @@
     ]
   },
   "4.#1": {
-    "hash": "aa6b10c07158",
+    "hash": "9f683432e224",
     "text": "The same URL serves two audiences by content negotiation: a browser gets the human landing page; a client send",
     "elsewhere": "node",
     "why": "content negotiation on an invite landing page is a host's route; hdtp-gateway serves it (TestLandingNoOracle404) and binds the chain's leaf to the card; a hosting platform's half is held in that platform's own MUST table, beside its code",
@@ -137,15 +168,26 @@
     ]
   },
   "5.2#1": {
-    "hash": "a9c2b9b299b4",
+    "hash": "be24da30226d",
     "text": "\"pending\"}` any stranger gets, while nothing is recorded and the owner is never bothered: blocked MUST be indi",
     "held_by": [
       "scenario:a blocked sender is answered exactly as an unknown one",
       "scenario:a blocked contact naming its leaf is answered as a stranger would be"
     ]
   },
+  "5.3#1": {
+    "held_by": [
+      "scenario:former host wipes the contact, the person returns from a new host"
+    ],
+    "elsewhere_names": [
+      "gateway:TestTombstoneForcesTheQuestion"
+    ],
+    "why": "the thirty days and what a returning chain meets are this library's decision (TOMBSTONE_S, the scenario); keeping the removed root is a host's store: hdtp-gateway writes it on an inbound remove_contact and the decision forces `ask` (TestTombstoneForcesTheQuestion)",
+    "hash": "76cfcdc96827",
+    "text": "A receiver therefore **MUST** keep, for 30 days after a `remove_contact`, the removed root and the leaf that r"
+  },
   "6.1#1": {
-    "hash": "28207ba3c071",
+    "hash": "b0daa9b099e0",
     "text": "A caller at the pending tier MAY list its tools: its `tools/list` MUST answer at the pending tier, naming `con",
     "held_by": [
       "scenario:a contact still pending_out lists the pending tier (baseline)",
@@ -155,14 +197,23 @@
     ]
   },
   "6.2#1": {
-    "hash": "30771afd931f",
+    "hash": "06a565712860",
     "text": "A `msg_id` MUST be a non-empty string — idempotency keyed on nothing protects nothing.",
     "held_by": [
       "scenario:an empty msg_id"
     ]
   },
   "6.2#2": {
-    "hash": "23de3c014e37",
+    "elsewhere": "node",
+    "elsewhere_names": [
+      "gateway:TestDuplicateMsgIDAcknowledgedNotReexecuted"
+    ],
+    "why": "tool idempotency is a host's store, keyed by the caller's root and the msg_id: hdtp-gateway answers a re-sent msg_id with the original row and writes nothing (internal/messaging/service.go), held by TestDuplicateMsgIDAcknowledgedNotReexecuted",
+    "hash": "6e33dee18e82",
+    "text": "The key is the caller's root and the `msg_id`: a host **MUST** answer a `msg_id` the same contact has used bef"
+  },
+  "6.2#3": {
+    "hash": "e0f0c6c6fea8",
     "text": "`{\"status\": \"ok\"}` — a card refresh, or `{\"status\": \"pending\"}` from a new address under `ask` (§5.3). The cal",
     "held_by": [
       "scenario:a guest whose card carries a different certificate than the chain"
@@ -172,8 +223,8 @@
       "gateway:TestACardThatDisagreesWithTheProofIsABadRequest"
     ]
   },
-  "6.2#3": {
-    "hash": "5488959269bf",
+  "6.2#4": {
+    "hash": "0f238a4a8871",
     "text": "`get_status` answers from that fixed four-value vocabulary; an implementation whose upstream presence source k",
     "elsewhere": "node",
     "why": "presence vocabulary is a host's mapping from whatever it watches; hdtp-gateway clamps it at the wire, feeding get_status states the vocabulary does not list and reading busy back (TestGetStatusClampsToTheSpecVocabulary)",
@@ -181,8 +232,26 @@
       "gateway:TestGetStatusClampsToTheSpecVocabulary"
     ]
   },
+  "7.#1": {
+    "elsewhere": "node",
+    "elsewhere_names": [
+      "gateway:TestAThreadCannotBeAdoptedByASecondContact"
+    ],
+    "why": "thread ownership is a host's store: hdtp-gateway refuses bad_request when a second contact writes into a thread it does not own (internal/messaging/service.go), held by TestAThreadCannotBeAdoptedByASecondContact",
+    "hash": "3113b6b0a632",
+    "text": "A `thread_id` belongs to the contact that first used it: a host **MUST** refuse with `bad_request` a `send_mes"
+  },
   "9.#1": {
-    "hash": "63b8673a7797",
+    "elsewhere": "node",
+    "elsewhere_names": [
+      "gateway:TestLeafSignupThenRenewThenMove"
+    ],
+    "why": "the host makes the key a CSR carries, and this library signs what it is given: hdtp-gateway mints a fresh key for every renewal and move, and its store refuses a renewal that generated no new key (internal/identity/leaf.go); TestLeafSignupThenRenewThenMove asserts the renewal's fresh key",
+    "hash": "a74409581884",
+    "text": "A host **MUST** generate a fresh key for every renewal, so that a leaf key compromised without anyone noticing"
+  },
+  "9.#2": {
+    "hash": "a16fce0f774d",
     "text": "A leaf's key does not outlive its leaf: a host MUST stop using the key of a leaf that has expired and MUST des",
     "elsewhere": "node",
     "why": "holding and destroying a leaf's key is the host's act. hdtp-gateway stops offering the key on the read path from notAfter and destroys both copies — the ledger row's and the account's — at start, on the hourly sweep and on adoption, stops serving the account, and audits it (TestAnExpiredCurrentLeafLosesItsKeyInBothPlaces, TestALeafThatRunsOutStopsBeingServedAndLosesItsKey); a hosting platform's half is held in that platform's own MUST table, beside its code. Until 2026-09-19 hosts retired superseded leaves only, so the key of a leaf nobody renewed was held and used for as long as the process lived",
@@ -191,8 +260,8 @@
       "gateway:TestALeafThatRunsOutStopsBeingServedAndLosesItsKey"
     ]
   },
-  "9.#2": {
-    "hash": "5d72e4328dad",
+  "9.#3": {
+    "hash": "3f2620f0c84c",
     "text": "**Moving** is the person issuing a leaf to the new host, the data carried across as an archive — the person's ",
     "held_by": [
       "rust:read_export_answers_the_whole_corpus",
@@ -205,20 +274,14 @@
     ],
     "why": "an archive is the §9.2 export, and both halves are this library's functions. The writer puts no key in a file: a key in a cell of a row the host writes, a message member the host writes, `owner_name` or `tool` is refused (export_write_refuses_a_row_or_message_holding_a_private_key; TestWriteExportZipRefusesWhatItsReaderRefusesBeforeTheFirstByte refuses before the first byte), and a message whose body or file is a key is left out with its file and listed (what_a_contact_controls_never_stops_an_export_and_it_reads_back, TestAFileThatIsAKeyLeavesWithItsMessageAndIsRefusedOnRead). The reader refuses key material and anything it does not recognise (key-in-a-cell.zip, key-in-a-body.zip, media-is-a-key.zip, unknown-file.zip, unknown-message-member.zip in the corpus). The new host reaching every contact, and the person telling the old host to leave, are the hosts'"
   },
-  "9.#3": {
-    "hash": "6fd3ca8f5633",
+  "9.#4": {
+    "hash": "52bc23c510e7",
     "text": "An address an identity has vacated MUST NOT be assigned to another identity until the last leaf issued for it ",
     "elsewhere": "node",
     "why": "address reassignment is a host's allocation policy, held by the host that allocates addresses; a hosting platform's half is held in that platform's own MUST table, beside its code"
   },
-  "9.#4": {
-    "hash": "9d2a2b8b2d6c",
-    "text": "A host that exports an identity toward a destination that cannot carry its chain MUST say so before the export",
-    "elsewhere": "node",
-    "why": "an export warning is a host's UI; a hosting platform's half is held in that platform's own MUST table, beside its code. The hdtp-gateway half is prose in its own SPEC §9 and names no test — a declaration, not a proof"
-  },
   "9.#5": {
-    "hash": "f287941a9ea7",
+    "hash": "03a283bf6b43",
     "text": "It issues one live leaf per identity at a time — a second endpoint is a move, not a second home, because conta",
     "held_by": [
       "rust:issues_from_the_vault",
@@ -232,7 +295,7 @@
     ]
   },
   "9.#6": {
-    "hash": "78b5e8f3df3f",
+    "hash": "a75c28f911e5",
     "text": "The **file** is the backup of the root and nothing else — the root's private key, its certificate and, for a d",
     "held_by": [
       "rust:a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates",
@@ -241,13 +304,13 @@
     "why": "the CLI's end-to-end test opens both files it wrote and holds each to its shape — the vault the root (its key and certificate) and nothing else, the record the ledger with no key — and the vault's bytes are unchanged by a signing; the core refuses a vault that carries a ledger or contacts, in both ports (issues_from_the_vault, and parity's 'wallet_issue from a vault that carries a ledger'). A browser wallet writes the file at creation and at a re-binding only; a hosting platform's half is held in that platform's own MUST table, beside its code. A CLI seals under the person's passphrase (owner, 2026-09-26); a card taking the root is the vault's one other writing (card-attach). (Until 2026-09-26 this cited a test of the record's file NAME and a test of the ledger entry, neither of which reads the file, and a search of ciphertext for \"pkcs8\".)"
   },
   "9.1#1": {
-    "hash": "f535401fac21",
+    "hash": "7b0d8b2ee9a2",
     "text": "A wallet MUST refuse a request that is not a top-level navigation, as the browser's fetch metadata reports it ",
     "elsewhere": "wallet",
     "why": "fetch metadata is a request header, read by the web wallet's page and Worker, which batondeck serves (the ceremony host's /sign route and ceremony.js); this library sees no request headers and shows nothing, and a hosting platform's half is held in that platform's own MUST table, beside its code"
   },
   "9.1#2": {
-    "hash": "05d8c9c42a8f",
+    "hash": "38d070ab9cbc",
     "text": "A wallet MUST refuse a request whose `Origin` is absent, `null`, or different from the origin of `redirect`: t",
     "held_by": [
       "rust:signing_request_check_passes_one_request_and_refuses_one_per_rule",
@@ -257,7 +320,7 @@
     ]
   },
   "9.1#3": {
-    "hash": "cfbb3ddc06c6",
+    "hash": "5d2fa2c76567",
     "text": "A wallet MUST refuse a request with a field the table above does not list, a field that is not a string, or a ",
     "held_by": [
       "rust:signing_request_check_passes_one_request_and_refuses_one_per_rule",
@@ -270,7 +333,7 @@
     "why": "a field the table does not list, a field that is not a string, and each field's shape are one case each in both ports' signing_request_check tests and in js/cases/signing.mjs's parity cases; `expires` is read in the one instant grammar (upper-case T and Z, `.` alone before a fraction) that instants_have_one_grammar and TestInstantsHaveOneGrammar hold"
   },
   "9.1#4": {
-    "hash": "e85d4ccda221",
+    "hash": "a7734af96848",
     "text": "A wallet MUST refuse a request whose CSR fails the checks of §9 — its own signature, and a key that is not a r",
     "held_by": [
       "rust:signing_request_check_passes_one_request_and_refuses_one_per_rule",
@@ -279,25 +342,25 @@
     "why": "signing_request_check runs csr_check (proof of possession, the root-key refusal, the normal form and the address guard); the root-key case is in these tests, the rest are csr_check's own"
   },
   "9.1#5": {
-    "hash": "f62be4c6f7fb",
+    "hash": "92bd74fda360",
     "text": "A wallet MUST prove the root against `expect_root` (§2.2) before it signs.",
     "elsewhere": "wallet",
     "why": "proving the root takes the person's passkey, which is the web wallet's page and Worker, which batondeck serves (the ceremony host's /sign route and ceremony.js); this library sees no request headers and shows nothing, and a hosting platform's half is held in that platform's own MUST table, beside its code"
   },
   "9.1#6": {
-    "hash": "643a77ea43fa",
+    "hash": "c5b4de1eee73",
     "text": "It MUST show the person the asking origin, the `recipient` as the host's own claim, the endpoint, the validity",
     "elsewhere": "wallet",
     "why": "what the person is shown is the web wallet's page and Worker, which batondeck serves (the ceremony host's /sign route and ceremony.js); this library sees no request headers and shows nothing, and a hosting platform's half is held in that platform's own MUST table, beside its code"
   },
   "9.1#7": {
-    "hash": "0e82b4c42ce1",
+    "hash": "b1eead32fb92",
     "text": "The wallet MUST NOT keep anything of the request once it has answered, and MUST NOT write its body to a log.",
     "elsewhere": "wallet",
     "why": "signing_request_check is stateless and keeps nothing; logging and storage are the web wallet's page and Worker, which batondeck serves (the ceremony host's /sign route and ceremony.js); this library sees no request headers and shows nothing, and a hosting platform's half is held in that platform's own MUST table, beside its code"
   },
   "9.1#8": {
-    "hash": "9b7ef049cbe7",
+    "hash": "0035b11a7636",
     "text": "A host MUST accept an answer only once, only with the `state` it minted for a pending request, and only a chai",
     "elsewhere": "node",
     "elsewhere_names": [
@@ -307,7 +370,7 @@
     "why": "accepting the answer is the host's: hdtp-gateway mints the state with the pending request, consumes it in the statement that checks it, and installs only a chain whose leaf carries the pending key and validates at the endpoint; the node's table is hdtp-gateway's docs/conformance.md (the row for HDTP §9.1's web wallet answer), and the hosting platform's is batondeck's docs/must-holders.json"
   },
   "9.2#1": {
-    "hash": "92584925803d",
+    "hash": "aa9da37761d8",
     "text": "An exporter MUST NOT leave out a media file it holds for a message it exports: a file it cannot include is a r",
     "held_by": [
       "go:TestWriteExportZipRefusesRatherThanOmitsAFile"
@@ -315,7 +378,7 @@
     "why": "the Go port's WriteExportZip refuses a file it cannot read and a message whose file is not handed in; a host that writes its own container holds the same duty"
   },
   "9.2#2": {
-    "hash": "0352e44f1aea",
+    "hash": "9dbda1059323",
     "text": "**Spreadsheet formulas.** A writer MUST write a CSV cell that begins with `=`, `+`, `-`, `@`, `'`, a tab or a ",
     "held_by": [
       "rust:csv_writes_what_it_reads_back_and_guards_every_formula_prefix",
@@ -323,7 +386,7 @@
     ]
   },
   "9.2#3": {
-    "hash": "b47e15be6dcf",
+    "hash": "e8d9098fbf97",
     "text": "**Unencrypted.** Every surface that writes an export MUST tell the person, before the file is written, that it",
     "held_by": [
       "rust:a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates"
@@ -331,13 +394,13 @@
     "why": "the hdtp CLI writes a contact book, never a full export, and says before it writes one that the file is not encrypted, that anyone who gets it can read their contact list, and that it holds no keys: that test holds the book's words exactly, holds that they name no conversations or files, finds them ahead of the line reporting the write, and finds them said when the write itself fails (an --out that is a dangling link passes every check made before the vault is opened and refuses the create), with no file written. This library writes no full export's notice: the full export is written by hosts, whose notices are theirs to hold — the node's table is hdtp-gateway's docs/conformance.md, and the hosting platform's is batondeck's docs/must-holders.json"
   },
   "9.2#4": {
-    "hash": "642ebd3f0504",
+    "hash": "943b6431f353",
     "text": "A host that delivers an export over a network MUST NOT keep it at rest: it builds the file when the signed-in ",
     "elsewhere": "host",
     "why": "delivery over a network is a host's import or export flow, which hdtp-gateway (the node) and batondeck each build over this library's export functions. No test of the node is named here; the node's table is hdtp-gateway's docs/conformance.md, and the hosting platform's is batondeck's docs/must-holders.json"
   },
   "9.2#5": {
-    "hash": "29667f806da5",
+    "hash": "8a85419bafbc",
     "text": "**Validation.** An importer MUST check the whole file before it writes anything, and MUST refuse the whole fil",
     "held_by": [
       "rust:read_export_answers_the_whole_corpus",
@@ -346,7 +409,7 @@
     "why": "ReadExportZip and the CLI's reader return nothing until the whole file, messages and media included, has passed; every hostile file in the corpus is refused whole"
   },
   "9.2#6": {
-    "hash": "78de3378590a",
+    "hash": "328586a05634",
     "text": "An importer MUST refuse any entry whose name is not exactly `manifest.json`, `contacts.csv`, `threads.csv`, `m",
     "held_by": [
       "rust:read_export_answers_the_whole_corpus",
@@ -354,7 +417,7 @@
     ]
   },
   "9.2#7": {
-    "hash": "c136a36bb095",
+    "hash": "56e5d1e80667",
     "text": "An importer MUST refuse a file in which one name appears twice",
     "held_by": [
       "rust:read_export_answers_the_whole_corpus",
@@ -362,7 +425,7 @@
     ]
   },
   "9.2#8": {
-    "hash": "09ac7b4bc5fc",
+    "hash": "f0ec63b1eba1",
     "text": "An importer MUST refuse a file that lacks a member; a file MAY omit `threads.csv`, `messages.jsonl` and `media",
     "held_by": [
       "rust:read_export_answers_the_whole_corpus",
@@ -370,7 +433,7 @@
     ]
   },
   "9.2#9": {
-    "hash": "74922bd430c5",
+    "hash": "1167680149f2",
     "text": "An importer MUST refuse an encrypted entry, a symbolic link (a Unix mode in the external attributes), and any ",
     "held_by": [
       "rust:read_export_answers_the_whole_corpus",
@@ -378,7 +441,7 @@
     ]
   },
   "9.2#10": {
-    "hash": "8360926b909b",
+    "hash": "751aca88ddae",
     "text": "An importer MUST count sizes by the bytes it actually decompresses, never by the sizes a header states, and MU",
     "held_by": [
       "rust:read_export_answers_the_whole_corpus",
@@ -390,7 +453,7 @@
     "why": "bytes actually decompressed: understated-size.zip states 16 bytes and holds 70000, and both hosts refuse it by what they read; js/cases/export-reader.mjs holds the core's own count of the text it is handed for contacts.csv and threads.csv with an entry that says less. Each bound has its file in the corpus, refused at the directory: oversize-manifest.zip, contacts-over-4-mib.zip, contacts-over-5000-rows.zip (by rows), threads-over-16-mib.zip, long-line.zip, media-over-5-mib.zip. The host's own whole-file ceiling is refused by name in TestAnExportWrittenIsReadBackWhole. The bounds themselves are held to contract/contract.json's ExportLimits in both ports"
   },
   "9.2#11": {
-    "hash": "9703a4bea0dd",
+    "hash": "9802c7e98486",
     "text": "An importer MUST refuse a text member that `manifest.files` does not list or whose sha256 differs from it, a l",
     "held_by": [
       "rust:read_export_answers_the_whole_corpus",
@@ -399,7 +462,7 @@
     "why": "unlisted-member.zip, hash-mismatch.zip, missing-threads.zip, media-listed-in-files.zip (a `files` entry naming a media member), media-bytes-not-name.zip and count-mismatch.zip in the corpus; `counts.media` is checked against the media members in both ports' read"
   },
   "9.2#12": {
-    "hash": "ea4ec8f44de1",
+    "hash": "afe0061c0fd3",
     "text": "An importer MUST refuse a file whose `owner` is not the root of the identity importing it, and a contact row w",
     "held_by": [
       "rust:read_export_answers_the_whole_corpus",
@@ -407,7 +470,7 @@
     ]
   },
   "9.2#13": {
-    "hash": "1d420b1906f6",
+    "hash": "499bf9644cd9",
     "text": "An importer MUST refuse a header that is not exactly the one shown, a row or a message that breaks what its co",
     "held_by": [
       "rust:read_export_answers_the_whole_corpus",
@@ -419,7 +482,7 @@
     "why": "bad-header.zip, blank-row.zip, two-attachments.zip, body-with-a-file.zip and unknown-message-member.zip in the corpus, and read-side parity cases for columns and members in js/cases/export-reader.mjs. A time outside the one grammar (a lower-case z or t, a comma before the fraction, an offset) is refused on read in a contact row, a thread row, the manifest and a message, in both ports (the instant cases of js/cases/export-reader.mjs), and by the grammar's own tests"
   },
   "9.2#14": {
-    "hash": "2dbab6660c18",
+    "hash": "8b0afc757507",
     "text": "An importer MUST refuse a thread whose `contact`, a message whose `thread`, `contact` or non-null `reply_to`, ",
     "held_by": [
       "rust:read_export_answers_the_whole_corpus",
@@ -427,7 +490,7 @@
     ]
   },
   "9.2#15": {
-    "hash": "01ede3d78374",
+    "hash": "683881fcf090",
     "text": "An importer MUST refuse any cell, any string member of the manifest or of a message, and any media file that d",
     "held_by": [
       "rust:read_export_answers_the_whole_corpus",
@@ -440,13 +503,13 @@
     "why": "key material: key-in-a-cell.zip (PKCS #8), key-in-a-body.zip (SEC1) and media-is-a-key.zip (a media file whose bytes are a PKCS #8 key in DER; a host's check, both hosts) in the corpus, with PKCS #8 and SEC1 in DER and PEM held by a_media_file_is_key_material_in_der_or_pem and TestAMediaFileIsKeyMaterialInDEROrPEM, and a manifest's owner_name on read in export_write_refuses_a_row_or_message_holding_a_private_key, owner_name and tool on read in js/cases/export.mjs. The profile: root-cert-not-a-root.zip in the corpus puts a contact's own leaf where its root certificate goes and is refused as not a root of §14.1's profile, and js/cases/export-reader.mjs holds the same and another root's certificate"
   },
   "9.2#16": {
-    "hash": "8bb2c5069814",
+    "hash": "16fb0b180d8f",
     "text": "It MUST show the person the contacts, and write nothing until the person agrees.",
     "elsewhere": "host",
     "why": "asking the person is a host's import or export flow, which hdtp-gateway (the node) and batondeck each build over this library's export functions. No test of the node is named here; the node's table is hdtp-gateway's docs/conformance.md, and the hosting platform's is batondeck's docs/must-holders.json; the hdtp CLI's contacts import shows every difference and asks before it writes the record"
   },
   "9.2#17": {
-    "hash": "5f621f70c3a8",
+    "hash": "e0039906fcee",
     "text": "An imported leaf MUST NOT replace a pin the host validated itself, and a row's `leaf` is pinned only when `[le",
     "held_by": [
       "rust:export_merge_never_replaces_a_held_pin",
@@ -457,13 +520,13 @@
     "why": "export_merge keeps a held pin; export_read answers a leaf only when [leaf, root_cert] validates, and the corpus's control holds a leaf that does not (cases.json leafless)"
   },
   "9.2#18": {
-    "hash": "9fb036438409",
+    "hash": "330c23ef52b8",
     "text": "A host MUST NOT send a message it imported, whatever its `status`: retries belonged to the host that exported ",
     "elsewhere": "host",
     "why": "sending is a host's import or export flow, which hdtp-gateway (the node) and batondeck each build over this library's export functions. No test of the node is named here; the node's table is hdtp-gateway's docs/conformance.md, and the hosting platform's is batondeck's docs/must-holders.json"
   },
   "9.2#19": {
-    "hash": "f68b533e70e4",
+    "hash": "06f46d237a92",
     "text": "The import MUST end with a request for a new leaf for the importing endpoint, which the host mints itself with",
     "elsewhere": "host",
     "elsewhere_names": [
@@ -473,7 +536,7 @@
     "why": "ending an import with a request for a new leaf is a host's import or export flow, which hdtp-gateway (the node) and batondeck each build over this library's export functions. The node holds it in TestFirstLeafAfterADataOnlyImport and TestAnImportedSlugHoldsOnlyItsRootUntilTheFirstChainInstalls; the node's table is hdtp-gateway's docs/conformance.md, and the hosting platform's is batondeck's docs/must-holders.json"
   },
   "9.2#20": {
-    "hash": "732c5dd8f556",
+    "hash": "12344906ed54",
     "text": "Once that leaf is installed, the host MUST call `update_contact` at every imported contact that is not blocked",
     "elsewhere": "host",
     "elsewhere_names": [
@@ -483,7 +546,7 @@
     "why": "the handshake after the import is a host's import or export flow, which hdtp-gateway (the node) and batondeck each build over this library's export functions. The node holds it in TestAfterAnImportTheNextLeafHandshakesEveryImportedContact and TestTheCampaignWalksAnImportsContactsOnceAndNeverABlockedOne; the node's table is hdtp-gateway's docs/conformance.md, and the hosting platform's is batondeck's docs/must-holders.json"
   },
   "9.2#21": {
-    "hash": "51fb37a492ed",
+    "hash": "c34b624669c5",
     "text": "A contact that refuses the call — `update_contact` is a contact-tier tool, and that contact does not hold the ",
     "elsewhere": "host",
     "elsewhere_names": [
@@ -493,7 +556,7 @@
     "why": "the request_contact fallback is a host's import or export flow, which hdtp-gateway (the node) and batondeck each build over this library's export functions. The node holds it in TestAfterAnImportTheNextLeafHandshakesEveryImportedContact and TestTheCampaignWalksAnImportsContactsOnceAndNeverABlockedOne; the node's table is hdtp-gateway's docs/conformance.md, and the hosting platform's is batondeck's docs/must-holders.json"
   },
   "9.2#22": {
-    "hash": "a6d2916359bc",
+    "hash": "26bd4eaaae44",
     "text": "A writer MUST write `reply_to` as `null` when the message it names is not in the file.",
     "held_by": [
       "rust:what_a_contact_controls_never_stops_an_export_and_it_reads_back",
@@ -502,7 +565,7 @@
     "why": "a reply to a message the file does not carry, the left-out one included, is written as null, and the file reads back"
   },
   "9.2#23": {
-    "hash": "4d8bedace3e3",
+    "hash": "6ec73d8ec722",
     "text": "A writer MUST drop from `their_permissions` every name that is not a permission of §8 and every name repeated,",
     "held_by": [
       "rust:what_a_contact_controls_never_stops_an_export_and_it_reads_back",
@@ -510,7 +573,7 @@
     ]
   },
   "9.2#24": {
-    "hash": "a8eb3f538099",
+    "hash": "597cb76cbe40",
     "text": "A writer MUST truncate `display_name` to 200 characters, since it is the contact's own claim.",
     "held_by": [
       "rust:what_a_contact_controls_never_stops_an_export_and_it_reads_back",
@@ -518,7 +581,7 @@
     ]
   },
   "9.2#25": {
-    "hash": "aa745ab035b1",
+    "hash": "93a381a79efe",
     "text": "A writer MUST leave out a message whose `body`, or whose media file, the key-material check above would refuse",
     "held_by": [
       "rust:what_a_contact_controls_never_stops_an_export_and_it_reads_back",
@@ -528,19 +591,19 @@
     "why": "a body that is a key: the message is left out and listed by id and reason (export_write_messages answers `left_out`); a media file that is a key: Go's WriteExportZip leaves out every message that carries it, with the file, and lists each (the core never sees media bytes, so the host's writer holds this half). The report the person is shown is the host's"
   },
   "9.2#26": {
-    "hash": "5154986a4395",
+    "hash": "d1946c31355b",
     "text": "**Ceilings.** A host MAY set import ceilings of its own, on the whole file and on counts — contacts, threads, ",
     "elsewhere": "host",
     "why": "a host's own ceilings are the host's. The one this library's Go port sets names itself in its refusal (\"the file is over the N-byte ceiling this host sets\", TestAnExportWrittenIsReadBackWhole); the node's table is hdtp-gateway's docs/conformance.md, and the hosting platform's is batondeck's docs/must-holders.json"
   },
   "9.2#27": {
-    "hash": "9364e147ab0b",
+    "hash": "de23a73f9daf",
     "text": "A host MUST NOT refuse to write an export because the file would exceed an import ceiling of its own, of any k",
     "elsewhere": "host",
     "why": "this library's writers take no ceiling at all, so nothing here refuses an export for one; whether a host warns is its surface. the node's table is hdtp-gateway's docs/conformance.md, and the hosting platform's is batondeck's docs/must-holders.json"
   },
   "9.2#28": {
-    "hash": "ff5bc5bb3c9f",
+    "hash": "21e112f86536",
     "text": "**The owner's own strings.** A writer MUST refuse to write a manifest whose `owner_name` or `tool` the key-mat",
     "held_by": [
       "rust:export_write_refuses_a_row_or_message_holding_a_private_key",
@@ -549,8 +612,8 @@
     "why": "export_write refuses a key in owner_name or tool, naming the member, and Go's WriteExportZip refuses it before the first byte; js/cases/export.mjs holds both ports to the same words"
   },
   "13.1#1": {
-    "hash": "f3ac410db1f0",
-    "text": "base64url HPKE encapsulated key, of exactly the suite's `Npk` (RFC 9180 §7.1): 65 bytes for `HDTP-SEAL-P256`, ",
+    "hash": "f4979201570b",
+    "text": "base64url HPKE encapsulated key, of exactly the suite's `Npk` (RFC 9180, Section 7.1): 65 bytes for `HDTP-SEAL",
     "held_by": [
       "scenario:a byte moved from the encapsulated key into the ciphertext",
       "rust:an_encapsulated_key_of_the_wrong_length_is_refused_under_each_suite",
@@ -558,8 +621,8 @@
     ]
   },
   "13.1#2": {
-    "hash": "fbd78ad60926",
-    "text": "Each of the four members is base64url (RFC 4648 §5) without padding, in its one canonical spelling, and a rece",
+    "hash": "0d7df47f34aa",
+    "text": "Each of the four members is base64url (RFC 4648, Section 5) without padding, in its one canonical spelling, an",
     "held_by": [
       "scenario:a real envelope whose protected carries a stray character",
       "scenario:a real envelope whose enc is padded",
@@ -568,22 +631,22 @@
     ]
   },
   "13.1#3": {
-    "hash": "647a7e313ce6",
+    "hash": "a3cc73682ec0",
     "text": "The suite follows the recipient's key and nothing else: a receiver MUST refuse an envelope whose `suite` is no",
     "held_by": [
       "scenario:the wrong suite for the recipient's key"
     ]
   },
   "13.1#4": {
-    "hash": "50d220277b07",
+    "hash": "4d5da13602d6",
     "text": "The HPKE `info` parameter is the ASCII string `HDTP-SEAL-v1`, and an envelope sealed under any other info stri",
     "held_by": [
       "scenario:sealed with a stale info string"
     ]
   },
   "13.1#5": {
-    "hash": "7ff47a8bc4dd",
-    "text": "The HPKE ephemeral MUST be fresh for every envelope — a reused one repeats the key and the nonce, and two ciph",
+    "hash": "a3ab2fa61907",
+    "text": "The HPKE ephemeral **MUST** be fresh for every envelope — a reused one repeats the key and the nonce, and two ",
     "held_by": [
       "scenario:HPKE ephemeral reuse leaks the XOR of two plaintexts; production sealing cannot take a seed",
       "scenario:a low-order X25519 recipient point",
@@ -592,14 +655,14 @@
     ]
   },
   "13.1#6": {
-    "hash": "a74d0872b680",
+    "hash": "043efb65cd3b",
     "text": "`msg_id` is REQUIRED and MUST be non-empty — replay protection keyed on an empty string protects nothing.",
     "held_by": [
       "scenario:an empty msg_id"
     ]
   },
   "13.1#7": {
-    "hash": "1797d1ad09e4",
+    "hash": "380138034970",
     "text": "A protected header carrying a member not listed for its `v`, or one whose type is not the one listed — `v`, `t",
     "held_by": [
       "scenario:a header with an extra member",
@@ -609,7 +672,7 @@
     ]
   },
   "13.2#1": {
-    "hash": "01354eaed081",
+    "hash": "31c65f41fa63",
     "text": "The plaintext of a request envelope is one bare JSON object (no JSON-RPC framing) of `method`, `params`, and e",
     "held_by": [
       "go:TestEnvelopesOpenAndReproduce",
@@ -618,7 +681,7 @@
     ]
   },
   "13.2#2": {
-    "hash": "8a633e21ceb8",
+    "hash": "c86663070bf0",
     "text": "A sender MUST carry `chain` on first contact and in its first envelope to each contact after a renewal, and MA",
     "held_by": [
       "scenario:after chain_required, the chain is sent and the leaf is learned",
@@ -634,7 +697,7 @@
     ]
   },
   "13.2#4": {
-    "hash": "61d4003b9f68",
+    "hash": "bfe99b543fe4",
     "text": "`chain` MUST validate (§14.2), `sig` MUST verify under its leaf key, and its leaf MUST byte-equal the `card` a",
     "held_by": [
       "scenario:a guest whose card carries a different certificate than the chain",
@@ -642,7 +705,7 @@
     ]
   },
   "13.2#5": {
-    "hash": "d3466aa6ceee",
+    "hash": "7e04cc491d52",
     "text": "Error results follow the sealing rule too: once a request envelope has been successfully opened, an error resu",
     "elsewhere": "node",
     "why": "sealing an error is the RECEIVER's act, past the open: hdtp-gateway does it (TestARefusalPastTheOpenIsSealed) and the caller refuses a plaintext code that should have been sealed (TestAPlaintextRefusalPastTheOpenIsNotThePeersAnswer). SealOpts.Error is the library's half",
@@ -652,7 +715,7 @@
     ]
   },
   "13.3#1": {
-    "hash": "40021258d5cc",
+    "hash": "30f6c54f573c",
     "text": "Receivers MUST validate in this order, rejecting at the first failure: decode `protected`; check `v` and `suit",
     "held_by": [
       "go:TestDecideOnVectors",
@@ -662,7 +725,7 @@
     ]
   },
   "13.3#2": {
-    "hash": "912fb3479c39",
+    "hash": "5be75b081f5a",
     "text": "Idempotency records for seen `msg_id`s MUST be retained until `min(exp, ts + 300 s)` — the end of the window i",
     "held_by": [
       "scenario:an envelope that asks to be remembered for a year",
@@ -673,14 +736,14 @@
     "gap": "the retention itself: keeping a seen msg_id's record until min(exp, ts + 300 s). Both hosts keep it until exp alone (the node's PutIdempotency window is the header's exp; the cloud's recordAck is until exp), which is CW-06 of the port-parity audit of 2026-09-29, its fix the node's and the cloud's"
   },
   "13.3#3": {
-    "hash": "71e0e50ade5b",
+    "hash": "aa6b5ce373c0",
     "text": "A **blocked** sender's envelopes MUST be processed exactly as an unknown sender's — the guest card-binding rul",
     "held_by": [
       "scenario:a blocked sender is answered exactly as an unknown one"
     ]
   },
   "13.4#1": {
-    "hash": "c537b6e341d9",
+    "hash": "69c4733ab83c",
     "text": "`none` — the recipient does not accept envelopes (`sealed_call` absent; senders MUST NOT seal); `optional` — b",
     "elsewhere": "node",
     "why": "the seal knob is a host's posture, advertised on its card; hdtp-gateway enforces it (TestSealNoneRefusesEnvelopes, TestPlaintextToSealRequiredAccountRefused)",
@@ -690,13 +753,13 @@
     ]
   },
   "13.5#1": {
-    "hash": "764e5c08e844",
+    "hash": "b14e3a1700f5",
     "text": "That key signs exactly four structures — a TLS handshake, a certificate signing request, a card, an envelope —",
     "elsewhere": "node",
     "why": "a negative over everything an implementation might sign, which no single test can hold. What bounds it is that the four structures are distinguishable by their first bytes, and that this library exposes no general signing entry point"
   },
   "14.1#1": {
-    "hash": "13d1f231f655",
+    "hash": "4ce8bf6e708b",
     "text": "A certificate's `signatureAlgorithm` MUST be its issuer key's own algorithm; a verifier takes the algorithm fr",
     "held_by": [
       "scenario:leaf declaring ECDSA but signed by an Ed25519 root",
@@ -705,8 +768,8 @@
     ]
   },
   "14.1#2": {
-    "hash": "1e6baf32b13d",
-    "text": "The algorithm identifier inside the `tbsCertificate` and the outer `signatureAlgorithm` MUST be byte-equal and",
+    "hash": "cceb6e9b5e72",
+    "text": "The algorithm identifier inside the `tbsCertificate` and the outer `signatureAlgorithm` **MUST** be byte-equal",
     "held_by": [
       "scenario:one algorithm inside the TBS, another outside it",
       "go:TestDERDeviationsAreRefused",
@@ -714,7 +777,7 @@
     ]
   },
   "14.1#3": {
-    "hash": "a3aa140cc25c",
+    "hash": "ec9edb798fc2",
     "text": "So an ECDSA signature on a certificate MUST be the twin with `s ≤ n/2`, the *low-S* form: an issuer normalises",
     "held_by": [
       "scenario:a P-256 leaf whose signature was swapped for its twin",
@@ -724,8 +787,26 @@
       "go:TestCertificatesReproduce"
     ]
   },
+  "14.1#4": {
+    "held_by": [
+      "scenario:a chain of one certificate",
+      "scenario:a chain of three certificates",
+      "rust:chain_cases",
+      "go:TestChainCases"
+    ],
+    "hash": "6548c875347f",
+    "text": "A **chain** is the leaf followed by the root and nothing else; a verifier **MUST** refuse any other length."
+  },
   "14.2#1": {
-    "hash": "24fda86f067e",
+    "held_by": [
+      "rust:chain_cases",
+      "go:TestChainCases"
+    ],
+    "hash": "f76c8d3f9605",
+    "text": "A verifier handed a chain **MUST** apply these in order and **MUST** refuse at the first failure — `envelope_i"
+  },
+  "14.2#2": {
+    "hash": "d69cafdd6ad2",
     "text": "When the verifier already holds a fingerprint for the identity in question — from a pin, or from the issuer ke",
     "held_by": [
       "scenario:Alina's leaf presented under Mallory's root",
@@ -734,8 +815,8 @@
       "rust:chain_cases"
     ]
   },
-  "14.2#2": {
-    "hash": "71191a341839",
+  "14.2#3": {
+    "hash": "e4db9964c191",
     "text": "When the verifier knows which address is in question — the URL it dialed, the endpoint it pinned, the endpoint",
     "held_by": [
       "scenario:endpoint: userinfo in the URI",
@@ -745,23 +826,35 @@
       "rust:normal_form"
     ]
   },
-  "14.2#3": {
-    "hash": "b03584c1298b",
+  "14.2#4": {
+    "hash": "1a9f8bb42e94",
     "text": "A `dNSName` beside the URI MUST equal its host, and the address guard of §3 — no loopback, link-local or priva",
     "held_by": [
       "scenario:endpoint: dNSName of another host",
       "scenario:a guest whose leaf names the receiver's own address"
     ]
   },
-  "14.2#4": {
-    "hash": "7fe5ebea3e5b",
+  "14.2#5": {
+    "hash": "2e3dd2c3a0f7",
     "text": "A verifier therefore MUST NOT refuse a chain on the root's `notBefore` — including a root whose `notBefore` is",
     "held_by": [
       "scenario:a root whose notBefore is years away is not a refusal"
     ]
   },
   "14.3#1": {
-    "hash": "432f57156a6f",
+    "held_by": [
+      "rust:newest_leaf_cases",
+      "go:TestChainCases"
+    ],
+    "elsewhere_names": [
+      "gateway:TestNewestLeafWinsAndNewAddresses"
+    ],
+    "why": "the comparison is this library's (Appendix B's newest-leaf cases, both ports: go:TestChainCases runs them); hdtp-gateway applies it to a pin (TestNewestLeafWinsAndNewAddresses)",
+    "hash": "88923d3a69e1",
+    "text": "Equal `notBefore` and equal bytes is the pinned leaf; a verifier **MUST** refuse a leaf with an equal `notBefo"
+  },
+  "14.3#2": {
+    "hash": "bbb8f48156f1",
     "text": "A host MUST NOT treat an unanswered or failed refresh as a reason to refuse a contact or to un-pin one: an end",
     "held_by": [],
     "elsewhere": "node",
@@ -769,5 +862,24 @@
       "gateway:TestAnUnansweredConfirmationChangesNoPin"
     ],
     "why": "a refresh is a host's act, on its owner's request, of one contact (§14.3 Refresh), and this library holds none: no host calls refresh_check by itself. What is normative is the negative, and hdtp-gateway holds it: a refresh driven at a closed port leaves the root, the endpoint, the leaf, its key, the root certificate and the card byte-identical, and is audited rather than acted on (TestAnUnansweredConfirmationChangesNoPin). ValidateChain here is what the answer to a refresh is judged by"
+  },
+  "14.4#1": {
+    "held_by": [
+      "scenario:a former key of a still-served identity gets the current chain"
+    ],
+    "elsewhere_names": [
+      "gateway:TestStaleKidIsAnsweredWithTheCurrentChain"
+    ],
+    "why": "the answer to a former key is this library's decision (the scenario); keeping the key identifiers is a host's store: hdtp-gateway keeps a former leaf's kid after its key is destroyed (TestStaleKidIsAnsweredWithTheCurrentChain)",
+    "hash": "4e284f245555",
+    "text": "An endpoint **MUST** keep the key identifiers of every leaf it has held for an identity it still serves — fing"
+  },
+  "14.4#2": {
+    "held_by": [
+      "rust:certificate_renewed_cases",
+      "go:TestChainCases"
+    ],
+    "hash": "50c091fdc16a",
+    "text": "A caller **MUST** follow `certificate_renewed` at most once per call, and only when the chain it carries is ne"
   }
 }
