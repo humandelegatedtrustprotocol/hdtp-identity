@@ -58,7 +58,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 
 | # | The sentence | Held by |
 |---|---|---|
-| `4.#1` | The same URL serves two audiences by content negotiation: a browser gets the human landing page; a client sending `Accept: application/hdtp-invite+json` (or appending `?format=json`) gets `{"card","card_sig","chain"}` — the signed card and the issuer's chain (§2), whose leaf MUST byte-equal the card's `X-HDTP-CERT` and which the redeemer MUST validate (§14.2) before use, so it can seal its very first call. | `gateway:TestLandingNoOracle404` |
+| `4.#1` | The same URL serves two audiences by content negotiation: a browser gets the human landing page; a client sending `Accept: application/hdtp-invite+json` or `Accept: application/json`, or appending `?format=json`, gets `{"card","card_sig","chain"}` — the signed card and the issuer's chain (§2), whose leaf MUST byte-equal the card's `X-HDTP-CERT` and which the redeemer MUST validate (§14.2) before use, so it can seal its very first call. | `gateway:TestLandingNoOracle404` |
 
 ### 5.2 Manual flow (vCard shared over existing channels)
 
@@ -200,7 +200,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 
 | # | The sentence | Held by |
 |---|---|---|
-| `14.3#1` | A verifier that does confirm a pin, by whatever means and at whatever moment it chooses, MUST NOT treat an unanswered or failed confirmation as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the verifier cannot reach at this moment is not a compromised endpoint, and a rule that turned unreachability into revocation would hand any carrier the power to disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
+| `14.3#1` | A host MUST NOT treat an unanswered or failed refresh as a reason to refuse a contact or to un-pin one: an endpoint that is down, slow, or behind a network the host cannot reach at that moment is not a compromised endpoint, and a rule that turned unreachability into revocation would let any carrier disconnect two people by dropping one request. | `gateway:TestAnUnansweredConfirmationChangesNoPin` |
 
 ## The 2868 cross-port parity cases
 
