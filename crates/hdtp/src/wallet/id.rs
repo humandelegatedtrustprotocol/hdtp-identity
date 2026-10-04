@@ -13,10 +13,23 @@ use hdtp_identity::x509;
 use serde_json::{json, Value};
 use std::path::Path;
 
-pub fn id_create(name: &str, alg: &str, vault: &str, key_out: Option<&str>) -> Res<i32> {
+/// `--ends`, the identity's end date (SPEC §14.1), read before anything is asked or written: an end
+/// date that is not in the future would make an identity that signs nothing, so it is refused here.
+pub(super) fn end_date(ends: Option<&str>, now: i64) -> Res<Option<i64>> {
+    let Some(text) = ends else { return Ok(None) };
+    let at = parse_rfc3339(text).map_err(|e| Fail(format!("--ends: {}", e.why)))?;
+    if at <= now {
+        return fail(format!("--ends {text} is not in the future: an identity that has already ended signs nothing. Nothing written."));
+    }
+    Ok(Some(at))
+}
+
+pub fn id_create(name: &str, alg: &str, vault: &str, key_out: Option<&str>, ends: Option<&str>) -> Res<i32> {
     // Every reason this command can refuse is found before a person is asked for a passphrase and
     // before a vault exists on disk. The `--key-out` check used to sit after the vault was
     // written, which left a made identity behind and told the person it had failed.
+    let now = now_or(None)?;
+    let ends = end_date(ends, now)?;
     let (record, record_real) = record_of(vault);
     for (taken, really) in [(vault, real(vault)), (record.as_str(), record_real.clone())] {
         if Path::new(&really).exists() {
@@ -33,9 +46,8 @@ pub fn id_create(name: &str, alg: &str, vault: &str, key_out: Option<&str>) -> R
     check_writable(Some(&record))?;
     let alg = Alg::parse(alg).map_err(|e| Fail(e.why))?;
     let pass = passphrase(true)?;
-    let now = now_or(None)?;
     let key = PrivateKey::generate(alg).map_err(|e| Fail(e.why))?;
-    let cert = x509::build_root(name, &key, now, &x509::random_serial().map_err(|e| Fail(e.why))?).map_err(|e| Fail(e.why))?;
+    let cert = x509::build_root(name, &key, now, ends, &x509::random_serial().map_err(|e| Fail(e.why))?).map_err(|e| Fail(e.why))?;
     let fp = key.public().fingerprint();
     let mut plaintext = json!({
         "v": 1,
@@ -96,6 +108,13 @@ pub fn id_issue(a: IssueArgs<'_>) -> Res<i32> {
     // The entry and the certificate it keeps must be for the same key on either path, software or
     // card: a vault edited between the two would issue under a root no contact has.
     root_key(&root)?;
+    // §2.2: a root past its end date signs nothing more. Said here, before the passphrase is asked
+    // again, before a card is opened and before "Sign this leaf?", by the core's own test of it.
+    let root_cert = from_b64u(root["cert"].as_str().unwrap_or(""))
+        .ok()
+        .and_then(|d| x509::parse(&d).ok())
+        .ok_or_else(|| Fail("this identity's root certificate does not read".into()))?;
+    csr::refuse_expired(&root_cert, now).map_err(|e| Fail(format!("{}: {}", e.code, e.why)))?;
     // And where the leaf is going is checked before it is signed. A leaf signed, written into the
     // ledger, and then lost to a directory that does not exist would leave this identity's one live
     // leaf spoken for by a certificate nobody has.
@@ -124,7 +143,10 @@ pub fn id_issue(a: IssueArgs<'_>) -> Res<i32> {
             request.endpoint
         ));
     }
-    let (nb, na) = csr::validity(now, previous, a.valid_days).map_err(|e| Fail(e.why))?;
+    let (nb, asked) = csr::validity(now, previous, a.valid_days).map_err(|e| Fail(e.why))?;
+    // A leaf ends no later than its root (§14.2 rule 4): the core ends it there, and the person is
+    // told before the question rather than after it.
+    let na = asked.min(root_cert.not_after);
 
     eprintln!("identity    {} ({})", fp, root["cn"].as_str().unwrap_or(""));
     eprintln!(
@@ -143,6 +165,9 @@ pub fn id_issue(a: IssueArgs<'_>) -> Res<i32> {
     eprintln!("origin      {}", a.origin.unwrap_or("(not given)"));
     eprintln!("host key    {} ({})", request.key.fingerprint(), request.key.alg().name());
     eprintln!("valid       {} to {}  ({} days)", instant(nb), instant(na), a.valid_days);
+    if na < asked {
+        eprintln!("note        {}", csr::ends_with_root_warning(na));
+    }
     if let Some(why) = facts["refusal"].as_str() {
         return fail(format!("bad_request: {why}"));
     }

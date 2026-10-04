@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
-	"unicode/utf16"
+	"unicode/utf8"
 )
 
 // seal is "" for none; extra lines go between the certificate and the seal.
@@ -45,22 +45,23 @@ func extraParts(extra []string) [][2]string {
 	return out
 }
 
+// fold is RFC 6350 §3.2 folding: a line is at most 75 octets, a continuation a space and at most 74
+// more, and a break never falls inside a UTF-8 sequence — it moves back to the start of the character.
 func fold(line string) string {
-	units := utf16.Encode([]rune(line))
-	if len(units) <= 75 {
+	if len(line) <= 75 {
 		return line
 	}
-	whole := func(i int) int {
-		if i > 0 && i < len(units) && units[i-1] >= 0xD800 && units[i-1] < 0xDC00 {
-			return i - 1
+	var parts []string
+	for i, width := 0, 75; i < len(line); width = 74 {
+		end := min(i+width, len(line))
+		for end < len(line) && !utf8.RuneStart(line[end]) {
+			end--
 		}
-		return i
-	}
-	first := whole(75)
-	parts := []string{string(utf16.Decode(units[:first]))}
-	for i := first; i < len(units); {
-		end := whole(min(i+74, len(units)))
-		parts = append(parts, " "+string(utf16.Decode(units[i:end])))
+		if i == 0 {
+			parts = append(parts, line[:end])
+		} else {
+			parts = append(parts, " "+line[i:end])
+		}
 		i = end
 	}
 	return strings.Join(parts, "\r\n")

@@ -101,7 +101,14 @@ pub fn assemble_raw(tbs: &[u8], alg_der: &[u8], sig: &[u8]) -> Vec<u8> {
     der::seq(&[tbs.to_vec(), alg_der.to_vec(), der::bitstr(&sig, 0)])
 }
 
-pub fn root_tbs(cn: &str, key: &PublicKey, not_before: i64, serial: &[u8]) -> Result<Unsigned> {
+/// A root's validity: `not_before`, and the end date its person chose or, absent, FOREVER (§14.1).
+/// The only refusal is an end before the start; one already past is the wallet's to refuse, since
+/// only the wallet knows `now`.
+pub fn root_tbs(cn: &str, key: &PublicKey, not_before: i64, not_after: Option<i64>, serial: &[u8]) -> Result<Unsigned> {
+    let not_after = not_after.unwrap_or(FOREVER);
+    if not_after < not_before {
+        return err("bad_request", "not_after is before not_before");
+    }
     let alg_oid = key.alg().sig_oid();
     let id = key.key_id();
     let tbs = der::seq(&[
@@ -109,7 +116,7 @@ pub fn root_tbs(cn: &str, key: &PublicKey, not_before: i64, serial: &[u8]) -> Re
         der::int_bytes(serial),
         sig_alg(alg_oid),
         name(cn),
-        der::seq(&[time::der_time(not_before), time::der_time(FOREVER)]),
+        der::seq(&[time::der_time(not_before), time::der_time(not_after)]),
         name(cn),
         key.spki().to_vec(),
         der::explicit(
@@ -124,9 +131,9 @@ pub fn root_tbs(cn: &str, key: &PublicKey, not_before: i64, serial: &[u8]) -> Re
     Ok(Unsigned { tbs, sig_alg: alg_oid.to_string() })
 }
 
-pub fn build_root(cn: &str, key: &PrivateKey, not_before: i64, serial: &[u8]) -> Result<Vec<u8>> {
+pub fn build_root(cn: &str, key: &PrivateKey, not_before: i64, not_after: Option<i64>, serial: &[u8]) -> Result<Vec<u8>> {
     let signer = key.signer();
-    let u = root_tbs(cn, &signer.public(), not_before, serial)?;
+    let u = root_tbs(cn, &signer.public(), not_before, not_after, serial)?;
     Ok(assemble(&u.tbs, &u.sig_alg, &signer.sign(&u.tbs)))
 }
 
@@ -452,8 +459,8 @@ pub fn profile_error(c: &Cert, kind: &str) -> Option<String> {
         if crit(OID_SKI) != Some(false) || c.issuer != c.subject {
             return Some("root identity".into());
         }
-        if c.not_after != FOREVER {
-            return Some("root notAfter is not 9999-12-31".into());
+        if c.not_after < c.not_before {
+            return Some("root notAfter is before its notBefore".into());
         }
         return None;
     }
@@ -530,6 +537,13 @@ pub fn host_of(endpoint: &str) -> &str {
     }
 }
 
+/// A root's end date, inclusive as RFC 5280 reads validity: the one test of it, for chain rule 4 and
+/// for every wallet about to sign under the root (§2.2). A root without an end date carries FOREVER
+/// and never reaches it.
+pub fn root_expired(root: &Cert, now: i64) -> bool {
+    now > root.not_after
+}
+
 /// §14.2, refusing at the first failure and naming the rule.
 pub fn validate_chain(chain: &[Vec<u8>], now: i64, expected_root: Option<&str>, expected_endpoint: Option<&str>) -> ChainResult {
     if chain.len() != 2 {
@@ -561,11 +575,18 @@ pub fn validate_chain(chain: &[Vec<u8>], now: i64, expected_root: Option<&str>, 
     if leaf.aki.as_deref() != Some(&root.key_id[..]) {
         return refuse(3, "authority key identifier is not the root");
     }
+    // The root's end date first: past it, every leaf is refused, and the reason says why.
+    if root_expired(&root, now) {
+        return refuse(4, "root has expired");
+    }
     if now < leaf.not_before || now > leaf.not_after {
         return refuse(4, "leaf outside its validity");
     }
     if leaf.not_after - leaf.not_before > MAX_LEAF_DAYS * DAY {
         return refuse(4, "leaf longer than 398 days");
+    }
+    if leaf.not_after > root.not_after {
+        return refuse(4, "leaf outlives the root");
     }
     if leaf.uris.len() != 1 {
         return refuse(5, format!("{} URIs", leaf.uris.len()));
@@ -765,6 +786,20 @@ impl Cert {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// SPEC 14.1: a root's end date is optional (FOREVER when absent), any instant from its
+    /// notBefore on, and one before it is refused by the builder as it is by the profile.
+    #[test]
+    fn a_root_carries_the_end_date_given_or_none() {
+        let key = PrivateKey::from_seed(crate::keys::Alg::Ed25519, &crate::util::seed("x509/root")).unwrap();
+        let s = serial_of("x509/root");
+        let none = parse(&build_root("A", &key, 1_000, None, &s).unwrap()).unwrap();
+        assert_eq!(none.not_after, FOREVER);
+        let at_start = parse(&build_root("A", &key, 1_000, Some(1_000), &s).unwrap()).unwrap();
+        assert_eq!((at_start.not_after, profile_error(&at_start, "root")), (1_000, None));
+        assert_eq!(build_root("A", &key, 1_000, Some(999), &s).unwrap_err().why, "not_after is before not_before");
+        assert_eq!(root_tbs("A", &key.public(), 1_000, Some(999), &s).err().map(|e| e.why), Some("not_after is before not_before".into()));
+    }
+
     #[test]
     fn normal_form() {
         assert!(is_normal_https("https://agent.alina.example/mcp"));

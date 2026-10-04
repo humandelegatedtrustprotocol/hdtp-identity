@@ -18,17 +18,17 @@ export default function csr({ add, expect }, f) {
   add('the root-key refusal with a list of numbers', 'csr_check', { der: rootCsr, root_spkis: [42] });
   add('the root-key refusal with a list of one empty string', 'csr_check', { der: rootCsr, root_spkis: [''] });
   add('the root-key refusal with no list', 'csr_check', { der: rootCsr });
-  add('issue_from_csr with an explicit zero validity', 'issue_from_csr', { csr: request, root_cn: 'A', root_pkcs8: rootPkcs8, now, valid_days: 0 });
-  add('issue_from_csr over 398 days', 'issue_from_csr', { csr: request, root_cn: 'A', root_pkcs8: rootPkcs8, now, valid_days: 400 });
-  add('issue_from_csr with a negative validity', 'issue_from_csr', { csr: request, root_cn: 'A', root_pkcs8: rootPkcs8, now, valid_days: -1 });
-  add('issue_from_csr of a request that is not one', 'issue_from_csr', { csr: b64url(new Uint8Array(8)), root_cn: 'A', root_pkcs8: rootPkcs8, now });
+  add('issue_from_csr with an explicit zero validity', 'issue_from_csr', { csr: request, root_cert: rootDer, root_pkcs8: rootPkcs8, now, valid_days: 0 });
+  add('issue_from_csr over 398 days', 'issue_from_csr', { csr: request, root_cert: rootDer, root_pkcs8: rootPkcs8, now, valid_days: 400 });
+  add('issue_from_csr with a negative validity', 'issue_from_csr', { csr: request, root_cert: rootDer, root_pkcs8: rootPkcs8, now, valid_days: -1 });
+  add('issue_from_csr of a request that is not one', 'issue_from_csr', { csr: b64url(new Uint8Array(8)), root_cert: rootDer, root_pkcs8: rootPkcs8, now });
   // A request whose DER is one short SEQUENCE: csr_check's own `parse`, kept or not (TC-1, R27).
   const truncated = b64url(new Uint8Array([0x30, 0x03, 0x02, 0x01]));
-  add('issue_from_csr of a request that is a truncated SEQUENCE', 'issue_from_csr', { csr: truncated, root_cn: 'A', root_pkcs8: rootPkcs8, now });
-  add('issue_tbs_from_csr of a request that is a truncated SEQUENCE', 'issue_tbs_from_csr', { csr: truncated, root_cn: 'A', root_spki: rootSpki, now });
-  add('issue_from_csr refusing the root\'s own key', 'issue_from_csr', { csr: rootCsr, root_cn: 'A', root_pkcs8: rootPkcs8, root_spkis: [rootSpki], now });
-  add('issue_tbs_from_csr', 'issue_tbs_from_csr', { csr: request, root_cn: 'A', root_spki: rootSpki, now }, (a) => (a?.tbs ? { ...a, tbs: '<a tbs, whose serial is random>' } : a));
-  add('issue_from_csr', 'issue_from_csr', { csr: request, root_cn: 'Alina Rao', root_pkcs8: rootPkcs8, now }, f.withoutSerial('der'));
+  add('issue_from_csr of a request that is a truncated SEQUENCE', 'issue_from_csr', { csr: truncated, root_cert: rootDer, root_pkcs8: rootPkcs8, now });
+  add('issue_tbs_from_csr of a request that is a truncated SEQUENCE', 'issue_tbs_from_csr', { csr: truncated, root_cert: rootDer, now });
+  add('issue_from_csr refusing the root\'s own key', 'issue_from_csr', { csr: rootCsr, root_cert: rootDer, root_pkcs8: rootPkcs8, root_spkis: [rootSpki], now });
+  add('issue_tbs_from_csr', 'issue_tbs_from_csr', { csr: request, root_cert: rootDer, now }, (a) => (a?.tbs ? { ...a, tbs: '<a tbs, whose serial is random>' } : a));
+  add('issue_from_csr', 'issue_from_csr', { csr: request, root_cert: rootDer, root_pkcs8: rootPkcs8, now }, f.withoutSerial('der'));
   // A request made and checked with every member given: the calls the generated cases vary (BASES).
   add('csr_new', 'csr_new', { cn: 'Alina Rao', host_pkcs8: hostPkcs8, endpoint: ENDPOINT, dns_name: 'agent.alina.example' });
   add('csr_check', 'csr_check', { der: request, root_spkis: [rootSpki] });
@@ -36,7 +36,7 @@ export default function csr({ add, expect }, f) {
   // §9's root-key refusal reaches a root given as its key id, which is the form a wallet holding
   // fingerprints has. One port matched only the SubjectPublicKeyInfo, so the other refusal never fired.
   add('the root-key refusal against a key id', 'csr_check', { der: rootCsr, root_spkis: [rootKeyId] });
-  add('issue_from_csr refusing a root given as a key id', 'issue_from_csr', { csr: rootCsr, root_cn: 'A', root_pkcs8: rootPkcs8, root_spkis: [rootKeyId], now });
+  add('issue_from_csr refusing a root given as a key id', 'issue_from_csr', { csr: rootCsr, root_cert: rootDer, root_pkcs8: rootPkcs8, root_spkis: [rootKeyId], now });
 
   // Every member that is absent rather than empty, and present as `null`.
   for (const fn of ['csr_new', 'csr_check']) add(`${fn} with nothing to work from`, fn, {});
@@ -54,7 +54,7 @@ export default function csr({ add, expect }, f) {
   add('csr_check: a signatureAlgorithm with a trailing NULL', 'csr_check', { der: signedBy(hostKey, cri.raw, derSeq(derChildren(sigAlg)[0].raw, derTlv(0x05, Buffer.alloc(0)))) });
   add('csr_check: a key outside the profile AND a malformed attribute set: which is said first', 'csr_check', { der: signedBy(hostKey, derSeq(version.raw, subject.raw, x25519SpkiDer, derTlv(0xa0, derInt(7)))) });
 
-  add('issue_from_csr with no now', 'issue_from_csr', { csr: request, root_pkcs8: rootPkcs8, root_cn: 'Alina Rao' });
+  add('issue_from_csr with no now', 'issue_from_csr', { csr: request, root_pkcs8: rootPkcs8, root_cert: rootDer });
 
   // A request on another port, for the host's own dNSName and for someone else's. Port-built: the
   // seed builds no certificate signing request.
@@ -73,9 +73,9 @@ export default function csr({ add, expect }, f) {
     const refused = 'endpoint is not an https URL in normal form';
     add(`csr_check of a request naming ${endpoint}`, 'csr_check', { der: zoned });
     expect(`csr_check of a request naming ${endpoint}`, { ok: false, why: refused });
-    add(`issue_from_csr of a request naming ${endpoint}`, 'issue_from_csr', { csr: zoned, root_cn: 'A', root_pkcs8: rootPkcs8, now });
+    add(`issue_from_csr of a request naming ${endpoint}`, 'issue_from_csr', { csr: zoned, root_cert: rootDer, root_pkcs8: rootPkcs8, now });
     expect(`issue_from_csr of a request naming ${endpoint}`, { error: 'bad_request', why: refused });
-    add(`issue_tbs_from_csr of a request naming ${endpoint}`, 'issue_tbs_from_csr', { csr: zoned, root_cn: 'A', root_spki: rootSpki, now });
+    add(`issue_tbs_from_csr of a request naming ${endpoint}`, 'issue_tbs_from_csr', { csr: zoned, root_cert: rootDer, now });
     expect(`issue_tbs_from_csr of a request naming ${endpoint}`, { error: 'bad_request', why: refused });
   }
 
@@ -88,7 +88,25 @@ export default function csr({ add, expect }, f) {
     const request = f.requestFor(spki);
     add(`csr_check of a request carrying a key outside the profile: ${kind}`, 'csr_check', { der: request });
     expect(`csr_check of a request carrying a key outside the profile: ${kind}`, { ok: false, why });
-    add(`issue_from_csr of a request carrying a key outside the profile: ${kind}`, 'issue_from_csr', { csr: request, root_cn: 'A', root_pkcs8: rootPkcs8, now });
+    add(`issue_from_csr of a request carrying a key outside the profile: ${kind}`, 'issue_from_csr', { csr: request, root_cert: rootDer, root_pkcs8: rootPkcs8, now });
     expect(`issue_from_csr of a request carrying a key outside the profile: ${kind}`, { error: 'unsupported', why });
   }
+
+  // SPEC §14.1 and §2.2: a root with the end date its person chose (fixtures.mjs `ending`). Before it
+  // a wallet issues, and a leaf that would outlive it ends with it (said in `warnings`); at its last
+  // second it still issues; past it every issuer refuses, `root_expired`, before anything is signed.
+  const { near, far, today, ended, endedWhy } = f.ending;
+  const tbsHidden = (a) => (a?.tbs ? { ...a, tbs: '<a tbs, whose serial is random>' } : a);
+  add('issue_from_csr under a root with an end date not yet reached', 'issue_from_csr', { csr: request, root_cert: far, root_pkcs8: rootPkcs8, now, valid_days: 365 }, f.withoutSerial('der'));
+  add('issue_from_csr under a root that ends before the leaf would', 'issue_from_csr', { csr: request, root_cert: near, root_pkcs8: rootPkcs8, now, valid_days: 365 }, f.withoutSerial('der'));
+  add('issue_tbs_from_csr under a root that ends before the leaf would', 'issue_tbs_from_csr', { csr: request, root_cert: near, now, valid_days: 365 }, tbsHidden);
+  add('issue_from_csr at the last second of its root', 'issue_from_csr', { csr: request, root_cert: today, root_pkcs8: rootPkcs8, now }, f.withoutSerial('der'));
+  add('issue_from_csr under a root past its end date', 'issue_from_csr', { csr: request, root_cert: ended, root_pkcs8: rootPkcs8, now });
+  expect('issue_from_csr under a root past its end date', endedWhy);
+  add('issue_tbs_from_csr under a root past its end date', 'issue_tbs_from_csr', { csr: request, root_cert: ended, now });
+  expect('issue_tbs_from_csr under a root past its end date', endedWhy);
+  add('issue_from_csr with a root_cert that is a leaf', 'issue_from_csr', { csr: request, root_cert: f.leafDer, root_pkcs8: rootPkcs8, now });
+  expect('issue_from_csr with a root_cert that is a leaf', { error: 'bad_request', why: 'root_cert is not a root of the profile: root extensions are not exactly the profile' });
+  add('issue_from_csr with a root_pkcs8 that is not the key of root_cert', 'issue_from_csr', { csr: request, root_cert: rootDer, root_pkcs8: f.p256Pkcs8, now });
+  expect('issue_from_csr with a root_pkcs8 that is not the key of root_cert', { error: 'bad_request', why: 'root_pkcs8 is not the key of root_cert' });
 }

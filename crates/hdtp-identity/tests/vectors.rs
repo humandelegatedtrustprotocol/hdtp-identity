@@ -95,10 +95,13 @@ fn appendix_b_is_read_as_the_shared_cases_say_refusals_word_for_word() {
 const NOW: &str = "2026-09-13T12:00:00Z";
 const ENDPOINT_A: &str = "https://agent.alina.example/mcp";
 const ENDPOINT_B: &str = "https://agent.bharat.example/mcp";
+const ENDPOINT_C: &str = "https://agent.chandra.example/mcp";
+const ROOT_C_ENDS: &str = "2028-01-01T00:00:00Z";
 
 struct Cast {
     root_a: PrivateKey,
     root_b: PrivateKey,
+    root_c: PrivateKey,
     hosts: HashMap<&'static str, PrivateKey>,
 }
 
@@ -107,9 +110,11 @@ fn cast() -> Cast {
     hosts.insert("leaf_a", PrivateKey::from_seed(Alg::Ed25519, &seed("host/alina/2026")).unwrap());
     hosts.insert("leaf_a_next", PrivateKey::from_seed(Alg::Ed25519, &seed("host/alina/2027")).unwrap());
     hosts.insert("leaf_b", PrivateKey::from_seed(Alg::P256, &seed("host/bharat/2026")).unwrap());
+    hosts.insert("leaf_c", PrivateKey::from_seed(Alg::Ed25519, &seed("host/chandra/2026")).unwrap());
     Cast {
         root_a: PrivateKey::from_seed(Alg::Ed25519, &seed("root/alina")).unwrap(),
         root_b: PrivateKey::from_seed(Alg::P256, &seed("root/bharat")).unwrap(),
+        root_c: PrivateKey::from_seed(Alg::Ed25519, &seed("root/chandra")).unwrap(),
         hosts,
     }
 }
@@ -154,16 +159,16 @@ fn der_of(v: &Value) -> HashMap<String, Vec<u8>> {
 }
 
 #[test]
-fn the_seven_certificates_reproduce() {
+fn the_certificates_reproduce() {
     let v = vectors();
     let der = der_of(&v);
     let c = cast();
     let (pub_a, pub_b) = (c.root_a.public(), c.root_b.public());
     let h = |n: &str| c.hosts[n].public();
 
-    let root_a = x509::build_root("Alina Rao", &c.root_a, at("2026-09-01T00:00:00Z"), &serial_of("root_a")).unwrap();
+    let root_a = x509::build_root("Alina Rao", &c.root_a, at("2026-09-01T00:00:00Z"), None, &serial_of("root_a")).unwrap();
     assert_eq!(hex(&root_a), hex(&der["root_a"]), "root_a byte for byte");
-    let root_b = x509::build_root("Bharat Mehta", &c.root_b, at("2026-09-01T00:00:00Z"), &serial_of("root_b")).unwrap();
+    let root_b = x509::build_root("Bharat Mehta", &c.root_b, at("2026-09-01T00:00:00Z"), None, &serial_of("root_b")).unwrap();
     assert_eq!(parse(&root_b).unwrap().tbs, parse(&der["root_b"]).unwrap().tbs, "root_b TBS");
     assert!(x509::verify_cert(&parse(&der["root_b"]).unwrap(), &pub_b), "root_b verifies under its key");
 
@@ -233,6 +238,20 @@ fn the_seven_certificates_reproduce() {
         "leaf_a_next",
     );
     assert_eq!(hex(&next), hex(&der["leaf_a_next"]));
+    // Chandra's root carries the end date its person chose (SPEC 14.1); its leaves end before it,
+    // with it, and after it.
+    let root_c =
+        x509::build_root("Chandra Iyer", &c.root_c, at("2026-09-01T00:00:00Z"), Some(at(ROOT_C_ENDS)), &serial_of("root_c")).unwrap();
+    assert_eq!(hex(&root_c), hex(&der["root_c"]), "root_c byte for byte");
+    let pub_c = c.root_c.public();
+    for (label, nb, na) in [
+        ("leaf_c", "2026-09-01T00:00:00Z", "2027-09-01T00:00:00Z"),
+        ("leaf_c_last", "2027-01-01T00:00:00Z", ROOT_C_ENDS),
+        ("leaf_c_outlives", "2027-06-01T00:00:00Z", "2028-06-01T00:00:00Z"),
+    ] {
+        let l = leaf(&c, "Chandra Iyer", &c.root_c, &pub_c, &h("leaf_c"), ENDPOINT_C, None, nb, na, label);
+        assert_eq!(hex(&l), hex(&der[label]), "{label} byte for byte");
+    }
 
     for (name, pkcs8_hex) in v["leaf_keys_pkcs8_hex"].as_object().unwrap() {
         let k = PrivateKey::from_pkcs8(&from_hex(pkcs8_hex.as_str().unwrap()).unwrap()).unwrap();
@@ -247,7 +266,7 @@ fn the_seven_certificates_reproduce() {
         // come out of parse and the profile check clean.
         if v["certificates"][name.as_str()]["refused"].as_bool() == Some(true) {
             let why = match parse(bytes) {
-                Ok(c) => x509::profile_error(&c, "leaf"),
+                Ok(c) => x509::profile_error(&c, if name.starts_with("root") { "root" } else { "leaf" }),
                 Err(e) => Some(e.why),
             };
             assert!(why.is_some(), "{name} is marked refused, and parse + the profile let it through");
@@ -287,7 +306,10 @@ fn chain_cases() {
         let r = validate_chain(&chain, at(c["now"].as_str().unwrap()), c["expected_root"].as_str(), c["expected_endpoint"].as_str());
         match (c["expect"].as_str().unwrap(), r) {
             ("accept", ChainResult::Ok(_)) => {}
-            ("refuse", ChainResult::Refused { rule, .. }) if rule as u64 == c["rule"].as_u64().unwrap() => {}
+            // A case that names its reason is held to it: rule 4 refuses for four reasons, and a guard
+            // that went missing would still refuse by rule 4 for another one.
+            ("refuse", ChainResult::Refused { rule, reason })
+                if rule as u64 == c["rule"].as_u64().unwrap() && c["reason"].as_str().is_none_or(|want| want == reason) => {}
             (want, ChainResult::Ok(_)) => panic!("{name}: expected {want}, got accept"),
             (want, ChainResult::Refused { rule, reason }) => {
                 panic!("{name}: expected {want} rule {}, got rule {rule} ({reason})", c["rule"])
@@ -297,7 +319,7 @@ fn chain_cases() {
     }
     // A floor, not a count: `== 12` went stale the day Appendix B gained two cases, and failed a run
     // in which every case had passed. What a number here is for is noticing the suite SHRINK.
-    assert!(n >= 14, "Appendix B has carried 14 chain cases; this run saw {n}");
+    assert!(n >= 20, "Appendix B has carried 20 chain cases; this run saw {n}");
 }
 
 #[test]

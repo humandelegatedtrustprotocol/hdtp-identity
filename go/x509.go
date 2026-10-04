@@ -79,15 +79,32 @@ func randomSerial() ([]byte, error) {
 	}
 }
 
-// RootOpts builds a root certificate to the profile.
+// RootOpts builds a root certificate to the profile. NotAfter is the identity's end date, which its
+// person chose (SPEC §14.1); the zero time means none, and the root never expires.
 type RootOpts struct {
 	CN        string
 	Key       *PrivateKey
 	NotBefore time.Time
+	NotAfter  time.Time
 	Serial    []byte
 }
 
-func rootTBS(cn string, pub *PublicKey, notBefore time.Time, serial []byte) (tbs, alg []byte, err error) {
+// rootNotAfter is a root's notAfter: the end date given, or forever. One given before notBefore is
+// refused; one already past is the wallet's to refuse, since only the wallet knows the time.
+func rootNotAfter(notBefore, notAfter time.Time) (time.Time, error) {
+	if notAfter.IsZero() {
+		return forever, nil
+	}
+	if notAfter.Before(notBefore) {
+		return time.Time{}, errArg("not_after is before not_before")
+	}
+	return notAfter, nil
+}
+
+func rootTBS(cn string, pub *PublicKey, notBefore, notAfter time.Time, serial []byte) (tbs, alg []byte, err error) {
+	if notAfter, err = rootNotAfter(notBefore, notAfter); err != nil {
+		return nil, nil, err
+	}
 	if serial == nil {
 		if serial, err = randomSerial(); err != nil {
 			return nil, nil, err
@@ -95,7 +112,7 @@ func rootTBS(cn string, pub *PublicKey, notBefore time.Time, serial []byte) (tbs
 	}
 	alg = sigAlgFor(pub.Alg)
 	tbs = seq(
-		explicit(0, derIntN(2)), derInt(serial), alg, nameCN(cn), seq(derTime(notBefore), derTime(forever)), nameCN(cn), pub.SPKI,
+		explicit(0, derIntN(2)), derInt(serial), alg, nameCN(cn), seq(derTime(notBefore), derTime(notAfter)), nameCN(cn), pub.SPKI,
 		explicit(3, seq(
 			extension(OIDBasicConstraints, true, seq(derBool(true), derIntN(0))),
 			extension(OIDKeyUsage, true, keyUsageBits([]int{5})),
@@ -106,11 +123,12 @@ func rootTBS(cn string, pub *PublicKey, notBefore time.Time, serial []byte) (tbs
 }
 
 // RootTBS is the external-signing seam: the bytes a root key must sign, and the algorithm identifier.
-func RootTBS(cn string, pub *PublicKey, notBefore time.Time, serial []byte) (tbs []byte, alg []byte, err error) {
+// notAfter is as RootOpts.NotAfter: the zero time is none.
+func RootTBS(cn string, pub *PublicKey, notBefore, notAfter time.Time, serial []byte) (tbs []byte, alg []byte, err error) {
 	if err := needPublic(pub, "the root's public key"); err != nil {
 		return nil, nil, err
 	}
-	return rootTBS(cn, pub, notBefore, serial)
+	return rootTBS(cn, pub, notBefore, notAfter, serial)
 }
 
 // Assemble puts a signed TBS together with its algorithm and signature into a certificate.
@@ -134,7 +152,7 @@ func BuildRoot(o RootOpts) ([]byte, error) {
 		return nil, err
 	}
 	signer := o.Key.Signer()
-	tbs, alg, err := rootTBS(o.CN, signer.Public, o.NotBefore, o.Serial)
+	tbs, alg, err := rootTBS(o.CN, signer.Public, o.NotBefore, o.NotAfter, o.Serial)
 	if err != nil {
 		return nil, err
 	}
@@ -628,8 +646,8 @@ func ProfileError(c *Cert, kind string) string {
 		if crit[OIDSubjectKeyID] || c.Issuer != c.Subject {
 			return "root identity"
 		}
-		if !c.NotAfter.Equal(forever) {
-			return "root notAfter is not 9999-12-31"
+		if c.NotAfter.Before(c.NotBefore) {
+			return "root notAfter is before its notBefore"
 		}
 		return ""
 	}
@@ -662,6 +680,13 @@ func ProfileError(c *Cert, kind string) string {
 
 // verifyCert: the signature algorithm the certificate declares must be the issuer key's own; a verifier
 // never picks the algorithm from the certificate, so a mismatch is simply a certificate the key did not sign.
+// RootExpired is a root's end date, inclusive as RFC 5280 reads validity: the one test of it, for chain
+// rule 4 and for every wallet about to sign under the root (SPEC §2.2). A root without an end date
+// carries 9999-12-31 and never reaches it.
+func RootExpired(root *Cert, now time.Time) bool {
+	return now.After(root.NotAfter)
+}
+
 func verifyCert(c *Cert, issuer *PublicKey) bool {
 	expected := OIDEcdsaSHA256
 	if issuer.Alg == AlgEd25519 {
@@ -735,11 +760,18 @@ func ValidateChain(chain [][]byte, o ChainOpts) ChainResult {
 	if !bytes.Equal(leaf.AKI, root.KeyID) {
 		return refuse(3, "authority key identifier is not the root")
 	}
+	// The root's end date first: past it, every leaf is refused, and the reason says why.
+	if RootExpired(root, o.Now) {
+		return refuse(4, "root has expired")
+	}
 	if o.Now.Before(leaf.NotBefore) || o.Now.After(leaf.NotAfter) {
 		return refuse(4, "leaf outside its validity")
 	}
 	if leaf.NotAfter.Sub(leaf.NotBefore) > MaxLeafDays*24*time.Hour {
 		return refuse(4, "leaf longer than 398 days")
+	}
+	if leaf.NotAfter.After(root.NotAfter) {
+		return refuse(4, "leaf outlives the root")
 	}
 	if len(leaf.URIs) != 1 {
 		return refuse(5, fmt.Sprintf("%d URIs", len(leaf.URIs)))

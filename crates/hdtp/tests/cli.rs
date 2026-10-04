@@ -617,15 +617,24 @@ fn the_generator_writes_a_vector_file_the_checker_proves() {
     let out = dir.path().join("vectors.json");
     hdtp().args(["vectors", "gen", "--out"]).arg(&out).assert().success();
     let v: serde_json::Value = serde_json::from_slice(&fs::read(&out).unwrap()).unwrap();
-    assert_eq!(v["certificates"].as_object().unwrap().len(), 7);
     assert_eq!(v["envelopes"].as_array().unwrap().len(), 3);
     hdtp().args(["vectors", "check", "--file"]).arg(&out).assert().success().stdout(all_passed());
-    // The Ed25519 certificates are the committed vectors byte for byte.
+    // The Ed25519 certificates are the committed vectors byte for byte, and the generator rebuilds
+    // every certificate the committed vectors hold in the profile (the ones marked `refused` it does
+    // not): the count is the committed file's, so it cannot go stale.
     let committed = repo_root().join("hdtp-spec/vectors/hdtp-1.0-vectors.json");
     if committed.exists() {
         let c: serde_json::Value = serde_json::from_slice(&fs::read(&committed).unwrap()).unwrap();
-        for name in ["root_a", "leaf_a", "leaf_a_expired", "leaf_a_long", "leaf_a_next"] {
-            assert_eq!(v["certificates"][name]["der_hex"], c["certificates"][name]["der_hex"], "{name}");
+        let in_profile: Vec<&String> =
+            c["certificates"].as_object().unwrap().iter().filter(|(_, x)| x["refused"].as_bool() != Some(true)).map(|(n, _)| n).collect();
+        let mut generated: Vec<&String> = v["certificates"].as_object().unwrap().keys().collect();
+        let mut want = in_profile.clone();
+        generated.sort();
+        want.sort();
+        assert_eq!(generated, want, "the generator rebuilds exactly the committed certificates in the profile");
+        // Bharat's are P-256, signed anew each run; everyone else's are Ed25519 and reproduce.
+        for name in in_profile.iter().filter(|n| n.split('_').nth(1) != Some("b")) {
+            assert_eq!(v["certificates"][name.as_str()]["der_hex"], c["certificates"][name.as_str()]["der_hex"], "{name}");
         }
         assert_eq!(v["envelopes"][0]["ct"], c["envelopes"][0]["ct"], "alina-to-bharat reproduces");
     }
@@ -908,4 +917,65 @@ fn a_card_held_root_is_held_to_the_ledger_by_the_core() {
         .and(predicate::str::contains("agent.alina.example is not told by this signature"))
         .and(predicate::str::contains("a second endpoint is a move").not()),
     );
+}
+
+/// SPEC §14.1 and §2.2 at the terminal: `--ends` gives the identity an end date; one that is not in
+/// the future is refused before a passphrase is asked; a leaf asked for near the end ends with the
+/// root and the person is told; past it, `id issue` refuses before it shows the leaf or asks anything.
+#[test]
+fn an_identity_with_an_end_date() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    let pass = passphrase_file(d, 0o600);
+    let key = d.join("host.key");
+    let csr = d.join("host.csr");
+    let vault = d.join("alina.hdtp-vault.json");
+
+    // No passphrase file: had the command reached the question, it would have failed on that instead.
+    hdtp()
+        .args(["id", "create", "--name", "Alina Rao", "--ends", "2020-01-01T00:00:00Z", "--vault"])
+        .arg(&vault)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--ends 2020-01-01T00:00:00Z is not in the future"));
+    assert!(!vault.exists() && !record_of(&vault).exists(), "nothing written");
+
+    hdtp()
+        .env("HDTP_PASSPHRASE_FILE", &pass)
+        .args(["id", "create", "--name", "Alina Rao", "--ends", "2099-01-01T00:00:00Z", "--vault"])
+        .arg(&vault)
+        .assert()
+        .success();
+    let root = core_call("parse_certificate", serde_json::json!({ "der": root_cert_of_vault(&pass, &vault) }));
+    assert_eq!(root["not_after"], "2099-01-01T00:00:00Z", "{root}");
+
+    hdtp().args(["key", "new", "--alg", "ed25519", "--out"]).arg(&key).assert().success();
+    hdtp()
+        .args(["csr", "new", "--endpoint", "https://agent.alina.example/mcp", "--key"])
+        .arg(&key)
+        .arg("--out")
+        .arg(&csr)
+        .assert()
+        .success();
+    let issue = |now: &str| {
+        let mut c = hdtp();
+        c.env("HDTP_PASSPHRASE_FILE", &pass)
+            .args(["id", "issue", "--yes", "--valid", "1y", "--now", now, "--csr"])
+            .arg(&csr)
+            .arg("--vault")
+            .arg(&vault);
+        c
+    };
+    // A month before the end: a year was asked, the leaf ends with the root, and the person is told.
+    issue("2098-12-01T00:00:00Z")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("to 2099-01-01T00:00:00Z").and(predicate::str::contains("the leaf ends with its root")));
+    let record_before = fs::read(record_of(&vault)).unwrap();
+    // One second past the end: refused, before the leaf is shown and before anything is asked.
+    issue("2099-01-01T00:00:01Z")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("root_expired").and(predicate::str::contains("endpoint ").not()));
+    assert_eq!(fs::read(record_of(&vault)).unwrap(), record_before, "the record is untouched");
 }

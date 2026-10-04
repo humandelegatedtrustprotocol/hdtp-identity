@@ -332,7 +332,7 @@ fn mallory(now: i64) -> Res<Mallory> {
     let root = PrivateKey::generate(Alg::Ed25519).map_err(|e| Fail(e.why))?;
     let host = PrivateKey::generate(Alg::Ed25519).map_err(|e| Fail(e.why))?;
     let serial = || x509::random_serial().map_err(|e| Fail(e.why));
-    let root_der = x509::build_root("Alina Rao", &root, now - 3600, &serial()?).map_err(|e| Fail(e.why))?;
+    let root_der = x509::build_root("Alina Rao", &root, now - 3600, None, &serial()?).map_err(|e| Fail(e.why))?;
     let (issuer, host_pub) = (root.public(), host.public());
     let leaf = |host_key: &PublicKey, not_before: i64, not_after: i64, ca: bool| -> Res<Vec<u8>> {
         let spec = LeafSpec {
@@ -798,7 +798,7 @@ mod tests {
             PrivateKey::generate(Alg::Ed25519).unwrap(),
             PrivateKey::generate(Alg::Ed25519).unwrap(),
         );
-        let root_t_der = x509::build_root("Target", &root_t, NOW - 3600, &x509::serial_of("control/root")).unwrap();
+        let root_t_der = x509::build_root("Target", &root_t, NOW - 3600, None, &x509::serial_of("control/root")).unwrap();
         let (issuer, host_pub) = (root_t.public(), host_t.public());
         let leaf_t = x509::build_leaf(
             &LeafSpec {
