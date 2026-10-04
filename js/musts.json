@@ -65,14 +65,18 @@
     ]
   },
   "2.2#2": {
-    "hash": "5fe166548983",
-    "text": "A wallet MUST refuse to sign unless all three hold:",
+    "hash": "8dfd87249fd7",
+    "text": "A wallet **MUST** refuse to sign unless all four hold:",
     "held_by": [
       "rust:a_card_whose_certificate_and_key_disagree_gets_no_leaf",
       "rust:another_card_signs_nothing_for_this_identity",
       "rust:a_card_that_swaps_its_key_after_the_check_signs_nothing_that_is_kept",
       "rust:a_vault_root_proves_itself_before_it_signs",
-      "go:TestWalletIssueProvesTheRootBeforeItSigns"
+      "go:TestWalletIssueProvesTheRootBeforeItSigns",
+      "rust:a_root_with_an_end_date",
+      "rust:a_vault_root_with_an_end_date",
+      "rust:a_card_root_with_an_end_date",
+      "go:TestARootWithAnEndDate"
     ]
   },
   "2.2#3": {
@@ -817,6 +821,17 @@
     ]
   },
   "14.2#3": {
+    "hash": "d5609fa0afbb",
+    "text": "The verifier's clock is not past the root's `notAfter`, and is within the leaf's `notBefore` and `notAfter`; t",
+    "held_by": [
+      "rust:chain_cases",
+      "go:TestChainCases",
+      "scenario:a leaf that outlives its root",
+      "rust:a_root_with_an_end_date",
+      "go:TestARootWithAnEndDate"
+    ]
+  },
+  "14.2#4": {
     "hash": "e4db9964c191",
     "text": "When the verifier knows which address is in question — the URL it dialed, the endpoint it pinned, the endpoint",
     "held_by": [
@@ -827,17 +842,17 @@
       "rust:normal_form"
     ]
   },
-  "14.2#4": {
+  "14.2#5": {
     "hash": "1a9f8bb42e94",
-    "text": "A `dNSName` beside the URI MUST equal its host, and the address guard of §3 — no loopback, link-local or priva",
+    "text": "A `dNSName` beside the URI **MUST** equal its host, and the address guard of §3 — no loopback, link-local or p",
     "held_by": [
       "scenario:endpoint: dNSName of another host",
       "scenario:a guest whose leaf names the receiver's own address"
     ]
   },
-  "14.2#5": {
+  "14.2#6": {
     "hash": "2e3dd2c3a0f7",
-    "text": "A verifier therefore MUST NOT refuse a chain on the root's `notBefore` — including a root whose `notBefore` is",
+    "text": "A verifier therefore **MUST NOT** refuse a chain on the root's `notBefore` — including a root whose `notBefore",
     "held_by": [
       "scenario:a root whose notBefore is years away is not a refusal"
     ]
