@@ -115,8 +115,8 @@ var b64urlProperties = []string{"X-HDTP-CERT"}
 // continuation's leading space or adds blank lines. Base64url has none of those four characters, so
 // removing them gives back the writer's bytes whenever nothing else was damaged. Other damage is what
 // it was before: a certificate cut short fails the DER parse below; a changed character is not found
-// by reading, since a card carries no root to check its leaf against — the certificate parses as one
-// its root did not sign, which is the position of a card altered in transit (§3: trust in a card is
+// by reading, since a card carries no root to check its leaf against — the certificate either fails
+// to parse or parses as one its root did not sign, which is the position of a card altered in transit (§3: trust in a card is
 // trust in the channel that carried it).
 // Any other line that starts no property is ignored.
 func DecodeCard(text string, now time.Time) (*Card, error) {

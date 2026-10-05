@@ -146,6 +146,16 @@
     ]
   },
   "3.#5": {
+    "hash": "33afd112d441",
+    "text": "A card copied through a chat or a mail client can arrive with its continuations' leading spaces removed and bl",
+    "held_by": [
+      "rust:a_card_as_a_chat_delivers_it_reads",
+      "rust:damage_that_is_not_whitespace_is_still_caught",
+      "go:TestCardAsAChatDeliversIt"
+    ],
+    "why": "both ports test the reading on the owner's pasted shape, a correct fold, no fold, whitespace inside, a seal after the certificate (plain and group-prefixed), a cut certificate and a changed signature character; js/cases/cards.mjs holds both ports to the seed's card.mjs on the same cards through parity"
+  },
+  "3.#6": {
     "hash": "e2b9336f14b5",
     "text": "A receiver MUST also refuse, at intake and again before every dial, an endpoint whose host resolves to a loopb",
     "held_by": [
@@ -155,7 +165,7 @@
       "scenario:a guest whose leaf names the receiver's own address"
     ]
   },
-  "3.#6": {
+  "3.#7": {
     "hash": "7ebdee768178",
     "text": "A writer **MUST NOT** put a control character into a card — in `FN`, in `X-HDTP-SEAL`, or in a property it add",
     "held_by": [
