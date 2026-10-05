@@ -1,7 +1,8 @@
 package hdtpidentity
 
-// §3, Reading a card: a card whose folding a paste damaged reads, a property after the certificate is
-// not swallowed into it, and damage that is not whitespace is still caught.
+// §3, Reading a card: a card whose folding a paste damaged reads, and a property after the certificate
+// is not swallowed into it. Damage that is not whitespace is what it was: a cut certificate is refused
+// by the DER parse, and a changed character reads, as a certificate its root did not sign.
 
 import (
 	"bytes"

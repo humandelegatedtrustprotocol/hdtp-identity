@@ -1,8 +1,9 @@
 //! §3, Reading a card, at the boundary a host calls (`card_decode`): a card whose folding a paste
-//! damaged reads, a property after the certificate is not swallowed into it, and damage that is not
-//! whitespace is still caught — a cut certificate by the DER parse, a changed character by chain
-//! validation. The Go port's `TestCardAsAChatDeliversIt` and the seed's vectors/check.mjs damage their
-//! cards the same way.
+//! damaged reads, and a property after the certificate is not swallowed into it. Damage that is not
+//! whitespace is what it was: a cut certificate is refused by the DER parse, and a changed character
+//! reads, as a certificate its root did not sign (`validate_chain` refuses it under that root; reading
+//! cannot, as a card carries no root). The Go port's `TestCardAsAChatDeliversIt` and the seed's
+//! vectors/check.mjs damage their cards the same way.
 
 use hdtp_identity::keys::{Alg, PrivateKey};
 use hdtp_identity::x509::{self, LeafSpec};
