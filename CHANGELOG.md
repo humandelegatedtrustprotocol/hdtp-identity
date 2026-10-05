@@ -19,8 +19,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   starts a property is never taken into the certificate. A certificate with a space or a tab inside
   it now reads (it was `not base64url`); a vertical tab, a no-break space and every other character
   outside base64url are refused as before. A cut certificate is still refused by the DER parse; a
-  changed character still reads, as a certificate its root did not sign, which reading cannot find
-  (a card carries no root) — the position of a card altered in transit, as before
+  changed character either fails to parse or reads as a certificate its root did not sign, which
+  reading cannot find (a card carries no root) — the position of a card altered in transit, as before
   (`tests/card_paste.rs`, `go/card_paste_test.go`, `js/cases/cards.mjs`).
 
 ## 0.6.0 — 2026-10-04
