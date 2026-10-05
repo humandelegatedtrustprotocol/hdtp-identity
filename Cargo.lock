@@ -836,7 +836,7 @@ dependencies = [
 
 [[package]]
 name = "hdtp"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "assert_cmd",
  "base64 0.22.1",
@@ -858,7 +858,7 @@ dependencies = [
 
 [[package]]
 name = "hdtp-identity"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -879,7 +879,7 @@ dependencies = [
 
 [[package]]
 name = "hdtp-identity-wasm"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "hdtp-identity",
  "wasm-bindgen",
@@ -888,7 +888,7 @@ dependencies = [
 
 [[package]]
 name = "hdtp-limits"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "serde_json",
 ]
