@@ -37,7 +37,7 @@
     "B64url": {
       "type": "string",
       "pattern": "^[A-Za-z0-9_-]*$",
-      "description": "Bytes, as base64url without padding, in exactly this alphabet. Every answer spells them this way, and every wire object of the specification is read this strictly: an envelope's members, an export's certificates, a signing request. A library argument outside those objects is also read with padding or the standard alphabet, and never with whitespace (CONTRACT §0)."
+      "description": "Bytes, as base64url without padding, in exactly this alphabet. Every answer spells them this way, and every wire object of the specification is read this strictly: an envelope's members, an export's certificates, a signing request. A library argument outside those objects is also read with padding or the standard alphabet, and never with whitespace (CONTRACT §0); a card's certificate loses its spaces, tabs, CRs and LFs before it is read (`card_decode`)."
     },
     "Alg": { "enum": ["ed25519", "p256"], "description": "A key algorithm. A key of any other is refused where it is read (CONTRACT §0)." },
     "Fingerprint": {
@@ -1526,7 +1526,7 @@
         "additionalProperties": false
       },
       "errors": ["bad_request", "parse"],
-      "notes": "Every refusal of a card is `bad_request` with the exact `why` strings of `card.mjs`. A `now` that is not an instant is `parse`, `not an RFC 3339 instant: <now>`, as every function that reads an instant answers it (`\"\"` included). An empty `X-HDTP-VERSION` names no version (`no X-HDTP-VERSION`). `X-HDTP-CERT` is read as every string a port did not write is read (§0), so a stray character, whitespace or a spare bit set is `certificate does not parse: not base64url`."
+      "notes": "Every refusal of a card is `bad_request` with the exact `why` strings of `card.mjs`. A `now` that is not an instant is `parse`, `not an RFC 3339 instant: <now>`, as every function that reads an instant answers it (`\"\"` included). An empty `X-HDTP-VERSION` names no version (`no X-HDTP-VERSION`). A card is read by SPEC §3's *Reading a card*, as `card.mjs` reads it: RFC 6350 unfolding (a CRLF or LF followed by one space or tab removed), then `X-HDTP-CERT` takes every following line that does not start a property (`[group.]NAME[;params]:`, the group and name of ASCII letters, digits and `-`), blank lines included, and loses every space, tab, CR and LF; any other line that starts no property is ignored. So a card whose folding a paste damaged reads. What is left is read as every string a port did not write is read (§0), so a stray character, any other whitespace (a vertical tab, a no-break space) or a spare bit set is `certificate does not parse: not base64url`."
     },
     "refresh_check": {
       "section": "cards",

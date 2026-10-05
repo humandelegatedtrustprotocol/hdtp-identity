@@ -7,13 +7,13 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed as proven that did not pass.
 
-Specification: **1.0.0**. **100** normative sentences, **2889** cross-port parity cases over **54** guarded functions.
+Specification: **1.0.0**. **101** normative sentences, **2895** cross-port parity cases over **54** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 1.0.0): **5778** answers, of which **0** do not hold to the shape it declares. Of **131** declared error codes, **131** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 1.0.0): **5790** answers, of which **0** do not hold to the shape it declares. Of **131** declared error codes, **131** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
-## The 100 normative sentences of the specification
+## The 101 normative sentences of the specification
 
-A sentence carrying MUST, MUST NOT or REQUIRED, one row each, in document order. **70** are
+A sentence carrying MUST, MUST NOT or REQUIRED, one row each, in document order. **71** are
 held by a test or an intrusion scenario in this repository; **30** belong to a wallet, a host
 or a node, and name the artefact that holds them there — checked against the sibling repository
 whenever it is on disk. A row with nothing in its last column would fail `js/musts.mjs`.
@@ -54,8 +54,9 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 | `3.#2` | A receiving implementation **MUST NOT** treat `FN` as identifying, and **SHOULD NOT** present it as a contact's whole identity: where two pinned contacts render alike, show the fingerprint alongside. | `gateway:TestCollidingNamesCarryTheirFingerprint`, `gateway:TestLookAlikeNamesCollideToo`, `gateway:TestNoPeerFacingSurfaceCanSetAPetname` |
 | `3.#3` | `FN` is untrusted display input: a receiver **MUST** strip control and bidirectional-format characters from it before rendering it, **SHOULD** cap its length, and **SHOULD** fold confusable scripts when deciding whether two names collide. | `gateway:TestParsedNameIsCappedAndStripped` |
 | `3.#4` | A receiver **MUST** reject a card without `X-HDTP-CERT`, one whose certificate does not parse as §14.1 describes — no issuer key identifier or one that is not the 32 bytes a key identifier is, no endpoint or several, a validity longer than 398 days — and a card whose `X-HDTP-VERSION` names a major version it does not implement, each with `bad_request`. | `scenario:a card without a certificate`, `scenario:two X-HDTP-CERT properties`, `scenario:a card naming a major that is not 1`, `scenario:a card whose leaf names its issuer in three bytes` |
-| `3.#5` | A receiver **MUST** also refuse, at intake and again before every dial, an endpoint whose host resolves to a loopback, link-local or private address — the resolve-and-vet guard §6.2 applies to media URLs — unless the owner has configured that network on purpose, and a guest's endpoint that names the receiver's own address, which no honest card carries. | `go:TestAddressGuardRefusesEverySpellingOfLoopback`, `go:TestAddressGuard`, `rust:guards`, `scenario:a guest whose leaf names the receiver's own address` |
-| `3.#6` | A writer **MUST NOT** put a control character into a card — in `FN`, in `X-HDTP-SEAL`, or in a property it adds: a card is lines, a line break writes a property of the writer's choosing, and a reader takes the first of a name, so a name of `x`, a line break and `X-HDTP-SEAL:none` turns a card that requires sealing into one that does not. | `rust:nothing_that_goes_into_a_card_may_carry_a_line_break`, `go:TestNothingThatGoesIntoACardMayCarryALineBreak` |
+| `3.#5` | A card copied through a chat or a mail client can arrive with its continuations' leading spaces removed and blank lines added, so a reader **MUST** read `X-HDTP-CERT` as follows: its value also takes every following line that does not start a property, blank lines included, and every space, tab, CR and LF is removed from it. | `rust:a_card_as_a_chat_delivers_it_reads`, `rust:damage_that_is_not_whitespace_is_still_caught`, `go:TestCardAsAChatDeliversIt` |
+| `3.#6` | A receiver **MUST** also refuse, at intake and again before every dial, an endpoint whose host resolves to a loopback, link-local or private address — the resolve-and-vet guard §6.2 applies to media URLs — unless the owner has configured that network on purpose, and a guest's endpoint that names the receiver's own address, which no honest card carries. | `go:TestAddressGuardRefusesEverySpellingOfLoopback`, `go:TestAddressGuard`, `rust:guards`, `scenario:a guest whose leaf names the receiver's own address` |
+| `3.#7` | A writer **MUST NOT** put a control character into a card — in `FN`, in `X-HDTP-SEAL`, or in a property it adds: a card is lines, a line break writes a property of the writer's choosing, and a reader takes the first of a name, so a name of `x`, a line break and `X-HDTP-SEAL:none` turns a card that requires sealing into one that does not. | `rust:nothing_that_goes_into_a_card_may_carry_a_line_break`, `go:TestNothingThatGoesIntoACardMayCarryALineBreak` |
 
 ### 4. Invites
 
@@ -229,7 +230,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 | `14.4#1` | An endpoint **MUST** keep the key identifiers of every leaf it has held for an identity it still serves — fingerprints, never keys past their `notAfter`. | `scenario:a former key of a still-served identity gets the current chain`, `gateway:TestStaleKidIsAnsweredWithTheCurrentChain` |
 | `14.4#2` | A caller **MUST** follow `certificate_renewed` at most once per call, and only when the chain it carries is newer than or equal to its pin (§14.3): an older chain, a chain to another root, or a chain naming another address is discarded and the call fails as it would have. | `rust:certificate_renewed_cases`, `go:TestChainCases` |
 
-## The 2889 cross-port parity cases
+## The 2895 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -237,7 +238,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **2889** cases (**1417** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
+At the run that generated this file: **2895** cases (**1417** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
 
 ### `address_guard` — 51 cases · whole on success
 
@@ -512,7 +513,7 @@ At the run that generated this file: **2889** cases (**1417** of the run's cases
 - generated · build_root · not_before absent, not_after 7
 - generated · build_root · not_before absent, serial 7
 
-### `card_decode` — 39 cases · whole on success
+### `card_decode` — 45 cases · whole on success
 
 - card_decode of a real card
 - card_decode of an empty card
@@ -534,13 +535,19 @@ At the run that generated this file: **2889** cases (**1417** of the run's cases
 - card_decode of a card whose certificate has padding inside
 - card_decode of a card whose certificate has a no-break space
 - card_decode of a card whose certificate has a vertical tab
-- card_decode of a card whose certificate has a tab
 - card_decode of a card whose certificate has nothing but !!!
 - card_decode of a card whose certificate has a spare bit set
 - card_decode of a card whose certificate has nothing wrong with it
 - card_decode of a card whose certificate has padding at the end
 - card_decode of a card whose certificate has the standard alphabet
 - card_decode of a card whose certificate has a space
+- card_decode of a card whose certificate has a tab
+- card_decode of a card as the owner pasted it
+- card_decode of a card not folded at all
+- card_decode of a card with its continuations indented by a tab
+- card_decode of a card pasted, then X-HDTP-SEAL:none
+- card_decode of a card pasted, then a group-prefixed property and the seal
+- card_decode of a card cut at 120 characters
 - card_decode of a card with an empty X-HDTP-VERSION
 - generated · card_decode · {}
 - generated · card_decode · the hostile object
