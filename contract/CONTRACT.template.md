@@ -29,7 +29,9 @@ the tables is `contract/CONTRACT.template.md` and is written by hand.
   the end, and a last character with a spare bit set are `{"error": "parse", "why": "not
   base64url"}`. Every string a port reads that it did not write itself — a card's certificate, a
   chain in a peer's plaintext, a pin's leaf, a held key, a vault's salt, nonce and ciphertext — is
-  read by the same rule and refused in its function's words. One list of cases,
+  read by the same rule and refused in its function's words. One step comes first for a card's
+  certificate alone: its value loses every space, tab, CR and LF, which a fold or a paste puts there
+  (SPEC §3, *Reading a card*; `card_decode`). One list of cases,
   `js/b64url-arguments.json`, holds both ports to it. The members of an envelope that travelled are
   read by a stricter rule (§5). The vector file alone uses hex.
 - **Instants** in JSON are RFC 3339 UTC strings with second precision (`"2026-09-13T12:00:00Z"`);

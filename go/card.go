@@ -5,6 +5,7 @@ package hdtpidentity
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -86,28 +87,65 @@ type CardError struct{ Why string }
 
 func (e CardError) Error() string { return e.Why }
 
-var unfoldRE = regexp.MustCompile("\r?\n[ \t]")
+var (
+	unfoldRE = regexp.MustCompile("\r?\n[ \t]")
+	lineRE   = regexp.MustCompile("\r?\n")
+	// propertyRE is a line that STARTS A PROPERTY: `[group.]NAME[;params]:`, the group and the name of
+	// ASCII letters, digits and `-` — the seed's PROPERTY, and the core's starts_property. A base64url
+	// line never matches: it has no `:`.
+	propertyRE = regexp.MustCompile(`^(?:[A-Za-z0-9-]+\.)?[A-Za-z0-9-]+(?:;[^:]*)?:`)
+	// cardWhitespace is what a base64url value loses: space, tab, CR and LF, and nothing else.
+	cardWhitespace = strings.NewReplacer(" ", "", "\t", "", "\r", "", "\n", "")
+)
+
+// b64urlProperties are the base64url-valued properties a card carries, read by step 3 of DecodeCard.
+var b64urlProperties = []string{"X-HDTP-CERT"}
 
 // DecodeCard is intake per §3: refuses what has no root to pin or no address to reach; an expired leaf
 // is not a refusal.
+//
+// Reading a card (§3, "Reading a card"), in three steps, as the seed's decodeCard and the core read one:
+//  1. RFC 6350 §3.2 unfolding: a line break, CRLF or LF, followed by ONE space or tab is removed, and
+//     the text is split into lines at CRLF or LF;
+//  2. a line starts a property when it begins `[group.]NAME[;params]:` (propertyRE);
+//  3. a base64url-valued property (b64urlProperties: X-HDTP-CERT) also takes every following line that
+//     starts no property, and its value loses every space, tab, CR and LF.
+//
+// Step 3 reads a card whose folding was damaged in transit: pasted through a chat, which drops a
+// continuation's leading space or adds blank lines. Base64url has none of those four characters, so
+// removing them gives back the writer's bytes whenever nothing else was damaged. A character that was
+// changed or lost still is, and is caught where it always was: by the DER parse below, or by chain
+// validation (§14.2) at the first exchange, since a card carries no root to check its leaf against.
+// Any other line that starts no property is ignored.
 func DecodeCard(text string, now time.Time) (*Card, error) {
 	now = now.Truncate(time.Second)
 	unfolded := unfoldRE.ReplaceAllString(text, "")
 	props := map[string][]string{}
 	var order []string
-	for _, line := range regexp.MustCompile("\r?\n").Split(unfolded, -1) {
-		if line == "" {
+	joining := "" // the base64url property whose last value later lines join, while they start no property
+	for _, line := range lineRE.Split(unfolded, -1) {
+		if !propertyRE.MatchString(line) {
+			if joining != "" {
+				v := props[joining]
+				v[len(v)-1] += line
+			}
 			continue
 		}
 		i := strings.IndexByte(line, ':')
-		if i < 0 {
-			continue
-		}
 		name := strings.ToUpper(strings.SplitN(line[:i], ";", 2)[0])
 		if _, ok := props[name]; !ok {
 			order = append(order, name)
 		}
 		props[name] = append(props[name], line[i+1:])
+		joining = ""
+		if slices.Contains(b64urlProperties, name) {
+			joining = name
+		}
+	}
+	for _, name := range b64urlProperties {
+		for j, v := range props[name] {
+			props[name][j] = cardWhitespace.Replace(v)
+		}
 	}
 	first := func(name string) (string, bool) {
 		v, ok := props[name]

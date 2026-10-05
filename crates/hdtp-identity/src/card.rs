@@ -99,16 +99,77 @@ fn unfold(text: &str) -> Vec<String> {
     out
 }
 
+/// The base64url-valued properties a card carries: their values are read by step 3 of `decode`.
+const B64URL: [&str; 1] = ["X-HDTP-CERT"];
+
+/// Whether a line STARTS A PROPERTY: it begins `[group.]NAME[;params]:`, the group and the name of
+/// ASCII letters, digits and `-` (the seed's `PROPERTY`, `/^(?:[A-Za-z0-9-]+\.)?[A-Za-z0-9-]+(?:;[^:]*)?:/`).
+/// A base64url line never does: it has no `:`.
+fn starts_property(line: &str) -> bool {
+    let b = line.as_bytes();
+    let run = |from: usize| from + b[from..].iter().take_while(|c| c.is_ascii_alphanumeric() || **c == b'-').count();
+    let mut end = run(0);
+    if end == 0 {
+        return false;
+    }
+    if b.get(end) == Some(&b'.') {
+        let name = run(end + 1);
+        if name == end + 1 {
+            return false;
+        }
+        end = name;
+    }
+    match b.get(end) {
+        Some(b':') => true,
+        Some(b';') => b[end..].contains(&b':'),
+        _ => false,
+    }
+}
+
 /// Intake per §3: refuses what has no root to pin or no address to reach; an expired leaf is not a refusal.
+///
+/// Reading a card (§3, "Reading a card"), in three steps, as the seed's `decodeCard` reads one:
+///   1. RFC 6350 §3.2 unfolding (`unfold`): a line break, CRLF or LF, followed by ONE space or tab is
+///      removed, and the text is split into lines at CRLF or LF;
+///   2. a line starts a property when it begins `[group.]NAME[;params]:` (`starts_property`);
+///   3. a base64url-valued property (`B64URL`: X-HDTP-CERT) also takes every following line that starts
+///      no property, and its value loses every space, tab, CR and LF.
+///
+/// Step 3 reads a card whose folding was damaged in transit: pasted through a chat, which drops a
+/// continuation's leading space or adds blank lines. Base64url has none of those four characters, so
+/// removing them gives back the writer's bytes whenever nothing else was damaged. A character that was
+/// changed or lost still is, and is caught where it always was: by the DER parse below, or by chain
+/// validation (§14.2) at the first exchange, since a card carries no root to check its leaf against.
+/// Any other line that starts no property is ignored.
 pub fn decode(text: &str, now: i64) -> Result<Card> {
     let mut props: Vec<(String, Vec<String>)> = Vec::new();
+    // The value later lines join, while they start no property: (index in props, index in its values).
+    let mut joining: Option<(usize, usize)> = None;
     for line in unfold(text) {
-        let Some(i) = line.find(':') else { continue };
+        if !starts_property(&line) {
+            if let Some((p, v)) = joining {
+                props[p].1[v].push_str(&line);
+            }
+            continue;
+        }
+        let i = line.find(':').unwrap_or_default();
         let name = line[..i].split(';').next().unwrap_or("").to_uppercase();
         let value = line[i + 1..].to_string();
-        match props.iter_mut().find(|(n, _)| *n == name) {
-            Some((_, v)) => v.push(value),
-            None => props.push((name, vec![value])),
+        let p = match props.iter().position(|(n, _)| *n == name) {
+            Some(p) => p,
+            None => {
+                props.push((name.clone(), Vec::new()));
+                props.len() - 1
+            }
+        };
+        props[p].1.push(value);
+        joining = B64URL.contains(&name.as_str()).then(|| (p, props[p].1.len() - 1));
+    }
+    for (name, values) in props.iter_mut() {
+        if B64URL.contains(&name.as_str()) {
+            for v in values.iter_mut() {
+                v.retain(|c| !matches!(c, ' ' | '\t' | '\r' | '\n'));
+            }
         }
     }
     let get = |n: &str| props.iter().find(|(k, _)| k == n).map(|(_, v)| v.as_slice());

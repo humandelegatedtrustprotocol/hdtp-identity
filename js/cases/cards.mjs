@@ -109,18 +109,58 @@ export default function cards({ add, expect }, f) {
     ['padding inside', at8('='), notB64],
     ['a no-break space', at8('\u00a0'), notB64],
     ['a vertical tab', at8('\u000b'), notB64],
-    ['a tab', at8('\t'), notB64],
     ['nothing but !!!', '!!!', notB64],
     ['a spare bit set', withSpareBit, notB64],
     // The controls, which must read: the certificate as written, padded, and in the standard alphabet.
     ['nothing wrong with it', leafDer, read],
     ['padding at the end', leafDer + '='.repeat((4 - (leafDer.length % 4)) % 4), read],
     ['the standard alphabet', leafDer.replace(/-/g, '+').replace(/_/g, '/'), read],
-    ['a space', at8(' '), notB64],
+    // A space and a tab are removed before the certificate is read (§3, Reading a card): a paste puts
+    // them there, and base64url has neither. Both were refused here until SEP-0001; all three readers
+    // changed together, so they still agree. A vertical tab and a no-break space stay refused.
+    ['a space', at8(' '), read],
+    ['a tab', at8('\t'), read],
   ]) {
     const seed = seedDecodes(withCert(value));
     add(`card_decode of a card whose certificate has ${what}`, 'card_decode', { vcard: withCert(value), now });
     expect(`card_decode of a card whose certificate has ${what}`, JSON.stringify(seed) === JSON.stringify(want) ? want : seed);
+  }
+  // ── A card as a chat delivers it (§3, Reading a card; SEP-0001) ─────────────────────────────────
+  //
+  // The owner's paste of 2026-10-05: X-HDTP-CERT's continuations without their leading space but the
+  // third, a blank line after the first and the fourth, LF line ends. Every reader dropped those lines
+  // and refused the card. Each case is held to the seed's reading (seedDecodes), and `want` is what that
+  // reading is: the card's certificate, or the refusal of what is damaged in more than its whitespace.
+  {
+    const lines = card.split('\r\n');
+    const first = lines.findIndex((l) => l.startsWith('X-HDTP-CERT:'));
+    const conts = lines.slice(first + 1).filter((l) => l.startsWith(' ')).length;
+    if (conts < 4) throw new Error(`cards.mjs: the card's certificate is folded over ${conts + 1} lines, too few to damage`);
+    const pasted = lines.map((l, i) => {
+      const k = i - first;
+      if (k < 1 || k > conts) return l;
+      const body = k === 3 ? l : l.slice(1);
+      return k === 1 || k === 4 ? body + '\n' : body;
+    }).join('\n');
+    const value = (v) => card.replace(/X-HDTP-CERT:[^]*?(?=\r\nX-HDTP-SEAL)/, () => 'X-HDTP-CERT:' + v);
+    // The seal is read too: a property after the certificate stays a property, and is not swallowed.
+    const seedReads = (vcard) => {
+      const c = decodeCard(vcard);
+      return c.error ? { error: c.error, why: c.why } : { ...seedDecodes(vcard), seal: c.seal };
+    };
+    const reads = (seal) => ({ ...read, seal });
+    for (const [what, vcard, want] of [
+      ['as the owner pasted it', pasted, reads('required')],
+      ['not folded at all', card.replace(/\r\n /g, ''), reads('required')],
+      ['with its continuations indented by a tab', card.replace(/\r\n /g, '\r\n\t'), reads('required')],
+      ['pasted, then X-HDTP-SEAL:none', pasted.replace('X-HDTP-SEAL:required', 'X-HDTP-SEAL:none'), reads('none')],
+      ['pasted, then a group-prefixed property and the seal', pasted.replace('X-HDTP-SEAL:required', 'item1.EMAIL;type=INTERNET:a@example.com\nX-HDTP-SEAL:optional'), reads('optional')],
+      ['cut at 120 characters', value(leafDer.slice(0, 120)), { error: 'bad_request', why: 'certificate does not parse: DER length overruns the buffer' }],
+    ]) {
+      const seed = seedReads(vcard);
+      add(`card_decode of a card ${what}`, 'card_decode', { vcard, now });
+      expect(`card_decode of a card ${what}`, JSON.stringify(seed) === JSON.stringify(want) ? want : seed);
+    }
   }
   add('card_decode of a card with an empty X-HDTP-VERSION', 'card_decode', { vcard: card.replace('X-HDTP-VERSION:1', 'X-HDTP-VERSION:'), now });
   expect('card_decode of a card with an empty X-HDTP-VERSION', { error: 'bad_request', why: 'no X-HDTP-VERSION' });
