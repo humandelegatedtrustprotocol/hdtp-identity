@@ -10,6 +10,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+## 0.7.0 — 2026-10-05
+
 - **A card whose folding a paste damaged reads (hdtp-spec SEP-0001, draft §3 *Reading a card*).**
   `card_decode` (Go: `DecodeCard`), in both ports and the seed: after RFC 6350 unfolding,
   `X-HDTP-CERT` takes every following line that does not start a property

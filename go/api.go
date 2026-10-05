@@ -15,7 +15,7 @@ import (
 // track the Rust core. The module version is the repository's one version (scripts/version.mjs
 // writes it here and holds it equal to the crates' and the Wasm package's).
 const (
-	ModuleVersion = "0.6.0"
+	ModuleVersion = "0.7.0"
 	SpecVersion   = "1.0.0"
 )
 
