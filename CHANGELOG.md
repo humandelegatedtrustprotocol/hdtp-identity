@@ -10,6 +10,19 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+- **A card whose folding a paste damaged reads (hdtp-spec SEP-0001, draft §3 *Reading a card*).**
+  `card_decode` (Go: `DecodeCard`), in both ports and the seed: after RFC 6350 unfolding,
+  `X-HDTP-CERT` takes every following line that does not start a property
+  (`[group.]NAME[;params]:`), blank lines included, and loses every space, tab, CR and LF before it
+  is read. A card pasted through a chat — continuations without their leading space, blank lines
+  between them — was refused `certificate does not parse` (seen on staging, 2026-10-05). A line that
+  starts a property is never taken into the certificate. A certificate with a space or a tab inside
+  it now reads (it was `not base64url`); a vertical tab, a no-break space and every other character
+  outside base64url are refused as before. A cut certificate is still refused by the DER parse; a
+  changed character either fails to parse or reads as a certificate its root did not sign, which
+  reading cannot find (a card carries no root) — the position of a card altered in transit, as before
+  (`tests/card_paste.rs`, `go/card_paste_test.go`, `js/cases/cards.mjs`).
+
 ## 0.6.0 — 2026-10-04
 
 - **A root may carry an end date (SPEC 1.0.0 as amended 2026-10-04, §14.1, §14.2, §2.2).** Every
