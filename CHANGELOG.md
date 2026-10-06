@@ -10,6 +10,11 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+- **SPEC §9 9.#4 follows SEP-0002.** `js/musts.json` holds the amended rule (hash `9c1f6a96da61`):
+  an address left, deleted or moved, is kept for the person for 24 hours, then freed.
+- **The `hdtp` wallet's move notice states that rule** in the web wallet's words; it no longer says
+  the address stays reserved until the old leaf expires.
+
 - **The gate holds hdtp-spec's JSON Schema to this contract.** `gate.sh`, and so the pre-push hook
   and `make release`, runs hdtp-spec's `schema/gen.mjs --check` with `HDTP_IDENTITY_DIR` set to this
   tree: the spec's committed `schema/*/schema.json` must be what this `contract/contract.json`
