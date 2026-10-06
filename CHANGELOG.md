@@ -10,6 +10,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+## 0.7.1 — 2026-10-06
+
 - **SPEC §9 9.#4 follows SEP-0002.** `js/musts.json` holds the amended rule (hash `9c1f6a96da61`):
   an address left, deleted or moved, is kept for the person for 24 hours, then freed.
 - **The `hdtp` wallet's move notice states that rule** in the web wallet's words; it no longer says
