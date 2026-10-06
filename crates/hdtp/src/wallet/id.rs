@@ -277,7 +277,7 @@ pub(super) fn move_notice(facts: &Value, name: &str, endpoint: &str) -> Option<S
             Some(format!(
                 "You are moving {name} to {endpoint}. Nothing cancels a certificate in HDTP. The one at {from} stays valid until {until}.\n\n\
                  Each contact switches to the new address the moment it sees this certificate. Your new host contacts each of them to show it. A contact it does not reach keeps using {from} until {until}.\n\n\
-                 {old_host} is not told by this signature. It keeps serving and keeps its key until you delete the identity there. Do that after your new host reports your contacts reached. The address stays reserved until {until}.\n\n\
+                 {old_host} is not told by this signature. It keeps serving and keeps its key until you delete the identity there. Do that after your new host reports your contacts reached. When the identity leaves that address, its host lets no other person's identity take it for 24 hours (HDTP §9).\n\n\
                  Renewing at {old_host} later would move your contacts back. This wallet refuses that unless you choose to move back."
             ))
         }
