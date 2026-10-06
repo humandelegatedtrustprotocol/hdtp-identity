@@ -105,6 +105,9 @@ node --test contract/schema.test.mjs   # the contract's own validator: a value p
 node contract/render.mjs --check  # CONTRACT.md is what contract/contract.json and the template render.
                                 # `js/parity.mjs` validates every answer of both ports against that same
                                 # file, so the document and the gate cannot describe different contracts
+( cd ../hdtp-spec && HDTP_IDENTITY_DIR="$OLDPWD" node schema/gen.mjs --check )
+                                # hdtp-spec's committed schema/*/schema.json is what this contract generates; when
+                                # it is not, the schema is regenerated in hdtp-spec first, as a spec PR
 node js/musts.mjs               # every MUST in hdtp-spec's specification names something that holds it, or says who does
 node js/record.mjs             # regenerate PROOFS.md: every MUST with its holder, every parity case (it prints both counts)
 node js/record.mjs --check     # ...and fail if it is stale (what gate.sh runs)
@@ -163,7 +166,7 @@ git commit js/manifest.json …   # a release (make release) re-pins its own ver
 **The gate is local, and there is no CI.** `sh gate.sh` is the list above as one command — all
 of it except the two builds, since the Wasm that ships is the pinned one and a native rebuild would
 write this machine's bytes over it. It reads the private sibling `hdtp-spec` (the specification's text, the seed
-under `vectors/lib`), which a runner's `GITHUB_TOKEN` cannot see, and the owner's decision
+under `vectors/lib`, the schema generator), which a runner's `GITHUB_TOKEN` cannot see, and the owner's decision
 (2026-09-20) is that no CI credential will be made for it: this project builds, gates and deploys
 from the owner's machine. So this repository's pre-push hook runs `gate.sh` on every push, and
 `make release` runs it before a version is cut. A CI job once held this list and failed at its

@@ -6,8 +6,8 @@
 #   sh gate.sh
 #
 # IT RUNS HERE AND NOT IN CI, by the owner's decision (2026-09-20): the list reads the private
-# sibling `hdtp-spec` — the specification's text, the seed in `vectors/lib` — and no CI credential for it will
-# be created. For five days a CI job held this list and failed at its first step on every run it
+# sibling `hdtp-spec` — the specification's text, the seed in `vectors/lib`, the schema generator —
+# and no CI credential for it will be created. For five days a CI job held this list and failed at its first step on every run it
 # ever had; a gate nothing can run is a comment. This repository's pre-push hook
 # (githooks/pre-push) runs it on every push, and `make release` runs it before a version is cut.
 #
@@ -18,8 +18,8 @@
 set -eu
 cd "$(dirname "$0")"
 
-[ -f ../hdtp-spec/site/spec-source.mjs ] && [ -d ../hdtp-spec/docs/specification ] && [ -f ../hdtp-spec/vectors/lib/x509.mjs ] || {
-  echo "gate: ../hdtp-spec is not checked out beside this directory (docs/specification and vectors/lib are read from it)" >&2
+[ -f ../hdtp-spec/site/spec-source.mjs ] && [ -d ../hdtp-spec/docs/specification ] && [ -f ../hdtp-spec/vectors/lib/x509.mjs ] && [ -f ../hdtp-spec/schema/gen.mjs ] || {
+  echo "gate: ../hdtp-spec is not checked out beside this directory (docs/specification, vectors/lib and schema/gen.mjs are read from it)" >&2
   exit 2
 }
 
@@ -108,6 +108,19 @@ node js/intrude.mjs --port go
 step "The contract's own validator, and CONTRACT.md rendered from the contract file"
 node_tests contract-tests contract/schema.test.mjs
 node contract/render.mjs --check
+
+step "hdtp-spec's committed JSON Schema is what THIS contract generates"
+# hdtp-spec publishes schema/<version>/schema.json, generated from contract/contract.json by its
+# schema/gen.mjs. Identity 0.7.0 shipped a contract change that schema did not carry, and nothing
+# said so until the whitepaper's publish ran the spec's own schema:check. This runs that check
+# against this tree's contract, so a contract change cannot be released ahead of the schema.
+( here="$(pwd)" && cd ../hdtp-spec && HDTP_IDENTITY_DIR="$here" node schema/gen.mjs --check ) || {
+  echo "gate: hdtp-spec's schema/*/schema.json is not what this contract/contract.json generates." >&2
+  echo "      Regenerate it in hdtp-spec FIRST, as a spec PR, from this tree's contract:" >&2
+  echo "        ( cd ../hdtp-spec && HDTP_IDENTITY_DIR=\"$(pwd)\" npm run schema )" >&2
+  echo "      then gate again with ../hdtp-spec at that PR's head." >&2
+  exit 1
+}
 
 step "The two ports answer a caller alike, and both answer as contract/contract.json says"
 node js/parity.mjs --manifest "$HDTP_RESULTS/parity-manifest.json"
