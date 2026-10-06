@@ -10,6 +10,13 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+- **`hdtp id issue` counts the days the leaf has.** A leaf ended with its root printed the days
+  asked beside the shorter span; the consent line now reads `(31 days; 365 asked)`.
+- **SPEC §4 4.#1 names the tests that hold it**: hdtp-gateway's `TestP1ExitTwoNodesPairAndMessage`
+  (the landing's chain validates and its leaf is the card's certificate) and `TestVerifyOfferRefusals`
+  (the redeemer refuses a chain that is not the card's), in place of `TestLandingNoOracle404`, which
+  holds the not-found sentence and no MUST.
+
 ## 0.7.1 — 2026-10-06
 
 - **SPEC §9 9.#4 follows SEP-0002.** `js/musts.json` holds the amended rule (hash `9c1f6a96da61`):
