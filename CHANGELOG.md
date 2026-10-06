@@ -10,6 +10,13 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+- **The gate holds hdtp-spec's JSON Schema to this contract.** `gate.sh`, and so the pre-push hook
+  and `make release`, runs hdtp-spec's `schema/gen.mjs --check` with `HDTP_IDENTITY_DIR` set to this
+  tree: the spec's committed `schema/*/schema.json` must be what this `contract/contract.json`
+  generates. 0.7.0 shipped a contract change that schema did not carry, found only when the
+  whitepaper's publish ran the spec's own `schema:check`. On a difference the gate fails and names
+  the fix: regenerate the schema in hdtp-spec first, as a spec PR.
+
 ## 0.7.0 — 2026-10-05
 
 - **A card whose folding a paste damaged reads (hdtp-spec SEP-0001, draft §3 *Reading a card*).**
