@@ -62,7 +62,7 @@ whenever it is on disk. A row with nothing in its last column would fail `js/mus
 
 | # | The sentence | Held by |
 |---|---|---|
-| `4.#1` | The same URL serves two audiences by content negotiation: a browser gets the human landing page; a client sending `Accept: application/hdtp-invite+json` or `Accept: application/json`, or appending `?format=json`, gets `{"card","card_sig","chain"}` — the signed card and the issuer's chain (§2), whose leaf **MUST** byte-equal the card's `X-HDTP-CERT` and which the redeemer **MUST** validate (§14.2) before use, so it can seal its very first call. | `gateway:TestLandingNoOracle404` |
+| `4.#1` | The same URL serves two audiences by content negotiation: a browser gets the human landing page; a client sending `Accept: application/hdtp-invite+json` or `Accept: application/json`, or appending `?format=json`, gets `{"card","card_sig","chain"}` — the signed card and the issuer's chain (§2), whose leaf **MUST** byte-equal the card's `X-HDTP-CERT` and which the redeemer **MUST** validate (§14.2) before use, so it can seal its very first call. | `gateway:TestP1ExitTwoNodesPairAndMessage`, `gateway:TestVerifyOfferRefusals`, `gateway:TestVerifyOfferAcceptsARealTwoZeroInvite` |
 
 ### 5.2 Manual flow (vCard shared over existing channels)
 
