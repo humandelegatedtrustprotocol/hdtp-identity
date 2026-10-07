@@ -12,8 +12,9 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 - **`hdtp id issue` counts the days the leaf has.** A leaf ended with its root printed the days
   asked beside the shorter span; the consent line now reads `(31 days; 365 asked)`.
-- **`hdtp id issue` says once that the leaf ends with its root**, on the consent screen where the
-  person decides; the note is no longer repeated after the signature.
+- **`hdtp id issue` says each thing once, on the consent screen where the person decides**: that
+  the leaf ends with its root, that the host is new, that the identity moves. The core's warnings of
+  the same facts are no longer printed again after the signature.
 - **PROOFS.md says which elsewhere rows name an artefact and which a role.** Of the 30 MUSTs held
   outside this repository, 16 name the artefact that holds them and 14 the implementation role, by
   declaration, as hdtp-spec's §12 (The record) now allows; the header had said every one named an
