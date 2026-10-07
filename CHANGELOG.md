@@ -10,6 +10,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+## 0.7.3 — 2026-10-07
+
 - **SPEC §9 9.#4 follows SEP-0003.** `js/musts.json` holds the amended rule (hash `f835c346eb45`):
   a left address is kept for 24 hours for the account that held it, which may be one the person
   shares at the host. The `hdtp` wallet's move notice says so.
