@@ -12,6 +12,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 - **`hdtp id issue` counts the days the leaf has.** A leaf ended with its root printed the days
   asked beside the shorter span; the consent line now reads `(31 days; 365 asked)`.
+- **`hdtp id issue` says once that the leaf ends with its root**, on the consent screen where the
+  person decides; the note is no longer repeated after the signature.
 - **SPEC §4 4.#1 names the tests that hold it**: hdtp-gateway's `TestP1ExitTwoNodesPairAndMessage`
   (the landing's chain validates and its leaf is the card's certificate) and `TestVerifyOfferRefusals`
   (the redeemer refuses a chain that is not the card's), in place of `TestLandingNoOracle404`, which

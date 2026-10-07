@@ -242,8 +242,14 @@ pub fn id_issue(a: IssueArgs<'_>) -> Res<i32> {
             json!({ "vault_plaintext": v.plaintext, "record_plaintext": rec.plaintext, "root_fingerprint": fp, "csr": b64u(&csr_der), "now": instant(now), "valid_days": a.valid_days, "move": a.moving }),
         )?,
     };
+    // The leaf's end at its root was said on the consent screen, where the person decided; the core's
+    // warning of the same thing is not said a second time.
+    let said = (na < asked).then(|| csr::ends_with_root_warning(na));
     for w in r["warnings"].as_array().cloned().unwrap_or_default() {
-        eprintln!("note        {}", w.as_str().unwrap_or(""));
+        let w = w.as_str().unwrap_or("");
+        if said.as_deref() != Some(w) {
+            eprintln!("note        {w}");
+        }
     }
     let mut entry = r["ledger_entry"].clone();
     if let Some(o) = a.origin {

@@ -967,10 +967,11 @@ fn an_identity_with_an_end_date() {
         c
     };
     // A month before the end: a year was asked, the leaf ends with the root, and the person is told,
-    // with the days the leaf has, not the days asked, on the line read before "Sign this leaf?".
+    // with the days the leaf has, not the days asked, on the line read before "Sign this leaf?" — and
+    // told once: the core's warning of the same thing is not printed again after the signature.
     issue("2098-12-01T00:00:00Z").assert().success().stderr(
         predicate::str::contains("2098-11-30T23:00:00Z to 2099-01-01T00:00:00Z  (31 days; 365 asked)")
-            .and(predicate::str::contains("the leaf ends with its root")),
+            .and(predicate::function(|s: &str| s.matches("the leaf ends with its root").count() == 1)),
     );
     let record_before = fs::read(record_of(&vault)).unwrap();
     // One second past the end: refused, before the leaf is shown and before anything is asked.
