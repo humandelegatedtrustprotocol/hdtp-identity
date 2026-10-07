@@ -7,7 +7,7 @@ use crate::io::{
 };
 use hdtp_identity::csr;
 use hdtp_identity::keys::{Alg, PrivateKey};
-use hdtp_identity::time::parse_rfc3339;
+use hdtp_identity::time::{parse_rfc3339, DAY};
 use hdtp_identity::util::{b64u, from_b64u};
 use hdtp_identity::x509;
 use serde_json::{json, Value};
@@ -164,9 +164,11 @@ pub fn id_issue(a: IssueArgs<'_>) -> Res<i32> {
     );
     eprintln!("origin      {}", a.origin.unwrap_or("(not given)"));
     eprintln!("host key    {} ({})", request.key.fingerprint(), request.key.alg().name());
-    eprintln!("valid       {} to {}  ({} days)", instant(nb), instant(na), a.valid_days);
     if na < asked {
+        eprintln!("valid       {} to {}  ({} days; {} asked)", instant(nb), instant(na), (na - nb) / DAY, a.valid_days);
         eprintln!("note        {}", csr::ends_with_root_warning(na));
+    } else {
+        eprintln!("valid       {} to {}  ({} days)", instant(nb), instant(na), a.valid_days);
     }
     if let Some(why) = facts["refusal"].as_str() {
         return fail(format!("bad_request: {why}"));

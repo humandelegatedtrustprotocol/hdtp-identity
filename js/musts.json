@@ -177,9 +177,12 @@
     "hash": "9f683432e224",
     "text": "The same URL serves two audiences by content negotiation: a browser gets the human landing page; a client send",
     "elsewhere": "node",
-    "why": "content negotiation on an invite landing page is a host's route; hdtp-gateway serves it (TestLandingNoOracle404) and binds the chain's leaf to the card; a hosting platform's half is held in that platform's own MUST table, beside its code",
+    "why": "an invite landing page is a host's route and its redeemer a host's client; in hdtp-gateway the landing's chain validates under the card's root and endpoint (TestP1ExitTwoNodesPairAndMessage, through fetchInvite), and the redeemer refuses an offer whose chain's leaf is not the card's certificate (TestVerifyOfferRefusals; control TestVerifyOfferAcceptsARealTwoZeroInvite); a hosting platform's half is held in that platform's own MUST table, beside its code",
+    "gap": "the node's redeemer validating the chain (§14.2) is held by no test: with ValidateChain's result ignored in verifyOffer every case of TestVerifyOfferRefusals is still refused, by its leaf-equals-card or root-fingerprint check; a case whose leaf is the card's and whose chain fails §14.2 is missing",
     "elsewhere_names": [
-      "gateway:TestLandingNoOracle404"
+      "gateway:TestP1ExitTwoNodesPairAndMessage",
+      "gateway:TestVerifyOfferRefusals",
+      "gateway:TestVerifyOfferAcceptsARealTwoZeroInvite"
     ]
   },
   "5.2#1": {
