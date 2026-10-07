@@ -1,6 +1,6 @@
 {
   "name": "@hdtp/identity",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "private": true,
   "type": "module",
   "description": "HDTP 1.0 identity core (Rust, compiled to WebAssembly): loaders for the browser, Cloudflare Workers and Node, and the Node proofs",
