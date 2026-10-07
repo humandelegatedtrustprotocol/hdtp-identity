@@ -196,7 +196,11 @@ fn a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates() {
         .assert()
         .success()
         .stdout(predicate::str::starts_with("-----BEGIN CERTIFICATE-----"))
-        .stderr(predicate::str::contains("NEW HOST"));
+        // Said once, on the consent screen: the core's warning of the same fact is not printed again.
+        .stderr(
+            predicate::str::contains("NEW HOST")
+                .and(predicate::function(|s: &str| s.lines().filter(|l| l.to_lowercase().contains("new host")).count() == 1)),
+        );
     // The signing wrote the record and never the vault: the file a person keeps is the one they were given.
     assert_eq!(fs::read(&vault).unwrap(), vault_as_made, "the vault is written once");
     // What each file holds, opened (SPEC §9): the vault the root and nothing else, the record the
@@ -288,7 +292,11 @@ fn a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates() {
         .arg(&vault)
         .assert()
         .success()
-        .stderr(predicate::str::contains("move"));
+        // The move is told once, in the notice read before the question; the core's warning of it is
+        // not printed again after the signature.
+        .stderr(predicate::str::contains("You are moving").and(predicate::function(|s: &str| {
+            s.lines().filter(|l| l.starts_with("You are moving") || l.starts_with("note        move:")).count() == 1
+        })));
     let ledger = hdtp().env("HDTP_PASSPHRASE_FILE", &pass).args(["id", "ledger", "--json", "--vault"]).arg(&vault).assert().success();
     let rows: Vec<serde_json::Value> = serde_json::from_slice(&ledger.get_output().stdout).unwrap();
     assert_eq!(rows.len(), 3);
@@ -967,10 +975,11 @@ fn an_identity_with_an_end_date() {
         c
     };
     // A month before the end: a year was asked, the leaf ends with the root, and the person is told,
-    // with the days the leaf has, not the days asked, on the line read before "Sign this leaf?".
+    // with the days the leaf has, not the days asked, on the line read before "Sign this leaf?" — and
+    // told once: the core's warning of the same thing is not printed again after the signature.
     issue("2098-12-01T00:00:00Z").assert().success().stderr(
         predicate::str::contains("2098-11-30T23:00:00Z to 2099-01-01T00:00:00Z  (31 days; 365 asked)")
-            .and(predicate::str::contains("the leaf ends with its root")),
+            .and(predicate::function(|s: &str| s.matches("the leaf ends with its root").count() == 1)),
     );
     let record_before = fs::read(record_of(&vault)).unwrap();
     // One second past the end: refused, before the leaf is shown and before anything is asked.

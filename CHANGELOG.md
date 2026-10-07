@@ -13,8 +13,18 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 - **SPEC §9 9.#4 follows SEP-0003.** `js/musts.json` holds the amended rule (hash `f835c346eb45`):
   a left address is kept for 24 hours for the account that held it, which may be one the person
   shares at the host. The `hdtp` wallet's move notice says so.
+
+## 0.7.2 — 2026-10-07
+
 - **`hdtp id issue` counts the days the leaf has.** A leaf ended with its root printed the days
   asked beside the shorter span; the consent line now reads `(31 days; 365 asked)`.
+- **`hdtp id issue` says each thing once, on the consent screen where the person decides**: that
+  the leaf ends with its root, that the host is new, that the identity moves. The core's warnings of
+  the same facts are no longer printed again after the signature.
+- **PROOFS.md says which elsewhere rows name an artefact and which a role.** Of the 30 MUSTs held
+  outside this repository, 16 name the artefact that holds them and 14 the implementation role, by
+  declaration, as hdtp-spec's §12 (The record) now allows; the header had said every one named an
+  artefact.
 - **SPEC §4 4.#1 names the tests that hold it**: hdtp-gateway's `TestP1ExitTwoNodesPairAndMessage`
   (the landing's chain validates and its leaf is the card's certificate) and `TestVerifyOfferRefusals`
   (the redeemer refuses a chain that is not the card's), in place of `TestLandingNoOracle404`, which
