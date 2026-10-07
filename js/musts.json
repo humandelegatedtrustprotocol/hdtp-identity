@@ -296,7 +296,7 @@
     "hash": "f835c346eb45",
     "text": "Whenever an identity leaves an address, deleted or moved, the host keeps the address for 24 hours for the acco",
     "elsewhere": "host",
-    "why": "keeping an address for the account that left it is a host's allocation policy, held by the host that allocates addresses: batondeck's docs/must-holders.json names its tests; the node's identities are all its one operator's, one account, so no address it frees can go to an identity of another account"
+    "why": "keeping an address for the account that left it is a host's allocation policy, held by the host that allocates addresses: batondeck's docs/must-holders.json names its tests; the node's identities are all its one operator's, so no address it frees can go to an identity outside the account that held it"
   },
   "9.#5": {
     "hash": "03a283bf6b43",
