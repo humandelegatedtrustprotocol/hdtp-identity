@@ -10,7 +10,7 @@
     "how": "sh js/reproduce.sh"
   },
   "source": {
-    "inputs_sha256": "fa6ca3d71ecdb7cb77700f49f31ee8f264f4ee8e56afada3aacba62068381c5e",
+    "inputs_sha256": "2f12c63a829f358438c1b117f9ca065b99bc5a3a73a7a615579418fc27f5c305",
     "files": 55,
     "paths": [
       "crates/hdtp-identity",

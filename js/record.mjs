@@ -94,12 +94,15 @@ L.push('');
 // ── the MUSTs ─────────────────────────────────────────────────────────────────────────
 const inRepo = musts.filter((m) => (map[m.id]?.held_by ?? []).length).length;
 const declared = musts.length - inRepo;
+// Of those held elsewhere, a row names the artefact that holds it, or only the role (SPEC §12, The record).
+const named = musts.filter((m) => !(map[m.id]?.held_by ?? []).length && (map[m.id]?.elsewhere_names ?? []).length).length;
 L.push(`## The ${musts.length} normative sentences of the specification`);
 L.push('');
 L.push(`A sentence carrying MUST, MUST NOT or REQUIRED, one row each, in document order. **${inRepo}** are`);
 L.push(`held by a test or an intrusion scenario in this repository; **${declared}** belong to a wallet, a host`);
-L.push('or a node, and name the artefact that holds them there — checked against the sibling repository');
-L.push('whenever it is on disk. A row with nothing in its last column would fail `js/musts.mjs`.');
+L.push(`or a node. Of those, **${named}** name the artefact that holds them there, checked against the sibling`);
+L.push(`repository whenever it is on disk; **${declared - named}** name the implementation role that holds them,`);
+L.push('by declaration. A row with nothing in its last column would fail `js/musts.mjs`.');
 L.push('');
 let section = null;
 for (const m of musts) {
