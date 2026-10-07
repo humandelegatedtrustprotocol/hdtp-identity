@@ -15,7 +15,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 - **SPEC §4 4.#1 names the tests that hold it**: hdtp-gateway's `TestP1ExitTwoNodesPairAndMessage`
   (the landing's chain validates and its leaf is the card's certificate) and `TestVerifyOfferRefusals`
   (the redeemer refuses a chain that is not the card's), in place of `TestLandingNoOracle404`, which
-  holds the not-found sentence and no MUST.
+  holds the not-found sentence and no MUST. Its gap is named: no test fails when the node's redeemer
+  ignores the chain's validation, since its other checks refuse every case.
 
 ## 0.7.1 — 2026-10-06
 
