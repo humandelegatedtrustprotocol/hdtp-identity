@@ -10,6 +10,9 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+- **SPEC §9 9.#4 follows SEP-0003.** `js/musts.json` holds the amended rule (hash `f835c346eb45`):
+  a left address is kept for 24 hours for the account that held it, which may be one the person
+  shares at the host. The `hdtp` wallet's move notice says so.
 - **`hdtp id issue` counts the days the leaf has.** A leaf ended with its root printed the days
   asked beside the shorter span; the consent line now reads `(31 days; 365 asked)`.
 - **SPEC §4 4.#1 names the tests that hold it**: hdtp-gateway's `TestP1ExitTwoNodesPairAndMessage`

@@ -293,10 +293,10 @@
     "why": "an archive is the §9.2 export, and both halves are this library's functions. The writer puts no key in a file: a key in a cell of a row the host writes, a message member the host writes, `owner_name` or `tool` is refused (export_write_refuses_a_row_or_message_holding_a_private_key; TestWriteExportZipRefusesWhatItsReaderRefusesBeforeTheFirstByte refuses before the first byte), and a message whose body or file is a key is left out with its file and listed (what_a_contact_controls_never_stops_an_export_and_it_reads_back, TestAFileThatIsAKeyLeavesWithItsMessageAndIsRefusedOnRead). The reader refuses key material and anything it does not recognise (key-in-a-cell.zip, key-in-a-body.zip, media-is-a-key.zip, unknown-file.zip, unknown-message-member.zip in the corpus). The new host reaching every contact, and the person telling the old host to leave, are the hosts'"
   },
   "9.#4": {
-    "hash": "9c1f6a96da61",
-    "text": "Whenever an identity leaves an address, deleted or moved, the host keeps the address for the person for 24 hou",
+    "hash": "f835c346eb45",
+    "text": "Whenever an identity leaves an address, deleted or moved, the host keeps the address for 24 hours for the acco",
     "elsewhere": "host",
-    "why": "keeping an address for the person who left it is a host's allocation policy, held by the host that allocates addresses: batondeck's docs/must-holders.json names its tests; the node's identities are all its one operator's, so no address it frees can go to another person's identity"
+    "why": "keeping an address for the account that left it is a host's allocation policy, held by the host that allocates addresses: batondeck's docs/must-holders.json names its tests; the node's identities are all its one operator's, one account, so no address it frees can go to an identity of another account"
   },
   "9.#5": {
     "hash": "03a283bf6b43",
