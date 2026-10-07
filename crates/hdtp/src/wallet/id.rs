@@ -174,6 +174,8 @@ pub fn id_issue(a: IssueArgs<'_>) -> Res<i32> {
         return fail(format!("bad_request: {why}"));
     }
     let name = root["cn"].as_str().unwrap_or("this identity");
+    // A move or a move back, told in the notice below (a signer with no ledger is told something else).
+    let moved = matches!(facts["notice"]["kind"].as_str(), Some("move" | "move_back"));
     if let Some(words) = move_notice(&facts, name, &request.endpoint) {
         eprintln!();
         eprintln!("{words}");
@@ -242,8 +244,23 @@ pub fn id_issue(a: IssueArgs<'_>) -> Res<i32> {
             json!({ "vault_plaintext": v.plaintext, "record_plaintext": rec.plaintext, "root_fingerprint": fp, "csr": b64u(&csr_der), "now": instant(now), "valid_days": a.valid_days, "move": a.moving }),
         )?,
     };
+    // What the consent screen said, where the person decided, is not said a second time from the
+    // core's warnings: the leaf's end at its root, a new host, a move.
+    let mut said = Vec::new();
+    if na < asked {
+        said.push(csr::ends_with_root_warning(na));
+    }
+    if new_host && !replacing {
+        said.push(NEW_HOST_WARNING.to_string());
+    }
+    if moved {
+        said.push(MOVE_WARNING.to_string());
+    }
     for w in r["warnings"].as_array().cloned().unwrap_or_default() {
-        eprintln!("note        {}", w.as_str().unwrap_or(""));
+        let w = w.as_str().unwrap_or("");
+        if !said.iter().any(|s| s == w) {
+            eprintln!("note        {w}");
+        }
     }
     let mut entry = r["ledger_entry"].clone();
     if let Some(o) = a.origin {
@@ -265,6 +282,12 @@ pub fn id_issue(a: IssueArgs<'_>) -> Res<i32> {
     eprintln!("issued      {} for {}", x509::parse(&leaf).map(|c| c.public_key.fingerprint()).unwrap_or_default(), request.endpoint);
     Ok(0)
 }
+
+/// `wallet_issue`'s warnings of a new host and of a move, in the core's words (vault.rs), which the
+/// consent screen has already said in its own. A copy: if the core's wording drifts from it, the
+/// note prints twice and the CLI tests that count each one fail.
+const NEW_HOST_WARNING: &str = "new host: this endpoint's host has never been issued to";
+const MOVE_WARNING: &str = "move: the live leaf at the previous endpoint is superseded once contacts see this one";
 
 /// The move notice (design §3), in the words a person reads before signing, from `ledger_check`'s
 /// facts: for a move or a move back, and for a signer with no ledger, whose words say what it cannot

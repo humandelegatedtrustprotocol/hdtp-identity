@@ -642,6 +642,65 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 
 [[package]]
+name = "hdtp"
+version = "0.7.1"
+dependencies = [
+ "assert_cmd",
+ "base64 0.22.1",
+ "clap",
+ "flate2",
+ "hdtp-identity",
+ "p256",
+ "pcsc",
+ "predicates",
+ "rpassword",
+ "serde_json",
+ "sha2",
+ "signature",
+ "tempfile",
+ "ureq",
+ "zeroize",
+ "zip",
+]
+
+[[package]]
+name = "hdtp-identity"
+version = "0.7.1"
+dependencies = [
+ "aes-gcm",
+ "argon2",
+ "base64 0.22.1",
+ "chacha20poly1305",
+ "curve25519-dalek",
+ "ed25519-dalek",
+ "getrandom 0.2.17",
+ "hdtp-limits",
+ "hmac",
+ "p256",
+ "serde",
+ "serde_json",
+ "sha2",
+ "x25519-dalek",
+ "zeroize",
+]
+
+[[package]]
+name = "hdtp-identity-wasm"
+version = "0.7.1"
+dependencies = [
+ "hdtp-identity",
+ "wasm-bindgen",
+ "wasm-bindgen-test",
+]
+
+[[package]]
+name = "hdtp-limits"
+version = "0.7.1"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -832,65 +891,6 @@ dependencies = [
  "elliptic-curve",
  "primeorder",
  "sha2",
-]
-
-[[package]]
-name = "hdtp"
-version = "0.7.1"
-dependencies = [
- "assert_cmd",
- "base64 0.22.1",
- "clap",
- "flate2",
- "p256",
- "hdtp-identity",
- "pcsc",
- "predicates",
- "rpassword",
- "serde_json",
- "sha2",
- "signature",
- "tempfile",
- "ureq",
- "zeroize",
- "zip",
-]
-
-[[package]]
-name = "hdtp-identity"
-version = "0.7.1"
-dependencies = [
- "aes-gcm",
- "argon2",
- "base64 0.22.1",
- "chacha20poly1305",
- "curve25519-dalek",
- "ed25519-dalek",
- "getrandom 0.2.17",
- "hmac",
- "p256",
- "hdtp-limits",
- "serde",
- "serde_json",
- "sha2",
- "x25519-dalek",
- "zeroize",
-]
-
-[[package]]
-name = "hdtp-identity-wasm"
-version = "0.7.1"
-dependencies = [
- "hdtp-identity",
- "wasm-bindgen",
- "wasm-bindgen-test",
-]
-
-[[package]]
-name = "hdtp-limits"
-version = "0.7.1"
-dependencies = [
- "serde_json",
 ]
 
 [[package]]
