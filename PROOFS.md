@@ -15,8 +15,9 @@ Every answer of both ports is validated against `contract/contract.json` (**55**
 
 A sentence carrying MUST, MUST NOT or REQUIRED, one row each, in document order. **71** are
 held by a test or an intrusion scenario in this repository; **30** belong to a wallet, a host
-or a node, and name the artefact that holds them there — checked against the sibling repository
-whenever it is on disk. A row with nothing in its last column would fail `js/musts.mjs`.
+or a node. Of those, **16** name the artefact that holds them there, checked against the sibling
+repository whenever it is on disk; **14** name the implementation role that holds them,
+by declaration. A row with nothing in its last column would fail `js/musts.mjs`.
 
 
 ### 2. Identity, certificates and mTLS
