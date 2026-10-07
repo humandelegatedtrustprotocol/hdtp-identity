@@ -10,6 +10,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+## 0.7.2 — 2026-10-07
+
 - **`hdtp id issue` counts the days the leaf has.** A leaf ended with its root printed the days
   asked beside the shorter span; the consent line now reads `(31 days; 365 asked)`.
 - **`hdtp id issue` says each thing once, on the consent screen where the person decides**: that
