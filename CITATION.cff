@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you use or refer to hdtp-identity, please cite it as below."
+title: "hdtp-identity — the HDTP identity core"
+type: software
+authors:
+  - family-names: Agrawal
+    given-names: Sumit
+repository-code: "https://github.com/humandelegatedtrustprotocol/hdtp-identity"
+license: Apache-2.0

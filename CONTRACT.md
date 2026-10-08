@@ -515,9 +515,10 @@ bucket's rate and burst, so a host fetches them from the key scheme written here
 of it. A call is charged to every bucket of its charge or to none,
 and the bucket keys are the cloud's `rate_buckets` keys, so rows written before the move read the
 same after it. The arithmetic is what the cloud's `RateLimiter.take` was, operation for operation,
-until the cloud removed it and decided through this library (batondeck ba68f9c);
-`js/cases/limits-vectors.json`, a fixed record made by running that TypeScript over SQLite, holds
-every port to its decisions and to the bits of every row it wrote.
+until the cloud (BatonDeck, a private repository) removed it on 2026-09-29 and decided through this
+library (batondeck ba68f9c, a hash of its history before the rewrite of 2026-10-01); `js/cases/limits-vectors.json`, a fixed record made on 2026-09-28 by
+running that TypeScript over SQLite, holds every port to its decisions and to the bits of every row
+it wrote.
 Two rules have no TypeScript to be held to: the guest total, charged before the open, and the cap on
 waiting requests.
 

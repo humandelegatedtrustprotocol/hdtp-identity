@@ -14,8 +14,6 @@ release:
 publish:
 	sh scripts/publish.sh "$(VERSION)"
 
-# A tag missing locally is fetched from origin over SSH, set for this process only (the user's git
-# config is not touched).
+# A tag missing locally is fetched from origin by the script, over the remote's own URL.
 verify-release:
-	GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.git@github.com:.insteadOf GIT_CONFIG_VALUE_0=https://github.com/ \
-	  sh scripts/verify-release.sh "$(VERSION)"
+	sh scripts/verify-release.sh "$(VERSION)"
