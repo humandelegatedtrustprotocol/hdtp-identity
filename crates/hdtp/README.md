@@ -102,7 +102,7 @@ and signatures reproduce byte for byte, ECDSA signatures are one valid signature
 P-256 leaf key is emitted in the full PKCS #8 form (the seed's Node emits the minimal form; both
 parse). `hdtp vectors intrude --against https://host/slug` sends the black-box scenarios a live
 endpoint can be judged on by its answer code alone — a stranger in the small form, a replay, a
-forged signature, an unknown `kid`, a header member the version does not list, the wrong suite,
+forged signature, an envelope sealed to a key this endpoint never held, a header member the version does not list, the wrong suite,
 an expired leaf, a chain of one, a sealed `tools/list` from a stranger, an envelope an hour old —
 and prints a verdict per scenario: blocked, REPRODUCES, UNREACHED (no HDTP answer), CONTROL
 REFUSED or CONTROL UNOPENED. A `rate_limited` answer, or HTTP 429, refuses the attempt before the
@@ -214,7 +214,7 @@ drops it for a machine with no PC/SC headers (a bare Linux container: `apt insta
 puts them back), and the card commands then say so rather than failing obscurely.
 
 Build: `cargo build --release -p hdtp` produces `target/release/hdtp`. The default build links
-PC/SC (`libpcsclite` on Linux, loaded dynamically: `apt install libpcsclite1` to run it);
+PC/SC (`libpcsclite` on Linux, linked dynamically: `apt install libpcsclite1` to run it);
 `--no-default-features` has no such dependency. Release binaries for `darwin-arm64`, `linux-arm64`
 and `linux-amd64` are built from a commit by `scripts/build-cli.sh` and are release assets; they are
 not bit-reproducible.
