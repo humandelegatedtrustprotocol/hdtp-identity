@@ -4,6 +4,13 @@
   "private": true,
   "type": "module",
   "description": "HDTP 1.0 identity core (Rust, compiled to WebAssembly): loaders for the browser, Cloudflare Workers and Node, and the Node proofs",
+  "author": "Sumit Agrawal",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/humandelegatedtrustprotocol/hdtp-identity.git",
+    "directory": "js"
+  },
   "exports": {
     ".": "./index.mjs",
     "./worker": "./worker.mjs"
