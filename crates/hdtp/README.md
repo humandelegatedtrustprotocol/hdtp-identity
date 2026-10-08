@@ -1,7 +1,13 @@
 # `hdtp` — the HDTP 1.0 command line
 
-One native binary, built from the same core as the Wasm module (`crates/hdtp-identity`), so a
-self-hoster needs nothing installed beside it. Two halves:
+The `hdtp` binary is what a person or a script runs: an implementer's tools for reading and proving
+HDTP's artefacts, and the wallet that holds a root and issues leaves. It is the same Rust core as
+the Wasm (`crates/hdtp-identity`) linked natively, so every verdict is the core's and the terminal
+only formats it. Releases carry it for `darwin-arm64`, `linux-arm64` and `linux-amd64`
+(`scripts/build-cli.sh`; the root `README.md` lists the assets). It is not an input of the pinned
+Wasm (`js/inputs.mjs`: "not in the Wasm"), so a change here does not demand a re-pin.
+
+Two halves:
 
 - **The implementer's tools.** `card show|check`, `chain check`, `cert show`, `csr new|check`,
   `key new`, `vectors gen|check|corpus|intrude`. Every verdict is the core's; the terminal formats it.
@@ -31,19 +37,42 @@ self-hoster needs nothing installed beside it. Two halves:
   included) against the identity it is imported into, keeps only its contacts, and shows every
   difference before the wallet's book is replaced.
 
+## What it holds
+
+`hdtp --help` prints:
+
 ```
-$ hdtp --help
 Commands:
-  card      A contact card: read it as a receiver would
-  chain     A chain of leaf and root: validate it (SPEC §14.2)
-  cert      One certificate: what it says and whether it is in the profile (§14.1)
-  csr       Certificate signing requests: a host makes one, a wallet checks one (§9)
-  key       Leaf keys for a host
-  vectors   Appendix B: regenerate, prove, write the export corpus for an owner, and aim the
-            intrusion scenarios at a live endpoint
-  id        The wallet: an identity is a root in a vault, and this is where leaves come from
-  contacts  The wallet's contact book, which outlives any host
+  card         A contact card: read it as a receiver would
+  chain        A chain of leaf and root: validate it (SPEC §14.2)
+  cert         One certificate: what it says and whether it is in the profile (§14.1)
+  csr          Certificate signing requests: a host makes one, a wallet checks one (§9)
+  key          Leaf keys for a host
+  vectors      Appendix B: regenerate, prove, and aim the intrusion scenarios at a live endpoint
+  id           The wallet: an identity is a root in a vault, and this is where leaves come from
+  contacts     The wallet's contact book, which outlives any host
+  card-status  A smartcard holding a root: the reader, the card, the slot, the key, and whose identity it is
+  card-attach  Hand an identity already in a vault over to the card that now holds a copy of its key
 ```
+
+and each group's subcommands, from their own `--help`:
+
+| Command | Subcommands |
+|---|---|
+| `card` | `show` decodes a card (name, root, endpoint, validity, seal, what was ignored); `check` gives the intake verdict of SPEC §3 |
+| `chain` | `check` validates a chain; on refusal it prints the rule and the reason |
+| `cert` | `show` parses a certificate and reports the profile verdict |
+| `csr` | `new` makes a host's request (its key, its endpoint, proof of possession); `check` is what a wallet checks before signing |
+| `key` | `new` writes a fresh leaf key owner-only and prints its fingerprint |
+| `vectors` | `gen` regenerates the vectors from their labelled seeds; `check` proves them from an Appendix B or a vector file; `corpus` writes the export corpus for another owner root; `intrude` aims the black-box intrusion scenarios at a live endpoint |
+| `id` | `create`, `issue`, `renew`, `ledger`, `show` (the public root certificate as PEM), `backup`, `restore` |
+| `contacts` | `export` writes the contact book as a book (SPEC §9.2); `import` replaces the wallet's book after showing every difference |
+
+The source is `src/implementer.rs` (`card`, `chain`, `cert`, `csr`, `key`), `src/vectors.rs` and `src/vectors/`
+(`gen`, `check`, `corpus`, `intrude`), `src/wallet.rs` and `src/wallet/` (`id`, `contacts`,
+`files`, `exportzip`, and `card` for a root on a smartcard), `src/piv.rs` (the PC/SC door, behind
+the `piv` feature) and `src/io.rs` (files, PEM, passphrases, private writes, the clock).
+
 
 A host and a wallet, end to end:
 
@@ -79,7 +108,9 @@ and prints a verdict per scenario: blocked, REPRODUCES, UNREACHED (no HDTP answe
 REFUSED or CONTROL UNOPENED. A `rate_limited` answer, or HTTP 429, refuses the attempt before the
 target judges the attack. The post is paused for the answer's `retry_after` (10 s when it names
 none, never more than 60 s) and posted again, at most three times. One still rate-limited is
-UNREACHED, and the run fails saying so. It writes nothing on the target.
+UNREACHED, and the run fails saying so. The scenarios are `js/live-scenarios.json`, compiled in
+with `include_str!`. The last one is the control, which must get through and so leaves the
+attacker (a new identity every run) pending on the target: aim the run at a test identity.
 
 `hdtp vectors corpus --owner <root> --out <dir>` writes the export corpus (`go/exportcorpus`,
 embedded in the binary) for another owner root. Every file keeps its one defect, and `cases.json`
@@ -182,8 +213,57 @@ The smartcard door is the `piv` feature, on by default. `cargo build --no-defaul
 drops it for a machine with no PC/SC headers (a bare Linux container: `apt install libpcsclite-dev`
 puts them back), and the card commands then say so rather than failing obscurely.
 
-Build: `cargo build --release -p hdtp` → `target/release/hdtp`, about 1.8 MB, no runtime
-dependencies. Tests: `cargo test -p hdtp` (unit tests, and `tests/cli.rs` driving the binary).
+Build: `cargo build --release -p hdtp` produces `target/release/hdtp`. The default build links
+PC/SC (`libpcsclite` on Linux, loaded dynamically: `apt install libpcsclite1` to run it);
+`--no-default-features` has no such dependency. Release binaries for `darwin-arm64`, `linux-arm64`
+and `linux-amd64` are built from a commit by `scripts/build-cli.sh` and are release assets; they are
+not bit-reproducible.
 
-**Distribution is the owner's decision:** release binaries from the repository for macOS and Linux,
-a Homebrew tap, or both.
+## What it refuses, and how
+
+The core's refusals are the contract's error codes (`contract/contract.json`, `ErrorCode`:
+`bad_request`, `parse`, `unsupported`, `envelope_invalid`, `vault`, `root_expired`, `key`,
+`internal`); the CLI prints them as `<code>: <why>` after `hdtp: ` (`src/io.rs`, `core`). Its own
+refusals are in the terminal's words: a path that is taken, a passphrase file anyone but its owner
+can read, a wrong passphrase, a card that is absent or holds another key, a request that breaks
+SPEC §9's rules (`wallet_issue`).
+
+Exit statuses, from the code:
+
+| Status | Meaning |
+|---|---|
+| 0 | the command did what it was asked; a verdict command's verdict was "accepted"; `vectors check` found no failure; `vectors intrude` found nothing to report |
+| 1 | any failure, printed as `hdtp: <why>` on stderr; or a refused verdict: `card check`, `chain check`, `csr check`, `card-status` when no identity in the vault has the card's key; or a person declined the question (`id issue` and `id renew` "Sign this leaf?", `contacts import` "Make this the wallet's contact book?"); `vectors check` with any failed check; `vectors intrude` with any scenario REPRODUCES, UNREACHED, CONTROL REFUSED or CONTROL UNOPENED |
+| 2 | `vectors intrude` when the target's card is not an HDTP card ("nothing to aim at"); also what the argument parser (clap) exits with on a usage error (`hdtp nosuch` exits 2) |
+
+## Invariants
+
+- No command prints a root key: there is no `id export` (`src/wallet/id.rs`).
+- The passphrase comes from a prompt, or from `HDTP_PASSPHRASE_FILE`, which is read once and refused
+  when anyone but its owner can read it; never from an argument (`src/io.rs`). A PIN comes from a
+  prompt or `HDTP_PIN_FILE`, held to the same rule (`src/piv.rs`).
+- A vault and every key the CLI writes is mode 0600; a vault and its record are written together or
+  not at all (`src/wallet/files.rs`).
+- Every reason to refuse is found before the passphrase is asked and before anything is written.
+- The passphrase and the keys that cross the CLI's side of the boundary are held in `Zeroizing`
+  buffers (`src/io.rs`, `core`).
+- The wallet's rules are the core's `wallet_issue`; the CLI does not reimplement them.
+
+## Held by
+
+`tests/cli.rs` drives the binary end to end (a host's key and request, an identity in a vault, a
+leaf issued that validates as a chain, the wallet's refusals, the Appendix B proof, a card read
+back); the unit tests in `src/` hold the rest, among them `the_command_tree_is_well_formed`. Both
+run in the gate step "Rust core, CLI and Wasm crate" (`cargo test --workspace`), with `cargo fmt`
+and clippy `-D warnings` before them. Gate step "The corpus the CLI writes for a fresh owner reads
+in the Go port as its cases.json says" runs `hdtp vectors corpus` for a random owner and has the Go
+port read it.
+
+## What it does not do
+
+- It sends nothing anywhere except `hdtp vectors intrude`, which posts to the endpoint it is aimed
+  at and fetches its `card.vcf` (`src/vectors/intrude.rs`). Even then it is not read-only: its
+  control leaves a pending request on the target (above).
+- It is not the browser wallet: a root on a card is used from here and from nowhere in a browser
+  (see "Why this is a native binary").
+- It does not export a root, and does not sync contacts.
