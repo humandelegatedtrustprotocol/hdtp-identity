@@ -1,10 +1,11 @@
 # exportcorpus
 
 The fixture corpus of the export (SPEC section 9.2; `CONTRACT.md` section 6.2): a valid export, a valid
-book, and one hostile file per check of the specification's validation, each hostile file being the
-valid export with one thing wrong. `cases.json` names every file, the owner root and the clock the
-corpus stands at, and for each file either what it holds (`accept`) or the refusal it must produce
-(`refusal`, at a `stage`: the core's or the host's). The corpus is the data the readers are tested
+book, and hostile files for the checks of the specification's validation. `cases.json` names the
+owner root and the clock the corpus stands at, and lists 44 cases: 3 carry `accept` (what the file
+holds: `valid-export.zip`, `valid-book.zip` and `local-names-differ.zip`, which is accepted, not
+refused), 40 carry a `refusal` (the refusal it must produce, at a `stage`: the core's or the
+host's), and 1, `understated-size.zip`, carries neither. The corpus is the data the readers are tested
 on; it has no behaviour of its own beyond building itself.
 
 Who reads it: the Go port's tests, the Rust core's tests, `js/parity.mjs` (`js/cases/export.mjs`),

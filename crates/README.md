@@ -32,8 +32,9 @@ specification of every byte.
 ### What it holds
 
 The public surface is `hdtp_identity::call(name, args_json) -> json` (`src/api.rs`) and the modules
-beneath it. The contract (`contract/contract.json`) declares 55 functions in 11 sections; each
-section has a body in `src/api/<section>.rs`.
+beneath it. The contract (`contract/contract.json`) declares 55 functions in 11 sections; ten of
+the sections have a body in `src/api/<section>.rs`, and `build`'s only function, `version`, is an arm
+of the dispatcher in `src/api.rs`.
 
 | Module | What it holds |
 |---|---|
