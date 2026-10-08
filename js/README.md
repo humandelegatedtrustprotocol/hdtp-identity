@@ -94,7 +94,7 @@ suite; `check-names.mjs --selftest` and `check-names.mjs`; `musts.mjs`; `record.
 `seed.mjs`; and `results.mjs --summary`. The numbers of the current tree are in `../PROOFS.md`
 (generated; `record.mjs --check` keeps them current): 101 normative sentences, 2895 cross-port
 parity cases over 54 guarded functions, 55 contract functions, spec 1.0.0; `check.mjs` printed
-148/148 checks passed and `intrude.mjs` 151 scenarios (147 blocked, 4 residual by decision,
+148/148 checks passed and `intrude.mjs` 157 scenarios (151 blocked, 6 residual by decision,
 0 reproduce) on the run that wrote this file. Those last two counts come from the sibling
 `hdtp-spec` at the time and are not held anywhere in this repository.
 

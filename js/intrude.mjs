@@ -56,6 +56,13 @@ function bharat(acceptNewHosts = 'auto') {
   pin(node, FP_A, { endpoint: E_A, leafDer: LEAF_A });
   return node;
 }
+// Bharat once Alina's renewal has reached him in her host's first envelope (§13.2): null unless it
+// was learned — answered as a contact, with the renewal event raised.
+const bharatWhoHeard = () => {
+  const b = bharat();
+  const learned = receive(b, message(hostA2, [fresh(hostA2, E_A), ROOT_A], LEAF_B));
+  return learned.tier === 'contact' && b.events.some((e) => e.event === 'renewal') ? b : null;
+};
 const rule = (chain, o = {}) => { const r = validateChain(chain, { now: NOW, ...o }); return r.ok ? 'accepted' : 'rule ' + r.rule; };
 
 const results = [];
@@ -82,6 +89,17 @@ scenario('identity', 'stolen leaf key: after Alina renews with a fresh key, the 
   const b = bharat();
   const learned = receive(b, message(hostA2, [fresh(hostA2, E_A), ROOT_A], LEAF_B));
   if (learned.tier !== 'contact' || !b.events.some((e) => e.event === 'renewal')) return 'renewal not learned';
+  return receive(b, message(hostA, chainA, LEAF_B));
+});
+// §14.2 rule 5 compares the chain's endpoint with the endpoint the receiver PINNED, never with where
+// the call came from — this harness has no source address at all. So a stolen leaf key sends as
+// Alina, from anywhere and in either form of §13.2, to every contact whose pin is still that leaf,
+// until the renewal reaches them; what it cannot do is claim another address (above) or outlast a
+// leaf the contact has seen superseded.
+scenario('identity', 'stolen leaf key: the small form passes too, while Bharat\'s pin is the stolen leaf', residual('contact'), () => receive(bharat(), message(hostA, chainA, LEAF_B, { reference: true })).tier);
+scenario('identity', 'stolen leaf key: after Alina renews, the small form naming the old leaf is asked for a chain, and the only chain it has is a guest\'s', blockedIf((r) => r.code === 'envelope_invalid' && /guest/.test(r.why)), () => {
+  const b = bharatWhoHeard(); if (!b) return 'renewal not learned';
+  if (receive(b, message(hostA, chainA, LEAF_B, { reference: true })).code !== 'chain_required') return 'not asked';
   return receive(b, message(hostA, chainA, LEAF_B));
 });
 scenario('identity', 'stolen root: re-homes Bharat under auto', residual('re-pinned, event raised'), () => {
@@ -306,6 +324,37 @@ scenario('secrets', 'a former key of a still-served identity gets the current ch
   renew(a, hostA2.sign, [fresh(hostA2, E_A), ROOT_A]);
   a.now = new Date(at('2027-09-01T00:00:00Z').getTime() + D); forgetKeysPast(a);
   return receive(a, message(hostB, chainB, LEAF_A, { ts: Math.floor(a.now / 1000) })).code;
+});
+
+// §2 (Renewal) and §13.3 step 3: a contact the renewal has not reached keeps sealing to the leaf it
+// pinned, and the host keeps that key until the leaf's notAfter so the envelope still opens. What the
+// rule costs is the stolen-leaf residual of §14.5, per contact, until the next exchange: the envelope
+// the host accepts opens just as well for whoever holds the key the host kept. The exchange is the
+// remedy — a host carries its chain in its first envelope to each contact after a renewal (§13.2),
+// which is the step measured here — and what the contact seals to from then on is a leaf the
+// superseded key cannot open, however the thief tries to roll the pin back. The keys the host still
+// holds are the harness's list (js/defender.mjs); what the port decides over them is measured.
+const alinaRenewed = () => {
+  const a = makeNode({ path: '/alina', leafKey: hostA.sign, chain: chainA, now: NOW });
+  pin(a, fingerprintOf(parse(ROOT_B)), { endpoint: E_B, leafDer: LEAF_B });
+  renew(a, hostA2.sign, [fresh(hostA2, E_A), ROOT_A]);
+  return a;
+};
+scenario('secrets', 'stale sender: an envelope sealed to the superseded key still opens at the host, until that leaf\'s notAfter (the control)', blockedIf((r) => r.tier === 'contact'), () => receive(alinaRenewed(), message(hostB, chainB, LEAF_A)));
+scenario('secrets', 'stale sender: the envelope the host accepted after the renewal opens for whoever holds the superseded key', residual('opened'), () => {
+  const e = message(hostB, chainB, LEAF_A);
+  if (receive(alinaRenewed(), e).tier !== 'contact') return 'not accepted';
+  return openTo(hostA, e);
+});
+scenario('secrets', 'stale sender: once the renewal reaches Bharat, what he seals next is closed to the superseded key', blockedIf((got) => /^closed: .*does not open/.test(got)), () => {
+  const b = bharatWhoHeard(); if (!b) return 'renewal not learned';
+  return openTo(hostA, message(hostB, chainB, b.pins.get(FP_A).leafDer));
+});
+scenario('secrets', 'stale sender: Mallory replays the superseded chain to roll Bharat back onto the key she holds; what he seals next is still closed to it', blockedIf((got) => /^closed: .*does not open/.test(got)), () => {
+  const b = bharatWhoHeard(); if (!b) return 'renewal not learned';
+  const r = receive(b, message(hostA, chainA, LEAF_B));
+  if (!(r.code === 'envelope_invalid' && /guest/.test(r.why))) return 'not refused as a guest: ' + JSON.stringify(r);
+  return openTo(hostA, message(hostB, chainB, b.pins.get(FP_A).leafDer));
 });
 scenario('secrets', 'HPKE ephemeral reuse leaks the XOR of two plaintexts; production sealing cannot take a seed', (got) => (got === 'leaks with a fixed seed, differs without' ? 'blocked' : 'REPRODUCES'), () => {
   const p1 = Buffer.alloc(32, 0x41), p2 = Buffer.alloc(32, 0x42), aad = Buffer.from('aad'), info = Buffer.from('HDTP-SEAL-v1');
