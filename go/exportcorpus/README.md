@@ -5,7 +5,7 @@ book, and hostile files for the checks of the specification's validation. `cases
 owner root and the clock the corpus stands at, and lists 44 cases: 3 carry `accept` (what the file
 holds: `valid-export.zip`, `valid-book.zip` and `local-names-differ.zip`, which is accepted, not
 refused), 40 carry a `refusal` (the refusal it must produce, at a `stage`: the core's or the
-host's), and 1, `understated-size.zip`, carries neither. The corpus is the data the readers are tested
+host's), and 1, `understated-size.zip`, carries a `refusal_prefix` instead. The corpus is the data the readers are tested
 on; it has no behaviour of its own beyond building itself.
 
 Who reads it: the Go port's tests, the Rust core's tests, `js/parity.mjs` (`js/cases/export.mjs`),
@@ -30,8 +30,10 @@ else (`scripts/release.sh` selects them by name; this README is not packed).
 
 ## What it refuses, and how
 
-The refusals are the corpus's data: each hostile case names the refusal the reader must produce in
-the contract's words. Every refusal of the export is `bad_request`, and its `why` begins with where:
+The refusals are the corpus's data. Of the 44 cases, 40 name the whole refusal the reader must
+produce, in the contract's words; 3 are accepted; and 1, `understated-size.zip`, names only the
+start of its refusal (`refusal_prefix` `manifest.json: `), which `go/export_corpus_test.go` checks with `strings.HasPrefix`. A case that is not
+accepted must be refused, and a refusal that does not match is a test failure. Every refusal of the export is `bad_request`, and its `why` begins with where:
 the member, then the row or line, then the column or member of a message (`src/export/mod.rs`'s
 header).
 
