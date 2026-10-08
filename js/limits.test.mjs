@@ -1,6 +1,6 @@
 // Both ports decide as js/cases/limits-vectors.json says, through the contract function a host
 // calls: every step of it (a fixed record, made on 2026-09-28, of BatonDeck's RateLimiter.take over
-// SQLite — batondeck 6c771f7, a commit of a private repository — which the cloud removed on
+// SQLite — batondeck 6c771f7, a commit of a private repository — a hash of batondeck's history before its rewrite of 2026-10-01; on its current main the file is `gateway/src/identity/limits.ts` from 449b273 to the parent of 2d6dc691, which removed it — which the cloud removed on
 // 2026-09-29, batondeck ba68f9c; its `about` says how it was made), sent to `limits_decide` in the
 // Wasm and in the Go adapter, each port carrying its own state from its own `writes`. Rows idle past the hour are dropped after every
 // step, where the TypeScript swept at most once a minute: the decisions must not care.

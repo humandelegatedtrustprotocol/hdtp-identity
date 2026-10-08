@@ -8,7 +8,7 @@ import (
 )
 
 // This port decides as js/cases/limits-vectors.json says: a fixed record, made on 2026-09-28, of
-// BatonDeck's TypeScript RateLimiter.take (batondeck 6c771f7, a commit of a private repository),
+// BatonDeck's TypeScript RateLimiter.take (batondeck 6c771f7, a commit of a private repository — a hash of batondeck's history before its rewrite of 2026-10-01; on its current main the file is `gateway/src/identity/limits.ts` from 449b273 to the parent of 2d6dc691, which removed it),
 // which the cloud removed on 2026-09-29 (batondeck ba68f9c): every step of it, replayed on this
 // port's own state (swept after every step, where the TypeScript swept at most once a minute),
 // every row compared bit for bit.
