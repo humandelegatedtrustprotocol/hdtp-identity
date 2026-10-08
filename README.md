@@ -146,7 +146,7 @@ git commit js/manifest.json …   # a release (make release) re-pins its own ver
 
 ## Build and prove
 
-`sh gate.sh` runs everything below except the two builds, and is what the pre-push hook runs. It
+`sh gate.sh` runs everything below except the two builds and the live battery, and is what the pre-push hook runs. It
 needs the specification checked out beside this repository, as `../hdtp-spec`
 ([hdtp-spec](https://github.com/humandelegatedtrustprotocol/hdtp-spec), at its `main`), and the
 pinned packages in `js/pkg-web` and `js/pkg-node` (`CONTRIBUTING.md`, "Getting set up").
@@ -201,7 +201,7 @@ PKCS #10 and HPKE are hand-rolled to the seed library's bytes rather than taken 
 profile is exact, and every byte is under this crate's control.
 
 **The gate is local, and there is no CI.** `sh gate.sh` is the list above as one command — all
-of it except the two builds, since the Wasm that ships is the pinned one and a native rebuild would
+of it except the two builds and the live battery (`js/live.mjs` needs an endpoint to drive), since the Wasm that ships is the pinned one and a native rebuild would
 write this machine's bytes over it. It reads the sibling `hdtp-spec` (the specification's text, the
 seed under `vectors/lib`, the schema generator) from beside this repository, and the owner's
 decision (2026-09-20) is that no CI will run it: this project builds, gates and releases from the
