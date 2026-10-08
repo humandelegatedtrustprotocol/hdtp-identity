@@ -24,8 +24,8 @@
 # against a hash written here, dependencies locked, paths remapped, wasm-opt off. Any machine with
 # Docker should make the same bytes; `make verify-release VERSION=x.y.z` runs this build again
 # against a published release and compares it with what was published. Nothing runs it on another
-# machine on every push: this repository has no CI (its gate reads a private sibling, and no CI
-# credential will be made for it).
+# machine on every push: this repository has no CI (its gate reads the sibling hdtp-spec from
+# beside the checkout, and no CI credential will be made; the owner's decision, 2026-09-20).
 #
 # linux/arm64 because it runs natively on the machines this is developed on. linux/amd64 would be
 # the other choice; under emulation on an arm64 Mac rustc crashes.

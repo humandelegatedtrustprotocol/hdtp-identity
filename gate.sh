@@ -5,11 +5,12 @@
 #
 #   sh gate.sh
 #
-# IT RUNS HERE AND NOT IN CI, by the owner's decision (2026-09-20): the list reads the private
-# sibling `hdtp-spec` — the specification's text, the seed in `vectors/lib`, the schema generator —
-# and no CI credential for it will be created. For five days a CI job held this list and failed at its first step on every run it
-# ever had; a gate nothing can run is a comment. This repository's pre-push hook
-# (githooks/pre-push) runs it on every push, and `make release` runs it before a version is cut.
+# IT RUNS HERE AND NOT IN CI, by the owner's decision (2026-09-20): the list reads the sibling
+# `hdtp-spec` checked out beside this repository — the specification's text, the seed in
+# `vectors/lib`, the schema generator — and no CI credential will be created for any of it. For five
+# days a CI job held this list and failed at its first step on every run it ever had; a gate nothing
+# can run is a comment. This repository's pre-push hook (githooks/pre-push) runs it on every push,
+# and `make release` runs it before a version is cut.
 #
 # It does NOT rebuild the Wasm. The build that ships is the pinned one (`js/reproduce.sh --pin`, a
 # container named by digest); a native `js/build.sh` writes this machine's bytes over it and
