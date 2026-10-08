@@ -10,6 +10,12 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+- **The seed's six stale-sender scenarios run on both ports.** `js/intrude.mjs` carries the
+  scenarios hdtp-spec's `vectors/intrude.mjs` gained for the stolen leaf key in the small form of
+  §13.2 and for the sender a renewal has not reached (§2): the superseded key the host still holds
+  opens what a contact seals to it, until the leaf's `notAfter`, and so does whoever holds that
+  key; once the renewal reaches the contact, what it seals next is closed to it, and a replay of
+  the superseded chain does not roll the pin back. Verdicts agree with the seed on both ports.
 - **The repository is written for a public reader.** `NOTICE`, `SECURITY.md`, `CONTRIBUTING.md`,
   `GOVERNANCE.md`, `MAINTAINERS.md`, `CODE_OF_CONDUCT.md`, `CITATION.cff` and `.github/` (two issue
   forms, the pull-request template, `CODEOWNERS`; no workflow), modelled on hdtp-spec's; the README
