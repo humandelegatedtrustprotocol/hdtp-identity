@@ -7,10 +7,11 @@ import (
 	"testing"
 )
 
-// This port decides as the vectors of batondeck 6c771f7 say — js/cases/limits-vectors.json, a fixed
-// record of the cloud's TypeScript, which the cloud removed at ba68f9c: every step of it, replayed on
-// this port's own state (swept after every step, where the TypeScript swept at most once
-// a minute), every row compared bit for bit.
+// This port decides as js/cases/limits-vectors.json says: a fixed record, made on 2026-09-28, of
+// BatonDeck's TypeScript RateLimiter.take (batondeck 6c771f7, a commit of a private repository),
+// which the cloud removed on 2026-09-29 (batondeck ba68f9c): every step of it, replayed on this
+// port's own state (swept after every step, where the TypeScript swept at most once a minute),
+// every row compared bit for bit.
 func TestLimitsDecideAsTheTypeScriptDid(t *testing.T) {
 	raw, err := os.ReadFile("../js/cases/limits-vectors.json")
 	if err != nil {
