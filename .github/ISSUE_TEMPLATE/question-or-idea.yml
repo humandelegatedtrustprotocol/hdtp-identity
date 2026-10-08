@@ -1,0 +1,11 @@
+name: Question or idea
+description: Something the contract or a port leaves unclear, or an idea for the library.
+labels: [question]
+body:
+  - type: textarea
+    id: body
+    attributes:
+      label: Question or idea
+      description: Name the port, version and function it concerns, if any. A change to what an implementation must do is a SEP in hdtp-spec.
+    validations:
+      required: true

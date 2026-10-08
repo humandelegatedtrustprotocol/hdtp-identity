@@ -1,0 +1,25 @@
+name: Defect
+description: A port that answers differently from the other, from CONTRACT.md or from the specification; a vector or scenario that fails; a build that does not reproduce its pin.
+labels: [bug]
+body:
+  - type: input
+    id: where
+    attributes:
+      label: Port, version and function
+      placeholder: Go port, 0.7.3, `card_decode`
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What CONTRACT.md or the specification says
+      description: Quote it, with the function's row or the section.
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happens
+      description: The call and its answer, or the failing test or scenario; a case in the shape of `js/cases/*.mjs` if you have one.
+    validations:
+      required: true
