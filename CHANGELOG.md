@@ -10,6 +10,15 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+- **The repository is written for a public reader.** `NOTICE`, `SECURITY.md`, `CONTRIBUTING.md`,
+  `GOVERNANCE.md`, `MAINTAINERS.md`, `CODE_OF_CONDUCT.md`, `CITATION.cff` and `.github/` (two issue
+  forms, the pull-request template, `CODEOWNERS`; no workflow), modelled on hdtp-spec's; the README
+  in the public form (`go get …/go@v0.7.3`, Cargo by git tag, the Wasm from the release asset), with
+  every number read from the tree (seven version copies, the pinned `.wasm` at 863,199 bytes, Node 22,
+  the pin's `linux/arm64` builder); `gate.sh`, the hooks, `js/reproduce.sh` and the `Makefile` no
+  longer call hdtp-spec private, and `make verify-release` no longer rewrites the remote to SSH;
+  the limits vectors' batondeck citations carry their measured dates, as a private repository's.
+
 ## 0.7.3 — 2026-10-07
 
 - **SPEC §9 9.#4 follows SEP-0003.** `js/musts.json` holds the amended rule (hash `f835c346eb45`):
