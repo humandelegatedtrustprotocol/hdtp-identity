@@ -46,9 +46,9 @@ the open where it can be, in a pull request or an issue.
   the pre-push hook runs `sh gate.sh`: the Rust core, the CLI and the Wasm crate's tests, the Go
   port's, the pin of this commit, Appendix B and hdtp-spec's intrusion scenarios through both
   ports, the contract's validator and `CONTRACT.md`, hdtp-spec's schema against this contract, the
-  parity of the two ports, the name guard, and the MUST registry — every normative sentence of the
-  specification naming the test or scenario that holds it. A change the gates cannot hold says so
-  in its pull request.
+  parity of the two ports, and the MUST registry — every normative sentence of the specification
+  naming the test or scenario that holds it. A change the gates cannot hold says so in its pull
+  request.
 
 ## Licence
 

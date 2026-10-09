@@ -40,9 +40,7 @@ by the maintainers (`MAINTAINERS.md`). How decisions are made is `GOVERNANCE.md`
   list is `js/inputs.mjs` — is committed first, then pinned (`sh js/reproduce.sh --pin`, the
   container build of that commit), then `js/manifest.json` is committed. The post-commit hook says
   when a commit has left the pin behind, and the gate refuses a stale pin.
-- No dead code, and no code for a behaviour HDTP does not have. The name guard
-  (`node js/check-names.mjs`; its list `js/hdtp-names.txt` is hdtp-spec's `scripts/hdtp-names.txt`
-  byte for byte) fails on any tracked path or text carrying a name it forbids.
+- No dead code, and no code for a behaviour HDTP does not have.
 - A sentence about behaviour is written after measuring it: a count, a size or a version quoted in
   prose is read from the code or the file it describes, never from memory.
 
@@ -106,9 +104,8 @@ export corpus the CLI writes read back by the Go port; the pin — HEAD's build 
 the pin was built from, and the bytes in `js/pkg-*` are the pinned ones; Appendix B through the
 Wasm and through the Go port; the intrusion scenarios through both; the contract's validator and
 `CONTRACT.md`; hdtp-spec's committed JSON Schema against this contract; the parity of the two
-ports; the harness's own tests; the name guard; the article before the name, which takes "an"; no
-generation suffix in a name; the MUST registry and `PROOFS.md`; the seed proving the
-specification; and one line per suite. It needs `../hdtp-spec` and the pinned packages above.
+ports; the harness's own tests; the article before the name, which takes "an"; no generation
+suffix in a name; the MUST registry and `PROOFS.md`; the seed proving the specification; and one line per suite. It needs `../hdtp-spec` and the pinned packages above.
 
 Outside contributors who cannot run the whole gate say in the pull request which steps they ran.
 

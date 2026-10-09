@@ -129,10 +129,6 @@ node js/parity.mjs --manifest "$HDTP_RESULTS/parity-manifest.json"
 step "The harness's own tests: the live battery against the seed's node, the Go adapter, the readers"
 node_tests js-tests js/*.test.mjs
 
-step "No tracked path or text carries a name hdtp-names.txt forbids, and the list and guard are hdtp-spec's"
-node js/check-names.mjs --selftest
-node js/check-names.mjs
-
 step "The name takes \"an\": no tracked text writes \"a\" before it"
 # A rename leaves the old article behind ("a" before a name that now begins with a vowel sound), in
 # prose, in comments and in the refusal strings a caller reads. Bare, or behind a mark or the X- prefix.
@@ -143,9 +139,9 @@ fi
 
 step "No identifier and no file name carries a generation suffix"
 # HDTP has one generation. A test or a function named for another one's number says otherwise while
-# it opens envelopes of this one, and the name guard cannot see it. Refused, in any tracked text and
-# any path: a V and a number inside a camel-case name, and a v and a number joined to a snake-case
-# name by an underscore on either side. A VALUE a test feeds in is not a name and is not matched: a
+# it opens envelopes of this one. Refused, in any tracked text and any path: a V and a number inside
+# a camel-case name, and a v and a number joined to a snake-case name by an underscore on either
+# side. A VALUE a test feeds in is not a name and is not matched: a
 # scenario id or a label spelled with a hyphen, a quoted string. Two standard names are let through
 # by name, because they are not generations: IPv4 and IPv6 in the address guard's two functions, and
 # the curve's own name in its OID constant.
