@@ -45,7 +45,6 @@ The proofs (each exits non-zero on a failure):
 | `musts.mjs` | every MUST in the specification and what holds it, from `musts.json`; fails on MISSING, DRIFTED or DANGLING entries and prints ONE PORT and GAP entries |
 | `record.mjs` | regenerates `../PROOFS.md` from `musts.json` and the parity manifest; `--check` fails if it is stale |
 | `seed.mjs` | runs the seed's intrusion suite once per gate run and reads Appendix B's vector blocks |
-| `check-names.mjs`, `hdtp-names.txt` | the name guard and its list, byte for byte hdtp-spec's copies |
 
 Support and test tooling: `port.mjs` and `go-adapter.mjs` (a port is `{ kind, call }`: the Wasm
 in-process, or the Go adapter kept open for the suite behind a worker thread), `cast.mjs` (the
@@ -90,7 +89,7 @@ reports it. The error codes the ports answer with are the contract's, listed in
 
 `gate.sh` runs, in order: `verify.mjs`; `check.mjs` and `check.mjs --port go`; `intrude.mjs` and
 `intrude.mjs --port go`; `parity.mjs --manifest`; `node --test js/*.test.mjs` as the `js-tests`
-suite; `check-names.mjs --selftest` and `check-names.mjs`; `musts.mjs`; `record.mjs --check`;
+suite; `musts.mjs`; `record.mjs --check`;
 `seed.mjs`; and `results.mjs --summary`. The numbers of the current tree are in `../PROOFS.md`
 (generated; `record.mjs --check` keeps them current): 101 normative sentences, 2895 cross-port
 parity cases over 54 guarded functions, 55 contract functions, spec 1.0.0; `check.mjs` printed

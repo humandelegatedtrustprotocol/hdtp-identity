@@ -183,8 +183,6 @@ node contract/render.mjs --check  # CONTRACT.md is what contract/contract.json a
 node js/musts.mjs               # every MUST in hdtp-spec's specification names something that holds it, or says who does
 node js/record.mjs             # regenerate PROOFS.md: every MUST with its holder, every parity case (it prints both counts)
 node js/record.mjs --check     # ...and fail if it is stale (what gate.sh runs)
-node js/check-names.mjs         # no tracked path or text carries a name js/hdtp-names.txt forbids; the list and
-                                # the guard are hdtp-spec's scripts/ files, byte for byte (`--selftest` proves the matcher)
 node scripts/version.mjs --check  # the one version, in all seven places it is written
 ```
 
