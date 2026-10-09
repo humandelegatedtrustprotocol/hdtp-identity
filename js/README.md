@@ -83,7 +83,7 @@ reports it. The error codes the ports answer with are the contract's, listed in
   `fixtures.mjs`), except four kinds the seed cannot build, each named where it is made.
 - `parity.mjs` has no list of excused failures.
 - The shipped package is two copies of one Wasm: `pkg-web` and `pkg-node` hold the same
-  `hdtp_identity_wasm_bg.wasm`, 863,199 bytes in `manifest.json`.
+  `hdtp_identity_wasm_bg.wasm`, 875,675 bytes in `manifest.json`.
 
 ## Held by
 
