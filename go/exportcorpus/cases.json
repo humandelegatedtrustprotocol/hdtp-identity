@@ -43,8 +43,8 @@
       }
     },
     {
-      "file": "valid-export-with-removed.zip",
-      "about": "the control with a former contact's conversation: a removed row, its thread, and a message carrying a file",
+      "file": "valid-export-with-removed-thread.zip",
+      "about": "the control with a former contact's conversation: a removed thread carrying his names, and a message carrying a file",
       "accept": {
         "contacts": 4,
         "removed": 1,
@@ -199,7 +199,7 @@
       "file": "dangling-thread-contact.zip",
       "about": "a thread whose contact is in no row",
       "stage": "core",
-      "refusal": "threads.csv: row 2, column contact: names no root in contacts.csv or removed.csv"
+      "refusal": "threads.csv: row 2, column contact: names no contact in contacts.csv"
     },
     {
       "file": "dangling-message-thread.zip",
@@ -304,82 +304,64 @@
       "refusal": "media/38d8118e5103b197661a8398a00118ef99fbf434d54c81129bca24ef4bb2b1ac: holds a private key"
     },
     {
-      "file": "removed-also-a-contact.zip",
-      "about": "a removed row whose root is a contact's",
+      "file": "removed-thread-is-owner.zip",
+      "about": "a removed thread whose root is the owner",
       "stage": "core",
-      "refusal": "removed.csv: row 2, column root: a root of contacts.csv"
+      "refusal": "threads.csv: row 4, column contact: the owner's own root"
     },
     {
-      "file": "removed-is-owner.zip",
-      "about": "a removed row whose root is the owner",
+      "file": "removed-thread-not-a-fingerprint.zip",
+      "about": "a removed thread whose root is not a fingerprint",
       "stage": "core",
-      "refusal": "removed.csv: row 2, column root: the owner's own root"
+      "refusal": "threads.csv: row 4, column contact: not a fingerprint"
     },
     {
-      "file": "removed-twice.zip",
-      "about": "one root in two removed rows",
+      "file": "names-on-a-live-thread.zip",
+      "about": "a contact's thread carrying names",
       "stage": "core",
-      "refusal": "removed.csv: row 3, column root: appears twice"
+      "refusal": "threads.csv: row 2, column contact_name: not empty, and the contact is in contacts.csv"
     },
     {
-      "file": "removed-unnamed.zip",
-      "about": "a removed row no thread names",
+      "file": "removed-thread-name-over-200.zip",
+      "about": "a removed thread whose name is 201 characters",
       "stage": "core",
-      "refusal": "removed.csv: row 3, column root: no thread names it"
+      "refusal": "threads.csv: row 4, column contact_name: over 200 characters"
     },
     {
-      "file": "removed-bad-header.zip",
-      "about": "a removed.csv header that is not the one §9.2 shows",
+      "file": "removed-thread-names-disagree.zip",
+      "about": "two removed threads of one root, naming him differently",
       "stage": "core",
-      "refusal": "removed.csv: row 1: the header is not root,name,display_name"
+      "refusal": "threads.csv: row 5, column contact_display_name: not what an earlier removed thread of this contact says"
     },
     {
-      "file": "removed-header-only.zip",
-      "about": "a removed.csv of its header alone, counted as one row",
+      "file": "named-header-without-a-removed-thread.zip",
+      "about": "the longer threads.csv header and no removed thread",
       "stage": "core",
-      "refusal": "manifest.json: counts: removed is 1, and removed.csv holds 0"
+      "refusal": "threads.csv: row 1: the header names contact_name and contact_display_name, and no thread is a removed thread"
     },
     {
-      "file": "removed-count-zero.zip",
-      "about": "counts.removed of 0",
+      "file": "threads-bad-header.zip",
+      "about": "a threads.csv header that is neither of §9.2's",
       "stage": "core",
-      "refusal": "manifest.json: counts: removed is a whole number from 1"
+      "refusal": "threads.csv: row 1: the header is not id,contact,topic,created_at,last_at"
     },
     {
-      "file": "key-in-a-removed-cell.zip",
-      "about": "a PKCS #8 private key in a removed row's name",
+      "file": "key-in-a-thread-name.zip",
+      "about": "a PKCS #8 private key in a removed thread's name",
       "stage": "core",
-      "refusal": "removed.csv: row 2, column name: holds a private key"
+      "refusal": "threads.csv: row 4, column contact_name: holds a private key"
     },
     {
-      "file": "removed-not-listed.zip",
-      "about": "removed.csv with neither counts.removed nor files' removed.csv",
+      "file": "removed-thread-six-fields.zip",
+      "about": "a removed thread of six fields under the longer header",
       "stage": "core",
-      "refusal": "removed.csv: manifest.json's files does not list it"
+      "refusal": "threads.csv: row 4: 6 fields, not 7"
     },
     {
-      "file": "removed-member-absent.zip",
-      "about": "counts.removed and files' removed.csv, and no removed.csv",
+      "file": "message-names-no-contact.zip",
+      "about": "a message whose contact is no contact and no removed thread's",
       "stage": "core",
-      "refusal": "removed.csv: manifest.json's files lists it, and the file lacks it"
-    },
-    {
-      "file": "removed-counted-not-listed.zip",
-      "about": "counts.removed without files' removed.csv",
-      "stage": "core",
-      "refusal": "manifest.json: counts: removed and files: removed.csv go together"
-    },
-    {
-      "file": "message-names-neither.zip",
-      "about": "a message whose contact is a root of neither contacts.csv nor removed.csv",
-      "stage": "core",
-      "refusal": "messages.jsonl: line 5, member contact: names no root in contacts.csv or removed.csv"
-    },
-    {
-      "file": "removed-over-16-mib.zip",
-      "about": "a removed.csv one byte over 16 MiB",
-      "stage": "core",
-      "refusal": "entry \"removed.csv\": 16777217 bytes, over the 16777216 an export allows"
+      "refusal": "messages.jsonl: line 5, member contact: names no contact in contacts.csv and no removed thread"
     }
   ]
 }

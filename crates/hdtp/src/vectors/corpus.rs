@@ -29,7 +29,7 @@ mod embedded {
 }
 
 /// The members whose sha256 a manifest lists.
-const LISTED: [&str; 4] = ["contacts.csv", "removed.csv", "threads.csv", "messages.jsonl"];
+const LISTED: [&str; 3] = ["contacts.csv", "threads.csv", "messages.jsonl"];
 
 fn u16_at(b: &[u8], at: usize) -> Result<usize, String> {
     b.get(at..at + 2).map(|s| u16::from_le_bytes([s[0], s[1]]) as usize).ok_or_else(|| "a header runs past the file".into())

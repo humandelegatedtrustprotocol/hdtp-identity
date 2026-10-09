@@ -65,9 +65,8 @@ pub fn contacts_import(vault: &str, file: &str, yes: bool) -> Res<i32> {
     let incoming: Vec<Value> = contents.contacts.iter().map(contact_of).collect();
     let plural = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
     eprintln!(
-        "{file}: {}, {}, {}, {} and {}, all checked; the wallet keeps only the contacts",
+        "{file}: {}, {}, {} and {}, all checked; the wallet keeps only the contacts",
         plural(contents.contacts.len(), "contact", "contacts"),
-        plural(contents.removed.len(), "removed contact", "removed contacts"),
         plural(contents.threads.len(), "thread", "threads"),
         plural(contents.messages.len(), "message", "messages"),
         plural(contents.media.len(), "file", "files")

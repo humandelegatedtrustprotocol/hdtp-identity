@@ -41,15 +41,7 @@ pub(super) fn export_read(a: &Value) -> Result<Answer> {
     }
     let owner = s(a, "owner")?;
     let now = instant(a, "now")?;
-    let r = export::read(
-        &directory,
-        opt_s(a, "manifest")?,
-        opt_s(a, "contacts_csv")?,
-        opt_s(a, "removed_csv")?,
-        opt_s(a, "threads_csv")?,
-        owner,
-        now,
-    )?;
+    let r = export::read(&directory, opt_s(a, "manifest")?, opt_s(a, "contacts_csv")?, opt_s(a, "threads_csv")?, owner, now)?;
     // Written straight from the rows, which borrow the members' text: no tree of values beside them.
     Ok(Answer::Text(r.answer))
 }
@@ -355,15 +347,8 @@ pub(super) fn export_write(a: &Value) -> Result<Value> {
     let exported_at = instant(a, "exported_at")?;
     let tool = s(a, "tool")?;
     let contacts = list(a, "contacts")?;
-    let (removed, threads, media) = (opt_list(a, "removed")?, opt_list(a, "threads")?, opt_list(a, "media")?);
-    let w = export::write(
-        owner,
-        owner_name,
-        exported_at,
-        tool,
-        &export::Rows { contacts, removed: &removed, threads: &threads, media: &media },
-    )?;
-    Ok(json!({ "partial": w.partial, "contacts_csv": w.contacts_csv, "removed_csv": w.removed_csv, "threads_csv": w.threads_csv }))
+    let w = export::write(owner, owner_name, exported_at, tool, contacts, &opt_list(a, "threads")?, &opt_list(a, "media")?)?;
+    Ok(json!({ "partial": w.partial, "contacts_csv": w.contacts_csv, "threads_csv": w.threads_csv }))
 }
 
 pub(super) fn export_write_messages(a: &Value) -> Result<Value> {

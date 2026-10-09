@@ -42,25 +42,21 @@ export default function exportCases({ add, expect }, f) {
   const writeArgs = { owner, owner_name: 'Olive', exported_at: now, tool: 'parity', contacts, threads, media };
   add('export_write: every formula prefix, quoting and line breaks, sorted rows', 'export_write', writeArgs);
   add('export_write: a book', 'export_write', { owner, owner_name: 'Olive', exported_at: now, tool: 'parity', contacts: [row({})] });
-  // removed.csv: rows sorted by root, a formula-led name guarded, a display name over 200 characters
-  // cut on a character, an empty name; and each refusal of a removed row, in both ports' words.
-  const removed = [
-    { root: other('S'), name: '', display_name: '' },
-    { root: other('R'), name: '=former, "quoted"', display_name: '\u00e9'.repeat(250) },
-  ];
+  // Removed threads (SPEC §9.2, SEP-0004): a former contact's conversation carries its names; the
+  // longer header, a formula-led name guarded, a display name over 200 characters cut on a character,
+  // an empty pair; and each refusal, in both ports' words.
   const removedThreads = [...threads,
-    { id: 't3', contact: other('R'), topic: 'the handover', created_at: '2026-09-12T10:00:00Z', last_at: '2026-09-12T10:00:00Z' },
-    { id: 't4', contact: other('S'), topic: '', created_at: '2026-09-13T10:00:00Z', last_at: '2026-09-13T10:00:00Z' }];
-  const withRemoved = (o) => ({ ...writeArgs, removed, threads: removedThreads, ...o });
-  add('export_write: removed rows, sorted, guarded, a display name cut', 'export_write', withRemoved({}));
-  add('export_write: a removed row whose root is a contact\'s', 'export_write', withRemoved({ removed: [{ root: rootFp, name: '', display_name: '' }] }));
-  add('export_write: a removed row whose root is the owner', 'export_write', withRemoved({ removed: [{ root: owner, name: '', display_name: '' }] }));
-  add('export_write: a removed row no thread names', 'export_write', withRemoved({ removed: [...removed, { root: other('U'), name: '', display_name: '' }] }));
-  add('export_write: one root in two removed rows', 'export_write', withRemoved({ removed: [...removed, removed[1]] }));
-  add('export_write: a removed row whose own name is over 200 characters', 'export_write', withRemoved({ removed: [removed[0], { ...removed[1], name: 'n'.repeat(201) }] }));
-  add('export_write: a removed row with a column removed.csv does not have', 'export_write', withRemoved({ removed: [removed[0], { ...removed[1], endpoint: ENDPOINT }] }));
-  add('export_write: a removed row that is not an object', 'export_write', withRemoved({ removed: [removed[0], 'R'] }));
-  add('export_write: a thread whose root is in neither member', 'export_write', withRemoved({ removed: [removed[1]] }));
+    { id: 't3', contact: other('R'), topic: 'the handover', created_at: '2026-09-12T10:00:00Z', last_at: '2026-09-12T10:00:00Z', contact_name: '=former, "quoted"', contact_display_name: '\u00e9'.repeat(250) },
+    { id: 't4', contact: other('R'), topic: '', created_at: '2026-09-13T10:00:00Z', last_at: '2026-09-13T10:00:00Z', contact_name: '=former, "quoted"', contact_display_name: '\u00e9'.repeat(250) },
+    { id: 't5', contact: other('S'), topic: '', created_at: '2026-09-13T10:00:00Z', last_at: '2026-09-13T10:00:00Z' }];
+  const withRemoved = (ts) => ({ ...writeArgs, threads: ts });
+  add('export_write: removed threads, the longer header, names guarded and cut', 'export_write', withRemoved(removedThreads));
+  add('export_write: names on a thread whose contact is a contact', 'export_write', withRemoved([...threads, { ...threads[0], id: 't9', contact_name: 'x' }]));
+  add('export_write: a removed thread whose root is the owner', 'export_write', withRemoved([...threads, { ...removedThreads[2], contact: owner }]));
+  add('export_write: a removed thread whose root is not a fingerprint', 'export_write', withRemoved([...threads, { ...removedThreads[2], contact: 'R' }]));
+  add('export_write: two removed threads of one root with different names', 'export_write', withRemoved([...threads, removedThreads[2], { ...removedThreads[3], contact_name: 'other' }]));
+  add('export_write: a removed thread whose own name is over 200 characters', 'export_write', withRemoved([...threads, { ...removedThreads[2], contact_name: 'n'.repeat(201) }]));
+  add('export_write: a thread name that is not a string', 'export_write', withRemoved([...threads, { ...removedThreads[2], contact_name: 7 }]));
   const messages = [
     { id: 'm1', thread: 't2', contact: rootFp, msg_id: 'x-1', direction: 'in', sender: 'human', time: '2026-09-10T10:00:00.9Z', body: 'Hello\n"there" ', reply_to: null, status: 'delivered', attachments: [] },
     { id: 'm2', thread: 't2', contact: rootFp, msg_id: 'x-2', direction: 'out', sender: 'agent', time: '2026-09-11T10:00:00Z', body: '', reply_to: 'x-1', status: 'read', attachments: [{ file, filename: 'a.pdf', mime: 'application/pdf', size: 5 }] },
@@ -100,7 +96,7 @@ export default function exportCases({ add, expect }, f) {
       directory: entries.map(({ name, size, encrypted, mode }) => ({ name, size, encrypted, mode })),
       owner: index.owner, now: index.now,
     };
-    for (const [arg, name] of [['manifest', 'manifest.json'], ['contacts_csv', 'contacts.csv'], ['removed_csv', 'removed.csv'], ['threads_csv', 'threads.csv']]) {
+    for (const [arg, name] of [['manifest', 'manifest.json'], ['contacts_csv', 'contacts.csv'], ['threads_csv', 'threads.csv']]) {
       const t = text(name);
       if (t !== undefined) args[arg] = t;
     }
@@ -113,8 +109,8 @@ export default function exportCases({ add, expect }, f) {
     }
     const body = text('messages.jsonl') ?? '';
     const fileLines = body === '' ? [] : body.replace(/\n$/, '').split('\n');
-    // A message names a root of contacts.csv or of removed.csv.
-    const roots = [...first.contacts, ...first.removed].map((r) => r.root);
+    // A message names a contact, or the contact of a removed thread.
+    const roots = [...first.contacts.map((r) => r.root), ...first.threads.map((t) => t.contact)];
     const msgArgs = { lines: fileLines, threads: first.threads.map((t) => t.id), contacts: roots, media: first.media.map((m) => m.hash) };
     const second = wasm.call('export_read_messages', msgArgs);
     if (second.error || c.accept) {

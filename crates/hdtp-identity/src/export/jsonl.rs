@@ -77,7 +77,7 @@ pub fn message(doc: &Map<String, Value>, names: Option<&Lookup<'_>>) -> std::res
             return Err((Some("thread"), "names no thread in threads.csv".into()));
         }
         if !n.contacts.contains(contact) {
-            return Err((Some("contact"), "names no root in contacts.csv or removed.csv".into()));
+            return Err((Some("contact"), "names no contact in contacts.csv and no removed thread".into()));
         }
     }
     one_of("direction", &DIRECTIONS)?;

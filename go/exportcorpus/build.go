@@ -55,7 +55,8 @@ type Case struct {
 // Accept is what a valid file holds, and which rows' leaves pin nothing.
 type Accept struct {
 	Contacts int `json:"contacts"`
-	// Removed counts removed.csv's rows; written only for a file that has them.
+	// Removed counts the removed threads (a former contact's conversation); written only for a file
+	// that has them.
 	Removed  int `json:"removed,omitempty"`
 	Threads  int `json:"threads"`
 	Messages int `json:"messages"`
@@ -274,7 +275,7 @@ func leaf(of identity, cn, host, endpoint string) (string, error) {
 }
 
 // valid builds the valid export, the book, and the valid export with a former contact's
-// conversation added (removed.csv), through the library's own writer.
+// conversation added (a removed thread), through the library's own writer.
 func valid() (export, []byte, []string, export, error) {
 	var fail export
 	owner, err := root("owner", OwnerCN)
@@ -380,23 +381,23 @@ func valid() (export, []byte, []string, export, error) {
 		return fail, nil, nil, fail, err
 	}
 
-	// The same export, and a conversation with Farid, a former contact: a removed row, its thread,
-	// and a message carrying a second file.
+	// The same export, and a conversation with Farid, a former contact: a removed thread carrying
+	// his names, and a message carrying a second file.
 	farid, err := root("farid", "Farid")
 	if err != nil {
 		return fail, nil, nil, fail, err
 	}
 	notes := []byte("notes from the old job\n")
 	nh := sum(notes)
-	removed := []map[string]any{{"root": farid.fp, "name": "Farid, from the old job", "display_name": "Farid K."}}
 	rthreads := append(append([]map[string]any{}, threads...),
-		map[string]any{"id": "t3", "contact": farid.fp, "topic": "the handover", "created_at": "2026-09-14T10:00:00Z", "last_at": "2026-09-14T10:00:00Z"})
+		map[string]any{"id": "t3", "contact": farid.fp, "topic": "the handover", "created_at": "2026-09-14T10:00:00Z", "last_at": "2026-09-14T10:00:00Z",
+			"contact_name": "Farid, from the old job", "contact_display_name": "Farid K."})
 	rmessages := append(append([]map[string]any{}, messages...),
 		map[string]any{"id": "m5", "thread": "t3", "contact": farid.fp, "msg_id": "msg-5", "direction": "in", "sender": "human", "time": "2026-09-14T10:00:00Z",
 			"body": "", "reply_to": nil, "status": "delivered", "attachments": []any{map[string]any{"file": nh, "filename": "notes.txt", "mime": "text/plain", "size": len(notes)}}})
-	rmedia := []any{map[string]any{"hash": h, "size": len(media)}, map[string]any{"hash": nh, "size": len(notes)}}
 	rw, err := call("export_write", map[string]any{"owner": owner.fp, "owner_name": OwnerCN, "exported_at": "2026-09-27T10:00:00Z",
-		"tool": "hdtp-identity exportcorpus", "contacts": contacts, "removed": removed, "threads": rthreads, "media": rmedia})
+		"tool": "hdtp-identity exportcorpus", "contacts": contacts, "threads": rthreads,
+		"media": []any{map[string]any{"hash": h, "size": len(media)}, map[string]any{"hash": nh, "size": len(notes)}}})
 	if err != nil {
 		return fail, nil, nil, fail, err
 	}
@@ -418,7 +419,6 @@ func valid() (export, []byte, []string, export, error) {
 	}
 	xr := export{owner: owner.fp, manifest: rmanifest, members: []entry{
 		{name: "contacts.csv", data: []byte(rw["contacts_csv"].(string))},
-		{name: "removed.csv", data: []byte(rw["removed_csv"].(string))},
 		{name: "threads.csv", data: []byte(rw["threads_csv"].(string))},
 		{name: "messages.jsonl", data: rjsonl},
 		{name: "media/"},
@@ -469,13 +469,13 @@ func Build() (map[string][]byte, error) {
 	}
 
 	withRemoved, err := xr.zip()
-	if err := add(Case{File: "valid-export-with-removed.zip", About: "the control with a former contact's conversation: a removed row, its thread, and a message carrying a file",
+	if err := add(Case{File: "valid-export-with-removed-thread.zip", About: "the control with a former contact's conversation: a removed thread carrying his names, and a message carrying a file",
 		Accept: &Accept{Contacts: 4, Removed: 1, Threads: 3, Messages: 5, Media: 2, Pinned: 1, Leafless: leafless}}, withRemoved, err); err != nil {
 		return nil, err
 	}
 
-	// A variant: the valid export (or, for removed.csv's cases, the export with a removed row) with
-	// one change, zipped.
+	// A variant: the valid export (or, for the removed thread's cases, the export with one) with one
+	// change, zipped.
 	variantOf := func(base export, file, about, stage, refusal string, change func(v *export) []entry) error {
 		v := base.clone()
 		entries := change(&v)
@@ -667,7 +667,7 @@ func Build() (map[string][]byte, error) {
 				v.relist()
 				return nil
 			}},
-		{"dangling-thread-contact.zip", "a thread whose contact is in no row", "core", "threads.csv: row 2, column contact: names no root in contacts.csv or removed.csv",
+		{"dangling-thread-contact.zip", "a thread whose contact is in no row", "core", "threads.csv: row 2, column contact: names no contact in contacts.csv",
 			func(v *export) []entry {
 				t := string(v.get("threads.csv"))
 				v.set("threads.csv", []byte(strings.Replace(t, strings.Split(strings.SplitAfter(t, "\r\n")[1], ",")[1], "sha256:"+strings.Repeat("B", 43), 1)))
@@ -801,68 +801,77 @@ func Build() (map[string][]byte, error) {
 		}
 	}
 
-	// removed.csv (SPEC §9.2): each case is the export with a removed row, with one thing wrong.
-	removedCSV := string(xr.get("removed.csv"))
-	faridRoot := strings.SplitN(strings.SplitAfter(removedCSV, "\r\n")[1], ",", 2)[0]
-	gita, err := root("gita", "Gita")
-	if err != nil {
-		return nil, err
+	// The removed thread (SPEC §9.2): each case is the export with one, with one thing wrong. Its
+	// row is the fourth of threads.csv (sorted by id: t1, t2, t3).
+	rthreads := string(xr.get("threads.csv"))
+	// Lines, not records: t2's topic holds a line break, so t3's record is the line that begins "t3,".
+	rlines := strings.SplitAfter(rthreads, "\r\n")
+	t3 := 0
+	for i, l := range rlines {
+		if strings.HasPrefix(l, "t3,") {
+			t3 = i
+		}
 	}
-	bharatRoot := strings.SplitN(strings.SplitAfter(contactsCSV, "\r\n")[bharatRow-1], ",", 2)[0]
-	setRemoved := func(v *export, text string) {
-		v.set("removed.csv", []byte(text))
+	faridRoot := strings.Split(rlines[t3], ",")[1]
+	setThreads := func(v *export, text string) {
+		v.set("threads.csv", []byte(text))
 		v.relist()
+	}
+	withRow := func(i int, row string) string {
+		lines := append([]string{}, rlines...)
+		lines[i] = row
+		return strings.Join(lines, "")
 	}
 	rjsonl := strings.SplitAfter(string(xr.get("messages.jsonl")), "\n")
 	removedSteps := []struct {
 		file, about, stage, refusal string
 		change                      func(v *export) []entry
 	}{
-		{"removed-also-a-contact.zip", "a removed row whose root is a contact's", "core", "removed.csv: row 2, column root: a root of contacts.csv",
+		{"removed-thread-is-owner.zip", "a removed thread whose root is the owner", "core", "threads.csv: row 4, column contact: the owner's own root",
+			func(v *export) []entry { setThreads(v, strings.Replace(rthreads, faridRoot, x.owner, 1)); return nil }},
+		{"removed-thread-not-a-fingerprint.zip", "a removed thread whose root is not a fingerprint", "core", "threads.csv: row 4, column contact: not a fingerprint",
+			func(v *export) []entry { setThreads(v, strings.Replace(rthreads, faridRoot, "farid", 1)); return nil }},
+		{"names-on-a-live-thread.zip", "a contact's thread carrying names", "core", "threads.csv: row 2, column contact_name: not empty, and the contact is in contacts.csv",
 			func(v *export) []entry {
-				setRemoved(v, strings.Replace(removedCSV, faridRoot, bharatRoot, 1))
+				setThreads(v, withRow(1, strings.TrimSuffix(rlines[1], ",,\r\n")+",x,\r\n"))
 				return nil
 			}},
-		{"removed-is-owner.zip", "a removed row whose root is the owner", "core", "removed.csv: row 2, column root: the owner's own root",
-			func(v *export) []entry { setRemoved(v, strings.Replace(removedCSV, faridRoot, x.owner, 1)); return nil }},
-		{"removed-twice.zip", "one root in two removed rows", "core", "removed.csv: row 3, column root: appears twice",
+		{"removed-thread-name-over-200.zip", "a removed thread whose name is 201 characters", "core", "threads.csv: row 4, column contact_name: over 200 characters",
 			func(v *export) []entry {
-				setRemoved(v, removedCSV+strings.SplitAfter(removedCSV, "\r\n")[1])
-				v.counts()["removed"] = 2
+				setThreads(v, strings.Replace(rthreads, "\"Farid, from the old job\"", strings.Repeat("n", 201), 1))
 				return nil
 			}},
-		{"removed-unnamed.zip", "a removed row no thread names", "core", "removed.csv: row 3, column root: no thread names it",
+		{"removed-thread-names-disagree.zip", "two removed threads of one root, naming him differently", "core",
+			"threads.csv: row 5, column contact_display_name: not what an earlier removed thread of this contact says",
 			func(v *export) []entry {
-				setRemoved(v, removedCSV+gita.fp+",Gita,Gita\r\n")
-				v.counts()["removed"] = 2
+				setThreads(v, rthreads+strings.Replace(strings.Replace(rlines[t3], "t3,", "t4,", 1), "Farid K.", "Farid Khan", 1))
+				v.counts()["threads"] = 4
 				return nil
 			}},
-		{"removed-bad-header.zip", "a removed.csv header that is not the one §9.2 shows", "core", "removed.csv: row 1: the header is not root,name,display_name",
+		{"named-header-without-a-removed-thread.zip", "the longer threads.csv header and no removed thread", "core",
+			"threads.csv: row 1: the header names contact_name and contact_display_name, and no thread is a removed thread",
 			func(v *export) []entry {
-				setRemoved(v, strings.Replace(removedCSV, "display_name", "nickname", 1))
+				setThreads(v, strings.Join(rlines[:t3], ""))
+				v.counts()["threads"] = 2
 				return nil
 			}},
-		{"removed-header-only.zip", "a removed.csv of its header alone, counted as one row", "core", "manifest.json: counts: removed is 1, and removed.csv holds 0",
-			func(v *export) []entry { setRemoved(v, strings.SplitAfter(removedCSV, "\r\n")[0]); return nil }},
-		{"removed-count-zero.zip", "counts.removed of 0", "core", "manifest.json: counts: removed is a whole number from 1",
-			func(v *export) []entry { v.counts()["removed"] = 0; return nil }},
-		{"key-in-a-removed-cell.zip", "a PKCS #8 private key in a removed row's name", "core", "removed.csv: row 2, column name: holds a private key",
+		{"threads-bad-header.zip", "a threads.csv header that is neither of §9.2's", "core", "threads.csv: row 1: the header is not id,contact,topic,created_at,last_at",
 			func(v *export) []entry {
-				setRemoved(v, strings.Replace(removedCSV, "\"Farid, from the old job\"", b64u(pkcs8), 1))
+				setThreads(v, strings.Replace(rthreads, ",contact_display_name", ",display", 1))
 				return nil
 			}},
-		{"removed-not-listed.zip", "removed.csv with neither counts.removed nor files' removed.csv", "core", "removed.csv: manifest.json's files does not list it",
+		{"key-in-a-thread-name.zip", "a PKCS #8 private key in a removed thread's name", "core", "threads.csv: row 4, column contact_name: holds a private key",
 			func(v *export) []entry {
-				delete(v.counts(), "removed")
-				delete(v.files(), "removed.csv")
+				setThreads(v, strings.Replace(rthreads, "\"Farid, from the old job\"", b64u(pkcs8), 1))
 				return nil
 			}},
-		{"removed-member-absent.zip", "counts.removed and files' removed.csv, and no removed.csv", "core", "removed.csv: manifest.json's files lists it, and the file lacks it",
-			func(v *export) []entry { v.drop("removed.csv"); return nil }},
-		{"removed-counted-not-listed.zip", "counts.removed without files' removed.csv", "core", "manifest.json: counts: removed and files: removed.csv go together",
-			func(v *export) []entry { delete(v.files(), "removed.csv"); return nil }},
-		{"message-names-neither.zip", "a message whose contact is a root of neither contacts.csv nor removed.csv", "core",
-			"messages.jsonl: line 5, member contact: names no root in contacts.csv or removed.csv",
+		{"removed-thread-six-fields.zip", "a removed thread of six fields under the longer header", "core", "threads.csv: row 4: 6 fields, not 7",
+			func(v *export) []entry {
+				setThreads(v, withRow(t3, strings.TrimSuffix(rlines[t3], ",Farid K.\r\n")+"\r\n"))
+				return nil
+			}},
+		{"message-names-no-contact.zip", "a message whose contact is no contact and no removed thread's", "core",
+			"messages.jsonl: line 5, member contact: names no contact in contacts.csv and no removed thread",
 			func(v *export) []entry {
 				var m map[string]any
 				_ = json.Unmarshal([]byte(rjsonl[4]), &m)
@@ -872,12 +881,6 @@ func Build() (map[string][]byte, error) {
 				v.set("messages.jsonl", []byte(strings.Join(lines, "")))
 				v.relist()
 				return nil
-			}},
-		{"removed-over-16-mib.zip", "a removed.csv one byte over 16 MiB", "core",
-			fmt.Sprintf(`entry "removed.csv": %d bytes, over the %d an export allows`, 16<<20+1, 16<<20),
-			func(v *export) []entry {
-				setRemoved(v, removedCSV+strings.Repeat("x", 16<<20+1-len(removedCSV)))
-				return deflated(v, "removed.csv")
 			}},
 	}
 	for _, s := range removedSteps {

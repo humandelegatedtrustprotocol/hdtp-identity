@@ -2,9 +2,9 @@
 
 The fixture corpus of the export (SPEC section 9.2; `CONTRACT.md` section 6.2): a valid export, a valid
 book, and hostile files for the checks of the specification's validation. `cases.json` names the
-owner root and the clock the corpus stands at, and lists 58 cases: 4 carry `accept` (what the file
+owner root and the clock the corpus stands at, and lists 55 cases: 4 carry `accept` (what the file
 holds: `valid-export.zip`, `valid-book.zip` and `local-names-differ.zip`, which is accepted, not
-refused, and `valid-export-with-removed.zip`, the export with a former contact's conversation), 53 carry a `refusal` (the refusal it must produce, at a `stage`: the core's or the
+refused, and `valid-export-with-removed-thread.zip`, the export with a former contact's conversation), 50 carry a `refusal` (the refusal it must produce, at a `stage`: the core's or the
 host's), and 1, `understated-size.zip`, carries a `refusal_prefix` instead. The corpus is the data the readers are tested
 on; it has no behaviour of its own beyond building itself.
 
@@ -17,7 +17,7 @@ else (`scripts/release.sh` selects them by name; this README is not packed).
 
 ## What it holds
 
-- `cases.json` and the `*.zip` files it names (58 `.zip` files in this tree), embedded as `FS`
+- `cases.json` and the `*.zip` files it names (55 `.zip` files in this tree), embedded as `FS`
   (`embed.go`, `//go:embed cases.json *.zip`).
 - `Build() (map[string][]byte, error)` (`build.go`) makes the whole corpus deterministically, the
   same bytes on every run: every member is stored (a compressor's output may change with the
@@ -30,7 +30,7 @@ else (`scripts/release.sh` selects them by name; this README is not packed).
 
 ## What it refuses, and how
 
-The refusals are the corpus's data. Of the 58 cases, 53 name the whole refusal the reader must
+The refusals are the corpus's data. Of the 55 cases, 50 name the whole refusal the reader must
 produce, in the contract's words; 4 are accepted; and 1, `understated-size.zip`, names only the
 start of its refusal (`refusal_prefix` `manifest.json: `), which `go/export_corpus_test.go` checks with `strings.HasPrefix`. A case that is not
 accepted must be refused, and a refusal that does not match is a test failure. Every refusal of the export is `bad_request`, and its `why` begins with where:
