@@ -101,10 +101,10 @@ func answersCorpus(t *testing.T, fsys fs.FS) {
 					}
 				}
 			}
-			if len(got.Contacts) != c.Accept.Contacts || len(got.Threads) != c.Accept.Threads || len(got.Messages) != c.Accept.Messages ||
-				len(got.Media) != c.Accept.Media || pinned != c.Accept.Pinned {
-				t.Errorf("%s: %d contacts (%d pinned), %d threads, %d messages, %d media; want %+v", c.File, len(got.Contacts), pinned,
-					len(got.Threads), len(got.Messages), len(got.Media), *c.Accept)
+			if len(got.Contacts) != c.Accept.Contacts || len(got.Removed) != c.Accept.Removed || len(got.Threads) != c.Accept.Threads ||
+				len(got.Messages) != c.Accept.Messages || len(got.Media) != c.Accept.Media || pinned != c.Accept.Pinned {
+				t.Errorf("%s: %d contacts (%d pinned), %d removed, %d threads, %d messages, %d media; want %+v", c.File, len(got.Contacts), pinned,
+					len(got.Removed), len(got.Threads), len(got.Messages), len(got.Media), *c.Accept)
 			}
 		case err == nil:
 			t.Errorf("%s: accepted, and must be refused: %s%s", c.File, c.Refusal, c.RefusalPrefix)
@@ -176,7 +176,7 @@ func TestWriteExportZipWritesTheCorpusControlsBack(t *testing.T) {
 		at, _ := time.Parse(time.RFC3339, m.ExportedAt)
 		var out bytes.Buffer
 		in := hdtp.ExportInput{Owner: index.Owner, OwnerName: m.OwnerName, Tool: m.Tool, ExportedAt: at,
-			Contacts: first.Contacts, Threads: first.Threads, Messages: first.Messages, Media: first.Media}
+			Contacts: first.Contacts, Removed: first.Removed, Threads: first.Threads, Messages: first.Messages, Media: first.Media}
 		_, err = hdtp.WriteExportZip(&out, in, func(hash string) (io.ReadCloser, error) { return zr.Open("media/" + hash) })
 		if err != nil {
 			t.Fatalf("%s: %v", file, err)

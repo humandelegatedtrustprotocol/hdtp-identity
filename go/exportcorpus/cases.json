@@ -43,6 +43,21 @@
       }
     },
     {
+      "file": "valid-export-with-removed.zip",
+      "about": "the control with a former contact's conversation: a removed row, its thread, and a message carrying a file",
+      "accept": {
+        "contacts": 4,
+        "removed": 1,
+        "threads": 3,
+        "messages": 5,
+        "media": 2,
+        "pinned": 1,
+        "leafless": [
+          "sha256:wfkWHDNr9Pj7Ci1sUzG2u1LLAQEjE-mUak_c65RWVPs"
+        ]
+      }
+    },
+    {
       "file": "zip-slip.zip",
       "about": "a name that climbs out of the directory",
       "stage": "core",
@@ -184,7 +199,7 @@
       "file": "dangling-thread-contact.zip",
       "about": "a thread whose contact is in no row",
       "stage": "core",
-      "refusal": "threads.csv: row 2, column contact: names no contact in contacts.csv"
+      "refusal": "threads.csv: row 2, column contact: names no root in contacts.csv or removed.csv"
     },
     {
       "file": "dangling-message-thread.zip",
@@ -287,6 +302,84 @@
       "about": "a media file whose bytes are a PKCS #8 private key, named by its hash and attached",
       "stage": "host",
       "refusal": "media/38d8118e5103b197661a8398a00118ef99fbf434d54c81129bca24ef4bb2b1ac: holds a private key"
+    },
+    {
+      "file": "removed-also-a-contact.zip",
+      "about": "a removed row whose root is a contact's",
+      "stage": "core",
+      "refusal": "removed.csv: row 2, column root: a root of contacts.csv"
+    },
+    {
+      "file": "removed-is-owner.zip",
+      "about": "a removed row whose root is the owner",
+      "stage": "core",
+      "refusal": "removed.csv: row 2, column root: the owner's own root"
+    },
+    {
+      "file": "removed-twice.zip",
+      "about": "one root in two removed rows",
+      "stage": "core",
+      "refusal": "removed.csv: row 3, column root: appears twice"
+    },
+    {
+      "file": "removed-unnamed.zip",
+      "about": "a removed row no thread names",
+      "stage": "core",
+      "refusal": "removed.csv: row 3, column root: no thread names it"
+    },
+    {
+      "file": "removed-bad-header.zip",
+      "about": "a removed.csv header that is not the one §9.2 shows",
+      "stage": "core",
+      "refusal": "removed.csv: row 1: the header is not root,name,display_name"
+    },
+    {
+      "file": "removed-header-only.zip",
+      "about": "a removed.csv of its header alone, counted as one row",
+      "stage": "core",
+      "refusal": "manifest.json: counts: removed is 1, and removed.csv holds 0"
+    },
+    {
+      "file": "removed-count-zero.zip",
+      "about": "counts.removed of 0",
+      "stage": "core",
+      "refusal": "manifest.json: counts: removed is a whole number from 1"
+    },
+    {
+      "file": "key-in-a-removed-cell.zip",
+      "about": "a PKCS #8 private key in a removed row's name",
+      "stage": "core",
+      "refusal": "removed.csv: row 2, column name: holds a private key"
+    },
+    {
+      "file": "removed-not-listed.zip",
+      "about": "removed.csv with neither counts.removed nor files' removed.csv",
+      "stage": "core",
+      "refusal": "removed.csv: manifest.json's files does not list it"
+    },
+    {
+      "file": "removed-member-absent.zip",
+      "about": "counts.removed and files' removed.csv, and no removed.csv",
+      "stage": "core",
+      "refusal": "removed.csv: manifest.json's files lists it, and the file lacks it"
+    },
+    {
+      "file": "removed-counted-not-listed.zip",
+      "about": "counts.removed without files' removed.csv",
+      "stage": "core",
+      "refusal": "manifest.json: counts: removed and files: removed.csv go together"
+    },
+    {
+      "file": "message-names-neither.zip",
+      "about": "a message whose contact is a root of neither contacts.csv nor removed.csv",
+      "stage": "core",
+      "refusal": "messages.jsonl: line 5, member contact: names no root in contacts.csv or removed.csv"
+    },
+    {
+      "file": "removed-over-16-mib.zip",
+      "about": "a removed.csv one byte over 16 MiB",
+      "stage": "core",
+      "refusal": "entry \"removed.csv\": 16777217 bytes, over the 16777216 an export allows"
     }
   ]
 }

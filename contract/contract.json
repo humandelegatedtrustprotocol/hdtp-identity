@@ -531,7 +531,7 @@
     },
     "ExportLimits": {
       "description": "The bounds of SPEC §9.2, in bytes unless named otherwise. A host counts the bytes it actually decompresses against them; the core holds the directory's sizes and the text it is handed to them. A host also sets a whole-file ceiling of its own, and names it when it refuses.",
-      "const": { "manifest": 65536, "contacts_csv": 4194304, "contacts_rows": 5000, "threads_csv": 16777216, "messages_line": 65536, "media_file": 5242880, "body": 16384, "name_characters": 200, "attachments": 1 }
+      "const": { "manifest": 65536, "contacts_csv": 4194304, "contacts_rows": 5000, "removed_csv": 16777216, "threads_csv": 16777216, "messages_line": 65536, "media_file": 5242880, "body": 16384, "name_characters": 200, "attachments": 1 }
     },
     "Sha256Hex": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "A sha256, lowercase hex." },
     "ExportManifest": {
@@ -545,13 +545,13 @@
         "tool": { "type": "string" },
         "counts": {
           "type": "object",
-          "properties": { "contacts": { "type": "integer", "minimum": 0 }, "threads": { "type": "integer", "minimum": 0 }, "messages": { "type": "integer", "minimum": 0 }, "media": { "type": "integer", "minimum": 0 } },
+          "properties": { "contacts": { "type": "integer", "minimum": 0 }, "threads": { "type": "integer", "minimum": 0 }, "messages": { "type": "integer", "minimum": 0 }, "media": { "type": "integer", "minimum": 0 }, "removed": { "type": "integer", "minimum": 1, "description": "The rows of removed.csv: present, and listed in files, exactly when the file holds removed.csv." } },
           "required": ["contacts", "threads", "messages", "media"],
           "additionalProperties": false
         },
         "files": {
           "type": "object",
-          "properties": { "contacts.csv": { "$ref": "#/$defs/Sha256Hex" }, "threads.csv": { "$ref": "#/$defs/Sha256Hex" }, "messages.jsonl": { "$ref": "#/$defs/Sha256Hex" } },
+          "properties": { "contacts.csv": { "$ref": "#/$defs/Sha256Hex" }, "removed.csv": { "$ref": "#/$defs/Sha256Hex" }, "threads.csv": { "$ref": "#/$defs/Sha256Hex" }, "messages.jsonl": { "$ref": "#/$defs/Sha256Hex" } },
           "additionalProperties": false,
           "description": "The text members to the sha256 of their bytes. Never a media member: each is bound by its name, the sha256 of its bytes, and counted by counts.media."
         }
@@ -578,9 +578,20 @@
       "required": ["root", "endpoint", "name", "display_name", "status", "was_active", "permissions", "their_permissions", "added"],
       "additionalProperties": false
     },
+    "RemovedRow": {
+      "type": "object",
+      "description": "One row of removed.csv (SPEC §9.2): a former contact whose conversation the file carries, by its root and the two names last known for it. Not a contact: no endpoint, certificate, status or permission.",
+      "properties": {
+        "root": { "$ref": "#/$defs/Fingerprint" },
+        "name": { "type": "string", "description": "The name the owner last gave the contact, at most 200 characters." },
+        "display_name": { "type": "string", "description": "The name the contact last gave themselves, at most 200 characters." }
+      },
+      "required": ["root", "name", "display_name"],
+      "additionalProperties": false
+    },
     "ThreadRow": {
       "type": "object",
-      "description": "One row of threads.csv (SPEC §9.2).",
+      "description": "One row of threads.csv (SPEC §9.2): `contact` is a root of contacts.csv or of removed.csv.",
       "properties": {
         "id": { "type": "string" },
         "contact": { "$ref": "#/$defs/Fingerprint" },
@@ -1974,6 +1985,7 @@
           "directory": { "type": "array", "items": { "$ref": "#/$defs/DirectoryEntry" } },
           "manifest": { "type": "string", "description": "manifest.json's text, exactly as its bytes decode." },
           "contacts_csv": { "type": "string" },
+          "removed_csv": { "type": "string", "description": "Required when the file has removed.csv; refused when it has none." },
           "threads_csv": { "type": "string", "description": "Required when the file has threads.csv; refused when it has none." },
           "owner": { "$ref": "#/$defs/Fingerprint" },
           "now": { "$ref": "#/$defs/InstantIn" }
@@ -1985,14 +1997,15 @@
         "type": "object",
         "properties": {
           "contacts": { "type": "array", "items": { "$ref": "#/$defs/ContactRow" } },
+          "removed": { "type": "array", "items": { "$ref": "#/$defs/RemovedRow" }, "description": "removed.csv's rows, in the file's order; empty when the file has none." },
           "threads": { "type": "array", "items": { "$ref": "#/$defs/ThreadRow" } },
           "media": { "type": "array", "items": { "type": "object", "properties": { "hash": { "$ref": "#/$defs/Sha256Hex" }, "size": { "type": "integer", "minimum": 0 } }, "required": ["hash", "size"], "additionalProperties": false } }
         },
-        "required": ["contacts", "threads", "media"],
+        "required": ["contacts", "removed", "threads", "media"],
         "additionalProperties": false
       },
       "errors": ["bad_request", "parse"],
-      "notes": "SPEC §9.2's validation of everything but the messages and the media bytes, refusing the whole file at the first fault; every refusal of the file is `bad_request` whose `why` names the member, then the row (the header is row 1) and the column. In order: each directory entry, in the order given (a name that is not exactly `manifest.json`, `contacts.csv`, `threads.csv`, `messages.jsonl`, `media/` or `media/` and 64 lowercase hex: `entry \"<name>\": not a name an export holds`; `appears twice`; `encrypted`; a symbolic link; a directory but `media/`; a stated size over its bound); `manifest.json` and `contacts.csv` present; the manifest (exactly its members, `hdtp_export` 1, `owner` a fingerprint and the importing identity's, the counts whole numbers, `owner_name` and `tool` holding no private key, `files` naming only the text members — `contacts.csv`, `threads.csv`, `messages.jsonl` — each a lowercase hex sha256, never a media member, which is bound by its name and counted); every text member but the manifest listed in `files`, and every listed member present; `threads.csv`, `messages.jsonl` and `media/` present when counted; the media entries as many as counted; `contacts.csv` (its sha256, its header exactly, at most 5000 rows, each row's cells — a cell that holds a private key is refused before its column's rule — the root a fingerprint, unique, not the owner; the endpoint in normal form and passing the address guard; names at most 200 characters; the status; `true` or `false`; §8's permissions, single-spaced, none twice; the leaf a leaf and the root certificate a root of §14.1's profile, the latter for the row's root; `added` an instant) and its count; then `threads.csv` the same way (ids unique, the contact a root in `contacts.csv`). One leading `'` is stripped from every cell. A row's `leaf` is answered only when `[leaf, root_cert]` validates at the row's endpoint at `now` (§14.2); otherwise it is null and pins nothing. `media` is each media member's hash and stated size, sorted by hash: the host checks each file's bytes against both as it streams it."
+      "notes": "SPEC §9.2's validation of everything but the messages and the media bytes, refusing the whole file at the first fault; every refusal of the file is `bad_request` whose `why` names the member, then the row (the header is row 1) and the column. In order: each directory entry, in the order given (a name that is not exactly `manifest.json`, `contacts.csv`, `removed.csv`, `threads.csv`, `messages.jsonl`, `media/` or `media/` and 64 lowercase hex: `entry \"<name>\": not a name an export holds`; `appears twice`; `encrypted`; a symbolic link; a directory but `media/`; a stated size over its bound); `manifest.json` and `contacts.csv` present; the manifest (exactly its members, `hdtp_export` 1, `owner` a fingerprint and the importing identity's, the counts whole numbers and `counts.removed`, when present, at least 1 (`counts: removed is a whole number from 1`), `owner_name` and `tool` holding no private key, `files` naming only the text members — `contacts.csv`, `removed.csv`, `threads.csv`, `messages.jsonl` — each a lowercase hex sha256, never a media member, which is bound by its name and counted; `counts.removed` and `files[\"removed.csv\"]` both present or both absent: `counts: removed and files: removed.csv go together`); every text member but the manifest listed in `files`, and every listed member present; `threads.csv`, `messages.jsonl` and `media/` present when counted; the media entries as many as counted; `contacts.csv` (its sha256, its header exactly, at most 5000 rows, each row's cells — a cell that holds a private key is refused before its column's rule — the root a fingerprint, unique, not the owner; the endpoint in normal form and passing the address guard; names at most 200 characters; the status; `true` or `false`; §8's permissions, single-spaced, none twice; the leaf a leaf and the root certificate a root of §14.1's profile, the latter for the row's root; `added` an instant) and its count; then `removed.csv` when the file has it (its sha256, its header `root,name,display_name` exactly, each row's cells — a private key refused first — the root a fingerprint, not the owner, not a root of `contacts.csv` (`a root of contacts.csv`), unique; each name at most 200 characters) and its count against `counts.removed`; then `threads.csv` the same way (ids unique, the contact a root in `contacts.csv` or `removed.csv`: `names no root in contacts.csv or removed.csv`); then every removed row named by a thread (`removed.csv: row <n>, column root: no thread names it`). One leading `'` is stripped from every cell. A row's `leaf` is answered only when `[leaf, root_cert]` validates at the row's endpoint at `now` (§14.2); otherwise it is null and pins nothing. `media` is each media member's hash and stated size, sorted by hash: the host checks each file's bytes against both as it streams it."
     },
     "export_read_messages": {
       "section": "export",
@@ -2001,7 +2014,7 @@
         "properties": {
           "lines": { "type": "array", "items": { "type": "string" } },
           "threads": { "type": "array", "items": { "type": "string" }, "description": "The thread ids export_read answered." },
-          "contacts": { "type": "array", "items": { "$ref": "#/$defs/Fingerprint" } },
+          "contacts": { "type": "array", "items": { "$ref": "#/$defs/Fingerprint" }, "description": "The roots a message may name: export_read's contacts' and its removed rows'." },
           "media": { "type": "array", "items": { "$ref": "#/$defs/Sha256Hex" } },
           "first_line": { "type": "integer", "minimum": 1, "description": "The line number of `lines[0]` in the whole member. Absent is 1." }
         },
@@ -2051,6 +2064,7 @@
           "exported_at": { "$ref": "#/$defs/InstantIn" },
           "tool": { "type": "string" },
           "contacts": { "type": "array", "items": { "$ref": "#/$defs/ContactRow" } },
+          "removed": { "type": "array", "items": { "$ref": "#/$defs/RemovedRow" }, "description": "The former contacts whose threads are among `threads`: one row for each root a thread names that is not a contact's." },
           "threads": { "type": "array", "items": { "$ref": "#/$defs/ThreadRow" } },
           "media": { "type": "array", "items": { "type": "object", "properties": { "hash": { "$ref": "#/$defs/Sha256Hex" }, "size": { "type": "integer", "minimum": 0 } }, "required": ["hash", "size"], "additionalProperties": false } }
         },
@@ -2062,13 +2076,14 @@
         "properties": {
           "partial": { "$ref": "#/$defs/ExportManifest", "description": "The manifest without the messages: counts.messages 0 and no messages.jsonl in files, for export_manifest to finish." },
           "contacts_csv": { "type": "string" },
+          "removed_csv": { "type": ["string", "null"], "description": "Null when there are no removed rows: the member, its count and its files entry are then left out." },
           "threads_csv": { "type": ["string", "null"], "description": "Null when there are no threads: the member is then left out, as §9.2 allows when it counts zero." }
         },
-        "required": ["partial", "contacts_csv", "threads_csv"],
+        "required": ["partial", "contacts_csv", "removed_csv", "threads_csv"],
         "additionalProperties": false
       },
       "errors": ["bad_request", "parse"],
-      "notes": "The canonical members, the same bytes from every port: each row checked by the reader's rules (`contacts[<i>], column <c>: <why>`), contacts sorted by root and threads by id, a permission list sorted, instants written as RFC 3339 UTC seconds, every cell that begins with `=` `+` `-` `@` `'` a tab or a carriage return written with one `'` before it, a cell quoted exactly when it holds `,` `\"` CR or LF, CRLF after every record. What a contact controls never stops the export (SPEC \u00a79.2): `their_permissions` keeps only the names of \u00a78, once each, and `display_name` is cut to 200 characters, on a character; the reader refuses both as written by anyone else. `owner_name` or `tool` holding a private key is refused, naming the member (`owner_name holds a private key`). The manifest's `files` lists the text members only; the media are counted. A book is this with no threads and no media."
+      "notes": "The canonical members, the same bytes from every port: each row checked by the reader's rules (`contacts[<i>], column <c>: <why>`), contacts and removed rows sorted by root and threads by id, a permission list sorted, instants written as RFC 3339 UTC seconds, every cell that begins with `=` `+` `-` `@` `'` a tab or a carriage return written with one `'` before it, a cell quoted exactly when it holds `,` `\"` CR or LF, CRLF after every record. What a contact controls never stops the export (SPEC \u00a79.2): `their_permissions` keeps only the names of \u00a78, once each, and `display_name`, of a contact or a removed row, is cut to 200 characters, on a character; the reader refuses both as written by anyone else. A removed row is held to the reader's rules (`removed[<i>], column <c>: <why>`), and one no thread names is refused (`removed[<i>], column root: no thread names it`). `owner_name` or `tool` holding a private key is refused, naming the member (`owner_name holds a private key`). The manifest's `files` lists the text members only; the media are counted. A book is this with no removed rows, no threads and no media."
     },
     "export_write_messages": {
       "section": "export",

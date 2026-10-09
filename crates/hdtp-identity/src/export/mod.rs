@@ -25,6 +25,7 @@ pub const MANIFEST_MAX: usize = 64 * 1024;
 pub const CONTACTS_MAX: usize = 4 * 1024 * 1024;
 pub const CONTACTS_ROWS_MAX: usize = 5000;
 pub const THREADS_MAX: usize = 16 * 1024 * 1024;
+pub const REMOVED_MAX: usize = 16 * 1024 * 1024;
 pub const LINE_MAX: usize = 64 * 1024;
 pub const MEDIA_MAX: usize = 5 * 1024 * 1024;
 pub const BODY_MAX: usize = 16 * 1024;
@@ -34,6 +35,7 @@ pub const ATTACHMENTS_MAX: usize = 1;
 pub const CONTACT_COLUMNS: [&str; 11] =
     ["root", "endpoint", "name", "display_name", "status", "was_active", "permissions", "their_permissions", "leaf", "root_cert", "added"];
 pub const THREAD_COLUMNS: [&str; 5] = ["id", "contact", "topic", "created_at", "last_at"];
+pub const REMOVED_COLUMNS: [&str; 3] = ["root", "name", "display_name"];
 pub const STATUSES: [&str; 3] = ["active", "blocked", "pending_out"];
 /// §8's permissions but `integration.<name>`, which is checked by its shape.
 pub const PERMISSIONS: [&str; 5] = ["message.text", "message.media", "status.view", "calendar.availability", "calendar.book"];
@@ -409,7 +411,7 @@ pub fn thread_row<'a>(cells: Vec<Cow<'a, str>>, roots: &HashSet<&str>) -> std::r
         return Err((0, "empty".into()));
     }
     if !roots.contains(contact.as_ref()) {
-        return Err((1, "names no contact in contacts.csv".into()));
+        return Err((1, "names no root in contacts.csv or removed.csv".into()));
     }
     let Ok(created) = crate::time::parse_rfc3339(&created_at) else { return Err((3, "not an RFC 3339 instant".into())) };
     let Ok(last) = crate::time::parse_rfc3339(&last_at) else { return Err((4, "not an RFC 3339 instant".into())) };
@@ -421,6 +423,60 @@ pub fn thread_row<'a>(cells: Vec<Cow<'a, str>>, roots: &HashSet<&str>) -> std::r
 /// stripped from every cell. Two passes over the text, and never a copy of it: the first refuses
 /// what the second would otherwise find partway, so a syntax fault anywhere is still the first thing
 /// named. The count is the data records'.
+/// One row of `removed.csv`: a contact the owner no longer has whose conversation the file carries,
+/// named by its root and the two names last known for it. It is not a contact.
+pub struct RemovedRow<'a> {
+    pub root: Cow<'a, str>,
+    pub name: Cow<'a, str>,
+    pub display_name: Cow<'a, str>,
+}
+
+impl RemovedRow<'_> {
+    /// The row as `export_read` answers it (CONTRACT §6.2, `RemovedRow`).
+    pub fn write_json(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(b"{\"root\":");
+        json_str(out, &self.root);
+        out.extend_from_slice(b",\"name\":");
+        json_str(out, &self.name);
+        out.extend_from_slice(b",\"display_name\":");
+        json_str(out, &self.display_name);
+        out.push(b'}');
+    }
+}
+
+/// One removed row's cells, checked: a root that is no contact's and not the owner's, and two names
+/// of at most 200 characters.
+pub fn removed_row<'a>(
+    cells: Vec<Cow<'a, str>>,
+    owner: &str,
+    contacts: &HashSet<&str>,
+) -> std::result::Result<RemovedRow<'a>, (usize, String)> {
+    for (k, cell) in cells.iter().enumerate() {
+        if holds_private_key(cell) {
+            return Err((k, "holds a private key".into()));
+        }
+    }
+    let count = cells.len();
+    let Ok([root, name, display_name]) = <[Cow<'a, str>; 3]>::try_from(cells) else {
+        return Err((0, format!("{count} fields, not 3")));
+    };
+    if !is_fingerprint(&root) {
+        return Err((0, "not a fingerprint".into()));
+    }
+    if root == owner {
+        return Err((0, "the owner's own root".into()));
+    }
+    if contacts.contains(root.as_ref()) {
+        return Err((0, "a root of contacts.csv".into()));
+    }
+    for (k, v) in [(1, &name), (2, &display_name)] {
+        if v.chars().count() > NAME_MAX {
+            return Err((k, format!("over {NAME_MAX} characters")));
+        }
+    }
+    Ok(RemovedRow { root, name, display_name })
+}
+
 /// One data record of a CSV member: its row number and its cells.
 type Record<'a> = (usize, Vec<Cow<'a, str>>);
 
@@ -498,6 +554,7 @@ fn member_limit(name: &str) -> Option<usize> {
     match name {
         "manifest.json" => Some(MANIFEST_MAX),
         "contacts.csv" => Some(CONTACTS_MAX),
+        "removed.csv" => Some(REMOVED_MAX),
         "threads.csv" => Some(THREADS_MAX),
         _ if name.starts_with("media/") && name.len() > 6 => Some(MEDIA_MAX),
         _ => None,
@@ -510,7 +567,7 @@ fn is_media(name: &str) -> bool {
 
 /// A name §9.2 allows in an export, exactly.
 pub fn allowed_name(name: &str) -> bool {
-    matches!(name, "manifest.json" | "contacts.csv" | "threads.csv" | "messages.jsonl" | "media/") || is_media(name)
+    matches!(name, "manifest.json" | "contacts.csv" | "removed.csv" | "threads.csv" | "messages.jsonl" | "media/") || is_media(name)
 }
 
 fn entry_label(name: &str) -> String {
@@ -519,11 +576,13 @@ fn entry_label(name: &str) -> String {
 
 /// §9.2's validation of everything but the messages and the media bytes, in this order: the
 /// directory, the members the file must have, the manifest, the directory against the manifest's
-/// `files` and `counts`, `contacts.csv`, `threads.csv`.
+/// `files` and `counts`, `contacts.csv`, `removed.csv`, `threads.csv`, and every removed row named by a
+/// thread.
 pub fn read<'a>(
     directory: &[Entry],
     manifest_text: Option<&str>,
     contacts_csv: Option<&'a str>,
+    removed_csv: Option<&'a str>,
     threads_csv: Option<&'a str>,
     owner: &str,
     now: i64,
@@ -622,6 +681,33 @@ pub fn read<'a>(
         return refuse(format!("manifest.json: counts: contacts is {}, and contacts.csv holds {}", m.contacts, contacts.len()));
     }
 
+    let contact_roots: HashSet<&str> = contacts.iter().map(|c| c.root.as_ref()).collect();
+    let mut removed: Vec<RemovedRow<'a>> = Vec::new();
+    if has("removed.csv") {
+        let Some(text) = removed_csv else { return refuse("removed_csv is required: the file has removed.csv") };
+        if text.len() > REMOVED_MAX {
+            return refuse(format!("removed.csv: over {REMOVED_MAX} bytes"));
+        }
+        if Some(&sha256_hex(text.as_bytes())) != m.files.get("removed.csv") {
+            return refuse("removed.csv: its sha256 is not manifest.json's");
+        }
+        let (_, rows) = table("removed.csv", text, &REMOVED_COLUMNS)?;
+        let mut seen: HashSet<[u8; 32]> = HashSet::new();
+        for (n, r) in rows {
+            let row = removed_row(r, owner, &contact_roots)
+                .map_err(|(k, why)| Error::new("bad_request", format!("removed.csv: row {n}, column {}: {why}", REMOVED_COLUMNS[k])))?;
+            if !seen.insert(crate::util::sha256(row.root.as_bytes())) {
+                return refuse(format!("removed.csv: row {n}, column root: appears twice"));
+            }
+            removed.push(row);
+        }
+        if removed.len() as u64 != m.removed {
+            return refuse(format!("manifest.json: counts: removed is {}, and removed.csv holds {}", m.removed, removed.len()));
+        }
+    } else if removed_csv.is_some() {
+        return refuse("removed_csv is given, and the file has no removed.csv");
+    }
+
     // The answer, written as each row passes: its size is about the members' text plus the keys, so
     // it is reserved once from their lengths rather than grown by doubling.
     let threads_text = if has("threads.csv") {
@@ -639,7 +725,16 @@ pub fn read<'a>(
         json_list_open(&mut out, &mut first);
         c.write_json(&mut out);
     }
+    out.extend_from_slice(b"],\"removed\":[");
+    let mut first = true;
+    for r in &removed {
+        json_list_open(&mut out, &mut first);
+        r.write_json(&mut out);
+    }
     out.extend_from_slice(b"],\"threads\":[");
+    // The roots a thread names, of either member; and those a thread did name.
+    let named: HashSet<&str> = contact_roots.iter().copied().chain(removed.iter().map(|r| r.root.as_ref())).collect();
+    let mut with_thread: HashSet<String> = HashSet::new();
     let mut threads: u64 = 0;
     if let Some(threads_text) = threads_text {
         if threads_text.len() > THREADS_MAX {
@@ -648,7 +743,6 @@ pub fn read<'a>(
         if Some(&sha256_hex(threads_text.as_bytes())) != m.files.get("threads.csv") {
             return refuse("threads.csv: its sha256 is not manifest.json's");
         }
-        let roots: HashSet<&str> = contacts.iter().map(|c| c.root.as_ref()).collect();
         let (count, rows) = table("threads.csv", threads_text, &THREAD_COLUMNS)?;
         // A thread's answer is its CSV row and some 57 bytes of keys and quotes.
         out.reserve_exact(threads_text.len() + 64 * count + 96 * media.len() + 16);
@@ -663,7 +757,7 @@ pub fn read<'a>(
             let checked = if r.len() != THREAD_COLUMNS.len() {
                 Err(format!("threads.csv: row {n}: {} fields, not {}", r.len(), THREAD_COLUMNS.len()))
             } else {
-                thread_row(r, &roots).map_err(|(k, why)| format!("threads.csv: row {n}, column {}: {why}", THREAD_COLUMNS[k]))
+                thread_row(r, &named).map_err(|(k, why)| format!("threads.csv: row {n}, column {}: {why}", THREAD_COLUMNS[k]))
             };
             let row = match checked {
                 Ok(row) => row,
@@ -673,6 +767,9 @@ pub fn read<'a>(
                 }
             };
             ids.push(&row.id, n);
+            if !removed.is_empty() && !with_thread.contains(row.contact.as_ref()) {
+                with_thread.insert(row.contact.to_string());
+            }
             json_list_open(&mut out, &mut first);
             row.write_json(&mut out);
             threads += 1;
@@ -681,6 +778,10 @@ pub fn read<'a>(
         if threads != m.threads {
             return refuse(format!("manifest.json: counts: threads is {}, and threads.csv holds {threads}", m.threads));
         }
+    }
+    // Every removed row is there for a conversation: one no thread names is refused.
+    if let Some(i) = removed.iter().position(|r| !with_thread.contains(r.root.as_ref())) {
+        return refuse(format!("removed.csv: row {}, column root: no thread names it", i + 2));
     }
     out.extend_from_slice(b"],\"media\":[");
     let mut first = true;
@@ -797,24 +898,44 @@ fn thread_cells(v: &Value) -> std::result::Result<Vec<String>, (usize, String)> 
         .collect()
 }
 
+/// A removed row handed to `export_write`, as its cells: the display name, the contact's own claim,
+/// cut to 200 characters on a character (SPEC §9.2, what a contact controls).
+fn removed_cells(v: &Value) -> std::result::Result<Vec<String>, (usize, String)> {
+    let Some(o) = v.as_object() else { return Err((0, "a removed row is an object".into())) };
+    if let Some(k) = crate::util::stranger(o, &REMOVED_COLUMNS) {
+        return Err((0, format!("{k} is not a column of removed.csv")));
+    }
+    REMOVED_COLUMNS
+        .iter()
+        .enumerate()
+        .map(|(k, col)| match o.get(*col).and_then(|c| c.as_str()) {
+            Some(s) if *col == "display_name" => Ok(s.chars().take(NAME_MAX).collect()),
+            Some(s) => Ok(s.to_string()),
+            None => Err((k, "missing, or not a string".to_string())),
+        })
+        .collect()
+}
+
 pub struct Written {
     pub partial: Value,
     pub contacts_csv: String,
+    pub removed_csv: Option<String>,
     pub threads_csv: Option<String>,
 }
 
 /// The canonical `contacts.csv` and `threads.csv`, and the manifest without the messages: every row
 /// checked by the reader's rules (so no host writes what a host refuses), contacts sorted by root and
 /// threads by id, every cell guarded and quoted one way.
-pub fn write(
-    owner: &str,
-    owner_name: &str,
-    exported_at: i64,
-    tool: &str,
-    contacts: &[Value],
-    threads: &[Value],
-    media: &[Value],
-) -> Result<Written> {
+/// The rows `write` is handed, as `export_write` takes them.
+pub struct Rows<'a> {
+    pub contacts: &'a [Value],
+    pub removed: &'a [Value],
+    pub threads: &'a [Value],
+    pub media: &'a [Value],
+}
+
+pub fn write(owner: &str, owner_name: &str, exported_at: i64, tool: &str, rows_in: &Rows<'_>) -> Result<Written> {
+    let Rows { contacts, removed, threads, media } = *rows_in;
     if !is_fingerprint(owner) {
         return refuse("owner is not a fingerprint");
     }
@@ -854,13 +975,38 @@ pub fn write(
         return refuse(format!("contacts: over {CONTACTS_MAX} bytes as contacts.csv"));
     }
 
+    let mut rrows: Vec<(String, Vec<String>)> = Vec::new();
+    let mut removed_roots: HashSet<String> = HashSet::new();
+    for (i, v) in removed.iter().enumerate() {
+        let located = |(k, why): (usize, String)| Error::new("bad_request", format!("removed[{i}], column {}: {why}", REMOVED_COLUMNS[k]));
+        let r = removed_cells(v).map_err(located)?;
+        removed_row(r.iter().map(|c| Cow::Borrowed(c.as_str())).collect(), owner, &root_refs).map_err(located)?;
+        if !removed_roots.insert(r[0].clone()) {
+            return refuse(format!("removed[{i}], column root: appears twice"));
+        }
+        rrows.push((r[0].clone(), r));
+    }
+    rrows.sort();
+    let removed_csv = (!rrows.is_empty()).then(|| {
+        let mut out = String::new();
+        csv::write_record(&mut out, &REMOVED_COLUMNS.map(String::from));
+        for (_, r) in &rrows {
+            csv::write_record(&mut out, &r.iter().map(|c| csv::guard(c)).collect::<Vec<_>>());
+        }
+        out
+    });
+    if removed_csv.as_ref().is_some_and(|t| t.len() > REMOVED_MAX) {
+        return refuse(format!("removed: over {REMOVED_MAX} bytes as removed.csv"));
+    }
+    let named: HashSet<&str> = root_refs.iter().copied().chain(removed_roots.iter().map(String::as_str)).collect();
+
     let mut trows: Vec<(String, Vec<String>)> = Vec::new();
     let mut thread_ids: HashSet<String> = HashSet::new();
     for (i, t) in threads.iter().enumerate() {
         let located = |(k, why): (usize, String)| Error::new("bad_request", format!("threads[{i}], column {}: {why}", THREAD_COLUMNS[k]));
         let mut r = thread_cells(t).map_err(located)?;
         let (created, last) = {
-            let row = thread_row(r.iter().map(|c| Cow::Borrowed(c.as_str())).collect(), &root_refs).map_err(located)?;
+            let row = thread_row(r.iter().map(|c| Cow::Borrowed(c.as_str())).collect(), &named).map_err(located)?;
             (row.created_at, row.last_at)
         };
         r[3] = crate::time::format_rfc3339(created);
@@ -871,6 +1017,12 @@ pub fn write(
         trows.push((r[0].clone(), r));
     }
     trows.sort();
+    let with_thread: HashSet<&str> = trows.iter().map(|(_, r)| r[1].as_str()).collect();
+    for (i, v) in removed.iter().enumerate() {
+        if !v.get("root").and_then(|r| r.as_str()).is_some_and(|r| with_thread.contains(r)) {
+            return refuse(format!("removed[{i}], column root: no thread names it"));
+        }
+    }
     let threads_csv = (!trows.is_empty()).then(|| {
         let mut out = String::new();
         csv::write_record(&mut out, &THREAD_COLUMNS.map(String::from));
@@ -885,6 +1037,9 @@ pub fn write(
 
     let mut files = serde_json::Map::new();
     files.insert("contacts.csv".into(), json!(sha256_hex(contacts_csv.as_bytes())));
+    if let Some(t) = &removed_csv {
+        files.insert("removed.csv".into(), json!(sha256_hex(t.as_bytes())));
+    }
     if let Some(t) = &threads_csv {
         files.insert("threads.csv".into(), json!(sha256_hex(t.as_bytes())));
     }
@@ -903,13 +1058,17 @@ pub fn write(
             return refuse(format!("media[{i}]: appears twice"));
         }
     }
+    let mut counts = json!({ "contacts": rows.len(), "threads": trows.len(), "messages": 0, "media": media.len() });
+    if removed_csv.is_some() {
+        counts["removed"] = json!(rrows.len());
+    }
     let partial = json!({
         "hdtp_export": manifest::VERSION, "owner": owner, "owner_name": owner_name,
         "exported_at": crate::time::format_rfc3339(exported_at), "tool": tool,
-        "counts": { "contacts": rows.len(), "threads": trows.len(), "messages": 0, "media": media.len() },
+        "counts": counts,
         "files": files,
     });
-    Ok(Written { partial, contacts_csv, threads_csv })
+    Ok(Written { partial, contacts_csv, removed_csv, threads_csv })
 }
 
 /// The members of the wallet's own copy of a contact (CONTRACT §6, `VaultContact`).
@@ -976,16 +1135,25 @@ mod tests {
                 "status": "active", "was_active": true, "permissions": [], "their_permissions": [], "leaf": null, "root_cert": null,
                 "added": "2026-09-27T10:00:00Z" })
         };
-        let write = |name: &str| write(&owner, "", 0, "t", &[row(name)], &[], &[]).map(|_| ()).map_err(|e| e.why);
+        let write = |name: &str| {
+            write(&owner, "", 0, "t", &Rows { contacts: &[row(name)], removed: &[], threads: &[], media: &[] })
+                .map(|_| ())
+                .map_err(|e| e.why)
+        };
         assert_eq!(write("Bharat"), Ok(()), "the control");
         assert_eq!(write(&pkcs8), Err("contacts[0], column name: holds a private key".to_string()));
         // The owner's and the host's own strings are refused, naming the member (SPEC 9.2#28), and a
         // manifest someone else wrote with one is refused on read (9.2#15).
-        let own = |owner_name: &str, tool: &str| super::write(&owner, owner_name, 0, tool, &[], &[], &[]).map(|_| ()).map_err(|e| e.why);
+        let own = |owner_name: &str, tool: &str| {
+            super::write(&owner, owner_name, 0, tool, &Rows { contacts: &[], removed: &[], threads: &[], media: &[] })
+                .map(|_| ())
+                .map_err(|e| e.why)
+        };
         assert_eq!(own(&pkcs8, "t"), Err("owner_name holds a private key".to_string()));
         let pem = format!("-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----", base64_std(&key.to_pkcs8()));
         assert_eq!(own("Alina", &pem), Err("tool holds a private key".to_string()));
-        let partial = super::write(&owner, "Alina", 0, "t", &[], &[], &[]).unwrap().partial;
+        let partial =
+            super::write(&owner, "Alina", 0, "t", &Rows { contacts: &[], removed: &[], threads: &[], media: &[] }).unwrap().partial;
         let finished = manifest::finish(&partial, None, 0).unwrap();
         assert!(manifest::parse(&finished, Some(&owner)).is_ok(), "the control reads");
         let with_key = finished.replace("\"owner_name\":\"Alina\"", &format!("\"owner_name\":\"{pkcs8}\""));
@@ -1028,7 +1196,7 @@ mod tests {
             "leaf": null, "root_cert": null, "added": "2026-09-27T10:00:00Z" });
         let thread =
             json!({ "id": "t1", "contact": peer, "topic": "", "created_at": "2026-09-27T10:00:00Z", "last_at": "2026-09-27T10:00:00Z" });
-        let w = write(&owner, "", 0, "t", &[row], &[thread], &[]).unwrap();
+        let w = write(&owner, "", 0, "t", &Rows { contacts: &[row], removed: &[], threads: &[thread], media: &[] }).unwrap();
         let cells = &csv::read(&w.contacts_csv).unwrap()[1];
         assert_eq!(cells[3].chars().count(), NAME_MAX, "the name is cut to 200 characters");
         assert!(long.starts_with(cells[3].as_str()), "on a character, keeping its start");
@@ -1060,7 +1228,7 @@ mod tests {
         let m = manifest::finish(&w.partial, Some(&sha256_hex(text.as_bytes())), 3).unwrap();
         let entry = |name: &str| Entry { name: name.into(), size: 1, encrypted: false, mode: 0 };
         let directory = [entry("manifest.json"), entry("contacts.csv"), entry("threads.csv"), entry("messages.jsonl")];
-        let r = read(&directory, Some(&m), Some(&w.contacts_csv), w.threads_csv.as_deref(), &owner, 0).unwrap();
+        let r = read(&directory, Some(&m), Some(&w.contacts_csv), None, w.threads_csv.as_deref(), &owner, 0).unwrap();
         assert!(r.answer.contains("\"their_permissions\":[\"integration.cal\",\"message.media\"]"));
         let file_lines: Vec<&str> = text.lines().collect();
         let (threads, contacts) = (["t1"], [peer.as_str()]);
@@ -1091,13 +1259,13 @@ mod tests {
         let owner = format!("sha256:{}", "O".repeat(43));
         let hashes: Vec<String> = (0..5000).map(|i| sha256_hex(format!("media {i}").as_bytes())).collect();
         let media: Vec<Value> = hashes.iter().map(|h| json!({ "hash": h, "size": 1 })).collect();
-        let w = write(&owner, "", 0, "t", &[], &[], &media).unwrap();
+        let w = write(&owner, "", 0, "t", &Rows { contacts: &[], removed: &[], threads: &[], media: &media }).unwrap();
         let m = manifest::finish(&w.partial, None, 0).unwrap();
         assert!(m.len() < MANIFEST_MAX / 8, "a manifest of {} bytes for 5000 media files", m.len());
         let entry = |name: String, mode: u32| Entry { name, size: 1, encrypted: false, mode };
         let mut directory = vec![entry("manifest.json".into(), 0), entry("contacts.csv".into(), 0), entry("media/".into(), 0o040755)];
         directory.extend(hashes.iter().map(|h| entry(format!("media/{h}"), 0)));
-        let r = read(&directory, Some(&m), Some(&w.contacts_csv), None, &owner, 0).unwrap();
+        let r = read(&directory, Some(&m), Some(&w.contacts_csv), None, None, &owner, 0).unwrap();
         let answer: Value = serde_json::from_str(&r.answer).unwrap();
         assert_eq!(answer["media"].as_array().unwrap().len(), 5000);
     }
@@ -1187,11 +1355,11 @@ mod tests {
         let pass = |d: &Data| -> [f64; 6] {
             let clock = std::time::Instant::now;
             let t = clock();
-            let w = write(&owner, "", 0, "t", &contacts, &d.threads, &[]).unwrap();
+            let w = write(&owner, "", 0, "t", &Rows { contacts: &contacts, removed: &[], threads: &d.threads, media: &[] }).unwrap();
             let t_write = t.elapsed().as_secs_f64();
             let manifest_text = manifest::finish(&w.partial, None, 0).unwrap();
             let t = clock();
-            read(&directory, Some(&manifest_text), Some(&w.contacts_csv), w.threads_csv.as_deref(), &owner, 0).unwrap();
+            read(&directory, Some(&manifest_text), Some(&w.contacts_csv), None, w.threads_csv.as_deref(), &owner, 0).unwrap();
             let t_read = t.elapsed().as_secs_f64();
             let t = clock();
             let lines = jsonl::write(&d.messages, None).unwrap().0;

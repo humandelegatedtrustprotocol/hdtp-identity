@@ -42,16 +42,16 @@ func callExportRead(a args) json.RawMessage {
 	if err != nil {
 		return failErr(codeFor(err, "parse"), err)
 	}
-	// The three texts, in the core's order, each a string or not given: one of another type is refused,
+	// The four texts, in the core's order, each a string or not given: one of another type is refused,
 	// where both ports read it as absent (CONTRACT §0, F5).
-	var texts [3]*string
-	for i, k := range []string{"manifest", "contacts_csv", "threads_csv"} {
+	var texts [4]*string
+	for i, k := range []string{"manifest", "contacts_csv", "removed_csv", "threads_csv"} {
 		if texts[i], err = a.optStr(k); err != nil {
 			return failErr(codeArgs, err)
 		}
 	}
-	threadsCSV := texts[2]
-	r, err := exportRead(directory, texts[0], texts[1], threadsCSV, owner, now)
+	threadsCSV := texts[3]
+	r, err := exportRead(directory, texts[0], texts[1], texts[2], threadsCSV, owner, now)
 	if err != nil {
 		return fail(codeArgs, err.Error())
 	}
@@ -149,6 +149,10 @@ func callExportWrite(a args) json.RawMessage {
 	if err != nil {
 		return failErr(codeArgs, err)
 	}
+	removed, err := a.optList("removed")
+	if err != nil {
+		return failErr(codeArgs, err)
+	}
 	threads, err := a.optList("threads")
 	if err != nil {
 		return failErr(codeArgs, err)
@@ -157,15 +161,18 @@ func callExportWrite(a args) json.RawMessage {
 	if err != nil {
 		return failErr(codeArgs, err)
 	}
-	w, err := exportWrite(owner, ownerName, at, tool, contacts, threads, media)
+	w, err := exportWrite(owner, ownerName, at, tool, contacts, removed, threads, media)
 	if err != nil {
 		return fail(codeArgs, err.Error())
 	}
-	var threadsCSV any
+	var removedCSV, threadsCSV any
+	if w.removedCSV != nil {
+		removedCSV = *w.removedCSV
+	}
 	if w.threadsCSV != nil {
 		threadsCSV = *w.threadsCSV
 	}
-	return ok(map[string]any{"partial": w.partial, "contacts_csv": w.contactsCSV, "threads_csv": threadsCSV})
+	return ok(map[string]any{"partial": w.partial, "contacts_csv": w.contactsCSV, "removed_csv": removedCSV, "threads_csv": threadsCSV})
 }
 
 func callExportWriteMessages(a args) json.RawMessage {
@@ -277,11 +284,17 @@ func readAnswer(r *exportReadResult, threadsBytes int) json.RawMessage {
 	if err != nil {
 		return fail("internal", err.Error())
 	}
+	removed, err := json.Marshal(r.removed)
+	if err != nil {
+		return fail("internal", err.Error())
+	}
 	var b bytes.Buffer
 	// A thread's answer is its CSV row and some 57 bytes of keys and quotes.
-	b.Grow(len(contacts) + len(media) + threadsBytes + 64*len(r.threads) + 64)
+	b.Grow(len(contacts) + len(removed) + len(media) + threadsBytes + 64*len(r.threads) + 64)
 	b.WriteString(`{"contacts":`)
 	b.Write(contacts)
+	b.WriteString(`,"removed":`)
+	b.Write(removed)
 	b.WriteString(`,"threads":[`)
 	for k, t := range r.threads {
 		if k > 0 {

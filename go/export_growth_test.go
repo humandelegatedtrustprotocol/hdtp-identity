@@ -69,14 +69,14 @@ func TestExportFunctionsGrowLinearlyInTheRowsOfAFile(t *testing.T) {
 	pass := func(d data) [6]float64 {
 		var out [6]float64
 		clock := time.Now()
-		w, err := exportWrite(owner, "", time.Unix(0, 0), "t", contacts, d.threads, nil)
+		w, err := exportWrite(owner, "", time.Unix(0, 0), "t", contacts, nil, d.threads, nil)
 		must(err)
 		out[0] = time.Since(clock).Seconds()
 		partial, _ := json.Marshal(w.partial)
 		manifest, err := finishManifest(partial, nil, 0)
 		must(err)
 		clock = time.Now()
-		_, err = exportRead(directory, &manifest, &w.contactsCSV, w.threadsCSV, owner, time.Unix(0, 0))
+		_, err = exportRead(directory, &manifest, &w.contactsCSV, nil, w.threadsCSV, owner, time.Unix(0, 0))
 		must(err)
 		out[1] = time.Since(clock).Seconds()
 		clock = time.Now()
