@@ -55,6 +55,8 @@ type Case struct {
 // Accept is what a valid file holds, and which rows' leaves pin nothing.
 type Accept struct {
 	Contacts int `json:"contacts"`
+	// Removed counts removed.csv's rows; written only for a file that has them.
+	Removed  int `json:"removed,omitempty"`
 	Threads  int `json:"threads"`
 	Messages int `json:"messages"`
 	Media    int `json:"media"`
@@ -271,38 +273,39 @@ func leaf(of identity, cn, host, endpoint string) (string, error) {
 	return b64u(der), err
 }
 
-// valid builds the valid export and the book, through the library's own writer.
-func valid() (export, []byte, []string, error) {
+// valid builds the valid export, the book, and the valid export with a former contact's
+// conversation added (removed.csv), through the library's own writer.
+func valid() (export, []byte, []string, export, error) {
 	var fail export
 	owner, err := root("owner", OwnerCN)
 	if err != nil {
-		return fail, nil, nil, err
+		return fail, nil, nil, fail, err
 	}
 	bharat, err := root("bharat", "Bharat")
 	if err != nil {
-		return fail, nil, nil, err
+		return fail, nil, nil, fail, err
 	}
 	chen, err := root("chen", "Chen")
 	if err != nil {
-		return fail, nil, nil, err
+		return fail, nil, nil, fail, err
 	}
 	dana, err := root("dana", "Dana")
 	if err != nil {
-		return fail, nil, nil, err
+		return fail, nil, nil, fail, err
 	}
 	eve, err := root("eve", "Eve")
 	if err != nil {
-		return fail, nil, nil, err
+		return fail, nil, nil, fail, err
 	}
 	bharatLeaf, err := leaf(bharat, "Bharat", "bharat", "https://agent.bharat.example/mcp")
 	if err != nil {
-		return fail, nil, nil, err
+		return fail, nil, nil, fail, err
 	}
 	// Chen's leaf names another address than Chen's row: it validates nowhere the row points, so
 	// it pins nothing and the reader answers it null.
 	chenLeaf, err := leaf(chen, "Chen", "chen", "https://old.chen.example/mcp")
 	if err != nil {
-		return fail, nil, nil, err
+		return fail, nil, nil, fail, err
 	}
 	media := []byte("%PDF-1.7\nthe bytes of a.pdf\n")
 	h := sum(media)
@@ -337,11 +340,11 @@ func valid() (export, []byte, []string, error) {
 	w, err := call("export_write", map[string]any{"owner": owner.fp, "owner_name": OwnerCN, "exported_at": "2026-09-27T10:00:00Z",
 		"tool": "hdtp-identity exportcorpus", "contacts": contacts, "threads": threads, "media": []any{map[string]any{"hash": h, "size": len(media)}}})
 	if err != nil {
-		return fail, nil, nil, err
+		return fail, nil, nil, fail, err
 	}
 	ml, err := call("export_write_messages", map[string]any{"messages": messages})
 	if err != nil {
-		return fail, nil, nil, err
+		return fail, nil, nil, fail, err
 	}
 	var jsonl []byte
 	for _, l := range ml["lines"].([]any) {
@@ -349,11 +352,11 @@ func valid() (export, []byte, []string, error) {
 	}
 	m, err := call("export_manifest", map[string]any{"partial": w["partial"], "hashes": map[string]any{"messages.jsonl": sum(jsonl)}, "messages": len(messages)})
 	if err != nil {
-		return fail, nil, nil, err
+		return fail, nil, nil, fail, err
 	}
 	var manifest map[string]any
 	if err := json.Unmarshal([]byte(m["manifest"].(string)), &manifest); err != nil {
-		return fail, nil, nil, err
+		return fail, nil, nil, fail, err
 	}
 	x := export{owner: owner.fp, manifest: manifest, members: []entry{
 		{name: "contacts.csv", data: []byte(w["contacts_csv"].(string))},
@@ -366,19 +369,68 @@ func valid() (export, []byte, []string, error) {
 	bw, err := call("export_write", map[string]any{"owner": owner.fp, "owner_name": OwnerCN, "exported_at": "2026-09-27T10:00:00Z",
 		"tool": "hdtp-identity exportcorpus", "contacts": []any{contacts[0], contacts[3]}})
 	if err != nil {
-		return fail, nil, nil, err
+		return fail, nil, nil, fail, err
 	}
 	bm, err := call("export_manifest", map[string]any{"partial": bw["partial"]})
 	if err != nil {
-		return fail, nil, nil, err
+		return fail, nil, nil, fail, err
 	}
 	book, err := zipOf([]entry{{name: "contacts.csv", data: []byte(bw["contacts_csv"].(string))}, {name: "manifest.json", data: []byte(bm["manifest"].(string))}})
-	return x, book, []string{chen.fp}, err
+	if err != nil {
+		return fail, nil, nil, fail, err
+	}
+
+	// The same export, and a conversation with Farid, a former contact: a removed row, its thread,
+	// and a message carrying a second file.
+	farid, err := root("farid", "Farid")
+	if err != nil {
+		return fail, nil, nil, fail, err
+	}
+	notes := []byte("notes from the old job\n")
+	nh := sum(notes)
+	removed := []map[string]any{{"root": farid.fp, "name": "Farid, from the old job", "display_name": "Farid K."}}
+	rthreads := append(append([]map[string]any{}, threads...),
+		map[string]any{"id": "t3", "contact": farid.fp, "topic": "the handover", "created_at": "2026-09-14T10:00:00Z", "last_at": "2026-09-14T10:00:00Z"})
+	rmessages := append(append([]map[string]any{}, messages...),
+		map[string]any{"id": "m5", "thread": "t3", "contact": farid.fp, "msg_id": "msg-5", "direction": "in", "sender": "human", "time": "2026-09-14T10:00:00Z",
+			"body": "", "reply_to": nil, "status": "delivered", "attachments": []any{map[string]any{"file": nh, "filename": "notes.txt", "mime": "text/plain", "size": len(notes)}}})
+	rmedia := []any{map[string]any{"hash": h, "size": len(media)}, map[string]any{"hash": nh, "size": len(notes)}}
+	rw, err := call("export_write", map[string]any{"owner": owner.fp, "owner_name": OwnerCN, "exported_at": "2026-09-27T10:00:00Z",
+		"tool": "hdtp-identity exportcorpus", "contacts": contacts, "removed": removed, "threads": rthreads, "media": rmedia})
+	if err != nil {
+		return fail, nil, nil, fail, err
+	}
+	rml, err := call("export_write_messages", map[string]any{"messages": rmessages})
+	if err != nil {
+		return fail, nil, nil, fail, err
+	}
+	var rjsonl []byte
+	for _, l := range rml["lines"].([]any) {
+		rjsonl = append(append(rjsonl, l.(string)...), '\n')
+	}
+	rm, err := call("export_manifest", map[string]any{"partial": rw["partial"], "hashes": map[string]any{"messages.jsonl": sum(rjsonl)}, "messages": len(rmessages)})
+	if err != nil {
+		return fail, nil, nil, fail, err
+	}
+	var rmanifest map[string]any
+	if err := json.Unmarshal([]byte(rm["manifest"].(string)), &rmanifest); err != nil {
+		return fail, nil, nil, fail, err
+	}
+	xr := export{owner: owner.fp, manifest: rmanifest, members: []entry{
+		{name: "contacts.csv", data: []byte(rw["contacts_csv"].(string))},
+		{name: "removed.csv", data: []byte(rw["removed_csv"].(string))},
+		{name: "threads.csv", data: []byte(rw["threads_csv"].(string))},
+		{name: "messages.jsonl", data: rjsonl},
+		{name: "media/"},
+		{name: "media/" + h, data: media},
+		{name: "media/" + nh, data: notes},
+	}}
+	return x, book, []string{chen.fp}, xr, nil
 }
 
 // Build answers every file of the corpus by name, cases.json included.
 func Build() (map[string][]byte, error) {
-	x, book, leafless, err := valid()
+	x, book, leafless, xr, err := valid()
 	if err != nil {
 		return nil, err
 	}
@@ -416,9 +468,16 @@ func Build() (map[string][]byte, error) {
 		return nil, err
 	}
 
-	// A variant: the valid export with one change, zipped.
-	variant := func(file, about, stage, refusal string, change func(v *export) []entry) error {
-		v := x.clone()
+	withRemoved, err := xr.zip()
+	if err := add(Case{File: "valid-export-with-removed.zip", About: "the control with a former contact's conversation: a removed row, its thread, and a message carrying a file",
+		Accept: &Accept{Contacts: 4, Removed: 1, Threads: 3, Messages: 5, Media: 2, Pinned: 1, Leafless: leafless}}, withRemoved, err); err != nil {
+		return nil, err
+	}
+
+	// A variant: the valid export (or, for removed.csv's cases, the export with a removed row) with
+	// one change, zipped.
+	variantOf := func(base export, file, about, stage, refusal string, change func(v *export) []entry) error {
+		v := base.clone()
 		entries := change(&v)
 		var data []byte
 		var err error
@@ -432,6 +491,9 @@ func Build() (map[string][]byte, error) {
 			c.Refusal, c.RefusalPrefix = "", strings.TrimSuffix(refusal, "…")
 		}
 		return add(c, data, err)
+	}
+	variant := func(file, about, stage, refusal string, change func(v *export) []entry) error {
+		return variantOf(x, file, about, stage, refusal, change)
 	}
 	withManifest := func(v *export, extra ...entry) []entry {
 		return append(append(append([]entry{}, v.members...), entry{name: "manifest.json", data: hdtp.Canonical(v.manifest)}), extra...)
@@ -605,7 +667,7 @@ func Build() (map[string][]byte, error) {
 				v.relist()
 				return nil
 			}},
-		{"dangling-thread-contact.zip", "a thread whose contact is in no row", "core", "threads.csv: row 2, column contact: names no contact in contacts.csv",
+		{"dangling-thread-contact.zip", "a thread whose contact is in no row", "core", "threads.csv: row 2, column contact: names no root in contacts.csv or removed.csv",
 			func(v *export) []entry {
 				t := string(v.get("threads.csv"))
 				v.set("threads.csv", []byte(strings.Replace(t, strings.Split(strings.SplitAfter(t, "\r\n")[1], ",")[1], "sha256:"+strings.Repeat("B", 43), 1)))
@@ -735,6 +797,91 @@ func Build() (map[string][]byte, error) {
 	}
 	for _, s := range steps {
 		if err := variant(s.file, s.about, s.stage, s.refusal, s.change); err != nil {
+			return nil, err
+		}
+	}
+
+	// removed.csv (SPEC §9.2): each case is the export with a removed row, with one thing wrong.
+	removedCSV := string(xr.get("removed.csv"))
+	faridRoot := strings.SplitN(strings.SplitAfter(removedCSV, "\r\n")[1], ",", 2)[0]
+	gita, err := root("gita", "Gita")
+	if err != nil {
+		return nil, err
+	}
+	bharatRoot := strings.SplitN(strings.SplitAfter(contactsCSV, "\r\n")[bharatRow-1], ",", 2)[0]
+	setRemoved := func(v *export, text string) {
+		v.set("removed.csv", []byte(text))
+		v.relist()
+	}
+	rjsonl := strings.SplitAfter(string(xr.get("messages.jsonl")), "\n")
+	removedSteps := []struct {
+		file, about, stage, refusal string
+		change                      func(v *export) []entry
+	}{
+		{"removed-also-a-contact.zip", "a removed row whose root is a contact's", "core", "removed.csv: row 2, column root: a root of contacts.csv",
+			func(v *export) []entry {
+				setRemoved(v, strings.Replace(removedCSV, faridRoot, bharatRoot, 1))
+				return nil
+			}},
+		{"removed-is-owner.zip", "a removed row whose root is the owner", "core", "removed.csv: row 2, column root: the owner's own root",
+			func(v *export) []entry { setRemoved(v, strings.Replace(removedCSV, faridRoot, x.owner, 1)); return nil }},
+		{"removed-twice.zip", "one root in two removed rows", "core", "removed.csv: row 3, column root: appears twice",
+			func(v *export) []entry {
+				setRemoved(v, removedCSV+strings.SplitAfter(removedCSV, "\r\n")[1])
+				v.counts()["removed"] = 2
+				return nil
+			}},
+		{"removed-unnamed.zip", "a removed row no thread names", "core", "removed.csv: row 3, column root: no thread names it",
+			func(v *export) []entry {
+				setRemoved(v, removedCSV+gita.fp+",Gita,Gita\r\n")
+				v.counts()["removed"] = 2
+				return nil
+			}},
+		{"removed-bad-header.zip", "a removed.csv header that is not the one §9.2 shows", "core", "removed.csv: row 1: the header is not root,name,display_name",
+			func(v *export) []entry {
+				setRemoved(v, strings.Replace(removedCSV, "display_name", "nickname", 1))
+				return nil
+			}},
+		{"removed-header-only.zip", "a removed.csv of its header alone, counted as one row", "core", "manifest.json: counts: removed is 1, and removed.csv holds 0",
+			func(v *export) []entry { setRemoved(v, strings.SplitAfter(removedCSV, "\r\n")[0]); return nil }},
+		{"removed-count-zero.zip", "counts.removed of 0", "core", "manifest.json: counts: removed is a whole number from 1",
+			func(v *export) []entry { v.counts()["removed"] = 0; return nil }},
+		{"key-in-a-removed-cell.zip", "a PKCS #8 private key in a removed row's name", "core", "removed.csv: row 2, column name: holds a private key",
+			func(v *export) []entry {
+				setRemoved(v, strings.Replace(removedCSV, "\"Farid, from the old job\"", b64u(pkcs8), 1))
+				return nil
+			}},
+		{"removed-not-listed.zip", "removed.csv with neither counts.removed nor files' removed.csv", "core", "removed.csv: manifest.json's files does not list it",
+			func(v *export) []entry {
+				delete(v.counts(), "removed")
+				delete(v.files(), "removed.csv")
+				return nil
+			}},
+		{"removed-member-absent.zip", "counts.removed and files' removed.csv, and no removed.csv", "core", "removed.csv: manifest.json's files lists it, and the file lacks it",
+			func(v *export) []entry { v.drop("removed.csv"); return nil }},
+		{"removed-counted-not-listed.zip", "counts.removed without files' removed.csv", "core", "manifest.json: counts: removed and files: removed.csv go together",
+			func(v *export) []entry { delete(v.files(), "removed.csv"); return nil }},
+		{"message-names-neither.zip", "a message whose contact is a root of neither contacts.csv nor removed.csv", "core",
+			"messages.jsonl: line 5, member contact: names no root in contacts.csv or removed.csv",
+			func(v *export) []entry {
+				var m map[string]any
+				_ = json.Unmarshal([]byte(rjsonl[4]), &m)
+				m["contact"] = "sha256:" + strings.Repeat("C", 43)
+				lines := append([]string{}, rjsonl...)
+				lines[4] = string(hdtp.Canonical(m)) + "\n"
+				v.set("messages.jsonl", []byte(strings.Join(lines, "")))
+				v.relist()
+				return nil
+			}},
+		{"removed-over-16-mib.zip", "a removed.csv one byte over 16 MiB", "core",
+			fmt.Sprintf(`entry "removed.csv": %d bytes, over the %d an export allows`, 16<<20+1, 16<<20),
+			func(v *export) []entry {
+				setRemoved(v, removedCSV+strings.Repeat("x", 16<<20+1-len(removedCSV)))
+				return deflated(v, "removed.csv")
+			}},
+	}
+	for _, s := range removedSteps {
+		if err := variantOf(xr, s.file, s.about, s.stage, s.refusal, s.change); err != nil {
 			return nil, err
 		}
 	}

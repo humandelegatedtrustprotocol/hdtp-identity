@@ -13,7 +13,7 @@ tests that hold constants to it (`crates/hdtp-identity/tests/constants.rs`,
 
 | File | What |
 |---|---|
-| `contract.json` | the source: JSON Schema 2020-12 (`$id` `urn:hdtp:identity:contract`, `spec` 1.0.0). Members: `sections` (11: build, keys, certificates, csr, signing, cards, envelopes, vault, ledger, export, limits), `failure` (the one failure shape), `$defs` (59 domain types) and `methods` (55 functions, each with `section`, `params`, `result`, `errors`, `notes`) |
+| `contract.json` | the source: JSON Schema 2020-12 (`$id` `urn:hdtp:identity:contract`, `spec` 1.0.0). Members: `sections` (11: build, keys, certificates, csr, signing, cards, envelopes, vault, ledger, export, limits), `failure` (the one failure shape), `$defs` (60 domain types) and `methods` (55 functions, each with `section`, `params`, `result`, `errors`, `notes`) |
 | `CONTRACT.template.md` | the hand-written prose of `CONTRACT.md`: conventions (section 0), the order of the receiving rules (5.1), the vault format (6), the gates (7); it holds `{{table:<section>}}`, `{{types}}`, `{{spec}}`, `{{count}}` and `{{error_codes}}` placeholders |
 | `render.mjs` | generates `../CONTRACT.md` from the two files above: one table per section, one row per function, the appendix of domain types; every section the contract declares must be rendered somewhere and no placeholder may be left |
 | `contract.mjs` | `loadContract()` and `judge(contract, fn, args, answer)`: judges one answer by the contract |

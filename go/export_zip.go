@@ -76,6 +76,9 @@ type ExportMedia struct {
 // ExportContents is what a validated export holds.
 type ExportContents struct {
 	Contacts []ContactRow
+	// Removed are the contacts the owner no longer has whose conversations the file carries: never
+	// contacts, and never written as one (SPEC §9.2).
+	Removed  []RemovedRow
 	Threads  []ThreadRow
 	Messages []MessageRow
 	Media    []ExportMedia
@@ -86,6 +89,7 @@ type ExportInput struct {
 	Owner, OwnerName, Tool string
 	ExportedAt             time.Time
 	Contacts               []ContactRow
+	Removed                []RemovedRow
 	Threads                []ThreadRow
 	Messages               []MessageRow
 	Media                  []ExportMedia
@@ -158,6 +162,7 @@ func (h *exportHost) readCapped(f *zip.File, limit int64) ([]byte, error) {
 var hostFailures = map[string]string{
 	"manifest is required":                              "manifest.json",
 	"contacts_csv is required":                          "contacts.csv",
+	"removed_csv is required: the file has removed.csv": "removed.csv",
 	"threads_csv is required: the file has threads.csv": "threads.csv",
 }
 
@@ -180,7 +185,7 @@ func ReadExportZip(zr *zip.Reader, owner string, now time.Time, ceiling int64) (
 	for _, m := range []struct {
 		name  string
 		limit int64
-	}{{"manifest.json", ExportManifestMax}, {"contacts.csv", ExportContactsMax}, {"threads.csv", ExportThreadsMax}} {
+	}{{"manifest.json", ExportManifestMax}, {"contacts.csv", ExportContactsMax}, {"removed.csv", ExportRemovedMax}, {"threads.csv", ExportThreadsMax}} {
 		f, has := first[m.name]
 		if !has {
 			continue
@@ -199,7 +204,7 @@ func ReadExportZip(zr *zip.Reader, owner string, now time.Time, ceiling int64) (
 		s := string(b)
 		texts[m.name] = &s
 	}
-	r, err := exportRead(directory, texts["manifest.json"], texts["contacts.csv"], texts["threads.csv"], owner, now)
+	r, err := exportRead(directory, texts["manifest.json"], texts["contacts.csv"], texts["removed.csv"], texts["threads.csv"], owner, now)
 	if err != nil {
 		if member, known := hostFailures[err.Error()]; known && failed[member] != nil {
 			return nil, failed[member]
@@ -210,9 +215,12 @@ func ReadExportZip(zr *zip.Reader, owner string, now time.Time, ceiling int64) (
 	if err := convert(r.contacts, &out.Contacts); err != nil {
 		return nil, err
 	}
-	out.Threads = r.threads
+	out.Removed, out.Threads = r.removed, r.threads
 	names := messageNames{threads: strSet{}, contacts: strSet{}, media: strSet{}}
 	for _, c := range out.Contacts {
+		names.contacts.add(c.Root)
+	}
+	for _, c := range out.Removed {
 		names.contacts.add(c.Root)
 	}
 	for _, t := range out.Threads {
@@ -389,7 +397,8 @@ func mediaHoldsPrivateKey(b []byte) bool {
 	return isPrivateKeyDER(b) || utf8.Valid(b) && holdsPrivateKey(string(b))
 }
 
-// WriteExportZip writes an export: contacts.csv, threads.csv when there are threads, messages.jsonl
+// WriteExportZip writes an export: contacts.csv, removed.csv when there are removed rows, threads.csv
+// when there are threads, messages.jsonl
 // when there are messages, media/ and each media file stored as it comes from media, and
 // manifest.json last.
 //
@@ -438,8 +447,8 @@ func WriteExportZip(w io.Writer, in ExportInput, media func(hash string) (io.Rea
 		}
 		kept = append(kept, msg)
 	}
-	var contacts, threads, messages any
-	for _, c := range []struct{ from, to any }{{in.Contacts, &contacts}, {in.Threads, &threads}, {kept, &messages}} {
+	var contacts, removed, threads, messages any
+	for _, c := range []struct{ from, to any }{{in.Contacts, &contacts}, {in.Removed, &removed}, {in.Threads, &threads}, {kept, &messages}} {
 		if err := convert(c.from, c.to); err != nil {
 			return nil, err
 		}
@@ -484,7 +493,7 @@ func WriteExportZip(w io.Writer, in ExportInput, media func(hash string) (io.Rea
 		return nil, err
 	}
 	at := time.Unix(in.ExportedAt.Unix(), 0).UTC()
-	written, err := exportWrite(in.Owner, in.OwnerName, at, in.Tool, asList(contacts), asList(threads), asList(mediaList))
+	written, err := exportWrite(in.Owner, in.OwnerName, at, in.Tool, asList(contacts), asList(removed), asList(threads), asList(mediaList))
 	if err != nil {
 		return nil, err
 	}
@@ -510,6 +519,9 @@ func WriteExportZip(w io.Writer, in ExportInput, media func(hash string) (io.Rea
 	// thread, contact and file, then the rules across the whole member.
 	names := messageNames{threads: strSet{}, contacts: strSet{}, media: strSet{}}
 	for _, c := range in.Contacts {
+		names.contacts.add(c.Root)
+	}
+	for _, c := range in.Removed {
 		names.contacts.add(c.Root)
 	}
 	for _, t := range in.Threads {
@@ -552,6 +564,11 @@ func WriteExportZip(w io.Writer, in ExportInput, media func(hash string) (io.Rea
 	}
 	if err := put("contacts.csv", zip.Deflate, bytes.NewReader([]byte(written.contactsCSV))); err != nil {
 		return nil, err
+	}
+	if written.removedCSV != nil {
+		if err := put("removed.csv", zip.Deflate, bytes.NewReader([]byte(*written.removedCSV))); err != nil {
+			return nil, err
+		}
 	}
 	if written.threadsCSV != nil {
 		if err := put("threads.csv", zip.Deflate, bytes.NewReader([]byte(*written.threadsCSV))); err != nil {
