@@ -3,8 +3,8 @@
 // no `,` before a fraction. A lower-case `z` and a `,` fraction were read by one port and refused by
 // the other. Called from js/cases/export.mjs, whose section this is.
 export default function exportInstants({ add, expect }) {
-  const owner = 'sha256:' + 'O'.repeat(43);
-  const peer = 'sha256:' + 'B'.repeat(43);
+  const owner = 'sha256:' + 'O'.repeat(42) + 'A';
+  const peer = 'sha256:' + 'B'.repeat(42) + 'A';
   const row = (added) => ({
     root: peer, endpoint: 'https://b.example/mcp', name: '', display_name: '', status: 'active', was_active: true,
     permissions: [], their_permissions: [], leaf: null, root_cert: null, added,

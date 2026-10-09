@@ -24,6 +24,9 @@ import (
 //   out of the arguments, the text it decodes to, the answer (the rows again with some 57 bytes of
 //   keys each), a ThreadRow of five string headers per thread sharing the text, a set of the ids, and
 //   the garbage of slices grown on the way — 6.6–6.8× measured on 2026-09-27. 0.3.1 allocated 28×.
+//   Measured again on 2026-10-10 with removed threads (SEP-0004): 6.8–7.0× for contacts' threads, and
+//   7.5–7.7× for a file whose every thread is removed with a root of its own, the costliest per row
+//   (11.3–11.6× before a removed thread's names were held by the row rather than copied).
 //
 //   export_read_end, at most 6 bytes per byte of its lists: each list's raw JSON and the strings it
 //   decodes to, and the ids and msg_ids sorted — 4.4× measured. 0.3.1 allocated 10×.
@@ -41,8 +44,12 @@ func memFP(i int) string {
 }
 
 // memReadArgs is export_read's arguments for 200 contacts and `rows` threads, and the CSV's size.
-func memReadArgs(t *testing.T, rows int) ([]byte, int) {
-	owner := "sha256:" + strings.Repeat("O", 43)
+func memReadArgs(t *testing.T, rows int) ([]byte, int) { return memReadArgsOf(t, rows, false) }
+
+// memReadArgsOf is memReadArgs, or, when removed, the same rows each a removed thread with a root of
+// its own (SPEC §9.2): the costliest legal file per row for what the reader keeps of a removed thread.
+func memReadArgsOf(t *testing.T, rows int, removed bool) ([]byte, int) {
+	owner := "sha256:" + strings.Repeat("O", 42) + "A"
 	contacts := []any{}
 	for i := 0; i < 200; i++ {
 		contacts = append(contacts, map[string]any{"root": memFP(i), "endpoint": fmt.Sprintf("https://c%d.example/mcp", i), "name": "",
@@ -50,7 +57,11 @@ func memReadArgs(t *testing.T, rows int) ([]byte, int) {
 	}
 	threads := []any{}
 	for i := 0; i < rows; i++ {
-		threads = append(threads, map[string]any{"id": memUUID(i), "contact": memFP(i % 200), "topic": "a topic",
+		contact := memFP(i % 200)
+		if removed {
+			contact = memFP(1000 + i)
+		}
+		threads = append(threads, map[string]any{"id": memUUID(i), "contact": contact, "topic": "a topic",
 			"created_at": "2026-09-01T00:00:00Z", "last_at": "2026-09-01T00:00:00Z"})
 	}
 	var w map[string]any
@@ -84,13 +95,17 @@ func memOf(t *testing.T, name string, args []byte) (uint64, json.RawMessage) {
 }
 
 func TestExportReadAllocatesABoundedAmountPerRow(t *testing.T) {
-	for _, rows := range []int{16000, 64000} {
-		args, csvBytes := memReadArgs(t, rows)
+	for _, c := range []struct {
+		rows    int
+		removed bool
+	}{{16000, false}, {64000, false}, {16000, true}, {64000, true}} {
+		rows := c.rows
+		args, csvBytes := memReadArgsOf(t, rows, c.removed)
 		n, out := memOf(t, "export_read", args)
 		if strings.Contains(string(out[:min(len(out), 100)]), `"error"`) {
 			t.Fatal(string(out[:200]))
 		}
-		t.Logf("export_read, %d threads (%d bytes of threads.csv): %d bytes allocated, %d per row, %.2fx the CSV", rows, csvBytes, n, n/uint64(rows), float64(n)/float64(csvBytes))
+		t.Logf("export_read, %d threads, removed %v (%d bytes of threads.csv): %d bytes allocated, %d per row, %.2fx the CSV", rows, c.removed, csvBytes, n, n/uint64(rows), float64(n)/float64(csvBytes))
 		if n > 9*uint64(csvBytes) {
 			t.Errorf("%d threads: %.2fx the CSV allocated, over 9x", rows, float64(n)/float64(csvBytes))
 		}
@@ -105,7 +120,7 @@ func TestExportReadEndAllocatesABoundedAmountPerID(t *testing.T) {
 			msgIDs = append(msgIDs, "x"+memUUID(i))
 		}
 		hash := strings.Repeat("a", 64)
-		manifest, _ := json.Marshal(map[string]any{"hdtp_export": 1, "owner": "sha256:" + strings.Repeat("O", 43), "owner_name": "", "exported_at": "2026-09-27T00:00:00Z",
+		manifest, _ := json.Marshal(map[string]any{"hdtp_export": 1, "owner": "sha256:" + strings.Repeat("O", 42) + "A", "owner_name": "", "exported_at": "2026-09-27T00:00:00Z",
 			"tool": "t", "counts": map[string]any{"contacts": 0, "threads": 0, "messages": rows, "media": 0}, "files": map[string]any{"messages.jsonl": hash}})
 		args, _ := json.Marshal(map[string]any{"manifest": string(manifest), "messages_sha256": hash, "lines": rows, "ids": ids, "msg_ids": msgIDs, "reply_tos": msgIDs[1:], "media_seen": []string{}, "media": []string{}})
 		lists, _ := json.Marshal([]any{ids, msgIDs, msgIDs[1:]})
@@ -125,6 +140,8 @@ func TestExportReadEndAllocatesABoundedAmountPerID(t *testing.T) {
 // streams it, whose every batch must cost what one batch costs, never what the file does. Measured
 // 2026-09-27: export_read of the largest threads.csv allocated 109.5 MB (6.5×; 0.3.1: 477.1 MB,
 // 28.4×); the costliest batch of the 64 MiB messages.jsonl (160,430 lines) 4.4 MB (0.3.1: 5.6 MB).
+// 2026-10-10: the largest threads.csv 114.3 MB (6.81×), and the largest of removed threads, each with a
+// root of its own, 125.9 MB (7.50×; 189.1 MB, 11.27×, before the names were held by the row).
 func TestTheLargestFilesAllocateWithinTheirBounds(t *testing.T) {
 	rows := (16*1024*1024 - 2048) / 139
 	args, csvBytes := memReadArgs(t, rows)
@@ -135,6 +152,19 @@ func TestTheLargestFilesAllocateWithinTheirBounds(t *testing.T) {
 	t.Logf("export_read of the largest threads.csv (%d threads, %d bytes): %.1f MB allocated, %.2fx", rows, csvBytes, float64(n)/1e6, float64(n)/float64(csvBytes))
 	if n > 9*uint64(csvBytes) {
 		t.Errorf("%.2fx the CSV, over 9x", float64(n)/float64(csvBytes))
+	}
+
+	// The same, every thread removed with a root of its own (SPEC §9.2): what the reader keeps of a
+	// removed thread at the largest legal threads.csv.
+	rrows := (16*1024*1024 - 2048) / 141
+	rargs, rcsv := memReadArgsOf(t, rrows, true)
+	if rcsv > 16*1024*1024 || rcsv < 16*1024*1024-64*1024 {
+		t.Fatalf("threads.csv of removed threads is %d bytes, not the largest the bound allows", rcsv)
+	}
+	rn, _ := memOf(t, "export_read", rargs)
+	t.Logf("export_read of the largest threads.csv of removed threads (%d threads, %d bytes): %.1f MB allocated, %.2fx", rrows, rcsv, float64(rn)/1e6, float64(rn)/float64(rcsv))
+	if rn > 9*uint64(rcsv) {
+		t.Errorf("removed threads: %.2fx the CSV, over 9x", float64(rn)/float64(rcsv))
 	}
 
 	threads, roots := []string{}, []string{}

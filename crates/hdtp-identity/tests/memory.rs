@@ -13,6 +13,11 @@
 //!   export_read, at most 4 bytes per byte of threads.csv: the member once more (the text its
 //!   argument's JSON decodes to), the answer (the rows again with some 57 bytes of keys each), and a
 //!   40-byte digest per thread id — about 3×; 2.9–3.0× measured on 2026-09-27. 0.3.1 held 15–16×.
+//!   With removed threads (SEP-0004), 2026-10-10: 2.9× for contacts' threads, and 3.8–3.9× for a file
+//!   whose every thread is removed with a root of its own (each also keeps a 104-byte digest record
+//!   and some 44 bytes of names in the answer); the largest such threads.csv peaks at 64.1 MB beside
+//!   its 17.0 MB of argument text. Before a removed thread's names were kept as digests it was 6.1×,
+//!   and 104.8 MB.
 //!
 //!   export_read_end, at most 2 bytes per byte of its lists: the ids as strings borrowed from the
 //!   argument text wherever JSON did not escape them, sorted, never copied — 1.15× measured. 0.3.1
@@ -85,10 +90,12 @@ struct File {
     csv_bytes: usize,
 }
 
-/// The export_read arguments of a file of 200 contacts and `rows` threads.
-fn a_file(rows: usize) -> File {
+/// The export_read arguments of a file of 200 contacts and `rows` threads, or, when `removed`, the same
+/// rows each a removed thread with a root of its own (SPEC §9.2): the costliest legal file per row for
+/// what the reader keeps of a removed thread.
+fn a_file_of(rows: usize, removed: bool) -> File {
     use serde_json::json;
-    let owner = format!("sha256:{}", "O".repeat(43));
+    let owner = format!("sha256:{}A", "O".repeat(42));
     let contacts: Vec<_> = (0..200)
         .map(|i| {
             json!({ "root": fp(i), "endpoint": format!("https://c{i}.example/mcp"), "name": "", "display_name": "", "status": "active",
@@ -96,7 +103,10 @@ fn a_file(rows: usize) -> File {
         })
         .collect();
     let threads: Vec<_> = (0..rows)
-        .map(|i| json!({ "id": uuid(i), "contact": fp(i % 200), "topic": "a topic", "created_at": "2026-09-01T00:00:00Z", "last_at": "2026-09-01T00:00:00Z" }))
+        .map(|i| {
+            let contact = if removed { fp(1000 + i) } else { fp(i % 200) };
+            json!({ "id": uuid(i), "contact": contact, "topic": "a topic", "created_at": "2026-09-01T00:00:00Z", "last_at": "2026-09-01T00:00:00Z" })
+        })
         .collect();
     let w: serde_json::Value = serde_json::from_str(&hdtp_identity::call(
         "export_write",
@@ -117,12 +127,12 @@ fn a_file(rows: usize) -> File {
 #[test]
 fn export_read_holds_a_bounded_amount_per_row() {
     let _alone = alone();
-    for rows in [16_000, 64_000] {
-        let f = a_file(rows);
+    for (rows, removed) in [(16_000, false), (64_000, false), (16_000, true), (64_000, true)] {
+        let f = a_file_of(rows, removed);
         let (peak, answer) = peak_of("export_read", &f.args);
         assert!(!answer.contains("\"error\""), "{}", &answer[..answer.len().min(200)]);
         eprintln!(
-            "export_read, {rows} threads ({} bytes of threads.csv): peak {peak} bytes, {} per row, {:.1}x the CSV",
+            "export_read, {rows} threads, removed {removed} ({} bytes of threads.csv): peak {peak} bytes, {} per row, {:.1}x the CSV",
             f.csv_bytes,
             peak / rows,
             peak as f64 / f.csv_bytes as f64
@@ -139,7 +149,7 @@ fn export_read_end_holds_a_bounded_amount_per_id() {
         let ids: Vec<String> = (0..rows).map(uuid).collect();
         let msg_ids: Vec<String> = ids.iter().map(|i| format!("x{i}")).collect();
         let hash = "a".repeat(64);
-        let owner = format!("sha256:{}", "O".repeat(43));
+        let owner = format!("sha256:{}A", "O".repeat(42));
         let manifest = json!({ "hdtp_export": 1, "owner": owner, "owner_name": "", "exported_at": "2026-09-27T00:00:00Z", "tool": "t",
         "counts": { "contacts": 0, "threads": 0, "messages": rows, "media": 0 }, "files": { "messages.jsonl": hash } })
         .to_string();
@@ -154,4 +164,24 @@ fn export_read_end_holds_a_bounded_amount_per_id() {
         );
         assert!(peak <= 2 * lists, "{rows} ids: {:.2}x the lists, over 2x", peak as f64 / lists as f64);
     }
+}
+
+/// The largest threads.csv the format allows, every thread removed with a root of its own: the peak
+/// one call holds in the Durable Object's instance, recorded as measured, and held to the same bound.
+#[test]
+fn export_read_of_the_largest_file_of_removed_threads() {
+    let _alone = alone();
+    let rows = (16 * 1024 * 1024 - 2048) / 141;
+    let f = a_file_of(rows, true);
+    assert!(f.csv_bytes <= 16 * 1024 * 1024 && f.csv_bytes > 16 * 1024 * 1024 - 64 * 1024, "threads.csv is {} bytes", f.csv_bytes);
+    let (peak, answer) = peak_of("export_read", &f.args);
+    assert!(!answer.contains("\"error\""), "{}", &answer[..answer.len().min(200)]);
+    eprintln!(
+        "export_read of the largest threads.csv of removed threads ({rows} threads, {} bytes; argument text {} bytes): peak {:.1} MB, {:.2}x",
+        f.csv_bytes,
+        f.args.len(),
+        peak as f64 / 1e6,
+        peak as f64 / f.csv_bytes as f64
+    );
+    assert!(peak <= 4 * f.csv_bytes, "{:.2}x the CSV, over 4x", peak as f64 / f.csv_bytes as f64);
 }

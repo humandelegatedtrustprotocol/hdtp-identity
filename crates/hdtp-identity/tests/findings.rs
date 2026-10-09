@@ -227,7 +227,7 @@ fn a_pin_that_names_its_leaf_is_matched_by_name_and_only_the_match_is_parsed() {
     // Its root is a fingerprint, as every root a host holds must be (a root that is not one is refused
     // by the reader, whatever the pin says it holds); its leaf is what has gone bad.
     let unreadable = |fp: Option<&str>| {
-        let mut p = json!({ "root": format!("sha256:{}", "G".repeat(43)), "endpoint": "https://ghost.example/mcp", "leaf": "AAAA", "state": "active" });
+        let mut p = json!({ "root": format!("sha256:{}A", "G".repeat(42)), "endpoint": "https://ghost.example/mcp", "leaf": "AAAA", "state": "active" });
         if let Some(fp) = fp {
             p["leaf_fingerprint"] = json!(fp);
         }
@@ -245,7 +245,7 @@ fn a_pin_that_names_its_leaf_is_matched_by_name_and_only_the_match_is_parsed() {
     // …and one that says it holds some OTHER leaf is never parsed at all. The other leaf is named by a
     // fingerprint: a leaf_fingerprint that is not one is the host's damaged state, refused where it is
     // read (the review of 2026-09-30, S1), as `sha256:somebody-else` now is.
-    let d = decide(json!([unreadable(Some(&format!("sha256:{}", "H".repeat(43)))), theirs(Some(&their_fp))]));
+    let d = decide(json!([unreadable(Some(&format!("sha256:{}A", "H".repeat(42)))), theirs(Some(&their_fp))]));
     assert_eq!(d["result"]["code"], "ok", "{d}");
     let d = decide(json!([unreadable(Some("sha256:somebody-else")), theirs(Some(&their_fp))]));
     assert_eq!(

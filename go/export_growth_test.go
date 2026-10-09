@@ -22,7 +22,7 @@ import (
 // export_functions_grow_linearly_in_the_rows_of_a_file is the same test.
 func TestExportFunctionsGrowLinearlyInTheRowsOfAFile(t *testing.T) {
 	const n = 5000
-	owner := "sha256:" + strings.Repeat("O", 43)
+	owner := "sha256:" + strings.Repeat("O", 42) + "A"
 	fp := func(i int) string {
 		s := sha256.Sum256([]byte(fmt.Sprintf("c%d", i)))
 		return "sha256:" + base64.RawURLEncoding.EncodeToString(s[:])

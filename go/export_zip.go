@@ -45,6 +45,8 @@ type ThreadRow struct {
 	LastAt             string `json:"last_at"`
 	ContactName        string `json:"contact_name,omitempty"`
 	ContactDisplayName string `json:"contact_display_name,omitempty"`
+	// removed is the reader's: the row is a removed thread, which its answer names.
+	removed bool
 }
 
 // Attachment is the one file a message may carry.

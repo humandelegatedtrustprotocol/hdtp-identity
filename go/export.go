@@ -444,6 +444,7 @@ func threadRow(cells []string, roots strSet, named bool, owner string) (ThreadRo
 		return ThreadRow{}, &cellRefusal{0, "empty"}
 	}
 	var contactName, contactDisplay string
+	removed := false
 	switch {
 	case !named && !roots.has(cells[1]):
 		return ThreadRow{}, &cellRefusal{1, "names no contact in contacts.csv"}
@@ -466,6 +467,7 @@ func threadRow(cells []string, roots strSet, named bool, owner string) (ThreadRo
 			}
 		}
 		contactName, contactDisplay = cells[5], cells[6]
+		removed = true
 	}
 	var times [2]string
 	for j, k := range []int{3, 4} {
@@ -476,8 +478,48 @@ func threadRow(cells []string, roots strSet, named bool, owner string) (ThreadRo
 		times[j] = instantOut(cells[k], t)
 	}
 	return ThreadRow{ID: cells[0], Contact: cells[1], Topic: cells[2], CreatedAt: times[0], LastAt: times[1],
-		ContactName: contactName, ContactDisplayName: contactDisplay}, nil
+		ContactName: contactName, ContactDisplayName: contactDisplay, removed: removed}, nil
 }
+
+// removedAt is a removed thread as the reader passes it: its place among the rows read and its row
+// number. Eight bytes a row, the names held by the row itself, so a file whose every thread is
+// removed costs no copy of any name (the memory tests hold it).
+type removedAt struct{ idx, n int32 }
+
+// firstNamesDiffer is the earliest removed thread whose names are not those of the earliest removed
+// thread of its root, and the column that differs, among `at`: the refusal reading them in order
+// would give (SPEC §9.2: one former contact, one pair of names). It sorts a copy, by root and row.
+func firstNamesDiffer(threads []ThreadRow, at []removedAt) (n, col int, found bool) {
+	sorted := append([]removedAt(nil), at...)
+	sort.Slice(sorted, func(i, j int) bool {
+		a, b := threads[sorted[i].idx].Contact, threads[sorted[j].idx].Contact
+		if a != b {
+			return a < b
+		}
+		return sorted[i].n < sorted[j].n
+	})
+	for i, first := 0, 0; i < len(sorted); i++ {
+		t, base := threads[sorted[i].idx], threads[sorted[first].idx]
+		if t.Contact != base.Contact {
+			first = i
+			continue
+		}
+		c := 0
+		switch {
+		case t.ContactName != base.ContactName:
+			c = 5
+		case t.ContactDisplayName != base.ContactDisplayName:
+			c = 6
+		}
+		if c != 0 && (!found || int(sorted[i].n) < n) {
+			n, col, found = int(sorted[i].n), c, true
+		}
+	}
+	return n, col, found
+}
+
+// threadsHeaderRefusal is the refusal of a threads.csv header that is neither of SPEC §9.2's two.
+const threadsHeaderRefusal = "threads.csv: row 1: the header is not id,contact,topic,created_at,last_at, nor that and contact_name,contact_display_name"
 
 // threadsHeader is the header a threads.csv's first record names: the longer one when it is exactly
 // that, and the shorter one otherwise (csvTable refuses anything else, naming it).
@@ -960,33 +1002,52 @@ func exportRead(directory []ExportEntry, manifestText, contactsCSV, threadsCSV *
 		columns := threadsHeader(*threadsCSV)
 		named := len(columns) == len(threadColumnsNamed)
 		if err := csvTable("threads.csv", *threadsCSV, columns, &count, nil); err != nil {
+			// A header that is neither of the two is refused naming both.
+			if err.Error() == "threads.csv: row 1: the header is not "+strings.Join(threadColumns, ",") {
+				return nil, exportRefuse(threadsHeaderRefusal)
+			}
 			return nil, err
 		}
 		threads = make([]ThreadRow, 0, count)
 		// The ids seen: the rows' own id strings, which share the member's text — no copy of any.
 		ids := make(strSet, count)
-		removed := removedNames{}
+		// The removed threads, checked for their names when the rows end or one is refused: the
+		// earliest refusal of either kind is the one named, as reading them in order names it.
+		var removed []removedAt
+		namesRefusal := func() error {
+			if n, col, found := firstNamesDiffer(threads, removed); found {
+				return exportRefuse(fmt.Sprintf("threads.csv: row %d, column %s: not what an earlier removed thread of this contact says", n, columns[col]))
+			}
+			return nil
+		}
+		refuse := func(why string) error {
+			if err := namesRefusal(); err != nil {
+				return err
+			}
+			return exportRefuse(why)
+		}
 		err = csvTable("threads.csv", *threadsCSV, columns, nil, func(r tableRow) error {
 			if len(r.cells) != len(columns) {
-				return exportRefuse(fmt.Sprintf("threads.csv: row %d: %d fields, not %d", r.n, len(r.cells), len(columns)))
+				return refuse(fmt.Sprintf("threads.csv: row %d: %d fields, not %d", r.n, len(r.cells), len(columns)))
 			}
 			row, bad := threadRow(r.cells, roots, named, owner)
 			if bad != nil {
-				return exportRefuse(fmt.Sprintf("threads.csv: row %d, column %s: %s", r.n, columns[bad.col], bad.why))
+				return refuse(fmt.Sprintf("threads.csv: row %d, column %s: %s", r.n, columns[bad.col], bad.why))
 			}
 			if ids.has(row.ID) {
-				return exportRefuse(fmt.Sprintf("threads.csv: row %d, column id: appears twice", r.n))
+				return refuse(fmt.Sprintf("threads.csv: row %d, column id: appears twice", r.n))
 			}
-			if named && !roots.has(row.Contact) {
-				if col := removed.differs(row); col != 0 {
-					return exportRefuse(fmt.Sprintf("threads.csv: row %d, column %s: not what an earlier removed thread of this contact says", r.n, columns[col]))
-				}
+			if row.removed {
+				removed = append(removed, removedAt{int32(len(threads)), int32(r.n)})
 			}
 			ids.add(row.ID)
 			threads = append(threads, row)
 			return nil
 		})
 		if err != nil {
+			return nil, err
+		}
+		if err := namesRefusal(); err != nil {
 			return nil, err
 		}
 		// The longer header only for a file that holds a removed thread: one form for one content.

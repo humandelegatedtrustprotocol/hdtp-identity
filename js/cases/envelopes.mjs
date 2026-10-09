@@ -44,7 +44,7 @@ export default function envelopes({ add, expect }, f) {
   // answers "exp too far from ts": a divergence introduced by the fix for one. Exact arithmetic now.
   add('decide on an envelope whose exp is in the year 71,000', 'decide', { now, envelope: request({ params: { name: 'send_message' }, msgId: 'parity-far', exp: 2 ** 41, ephemeralSeed: Buffer.alloc(32, 6) }), node });
   add('open_result of a request envelope', 'open_result', { envelope: sealed, my_pkcs8: hostPkcs8, my_spki: hostSpki, msg_id: 'p-1', now, pins: [] });
-  add('follow_renewed on a chain to another root', 'follow_renewed', { answer: { code: 'certificate_renewed', data: { chain: [leafDer, rootDer] } }, pinned_root: 'sha256:' + 'A'.repeat(43), pinned_leaf: leafDer, dialed: ENDPOINT, now });
+  add('follow_renewed on a chain to another root', 'follow_renewed', { answer: { code: 'certificate_renewed', data: { chain: [leafDer, rootDer] } }, pinned_root: 'sha256:' + 'A'.repeat(42) + 'A', pinned_leaf: leafDer, dialed: ENDPOINT, now });
   add('follow_renewed on a chain that is not one', 'follow_renewed', { answer: { code: 'certificate_renewed', data: { chain: [] } }, pinned_root: rootFp, pinned_leaf: leafDer, dialed: ENDPOINT, now });
   add('follow_renewed on the same leaf', 'follow_renewed', { answer: { code: 'certificate_renewed', data: { chain: [leafDer, rootDer] } }, pinned_root: rootFp, pinned_leaf: leafDer, dialed: ENDPOINT, now });
   // The pinned root and the dialed address are what a renewed chain is held to, and "" is a value like
@@ -334,7 +334,7 @@ export default function envelopes({ add, expect }, f) {
   expect('decide on a peer who returns exactly at the end of the tombstone window', { code: 'envelope_invalid', why: 'guest may only redeem or request' });
   // A stranger asking to be a contact from an endpoint another root was pinned at: the claim is named
   // while the window holds, and not after.
-  const OTHER_ROOT = 'sha256:' + 'B'.repeat(43);
+  const OTHER_ROOT = 'sha256:' + 'B'.repeat(42) + 'A';
   const asking = request({ params: { name: 'request_contact', arguments: { card: f.card } }, msgId: 'p-claim' });
   const claimed = (back) => ({ now, envelope: asking, node: { ...node, endpoint: 'https://bharat.example/mcp', former_endpoints: [{ root: OTHER_ROOT, endpoint: ENDPOINT, at: f.before(back) }] } });
   add('decide on a stranger at an endpoint another root left a second inside the claim window', 'decide', claimed(CLAIM - 1));
@@ -405,9 +405,9 @@ export default function envelopes({ add, expect }, f) {
   // The gone row's root and the leaf it names are fingerprints: from e49ef50 a root that is not one is
   // refused before any pin is read, and so were these two cases, whatever their names said, until the
   // review of 2026-09-30 found it with S1.
-  const gone = { root: 'sha256:' + 'B'.repeat(43), endpoint: 'https://ghost.example/mcp', leaf: 'AAAA', state: 'active' };
+  const gone = { root: 'sha256:' + 'B'.repeat(42) + 'A', endpoint: 'https://ghost.example/mcp', leaf: 'AAAA', state: 'active' };
   add('decide, small form: the pin names its leaf', 'decide', { now, envelope: small, node: { ...node, pins: [{ ...mine, leaf_fingerprint: hostFp }] } });
-  add('decide, small form: an unreadable pin that names some OTHER leaf is never parsed', 'decide', { now, envelope: small, node: { ...node, pins: [{ ...gone, leaf_fingerprint: 'sha256:' + 'C'.repeat(43) }, { ...mine, leaf_fingerprint: hostFp }] } });
+  add('decide, small form: an unreadable pin that names some OTHER leaf is never parsed', 'decide', { now, envelope: small, node: { ...node, pins: [{ ...gone, leaf_fingerprint: 'sha256:' + 'C'.repeat(42) + 'A' }, { ...mine, leaf_fingerprint: hostFp }] } });
   expect('decide, small form: an unreadable pin that names some OTHER leaf is never parsed', { code: 'ok', form: 'leaf', tier: 'contact' });
   add('decide, small form: an unreadable pin that names no leaf has to be parsed', 'decide', { now, envelope: small, node: { ...node, pins: [gone, { ...mine, leaf_fingerprint: hostFp }] } });
   add('decide, small form: a pin whose named leaf is not its leaf', 'decide', { now, envelope: small, node: { ...node, pins: [{ ...mine, leaf: rootDer, leaf_fingerprint: hostFp }] } });

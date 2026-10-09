@@ -93,7 +93,7 @@ export default function vault({ add, expect }, f) {
   // A vault that carries what belongs in the record, and a missing record: refused alike.
   add('wallet_issue from a vault that carries a ledger', 'wallet_issue', { vault_plaintext: { ...held, ledger: [], contacts: [] }, record_plaintext: record, root_fingerprint: rootFp, csr, now });
   add('wallet_issue without a record', 'wallet_issue', { vault_plaintext: held, root_fingerprint: rootFp, csr, now });
-  add('wallet_issue for a root the vault does not hold', 'wallet_issue', { vault_plaintext: held, record_plaintext: record, root_fingerprint: 'sha256:' + 'A'.repeat(43), csr, now });
+  add('wallet_issue for a root the vault does not hold', 'wallet_issue', { vault_plaintext: held, record_plaintext: record, root_fingerprint: 'sha256:' + 'A'.repeat(42) + 'A', csr, now });
   add('wallet_issue of the root\'s own key', 'wallet_issue', { vault_plaintext: held, record_plaintext: record, root_fingerprint: rootFp, csr: rootCsr, now });
   // A request whose DER is one short SEQUENCE: csr_check's own `parse`, kept or not (TC-1, F18).
   add('wallet_issue of a request that is a truncated SEQUENCE', 'wallet_issue', { vault_plaintext: held, record_plaintext: record, root_fingerprint: rootFp, csr: b64url(new Uint8Array([0x30, 0x03, 0x02, 0x01])), now });
@@ -167,7 +167,7 @@ export default function vault({ add, expect }, f) {
     expect(`wallet_issue with valid_days spelled ${what}`, { error: 'bad_request', why: 'valid_days is required' });
   }
   // The control that must get through: a ledger that reads, an entry for another root, and an origin.
-  add('wallet_issue over a ledger that reads', 'wallet_issue', issueWith({ valid_days: 30, record_plaintext: { ...record, ledger: [{ ...entry, root: 'sha256:' + 'B'.repeat(43), origin: 'https://app.example' }] } }), f.withoutSerial('der'));
+  add('wallet_issue over a ledger that reads', 'wallet_issue', issueWith({ valid_days: 30, record_plaintext: { ...record, ledger: [{ ...entry, root: 'sha256:' + 'B'.repeat(42) + 'A', origin: 'https://app.example' }] } }), f.withoutSerial('der'));
 
   // Every member that is absent rather than empty.
   add('vault_seal with nothing to work from', 'vault_seal', { passphrase: 'a passphrase' });
@@ -386,7 +386,7 @@ export default function vault({ add, expect }, f) {
     add('wallet_issue from documents whose every optional member is null', 'wallet_issue', issueWith({
       valid_days: 30,
       vault_plaintext: { ...held, roots: [nulled(root0, 'alg', 'holder', 'rebound_at')], prf: null, passkey: null },
-      record_plaintext: nulled({ ...record, roots: null, ledger: [{ ...entry, root: 'sha256:' + 'B'.repeat(43), origin: null }], contacts: [{ root: 'sha256:' + 'C'.repeat(43), endpoint: ENDPOINT, name: null, leaf: null, root_cert: null, added: null }] }, 'passkey', 'backup_verified_at'),
+      record_plaintext: nulled({ ...record, roots: null, ledger: [{ ...entry, root: 'sha256:' + 'B'.repeat(42) + 'A', origin: null }], contacts: [{ root: 'sha256:' + 'C'.repeat(42) + 'A', endpoint: ENDPOINT, name: null, leaf: null, root_cert: null, added: null }] }, 'passkey', 'backup_verified_at'),
     }), f.withoutSerial('der'));
     expect('wallet_issue from documents whose every optional member is null', { endpoint: ENDPOINT, new_host: true });
     add('wallet_issue from a record whose ledger and contacts are null', 'wallet_issue', issueWith({ valid_days: 30, record_plaintext: { ...record, ledger: null, contacts: null } }), f.withoutSerial('der'));
@@ -397,7 +397,7 @@ export default function vault({ add, expect }, f) {
   add('wallet_issue from documents with every member they may hold', 'wallet_issue', issueWith({
     valid_days: 30,
     vault_plaintext: { ...held, roots: [{ ...root0, alg: 'ed25519', holder: { kind: 'piv' } }], prf: b64url(new Uint8Array(32).fill(7)), passkey: { credential_id: 'a-credential' } },
-    record_plaintext: { ...record, roots: [{ ...uncreated, created: now, rebound_at: 1789214400000 }], contacts: [{ root: 'sha256:' + 'C'.repeat(43), endpoint: ENDPOINT, name: 'Bharat', added: now }], passkey: { credential_id: 'a-credential' }, backup_verified_at: 1789214400000 },
+    record_plaintext: { ...record, roots: [{ ...uncreated, created: now, rebound_at: 1789214400000 }], contacts: [{ root: 'sha256:' + 'C'.repeat(42) + 'A', endpoint: ENDPOINT, name: 'Bharat', added: now }], passkey: { credential_id: 'a-credential' }, backup_verified_at: 1789214400000 },
   }), f.withoutSerial('der'));
 
   // SPEC §2.2 in the vault: past its root's end date nothing is signed, and before it a leaf that would

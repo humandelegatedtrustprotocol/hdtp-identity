@@ -58,6 +58,21 @@
       }
     },
     {
+      "file": "valid-export-with-a-nameless-removed-thread.zip",
+      "about": "the control with a removed thread whose two names are empty",
+      "accept": {
+        "contacts": 4,
+        "removed": 1,
+        "threads": 3,
+        "messages": 5,
+        "media": 2,
+        "pinned": 1,
+        "leafless": [
+          "sha256:wfkWHDNr9Pj7Ci1sUzG2u1LLAQEjE-mUak_c65RWVPs"
+        ]
+      }
+    },
+    {
       "file": "zip-slip.zip",
       "about": "a name that climbs out of the directory",
       "stage": "core",
@@ -170,6 +185,12 @@
       "about": "a contact row whose root is the owner",
       "stage": "core",
       "refusal": "contacts.csv: row 2, column root: the owner's own root"
+    },
+    {
+      "file": "contact-root-alias.zip",
+      "about": "a contact row whose root is another row's with its spare bits set",
+      "stage": "core",
+      "refusal": "contacts.csv: row 2, column root: not a fingerprint"
     },
     {
       "file": "bad-header.zip",
@@ -343,7 +364,25 @@
       "file": "threads-bad-header.zip",
       "about": "a threads.csv header that is neither of §9.2's",
       "stage": "core",
-      "refusal": "threads.csv: row 1: the header is not id,contact,topic,created_at,last_at"
+      "refusal": "threads.csv: row 1: the header is not id,contact,topic,created_at,last_at, nor that and contact_name,contact_display_name"
+    },
+    {
+      "file": "removed-thread-display-name-over-200.zip",
+      "about": "a removed thread whose display name is 201 characters",
+      "stage": "core",
+      "refusal": "threads.csv: row 4, column contact_display_name: over 200 characters"
+    },
+    {
+      "file": "removed-thread-alias-of-a-contact.zip",
+      "about": "a contact's root with its spare bits set, as a removed thread's root",
+      "stage": "core",
+      "refusal": "threads.csv: row 2, column contact: not a fingerprint"
+    },
+    {
+      "file": "removed-thread-alias-of-the-owner.zip",
+      "about": "the owner's root with its spare bits set, as a removed thread's root",
+      "stage": "core",
+      "refusal": "threads.csv: row 4, column contact: not a fingerprint"
     },
     {
       "file": "key-in-a-thread-name.zip",

@@ -31,10 +31,13 @@ func SecondHome(liveEndpoint string) string {
 	return "a leaf is live for " + liveEndpoint + ": a second endpoint is a move, not a second home"
 }
 
-// IsFingerprint is `sha256:` and 43 base64url characters: a root fingerprint as SPEC §2 writes one.
+// IsFingerprint is `sha256:` and 43 base64url characters: a root fingerprint as SPEC §2 writes one,
+// in its one spelling. 43 characters carry 258 bits for the digest's 256, and the last character's
+// two spare bits are zero (RFC 4648 §3.5), so it is one of AEIMQUYcgkosw048: any other spells the
+// same 32 bytes again, as a second name for one root.
 func IsFingerprint(s string) bool {
 	h, found := strings.CutPrefix(s, "sha256:")
-	return found && len(h) == 43 && isB64url(h)
+	return found && len(h) == 43 && isB64url(h) && strings.IndexByte("AEIMQUYcgkosw048", h[42]) >= 0
 }
 
 // entryMemberReads is one required member of a ledger entry, read: the root a fingerprint, the

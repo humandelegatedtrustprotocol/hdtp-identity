@@ -22,9 +22,16 @@ pub fn second_home(live_endpoint: &str) -> String {
     format!("a leaf is live for {live_endpoint}: a second endpoint is a move, not a second home")
 }
 
-/// `sha256:` and 43 base64url characters: a root fingerprint as SPEC §2 writes one.
+/// `sha256:` and 43 base64url characters: a root fingerprint as SPEC §2 writes one, in its one
+/// spelling. 43 characters carry 258 bits for the digest's 256, and the last character's two spare
+/// bits are zero (RFC 4648 §3.5), so it is one of `AEIMQUYcgkosw048`: any other spells the same 32
+/// bytes again, as a second name for one root.
 pub fn is_fingerprint(s: &str) -> bool {
-    s.strip_prefix("sha256:").is_some_and(|h| h.len() == 43 && h.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_'))
+    s.strip_prefix("sha256:").is_some_and(|h| {
+        h.len() == 43
+            && h.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
+            && h.bytes().last().is_some_and(|c| b"AEIMQUYcgkosw048".contains(&c))
+    })
 }
 
 /// Every entry of a ledger read as CONTRACT §6's `LedgerEntry`: a list, each entry an object with
@@ -207,7 +214,7 @@ mod tests {
     use super::*;
 
     const ROOT: &str = "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-    const OTHER: &str = "sha256:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+    const OTHER: &str = "sha256:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA";
     const A: &str = "https://agent.alina.example/mcp";
     const B: &str = "https://alina.host.example/alina/mcp";
     const NOW: i64 = 1_789_214_400; // 2026-09-12T12:00:00Z
