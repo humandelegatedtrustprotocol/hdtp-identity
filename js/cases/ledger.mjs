@@ -7,7 +7,7 @@ import { ZONED } from './certificates.mjs';
 
 export default function ledger({ add, expect }, f) {
   const { now, ENDPOINT, rootFp } = f;
-  const OTHER_ROOT = 'sha256:' + 'B'.repeat(43);
+  const OTHER_ROOT = 'sha256:' + 'B'.repeat(42) + 'A';
   const THERE = 'https://alina.host.example/alina/mcp';
   const day = 86_400_000;
   const at = (days) => new Date(Date.parse(now) + days * day).toISOString().replace(/\.\d{3}Z$/, 'Z');

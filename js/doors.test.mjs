@@ -30,7 +30,7 @@ const leafOf = (endpoint, notBefore, label) =>
 const moved = leafOf(ENDPOINTS.alinaMoved, new Date('2026-09-10T00:00:00Z'), 'doors/moved');
 const newer = b64url(leafOf(ENDPOINT, new Date('2026-09-10T00:00:00Z'), 'doors/newer'));
 const sameDay = b64url(leafOf(ENDPOINT, BORN, 'doors/same-day'));
-const OTHER = 'sha256:' + 'B'.repeat(43);
+const OTHER = 'sha256:' + 'B'.repeat(42) + 'A';
 const elsewhere = { ...node, endpoint: 'https://bharat.example/mcp' };
 const tomb = (back, leaf = olderLeaf) => [{ root: rootFp, leaf, at: f.before(back) }];
 const pin = (o = {}) => [{ ...pinned[0], ...o }];

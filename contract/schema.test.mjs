@@ -91,8 +91,8 @@ test('a failure is recognised by its shape, not by a member called error', () =>
 
 test('judge catches a member the contract does not describe, and one that is missing', () => {
   const args = { spki: 'AAAA' };
-  assert.match(judge(contract, 'key_info', args, { alg: 'ed25519', fingerprint: 'sha256:' + 'A'.repeat(43), key_id: 'AA', extra: 1 })[0], /does not describe/);
-  assert.match(judge(contract, 'key_info', args, { alg: 'ed25519', fingerprint: 'sha256:' + 'A'.repeat(43) })[0], /has no member "key_id"/);
+  assert.match(judge(contract, 'key_info', args, { alg: 'ed25519', fingerprint: 'sha256:' + 'A'.repeat(42) + 'A', key_id: 'AA', extra: 1 })[0], /does not describe/);
+  assert.match(judge(contract, 'key_info', args, { alg: 'ed25519', fingerprint: 'sha256:' + 'A'.repeat(42) + 'A' })[0], /has no member "key_id"/);
 });
 
 test('judge catches an undeclared error code, and an unknown function that does not say unsupported', () => {

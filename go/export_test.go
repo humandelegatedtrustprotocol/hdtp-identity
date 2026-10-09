@@ -60,7 +60,7 @@ func TestCSVWritesWhatItReadsBackAndGuardsEveryFormulaPrefix(t *testing.T) {
 
 const (
 	exportOwner = "sha256:" + "A0000000000000000000000000000000000000000AA"
-	exportPeer  = "sha256:" + "B0000000000000000000000000000000000000000BB"
+	exportPeer  = "sha256:" + "B0000000000000000000000000000000000000000BA"
 )
 
 func exportFixture(t *testing.T) (ExportInput, map[string][]byte) {
@@ -173,7 +173,7 @@ func TestWriteExportZipRefusesRatherThanOmitsAFile(t *testing.T) {
 // SPEC §9.2, import step 2: an imported leaf never replaces a pin the host validated itself, and a
 // row the host holds without a leaf takes the row's (export_read kept it only because it validated).
 func TestExportMergeNeverReplacesAHeldPin(t *testing.T) {
-	a, b, c := "sha256:"+strings.Repeat("A", 43), "sha256:"+strings.Repeat("B", 43), "sha256:"+strings.Repeat("C", 43)
+	a, b, c := "sha256:" + strings.Repeat("A", 42) + "A", "sha256:" + strings.Repeat("B", 42) + "A", "sha256:" + strings.Repeat("C", 42) + "A"
 	row := func(root, endpoint string, leaf any) map[string]any {
 		return map[string]any{"root": root, "endpoint": endpoint, "leaf": leaf, "root_cert": nil}
 	}
@@ -245,7 +245,7 @@ func TestWhatAContactControlsNeverStopsAnExportAndItReadsBack(t *testing.T) {
 // A contact held without a leaf, blocked and granted one thing, keeps what the person decided when a
 // file brings its leaf: it stays blocked and granted what it was, and each difference is a conflict.
 func TestExportMergeKeepsWhatThePersonDecidedAboutAHeldContact(t *testing.T) {
-	root := "sha256:" + strings.Repeat("B", 43)
+	root := "sha256:" + strings.Repeat("B", 42) + "A"
 	held := []any{map[string]any{"root": root, "endpoint": "https://b.example/mcp", "leaf": nil, "root_cert": nil, "status": "blocked", "permissions": []any{"message.text"}}}
 	rows := []any{map[string]any{"root": root, "endpoint": "https://b.example/mcp", "leaf": "MIIrow", "root_cert": "MIIroot", "status": "active", "permissions": []any{"message.media", "message.text"}}}
 	write, _, conflicts, err := exportMerge(held, rows)

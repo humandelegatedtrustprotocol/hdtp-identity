@@ -465,6 +465,10 @@ pub fn thread_row<'a>(
     Ok(ThreadRow { id, contact, topic, created_at: created, last_at: last, contact_name, contact_display_name })
 }
 
+/// The refusal of a `threads.csv` header that is neither of SPEC §9.2's two.
+const THREADS_HEADER_REFUSAL: &str =
+    "threads.csv: row 1: the header is not id,contact,topic,created_at,last_at, nor that and contact_name,contact_display_name";
+
 /// The header a `threads.csv`'s first record names: the longer one when it is exactly that, and the
 /// shorter one otherwise (`table` refuses anything else, naming it).
 fn threads_header(text: &str) -> &'static [&'static str] {
@@ -540,14 +544,65 @@ impl Repeats {
     fn push(&mut self, id: &str, row: usize) {
         self.seen.push((crate::util::sha256(id.as_bytes()), row));
     }
-    /// The refusal of the earliest row whose id an earlier row has, if any row has one.
-    fn refuse_first(&mut self) -> Result<()> {
+    /// The earliest row whose id an earlier row has, if any row has one.
+    fn first(&mut self) -> Option<usize> {
         self.seen.sort_unstable();
-        let repeat = self.seen.windows(2).filter(|w| w[0].0 == w[1].0).map(|w| w[1].1).min();
-        match repeat {
-            Some(n) => refuse(format!("threads.csv: row {n}, column id: appears twice")),
-            None => Ok(()),
+        self.seen.windows(2).filter(|w| w[0].0 == w[1].0).map(|w| w[1].1).min()
+    }
+}
+
+/// The removed threads as they pass, to find the earliest whose names are not those of its root's
+/// earliest removed thread (SPEC §9.2: one former contact, one pair of names): the root and each name
+/// as sha256 digests beside the row number, a fixed 104 bytes a removed row and never a copy of a
+/// name, so a file whose every thread is removed costs no more than its rows (the memory tests hold
+/// it). Looked for, as `Repeats` is, when a row is refused and when the rows end.
+struct RemovedNames {
+    seen: Vec<RemovedSeen>,
+}
+
+/// A removed thread as `RemovedNames` keeps it: its root's digest, each name's, and its row.
+type RemovedSeen = ([u8; 32], [u8; 32], [u8; 32], usize);
+
+impl RemovedNames {
+    fn push(&mut self, t: &ThreadRow<'_>, row: usize) {
+        use crate::util::sha256;
+        self.seen.push((sha256(t.contact.as_bytes()), sha256(t.contact_name.as_bytes()), sha256(t.contact_display_name.as_bytes()), row));
+    }
+    /// The earliest removed thread whose names differ from its root's first, and the column.
+    fn first(&mut self) -> Option<(usize, usize)> {
+        self.seen.sort_unstable_by(|a, b| (a.0, a.3).cmp(&(b.0, b.3)));
+        let mut out: Option<(usize, usize)> = None;
+        let mut base = 0;
+        for i in 0..self.seen.len() {
+            let (t, b) = (&self.seen[i], &self.seen[base]);
+            if t.0 != b.0 {
+                base = i;
+                continue;
+            }
+            let col = if t.1 != b.1 {
+                5
+            } else if t.2 != b.2 {
+                6
+            } else {
+                continue;
+            };
+            if out.is_none_or(|(n, _)| t.3 < n) {
+                out = Some((t.3, col));
+            }
         }
+        out
+    }
+}
+
+/// The earliest refusal the rows read so far hold, an id repeated or a removed thread's names, as
+/// reading them in order would name it: at one row, the repeat first.
+fn first_thread_problem(ids: &mut Repeats, names: &mut RemovedNames, columns: &[&str]) -> Result<()> {
+    match (ids.first(), names.first()) {
+        (Some(d), e) if e.is_none_or(|(n, _)| d <= n) => refuse(format!("threads.csv: row {d}, column id: appears twice")),
+        (_, Some((n, col))) => {
+            refuse(format!("threads.csv: row {n}, column {}: not what an earlier removed thread of this contact says", columns[col]))
+        }
+        _ => Ok(()),
     }
 }
 
@@ -726,10 +781,21 @@ pub fn read<'a>(
         let roots: HashSet<&str> = contacts.iter().map(|c| c.root.as_ref()).collect();
         let columns = threads_header(threads_text);
         let named = columns.len() == THREAD_COLUMNS_NAMED.len();
-        let mut removed = std::collections::HashMap::new();
-        let (count, rows) = table("threads.csv", threads_text, columns)?;
-        // A thread's answer is its CSV row and some 57 bytes of keys and quotes.
-        out.reserve_exact(threads_text.len() + 64 * count + 96 * media.len() + 16);
+        // A header that is neither of the two is refused naming both.
+        let (count, rows) = table("threads.csv", threads_text, columns).map_err(|e| {
+            if e.why == format!("threads.csv: row 1: the header is not {}", THREAD_COLUMNS.join(",")) {
+                Error::new("bad_request", THREADS_HEADER_REFUSAL)
+            } else {
+                e
+            }
+        })?;
+        // A thread's answer is its CSV row and some 57 bytes of keys and quotes, and a removed
+        // thread's two names some 44 more, which only the longer header can hold.
+        let names_room = if named { 48 * count } else { 0 };
+        out.reserve_exact(threads_text.len() + 64 * count + names_room + 96 * media.len() + 16);
+        // Sized once for a file whose header can hold removed threads: grown by doubling, the old
+        // buffers stay in an instance's linear memory, which never shrinks.
+        let mut removed = RemovedNames { seen: Vec::with_capacity(if named { count } else { 0 }) };
         // The thread ids seen, as sha256 digests beside their row numbers: a fixed 40 bytes a row,
         // never a copy of an id of any length, and no hash table's slack. A digest collision cannot pass
         // a duplicate (at 2^-256 it could refuse a distinct pair). A repeat is looked for when a row is
@@ -746,28 +812,22 @@ pub fn read<'a>(
             let row = match checked {
                 Ok(row) => row,
                 Err(why) => {
-                    ids.refuse_first()?;
+                    first_thread_problem(&mut ids, &mut removed, columns)?;
                     return refuse(why);
                 }
             };
             ids.push(&row.id, n);
             let is_removed = !roots.contains(row.contact.as_ref());
             if is_removed {
-                if let Some(k) = names_differ(&mut removed, &row) {
-                    ids.refuse_first()?;
-                    return refuse(format!(
-                        "threads.csv: row {n}, column {}: not what an earlier removed thread of this contact says",
-                        columns[k]
-                    ));
-                }
+                removed.push(&row, n);
             }
             json_list_open(&mut out, &mut first);
             row.write_json(&mut out, is_removed);
             threads += 1;
         }
-        ids.refuse_first()?;
+        first_thread_problem(&mut ids, &mut removed, columns)?;
         // The longer header only for a file that holds a removed thread: one form for one content.
-        if named && removed.is_empty() {
+        if named && removed.seen.is_empty() {
             return refuse("threads.csv: row 1: the header names contact_name and contact_display_name, and no thread is a removed thread");
         }
         if threads != m.threads {
@@ -1080,9 +1140,9 @@ mod tests {
     fn export_write_refuses_a_row_or_message_holding_a_private_key() {
         let key = PrivateKey::from_seed(Alg::Ed25519, &seed("export/key")).unwrap();
         let pkcs8 = b64u(&key.to_pkcs8());
-        let owner = format!("sha256:{}", "O".repeat(43));
+        let owner = format!("sha256:{}A", "O".repeat(42));
         let row = |name: &str| {
-            json!({ "root": format!("sha256:{}", "B".repeat(43)), "endpoint": "https://b.example/mcp", "name": name, "display_name": "",
+            json!({ "root": format!("sha256:{}A", "B".repeat(42)), "endpoint": "https://b.example/mcp", "name": name, "display_name": "",
                 "status": "active", "was_active": true, "permissions": [], "their_permissions": [], "leaf": null, "root_cert": null,
                 "added": "2026-09-27T10:00:00Z" })
         };
@@ -1130,8 +1190,8 @@ mod tests {
     /// reads as a key is left out and listed, and the rest of the file writes.
     #[test]
     fn what_a_contact_controls_never_stops_an_export_and_it_reads_back() {
-        let owner = format!("sha256:{}", "O".repeat(43));
-        let peer = format!("sha256:{}", "B".repeat(43));
+        let owner = format!("sha256:{}A", "O".repeat(42));
+        let peer = format!("sha256:{}A", "B".repeat(42));
         let long: String = "é".repeat(150) + &"x".repeat(150);
         let row = json!({ "root": peer, "endpoint": "https://b.example/mcp", "name": "", "display_name": long, "status": "active",
             "was_active": true, "permissions": ["message.text"], "their_permissions": ["message.media", "root.everything", "message.media", "integration.cal"],
@@ -1198,7 +1258,7 @@ mod tests {
     /// manifest well under 64 KiB, and the reader takes it, counting every file.
     #[test]
     fn an_export_of_5000_media_files_has_a_small_manifest_and_reads_back() {
-        let owner = format!("sha256:{}", "O".repeat(43));
+        let owner = format!("sha256:{}A", "O".repeat(42));
         let hashes: Vec<String> = (0..5000).map(|i| sha256_hex(format!("media {i}").as_bytes())).collect();
         let media: Vec<Value> = hashes.iter().map(|h| json!({ "hash": h, "size": 1 })).collect();
         let w = write(&owner, "", 0, "t", &[], &[], &media).unwrap();
@@ -1251,7 +1311,7 @@ mod tests {
     #[test]
     fn export_functions_grow_linearly_in_the_rows_of_a_file() {
         let n = 5_000;
-        let owner = format!("sha256:{}", "O".repeat(43));
+        let owner = format!("sha256:{}A", "O".repeat(42));
         let fp = |i: usize| format!("sha256:{}", b64u(&crate::util::sha256(format!("c{i}").as_bytes())));
         let contacts: Vec<Value> = (0..200)
             .map(|i| {

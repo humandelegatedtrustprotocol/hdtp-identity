@@ -428,6 +428,14 @@ func valid() (export, []byte, []string, export, error) {
 	return x, book, []string{chen.fp}, xr, nil
 }
 
+// alias is a fingerprint with its last character's two spare bits set: the same 32 bytes, spelled a
+// second way, which no reader takes (SPEC §2).
+func alias(fp string) string {
+	const b64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	last := strings.IndexByte(b64, fp[len(fp)-1])
+	return fp[:len(fp)-1] + string(b64[last+1])
+}
+
 // Build answers every file of the corpus by name, cases.json included.
 func Build() (map[string][]byte, error) {
 	x, book, leafless, xr, err := valid()
@@ -471,6 +479,16 @@ func Build() (map[string][]byte, error) {
 	withRemoved, err := xr.zip()
 	if err := add(Case{File: "valid-export-with-removed-thread.zip", About: "the control with a former contact's conversation: a removed thread carrying his names, and a message carrying a file",
 		Accept: &Accept{Contacts: 4, Removed: 1, Threads: 3, Messages: 5, Media: 2, Pinned: 1, Leafless: leafless}}, withRemoved, err); err != nil {
+		return nil, err
+	}
+
+	// A removed thread for which the host held no name: both names empty, the root its label.
+	nameless := xr.clone()
+	nameless.set("threads.csv", []byte(strings.Replace(string(xr.get("threads.csv")), ",\"Farid, from the old job\",Farid K.\r\n", ",,\r\n", 1)))
+	nameless.relist()
+	withNameless, err := nameless.zip()
+	if err := add(Case{File: "valid-export-with-a-nameless-removed-thread.zip", About: "the control with a removed thread whose two names are empty",
+		Accept: &Accept{Contacts: 4, Removed: 1, Threads: 3, Messages: 5, Media: 2, Pinned: 1, Leafless: leafless}}, withNameless, err); err != nil {
 		return nil, err
 	}
 
@@ -638,6 +656,14 @@ func Build() (map[string][]byte, error) {
 				lines := strings.SplitAfter(contactsCSV, "\r\n")
 				cells := strings.SplitN(lines[1], ",", 2)
 				lines[1] = x.owner + "," + cells[1]
+				v.set("contacts.csv", []byte(strings.Join(lines, "")))
+				v.relist()
+				return nil
+			}},
+		{"contact-root-alias.zip", "a contact row whose root is another row's with its spare bits set", "core", fmt.Sprintf("contacts.csv: row %d, column root: not a fingerprint", 2),
+			func(v *export) []entry {
+				lines := strings.SplitAfter(contactsCSV, "\r\n")
+				lines[1] = alias(strings.SplitN(lines[2], ",", 2)[0]) + "," + strings.SplitN(lines[1], ",", 2)[1]
 				v.set("contacts.csv", []byte(strings.Join(lines, "")))
 				v.relist()
 				return nil
@@ -823,6 +849,7 @@ func Build() (map[string][]byte, error) {
 		return strings.Join(lines, "")
 	}
 	rjsonl := strings.SplitAfter(string(xr.get("messages.jsonl")), "\n")
+	bharatRoot := strings.Split(rlines[1], ",")[1]
 	removedSteps := []struct {
 		file, about, stage, refusal string
 		change                      func(v *export) []entry
@@ -855,9 +882,26 @@ func Build() (map[string][]byte, error) {
 				v.counts()["threads"] = 2
 				return nil
 			}},
-		{"threads-bad-header.zip", "a threads.csv header that is neither of §9.2's", "core", "threads.csv: row 1: the header is not id,contact,topic,created_at,last_at",
+		{"threads-bad-header.zip", "a threads.csv header that is neither of §9.2's", "core", "threads.csv: row 1: the header is not id,contact,topic,created_at,last_at, nor that and contact_name,contact_display_name",
 			func(v *export) []entry {
 				setThreads(v, strings.Replace(rthreads, ",contact_display_name", ",display", 1))
+				return nil
+			}},
+		{"removed-thread-display-name-over-200.zip", "a removed thread whose display name is 201 characters", "core", "threads.csv: row 4, column contact_display_name: over 200 characters",
+			func(v *export) []entry {
+				setThreads(v, strings.Replace(rthreads, ",Farid K.\r\n", ","+strings.Repeat("d", 201)+"\r\n", 1))
+				return nil
+			}},
+		// A fingerprint has one spelling (SPEC §2): the last character's two spare bits are zero. The
+		// same 32 bytes spelled with them set would be a second name for one root.
+		{"removed-thread-alias-of-a-contact.zip", "a contact's root with its spare bits set, as a removed thread's root", "core", "threads.csv: row 2, column contact: not a fingerprint",
+			func(v *export) []entry {
+				setThreads(v, withRow(1, strings.Replace(rlines[1], bharatRoot, alias(bharatRoot), 1)))
+				return nil
+			}},
+		{"removed-thread-alias-of-the-owner.zip", "the owner's root with its spare bits set, as a removed thread's root", "core", "threads.csv: row 4, column contact: not a fingerprint",
+			func(v *export) []entry {
+				setThreads(v, strings.Replace(rthreads, faridRoot, alias(x.owner), 1))
 				return nil
 			}},
 		{"key-in-a-thread-name.zip", "a PKCS #8 private key in a removed thread's name", "core", "threads.csv: row 4, column contact_name: holds a private key",

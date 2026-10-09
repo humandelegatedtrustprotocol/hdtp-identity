@@ -207,7 +207,7 @@ export default function certificates({ add, expect }, f) {
   add('validate_chain of leaf and leaf', 'validate_chain', { chain: [leafDer, leafDer], now });
   add('validate_chain of root and root', 'validate_chain', { chain: [rootDer, rootDer], now });
   add('validate_chain the wrong way round', 'validate_chain', { chain: [rootDer, leafDer], now });
-  add('validate_chain against the wrong root', 'validate_chain', { chain: [leafDer, rootDer], now, expected_root: 'sha256:' + 'A'.repeat(43) });
+  add('validate_chain against the wrong root', 'validate_chain', { chain: [leafDer, rootDer], now, expected_root: 'sha256:' + 'A'.repeat(42) + 'A' });
   add('validate_chain against another endpoint', 'validate_chain', { chain: [leafDer, rootDer], now, expected_endpoint: 'https://elsewhere.example/mcp' });
   add('validate_chain before the leaf begins', 'validate_chain', { chain: [leafDer, rootDer], now: '2026-08-01T00:00:00Z' });
   add('validate_chain after the leaf ends', 'validate_chain', { chain: [leafDer, rootDer], now: '2028-01-01T00:00:00Z' });

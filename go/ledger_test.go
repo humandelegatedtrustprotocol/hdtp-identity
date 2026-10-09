@@ -7,7 +7,7 @@ import (
 
 const (
 	ledgerRoot  = "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-	ledgerOther = "sha256:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+	ledgerOther = "sha256:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA"
 	ledgerA     = "https://agent.alina.example/mcp"
 	ledgerB     = "https://alina.host.example/alina/mcp"
 )

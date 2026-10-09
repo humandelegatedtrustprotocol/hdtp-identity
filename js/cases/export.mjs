@@ -20,8 +20,8 @@ const sha = (b) => createHash('sha256').update(b).digest('hex');
 
 export default function exportCases({ add, expect }, f) {
   const { wasm, rootFp, rootDer, leafDer, ENDPOINT, now } = f;
-  const owner = 'sha256:' + 'O'.repeat(43);
-  const other = (c) => 'sha256:' + c.repeat(43);
+  const owner = 'sha256:' + 'O'.repeat(42) + 'A';
+  const other = (c) => 'sha256:' + c.repeat(42) + 'A';
 
   // ── the writers ─────────────────────────────────────────────────────────────────────────────
   const row = (o) => ({

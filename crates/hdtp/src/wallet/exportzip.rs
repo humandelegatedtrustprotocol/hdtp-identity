@@ -396,7 +396,7 @@ mod tests {
             crate::vectors::corpus::corpus_for(peer).map(|_| ()),
             Err(format!("{peer}: the corpus already names this root as someone other than the owner"))
         );
-        let wrong_owner = format!("sha256:{}", "A".repeat(43));
+        let wrong_owner = format!("sha256:{}A", "A".repeat(42));
         assert_eq!(
             crate::vectors::corpus::corpus_for(&wrong_owner).map(|_| ()),
             Err(format!("{wrong_owner}: the corpus already names this root as someone other than the owner"))

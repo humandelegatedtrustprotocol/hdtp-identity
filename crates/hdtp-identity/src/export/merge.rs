@@ -105,7 +105,7 @@ mod tests {
     /// validated).
     #[test]
     fn export_merge_never_replaces_a_held_pin() {
-        let [a, b, c] = ["A", "B", "C"].map(|x| format!("sha256:{}", x.repeat(43)));
+        let [a, b, c] = ["A", "B", "C"].map(|x| format!("sha256:{}A", x.repeat(42)));
         let row = |root: &str, endpoint: &str, leaf: Value| json!({ "root": root, "endpoint": endpoint, "leaf": leaf, "root_cert": null });
         let held = [row(&a, "https://a.example/mcp", json!("MIIheld")), row(&b, "https://b.example/mcp", Value::Null)];
         let rows = [
@@ -124,7 +124,7 @@ mod tests {
     /// carried is a conflict. A blocked contact came back active with the file's grants, before.
     #[test]
     fn export_merge_keeps_what_the_person_decided_about_a_held_contact() {
-        let root = format!("sha256:{}", "B".repeat(43));
+        let root = format!("sha256:{}A", "B".repeat(42));
         let held = [
             json!({ "root": root, "endpoint": "https://b.example/mcp", "leaf": null, "root_cert": null, "status": "blocked", "permissions": ["message.text"] }),
         ];

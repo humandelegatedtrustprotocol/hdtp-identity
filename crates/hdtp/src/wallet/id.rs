@@ -475,7 +475,7 @@ mod tests {
     use hdtp_identity::time::format_rfc3339;
 
     const ROOT: &str = "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-    const OTHER: &str = "sha256:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+    const OTHER: &str = "sha256:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA";
     const A: &str = "https://agent.alina.example/mcp";
     const B: &str = "https://alina.host.example/alina/mcp";
     const NOW: i64 = 1_789_214_400; // 2026-09-12T12:00:00Z

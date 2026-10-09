@@ -31,13 +31,16 @@ import { fresh } from './wasm-memory.mjs';
 //   0.3.1: 33.7 MB at 16k, 135.3 MB at 60k, some 260 MB at 120k.
 //   export_read_end: 199 bytes an id (UUID ids, msg_ids and reply_tos). 0.3.1: 618.
 //   A 64 MiB messages.jsonl, 160,430 lines, in batches of 500: 2.3 MB at the most.
+// Measured 2026-10-10, with removed threads (SEP-0004): contacts' threads 4.85–4.92× as before; a file
+//   whose every thread is removed with a root of its own 4.79–4.88× (16k, 64k), and the largest such
+//   threads.csv, 118,972 threads and 16,775,123 bytes, 84.0 MB.
 const PER_CSV_BYTE = 6;
 const PER_END_ARG_BYTE = 2.5;
 // Three quarters of a Durable Object's 128 MB: a call may not take more than that of an instance.
 const LARGEST_CEILING = 96 * 1024 * 1024;
 const BATCHES_CEILING = 16 * 1024 * 1024;
 
-const owner = 'sha256:' + 'O'.repeat(43);
+const owner = 'sha256:' + 'O'.repeat(42) + 'A';
 const fp = (i) => 'sha256:' + createHash('sha256').update('c' + i).digest('base64url');
 const uuid = (i) => createHash('sha256').update('u' + i).digest('hex').replace(/^(.{8})(.{4})(.{4})(.{4})(.{12}).*/, '$1-$2-$3-$4-$5');
 const contacts = Array.from({ length: 200 }, (_, i) => ({
@@ -45,10 +48,14 @@ const contacts = Array.from({ length: 200 }, (_, i) => ({
   permissions: [], their_permissions: [], leaf: null, root_cert: null, added: '2026-09-01T00:00:00Z',
 }));
 
-/** export_read's arguments for 200 contacts and `rows` threads with UUID ids, and the CSV's size. */
-function readArgs(rows) {
+/**
+ * export_read's arguments for 200 contacts and `rows` threads with UUID ids, and the CSV's size; when
+ * `removed`, each thread a removed thread with a root of its own (SPEC §9.2), the costliest legal
+ * file per row for what the reader keeps of one.
+ */
+function readArgs(rows, removed = false) {
   const w0 = fresh();
-  const threads = Array.from({ length: rows }, (_, i) => ({ id: uuid(i), contact: fp(i % 200), topic: 'a topic', created_at: '2026-09-01T00:00:00Z', last_at: '2026-09-01T00:00:00Z' }));
+  const threads = Array.from({ length: rows }, (_, i) => ({ id: uuid(i), contact: fp(removed ? 1000 + i : i % 200), topic: 'a topic', created_at: '2026-09-01T00:00:00Z', last_at: '2026-09-01T00:00:00Z' }));
   const w = w0.call('export_write', { owner, owner_name: '', exported_at: '2026-09-27T00:00:00Z', tool: 't', contacts, threads });
   assert.ok(!w.error, w.why);
   const manifest = w0.call('export_manifest', { partial: w.partial }).manifest;
@@ -65,12 +72,12 @@ function grows(name, args) {
   return { bytes: core.bytes() - before, answer };
 }
 
-test('export_read holds at most 6 bytes per byte of threads.csv, at N and 4N rows', () => {
-  for (const rows of [16_000, 64_000]) {
-    const { args, csv } = readArgs(rows);
+test('export_read holds at most 6 bytes per byte of threads.csv, at N and 4N rows, and when every thread is removed', () => {
+  for (const [rows, removed] of [[16_000, false], [64_000, false], [16_000, true], [64_000, true]]) {
+    const { args, csv } = readArgs(rows, removed);
     const { bytes, answer } = grows('export_read', args);
     assert.equal(answer.threads.length, rows);
-    console.log(`  export_read, ${rows} threads (${csv} bytes): linear memory grew ${bytes} bytes, ${(bytes / csv).toFixed(2)}× the CSV`);
+    console.log(`  export_read, ${rows} threads, removed ${removed} (${csv} bytes): linear memory grew ${bytes} bytes, ${(bytes / csv).toFixed(2)}× the CSV`);
     assert.ok(bytes <= PER_CSV_BYTE * csv, `${rows} threads: ${(bytes / csv).toFixed(2)}× the CSV, over ${PER_CSV_BYTE}×`);
   }
 });
@@ -96,6 +103,16 @@ test('the largest threads.csv the bound allows fits a Durable Object', () => {
   assert.ok(csv <= 16 * 1024 * 1024 && csv > 15.9 * 1024 * 1024, `threads.csv is ${csv} bytes`);
   const { bytes } = grows('export_read', args);
   console.log(`  export_read of the largest threads.csv (${rows} threads, ${csv} bytes): linear memory grew ${(bytes / 1e6).toFixed(1)} MB`);
+  assert.ok(bytes <= LARGEST_CEILING, `${(bytes / 1e6).toFixed(1)} MB, over the ${LARGEST_CEILING / 1024 / 1024} MiB ceiling`);
+});
+
+test('the largest threads.csv of removed threads, each with a root of its own, fits a Durable Object', () => {
+  // A removed thread's row is 141 bytes (two empty names); fill to just under 16 MiB.
+  const rows = Math.floor((16 * 1024 * 1024 - 2048) / 141);
+  const { args, csv } = readArgs(rows, true);
+  assert.ok(csv <= 16 * 1024 * 1024 && csv > 15.9 * 1024 * 1024, `threads.csv is ${csv} bytes`);
+  const { bytes } = grows('export_read', args);
+  console.log(`  export_read of the largest threads.csv of removed threads (${rows} threads, ${csv} bytes): linear memory grew ${(bytes / 1e6).toFixed(1)} MB`);
   assert.ok(bytes <= LARGEST_CEILING, `${(bytes / 1e6).toFixed(1)} MB, over the ${LARGEST_CEILING / 1024 / 1024} MiB ceiling`);
 });
 

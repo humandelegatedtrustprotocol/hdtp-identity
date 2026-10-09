@@ -44,7 +44,7 @@ func TestWriteExportZipRefusesWhatItsReaderRefusesBeforeTheFirstByte(t *testing.
 			in.Messages[1].Thread = "t-elsewhere"
 		}, "messages.jsonl: line 2, member thread: names no thread in threads.csv"},
 		{"a message to a contact the export does not hold", func(in *ExportInput, _ map[string][]byte) {
-			in.Messages[1].Contact = "sha256:" + strings.Repeat("C", 43)
+			in.Messages[1].Contact = "sha256:" + strings.Repeat("C", 42) + "A"
 		}, "messages.jsonl: line 2, member contact: names no contact in contacts.csv and no removed thread"},
 		{"the same message id twice", func(in *ExportInput, _ map[string][]byte) {
 			in.Messages[1].ID = in.Messages[0].ID

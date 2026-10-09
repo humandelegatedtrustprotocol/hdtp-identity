@@ -424,7 +424,7 @@ fn an_open_with_no_public_key_is_refused_by_name() {
 #[test]
 fn typed_decisions_refuse_a_host_root_that_is_not_a_fingerprint() {
     use hdtp_identity::envelope::{self, CallerPin, DecideInput, FormerEndpoint, HeldKey, NodeState, OpenResultArgs, Pin, Tombstone, Wire};
-    let fp = format!("sha256:{}", "A".repeat(43));
+    let fp = format!("sha256:{}A", "A".repeat(42));
     let pin =
         |root: &str| Pin { root: root.into(), endpoint: E_A.into(), leaf: String::new(), state: "active".into(), leaf_fingerprint: None };
     let node = |pins: Vec<Pin>, tombstones: Vec<Tombstone>, former_endpoints: Vec<FormerEndpoint>| NodeState {

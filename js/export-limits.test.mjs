@@ -21,7 +21,7 @@ import { makePort } from './port.mjs';
 const MEASURED = { wasm: 1024, go: 1986 };
 const CEILING_MS = 10_000;
 
-const owner = 'sha256:' + 'O'.repeat(43);
+const owner = 'sha256:' + 'O'.repeat(42) + 'A';
 const fp = (i) => 'sha256:' + createHash('sha256').update('c' + i).digest('base64url');
 
 function largest(wasm) {

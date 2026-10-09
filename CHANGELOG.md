@@ -20,9 +20,20 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   `export_read` answers the two names on a removed thread and on no other; `export_write` takes
   them on a removed thread and refuses them on any other. A message's `contact` may be a removed
   thread's: its refusal now reads `names no contact in contacts.csv and no removed thread` for every
-  file, where it read `names no contact in contacts.csv`. The corpus gains
-  `valid-export-with-removed-thread.zip` and ten refusals (55 cases); `valid-export.zip` and
-  `valid-book.zip` are byte for byte what they were.
+  file, where it read `names no contact in contacts.csv`. A threads.csv header that is neither of the
+  two is refused naming both. The corpus gains `valid-export-with-removed-thread.zip`,
+  `valid-export-with-a-nameless-removed-thread.zip` and fourteen refusals (60 cases);
+  `valid-export.zip` and `valid-book.zip` are byte for byte what they were. The reader keeps a removed
+  thread's names by the row (Go) or as digests (Rust), never as copies: a file whose every thread is
+  removed with a root of its own allocates 7.5–7.7× its threads.csv in the Go port and peaks at
+  3.8–3.9× in the core (11.3–11.6× and 6.1× before), and the largest such file grows a Wasm instance
+  by 84.0 MB; the memory tests hold both at N and 4N rows.
+- **A fingerprint has one spelling.** `sha256:` and 43 base64url characters whose last is one of
+  `AEIMQUYcgkosw048`: the two spare bits are zero (RFC 4648 §3.5). Any other last character spells the
+  same 32 bytes again, a second name for one root: a live contact's root so spelled would have read as
+  a removed thread, the owner's as a removed thread that is not the owner, and two contacts.csv rows
+  as two roots. Both ports refuse it everywhere a fingerprint is read (SEP-0004, SPEC §2); the corpus
+  holds the three aliases.
 - **The seed's six stale-sender scenarios run on both ports.** `js/intrude.mjs` carries the
   scenarios hdtp-spec's `vectors/intrude.mjs` gained for the stolen leaf key in the small form of
   §13.2 and for the sender a renewal has not reached (§2): the superseded key the host still holds

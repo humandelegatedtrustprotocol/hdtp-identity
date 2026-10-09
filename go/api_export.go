@@ -277,13 +277,16 @@ func readAnswer(r *exportReadResult, threadsBytes int) json.RawMessage {
 	if err != nil {
 		return fail("internal", err.Error())
 	}
-	roots := make(strSet, len(r.contacts))
-	for _, c := range r.contacts {
-		roots.add(c.(map[string]any)["root"].(string))
+	removed := 0
+	for _, t := range r.threads {
+		if t.removed {
+			removed++
+		}
 	}
 	var b bytes.Buffer
 	// A thread's answer is its CSV row and some 57 bytes of keys and quotes.
-	b.Grow(len(contacts) + len(media) + threadsBytes + 64*len(r.threads) + 64)
+	// and a removed thread's two names some 44 more.
+	b.Grow(len(contacts) + len(media) + threadsBytes + 64*len(r.threads) + 48*removed + 64)
 	b.WriteString(`{"contacts":`)
 	b.Write(contacts)
 	b.WriteString(`,"threads":[`)
@@ -303,7 +306,7 @@ func readAnswer(r *exportReadResult, threadsBytes int) json.RawMessage {
 		writeJSONString(&b, t.LastAt)
 		// A removed thread's names, on a removed thread only: any other thread's are empty and are
 		// not answered.
-		if !roots.has(t.Contact) {
+		if t.removed {
 			b.WriteString(`,"contact_name":`)
 			writeJSONString(&b, t.ContactName)
 			b.WriteString(`,"contact_display_name":`)
