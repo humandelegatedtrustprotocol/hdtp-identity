@@ -45,7 +45,7 @@ func TestWriteExportZipRefusesWhatItsReaderRefusesBeforeTheFirstByte(t *testing.
 		}, "messages.jsonl: line 2, member thread: names no thread in threads.csv"},
 		{"a message to a contact the export does not hold", func(in *ExportInput, _ map[string][]byte) {
 			in.Messages[1].Contact = "sha256:" + strings.Repeat("C", 43)
-		}, "messages.jsonl: line 2, member contact: names no root in contacts.csv or removed.csv"},
+		}, "messages.jsonl: line 2, member contact: names no contact in contacts.csv and no removed thread"},
 		{"the same message id twice", func(in *ExportInput, _ map[string][]byte) {
 			in.Messages[1].ID = in.Messages[0].ID
 		}, `messages.jsonl: id "1" appears twice`},
@@ -156,7 +156,7 @@ func keyFileExport(t *testing.T, file []byte, h string) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	written, err := exportWrite(in.Owner, in.OwnerName, in.ExportedAt, in.Tool, contacts.([]any), nil, threads.([]any), []any{map[string]any{"hash": h, "size": len(file)}})
+	written, err := exportWrite(in.Owner, in.OwnerName, in.ExportedAt, in.Tool, contacts.([]any), threads.([]any), []any{map[string]any{"hash": h, "size": len(file)}})
 	if err != nil {
 		t.Fatal(err)
 	}

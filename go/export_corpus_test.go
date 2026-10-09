@@ -101,10 +101,20 @@ func answersCorpus(t *testing.T, fsys fs.FS) {
 					}
 				}
 			}
-			if len(got.Contacts) != c.Accept.Contacts || len(got.Removed) != c.Accept.Removed || len(got.Threads) != c.Accept.Threads ||
+			// A removed thread is one whose contact is no contact's root (SPEC §9.2).
+			roots, removed := map[string]bool{}, 0
+			for _, r := range got.Contacts {
+				roots[r.Root] = true
+			}
+			for _, th := range got.Threads {
+				if !roots[th.Contact] {
+					removed++
+				}
+			}
+			if len(got.Contacts) != c.Accept.Contacts || removed != c.Accept.Removed || len(got.Threads) != c.Accept.Threads ||
 				len(got.Messages) != c.Accept.Messages || len(got.Media) != c.Accept.Media || pinned != c.Accept.Pinned {
-				t.Errorf("%s: %d contacts (%d pinned), %d removed, %d threads, %d messages, %d media; want %+v", c.File, len(got.Contacts), pinned,
-					len(got.Removed), len(got.Threads), len(got.Messages), len(got.Media), *c.Accept)
+				t.Errorf("%s: %d contacts (%d pinned), %d removed threads, %d threads, %d messages, %d media; want %+v", c.File, len(got.Contacts), pinned,
+					removed, len(got.Threads), len(got.Messages), len(got.Media), *c.Accept)
 			}
 		case err == nil:
 			t.Errorf("%s: accepted, and must be refused: %s%s", c.File, c.Refusal, c.RefusalPrefix)
@@ -176,7 +186,7 @@ func TestWriteExportZipWritesTheCorpusControlsBack(t *testing.T) {
 		at, _ := time.Parse(time.RFC3339, m.ExportedAt)
 		var out bytes.Buffer
 		in := hdtp.ExportInput{Owner: index.Owner, OwnerName: m.OwnerName, Tool: m.Tool, ExportedAt: at,
-			Contacts: first.Contacts, Removed: first.Removed, Threads: first.Threads, Messages: first.Messages, Media: first.Media}
+			Contacts: first.Contacts, Threads: first.Threads, Messages: first.Messages, Media: first.Media}
 		_, err = hdtp.WriteExportZip(&out, in, func(hash string) (io.ReadCloser, error) { return zr.Open("media/" + hash) })
 		if err != nil {
 			t.Fatalf("%s: %v", file, err)

@@ -8,17 +8,13 @@ use std::collections::BTreeMap;
 pub const VERSION: u64 = 1;
 const MEMBERS: [&str; 7] = ["hdtp_export", "owner", "owner_name", "exported_at", "tool", "counts", "files"];
 const COUNTS: [&str; 4] = ["contacts", "threads", "messages", "media"];
-/// The counts a manifest may hold besides `COUNTS`, each present only when it is at least 1.
-const OPTIONAL_COUNTS: [&str; 1] = ["removed"];
-const LISTED: [&str; 4] = ["contacts.csv", "removed.csv", "threads.csv", "messages.jsonl"];
+const LISTED: [&str; 3] = ["contacts.csv", "threads.csv", "messages.jsonl"];
 
 pub struct Manifest {
     pub contacts: u64,
     pub threads: u64,
     pub messages: u64,
     pub media: u64,
-    /// `counts.removed`: 0 when the manifest does not count it, as a file without `removed.csv`.
-    pub removed: u64,
     pub files: BTreeMap<String, String>,
 }
 
@@ -53,8 +49,7 @@ pub fn check(doc: &Map<String, Value>, owner: Option<&str>) -> Result<Manifest> 
         return at("exported_at is not an RFC 3339 instant");
     }
     let Some(counts) = doc["counts"].as_object() else { return at("counts is an object") };
-    let known: Vec<&str> = OPTIONAL_COUNTS.iter().chain(COUNTS.iter()).copied().collect();
-    if let Some(k) = crate::util::stranger(counts, &known) {
+    if let Some(k) = crate::util::stranger(counts, &COUNTS) {
         return at(format!("counts: {} is not a count of a manifest", crate::canonical::string(&k)));
     }
     let mut n = [0u64; 4];
@@ -64,13 +59,6 @@ pub fn check(doc: &Map<String, Value>, owner: Option<&str>) -> Result<Manifest> 
             None => return at(format!("counts: {k} is not a whole number")),
         };
     }
-    let removed = match counts.get("removed") {
-        None => 0,
-        Some(v) => match v.as_u64() {
-            Some(r) if r >= 1 => r,
-            _ => return at("counts: removed is a whole number from 1"),
-        },
-    };
     let Some(listed) = doc["files"].as_object() else { return at("files is an object") };
     let mut files = BTreeMap::new();
     // SPEC 9.2#11: `files` lists the text members only. A media member is bound by its name,
@@ -83,10 +71,7 @@ pub fn check(doc: &Map<String, Value>, owner: Option<&str>) -> Result<Manifest> 
         let Some(hash) = hash.as_str().filter(|h| is_hash(h)) else { return at(format!("files: {name}: not a lowercase hex sha256")) };
         files.insert(name.clone(), hash.to_string());
     }
-    if files.contains_key("removed.csv") != (removed > 0) {
-        return at("counts: removed and files: removed.csv go together");
-    }
-    Ok(Manifest { contacts: n[0], threads: n[1], messages: n[2], media: n[3], removed, files })
+    Ok(Manifest { contacts: n[0], threads: n[1], messages: n[2], media: n[3], files })
 }
 
 /// The manifest's text parsed and checked.

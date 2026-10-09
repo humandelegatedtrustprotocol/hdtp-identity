@@ -10,16 +10,19 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
-- **An export carries a former contact's conversation (SEP-0004).** A new optional member,
-  `removed.csv` (`root,name,display_name`), names each former contact whose thread the file carries;
-  `counts.removed` and `files["removed.csv"]` are present with it and only with it, so a file without
-  one is the file this library wrote before. `export_read` takes `removed_csv` and answers
-  `removed`; `export_write` takes `removed` and answers `removed_csv`; a thread's and a message's
-  `contact` may name a root of either member (`names no root in contacts.csv or removed.csv`); a
-  removed row is no contact's root and not the owner's, unique, named by a thread, its names at most
-  200 characters (the display name cut, as a contact's is), and the member at most 16 MiB
-  (`ExportLimits.removed_csv`). The corpus gains `valid-export-with-removed.zip` and thirteen
-  refusals (58 cases); `valid-export.zip` and `valid-book.zip` are byte for byte what they were.
+- **An export carries a former contact's conversation (SEP-0004).** A removed thread is a row of
+  `threads.csv` whose `contact` is not a root of `contacts.csv`. It carries the names the contact is
+  known by in two new columns, `contact_name` and `contact_display_name`, which are empty on every
+  other thread. `threads.csv` takes the longer header only when a removed thread exists, so a file
+  without one is the file this library wrote before, and the manifest does not change. A removed
+  thread's root is a fingerprint and not the owner's. Its names are at most 200 characters (the
+  display name cut, as a contact's is) and the same on every removed thread of that root.
+  `export_read` answers the two names on a removed thread and on no other; `export_write` takes
+  them on a removed thread and refuses them on any other. A message's `contact` may be a removed
+  thread's: its refusal now reads `names no contact in contacts.csv and no removed thread` for every
+  file, where it read `names no contact in contacts.csv`. The corpus gains
+  `valid-export-with-removed-thread.zip` and ten refusals (55 cases); `valid-export.zip` and
+  `valid-book.zip` are byte for byte what they were.
 - **The seed's six stale-sender scenarios run on both ports.** `js/intrude.mjs` carries the
   scenarios hdtp-spec's `vectors/intrude.mjs` gained for the stolen leaf key in the small form of
   §13.2 and for the sender a renewal has not reached (§2): the superseded key the host still holds

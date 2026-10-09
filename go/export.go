@@ -29,7 +29,6 @@ const (
 	ExportContactsMax    = 4 * 1024 * 1024
 	ExportContactsRowMax = 5000
 	ExportThreadsMax     = 16 * 1024 * 1024
-	ExportRemovedMax     = 16 * 1024 * 1024
 	ExportLineMax        = 64 * 1024
 	ExportMediaMax       = 5 * 1024 * 1024
 	ExportBodyMax        = 16 * 1024
@@ -39,20 +38,22 @@ const (
 )
 
 var (
-	contactColumns   = []string{"root", "endpoint", "name", "display_name", "status", "was_active", "permissions", "their_permissions", "leaf", "root_cert", "added"}
-	threadColumns    = []string{"id", "contact", "topic", "created_at", "last_at"}
-	removedColumns   = []string{"root", "name", "display_name"}
-	contactStatuses  = []string{"active", "blocked", "pending_out"}
-	exportPerms      = []string{"message.text", "message.media", "status.view", "calendar.availability", "calendar.book"}
-	manifestMembers  = []string{"hdtp_export", "owner", "owner_name", "exported_at", "tool", "counts", "files"}
-	manifestCounts   = []string{"contacts", "threads", "messages", "media"}
-	manifestListed   = []string{"contacts.csv", "removed.csv", "threads.csv", "messages.jsonl"}
-	messageMembers   = []string{"id", "thread", "contact", "msg_id", "direction", "sender", "time", "body", "reply_to", "status", "attachments"}
-	attachmentFields = []string{"file", "filename", "mime", "size"}
-	msgDirections    = []string{"in", "out"}
-	msgSenders       = []string{"agent", "human"}
-	msgStatuses      = []string{"delivered", "queued", "failed", "read"}
-	pinFields        = []string{"endpoint", "leaf", "root_cert"}
+	contactColumns = []string{"root", "endpoint", "name", "display_name", "status", "was_active", "permissions", "their_permissions", "leaf", "root_cert", "added"}
+	threadColumns  = []string{"id", "contact", "topic", "created_at", "last_at"}
+	// threadColumnsNamed is threads.csv's header when it holds a removed thread: the two names a
+	// former contact is known by travel on its conversation (SPEC §9.2, SEP-0004).
+	threadColumnsNamed = append(append([]string{}, threadColumns...), "contact_name", "contact_display_name")
+	contactStatuses    = []string{"active", "blocked", "pending_out"}
+	exportPerms        = []string{"message.text", "message.media", "status.view", "calendar.availability", "calendar.book"}
+	manifestMembers    = []string{"hdtp_export", "owner", "owner_name", "exported_at", "tool", "counts", "files"}
+	manifestCounts     = []string{"contacts", "threads", "messages", "media"}
+	manifestListed     = []string{"contacts.csv", "threads.csv", "messages.jsonl"}
+	messageMembers     = []string{"id", "thread", "contact", "msg_id", "direction", "sender", "time", "body", "reply_to", "status", "attachments"}
+	attachmentFields   = []string{"file", "filename", "mime", "size"}
+	msgDirections      = []string{"in", "out"}
+	msgSenders         = []string{"agent", "human"}
+	msgStatuses        = []string{"delivered", "queued", "failed", "read"}
+	pinFields          = []string{"endpoint", "leaf", "root_cert"}
 )
 
 // strSet is a set of strings. Every name the export's rules look up in a list the FILE sizes (the
@@ -423,21 +424,48 @@ func contactRow(cells []string, owner string, pinAt *time.Time) (map[string]any,
 }
 
 // threadRow checks one thread row's cells against the contacts' roots: the row, its cells shared
-// with the member's text.
-func threadRow(cells []string, roots strSet) (ThreadRow, *cellRefusal) {
+// with the member's text. named is the longer header: a thread whose contact is no root of
+// contacts.csv is then a removed thread, a former contact's conversation, which carries the names it
+// is known by; any other thread's two names are empty. owner is the export's.
+func threadRow(cells []string, roots strSet, named bool, owner string) (ThreadRow, *cellRefusal) {
 	for k, c := range cells {
 		if holdsPrivateKey(c) {
 			return ThreadRow{}, &cellRefusal{k, "holds a private key"}
 		}
 	}
-	if len(cells) != 5 {
-		return ThreadRow{}, &cellRefusal{0, fmt.Sprintf("%d fields, not 5", len(cells))}
+	want := len(threadColumns)
+	if named {
+		want = len(threadColumnsNamed)
+	}
+	if len(cells) != want {
+		return ThreadRow{}, &cellRefusal{0, fmt.Sprintf("%d fields, not %d", len(cells), want)}
 	}
 	if cells[0] == "" {
 		return ThreadRow{}, &cellRefusal{0, "empty"}
 	}
-	if !roots.has(cells[1]) {
-		return ThreadRow{}, &cellRefusal{1, "names no root in contacts.csv or removed.csv"}
+	var contactName, contactDisplay string
+	switch {
+	case !named && !roots.has(cells[1]):
+		return ThreadRow{}, &cellRefusal{1, "names no contact in contacts.csv"}
+	case named && roots.has(cells[1]):
+		for k := 5; k <= 6; k++ {
+			if cells[k] != "" {
+				return ThreadRow{}, &cellRefusal{k, "not empty, and the contact is in contacts.csv"}
+			}
+		}
+	case named:
+		switch {
+		case !IsFingerprint(cells[1]):
+			return ThreadRow{}, &cellRefusal{1, "not a fingerprint"}
+		case cells[1] == owner:
+			return ThreadRow{}, &cellRefusal{1, "the owner's own root"}
+		}
+		for k := 5; k <= 6; k++ {
+			if utf8.RuneCountInString(cells[k]) > ExportNameMax {
+				return ThreadRow{}, &cellRefusal{k, fmt.Sprintf("over %d characters", ExportNameMax)}
+			}
+		}
+		contactName, contactDisplay = cells[5], cells[6]
 	}
 	var times [2]string
 	for j, k := range []int{3, 4} {
@@ -447,42 +475,40 @@ func threadRow(cells []string, roots strSet) (ThreadRow, *cellRefusal) {
 		}
 		times[j] = instantOut(cells[k], t)
 	}
-	return ThreadRow{ID: cells[0], Contact: cells[1], Topic: cells[2], CreatedAt: times[0], LastAt: times[1]}, nil
+	return ThreadRow{ID: cells[0], Contact: cells[1], Topic: cells[2], CreatedAt: times[0], LastAt: times[1],
+		ContactName: contactName, ContactDisplayName: contactDisplay}, nil
 }
 
-// RemovedRow is one row of removed.csv: a contact the owner no longer has whose conversation the
-// file carries, named by its root and the two names last known for it. It is not a contact.
-type RemovedRow struct {
-	Root        string `json:"root"`
-	Name        string `json:"name"`
-	DisplayName string `json:"display_name"`
+// threadsHeader is the header a threads.csv's first record names: the longer one when it is exactly
+// that, and the shorter one otherwise (csvTable refuses anything else, naming it).
+func threadsHeader(text string) []string {
+	named := false
+	csvEach(text, func(n int, fields []string) bool {
+		named = strings.Join(fields, "\x00") == strings.Join(threadColumnsNamed, "\x00")
+		return false
+	})
+	if named {
+		return threadColumnsNamed
+	}
+	return threadColumns
 }
 
-// removedRow checks one removed row's cells: a root that is no contact's and not the owner's, and
-// two names of at most 200 characters.
-func removedRow(cells []string, owner string, contacts strSet) (RemovedRow, *cellRefusal) {
-	for k, c := range cells {
-		if holdsPrivateKey(c) {
-			return RemovedRow{}, &cellRefusal{k, "holds a private key"}
-		}
+// removedNames holds every removed thread of one root to the names its first gives (SPEC §9.2: one
+// former contact, one pair of names): the row and column of the first that differs, or 0.
+type removedNames map[string][2]string
+
+func (r removedNames) differs(t ThreadRow) int {
+	got := [2]string{t.ContactName, t.ContactDisplayName}
+	first, seen := r[t.Contact]
+	switch {
+	case !seen:
+		r[t.Contact] = got
+	case first[0] != got[0]:
+		return 5
+	case first[1] != got[1]:
+		return 6
 	}
-	if len(cells) != 3 {
-		return RemovedRow{}, &cellRefusal{0, fmt.Sprintf("%d fields, not 3", len(cells))}
-	}
-	switch root := cells[0]; {
-	case !IsFingerprint(root):
-		return RemovedRow{}, &cellRefusal{0, "not a fingerprint"}
-	case root == owner:
-		return RemovedRow{}, &cellRefusal{0, "the owner's own root"}
-	case contacts.has(root):
-		return RemovedRow{}, &cellRefusal{0, "a root of contacts.csv"}
-	}
-	for k := 1; k <= 2; k++ {
-		if utf8.RuneCountInString(cells[k]) > ExportNameMax {
-			return RemovedRow{}, &cellRefusal{k, fmt.Sprintf("over %d characters", ExportNameMax)}
-		}
-	}
-	return RemovedRow{Root: cells[0], Name: cells[1], DisplayName: cells[2]}, nil
+	return 0
 }
 
 // instantOut is an instant as an answer writes it: the cell itself when it is already written that
@@ -545,9 +571,7 @@ func csvTable(member, text string, columns []string, count *int, fn func(r table
 
 type exportManifest struct {
 	contacts, threads, messages, media uint64
-	// removed is counts.removed: 0 when the manifest does not count it, as a file without removed.csv.
-	removed uint64
-	files   map[string]string
+	files                              map[string]string
 }
 
 // orderedKeys is an object's member names in document order, a repeated name at its first place —
@@ -630,7 +654,7 @@ func checkManifest(doc map[string]any, order []string, owner *string) (*exportMa
 	if !isObj {
 		return nil, manifestAt("counts is an object")
 	}
-	if k := stranger(counts, append([]string{"removed"}, manifestCounts...)); k != "" {
+	if k := stranger(counts, manifestCounts); k != "" {
 		return nil, manifestAt("counts: " + jsonString(k) + " is not a count of a manifest")
 	}
 	var n [4]uint64
@@ -640,14 +664,6 @@ func checkManifest(doc map[string]any, order []string, owner *string) (*exportMa
 			return nil, manifestAt("counts: " + k + " is not a whole number")
 		}
 		n[i] = v
-	}
-	var removed uint64
-	if v, counted := counts["removed"]; counted {
-		r, ok := asU64(v)
-		if !ok || r < 1 {
-			return nil, manifestAt("counts: removed is a whole number from 1")
-		}
-		removed = r
 	}
 	listed, isObj := doc["files"].(map[string]any)
 	if !isObj {
@@ -681,10 +697,7 @@ func checkManifest(doc map[string]any, order []string, owner *string) (*exportMa
 		}
 		files[name] = hash
 	}
-	if _, isListed := files["removed.csv"]; isListed != (removed > 0) {
-		return nil, manifestAt("counts: removed and files: removed.csv go together")
-	}
-	return &exportManifest{contacts: n[0], threads: n[1], messages: n[2], media: n[3], removed: removed, files: files}, nil
+	return &exportManifest{contacts: n[0], threads: n[1], messages: n[2], media: n[3], files: files}, nil
 }
 
 // loneSurrogate reports a \u escape of a UTF-16 surrogate that is not half of a pair. serde_json
@@ -769,7 +782,7 @@ func finishManifest(raw json.RawMessage, messagesSHA *string, messages uint64) (
 	return text, nil
 }
 
-// ── the directory, contacts.csv, removed.csv, threads.csv ────────────────────────────────────────
+// ── the directory, contacts.csv, threads.csv ────────────────────────────────────────────────────
 
 // ExportEntry is one entry of a zip's central directory, as the host read it.
 type ExportEntry struct {
@@ -786,7 +799,7 @@ func isExportMedia(name string) bool {
 
 func allowedExportName(name string) bool {
 	switch name {
-	case "manifest.json", "contacts.csv", "removed.csv", "threads.csv", "messages.jsonl", "media/":
+	case "manifest.json", "contacts.csv", "threads.csv", "messages.jsonl", "media/":
 		return true
 	}
 	return isExportMedia(name)
@@ -798,8 +811,6 @@ func memberLimit(name string) int {
 		return ExportManifestMax
 	case name == "contacts.csv":
 		return ExportContactsMax
-	case name == "removed.csv":
-		return ExportRemovedMax
 	case name == "threads.csv":
 		return ExportThreadsMax
 	case strings.HasPrefix(name, "media/") && len(name) > 6:
@@ -810,14 +821,13 @@ func memberLimit(name string) int {
 
 type exportReadResult struct {
 	contacts []any
-	removed  []RemovedRow
 	threads  []ThreadRow
 	media    []ExportMedia
 }
 
 // exportRead is §9.2's validation of everything but the messages and the media bytes, in the core's
 // order.
-func exportRead(directory []ExportEntry, manifestText, contactsCSV, removedCSV, threadsCSV *string, owner string, now time.Time) (*exportReadResult, error) {
+func exportRead(directory []ExportEntry, manifestText, contactsCSV, threadsCSV *string, owner string, now time.Time) (*exportReadResult, error) {
 	seen := strSet{}
 	for _, e := range directory {
 		label := "entry " + jsonString(e.Name)
@@ -936,48 +946,6 @@ func exportRead(directory []ExportEntry, manifestText, contactsCSV, removedCSV, 
 		return nil, exportRefuse(fmt.Sprintf("manifest.json: counts: contacts is %d, and contacts.csv holds %d", m.contacts, len(contacts)))
 	}
 
-	removed := []RemovedRow{}
-	if has("removed.csv") {
-		if removedCSV == nil {
-			return nil, exportRefuse("removed_csv is required: the file has removed.csv")
-		}
-		if len(*removedCSV) > ExportRemovedMax {
-			return nil, exportRefuse(fmt.Sprintf("removed.csv: over %d bytes", ExportRemovedMax))
-		}
-		if sha256Hex([]byte(*removedCSV)) != m.files["removed.csv"] {
-			return nil, exportRefuse("removed.csv: its sha256 is not manifest.json's")
-		}
-		seenRemoved := strSet{}
-		err = csvTable("removed.csv", *removedCSV, removedColumns, nil, func(r tableRow) error {
-			row, bad := removedRow(r.cells, owner, roots)
-			if bad != nil {
-				return exportRefuse(fmt.Sprintf("removed.csv: row %d, column %s: %s", r.n, removedColumns[bad.col], bad.why))
-			}
-			if seenRemoved.has(row.Root) {
-				return exportRefuse(fmt.Sprintf("removed.csv: row %d, column root: appears twice", r.n))
-			}
-			seenRemoved.add(row.Root)
-			removed = append(removed, row)
-			return nil
-		})
-		if err != nil {
-			return nil, err
-		}
-		if uint64(len(removed)) != m.removed {
-			return nil, exportRefuse(fmt.Sprintf("manifest.json: counts: removed is %d, and removed.csv holds %d", m.removed, len(removed)))
-		}
-	} else if removedCSV != nil {
-		return nil, exportRefuse("removed_csv is given, and the file has no removed.csv")
-	}
-	// A thread, and a message, names a root of either member.
-	named := make(strSet, len(roots)+len(removed))
-	for r := range roots {
-		named.add(r)
-	}
-	for _, r := range removed {
-		named.add(r.Root)
-	}
-
 	var threads []ThreadRow
 	if has("threads.csv") {
 		if threadsCSV == nil {
@@ -989,22 +957,30 @@ func exportRead(directory []ExportEntry, manifestText, contactsCSV, removedCSV, 
 		if sha256Hex([]byte(*threadsCSV)) != m.files["threads.csv"] {
 			return nil, exportRefuse("threads.csv: its sha256 is not manifest.json's")
 		}
-		if err := csvTable("threads.csv", *threadsCSV, threadColumns, &count, nil); err != nil {
+		columns := threadsHeader(*threadsCSV)
+		named := len(columns) == len(threadColumnsNamed)
+		if err := csvTable("threads.csv", *threadsCSV, columns, &count, nil); err != nil {
 			return nil, err
 		}
 		threads = make([]ThreadRow, 0, count)
 		// The ids seen: the rows' own id strings, which share the member's text — no copy of any.
 		ids := make(strSet, count)
-		err = csvTable("threads.csv", *threadsCSV, threadColumns, nil, func(r tableRow) error {
-			if len(r.cells) != len(threadColumns) {
-				return exportRefuse(fmt.Sprintf("threads.csv: row %d: %d fields, not %d", r.n, len(r.cells), len(threadColumns)))
+		removed := removedNames{}
+		err = csvTable("threads.csv", *threadsCSV, columns, nil, func(r tableRow) error {
+			if len(r.cells) != len(columns) {
+				return exportRefuse(fmt.Sprintf("threads.csv: row %d: %d fields, not %d", r.n, len(r.cells), len(columns)))
 			}
-			row, bad := threadRow(r.cells, named)
+			row, bad := threadRow(r.cells, roots, named, owner)
 			if bad != nil {
-				return exportRefuse(fmt.Sprintf("threads.csv: row %d, column %s: %s", r.n, threadColumns[bad.col], bad.why))
+				return exportRefuse(fmt.Sprintf("threads.csv: row %d, column %s: %s", r.n, columns[bad.col], bad.why))
 			}
 			if ids.has(row.ID) {
 				return exportRefuse(fmt.Sprintf("threads.csv: row %d, column id: appears twice", r.n))
+			}
+			if named && !roots.has(row.Contact) {
+				if col := removed.differs(row); col != 0 {
+					return exportRefuse(fmt.Sprintf("threads.csv: row %d, column %s: not what an earlier removed thread of this contact says", r.n, columns[col]))
+				}
 			}
 			ids.add(row.ID)
 			threads = append(threads, row)
@@ -1013,23 +989,17 @@ func exportRead(directory []ExportEntry, manifestText, contactsCSV, removedCSV, 
 		if err != nil {
 			return nil, err
 		}
+		// The longer header only for a file that holds a removed thread: one form for one content.
+		if named && len(removed) == 0 {
+			return nil, exportRefuse("threads.csv: row 1: the header names contact_name and contact_display_name, and no thread is a removed thread")
+		}
 		if uint64(len(threads)) != m.threads {
 			return nil, exportRefuse(fmt.Sprintf("manifest.json: counts: threads is %d, and threads.csv holds %d", m.threads, len(threads)))
 		}
 	} else if threadsCSV != nil {
 		return nil, exportRefuse("threads_csv is given, and the file has no threads.csv")
 	}
-	// Every removed row is there for a conversation: one no thread names is refused.
-	withThread := make(strSet, len(removed))
-	for _, t := range threads {
-		withThread.add(t.Contact)
-	}
-	for i, r := range removed {
-		if !withThread.has(r.Root) {
-			return nil, exportRefuse(fmt.Sprintf("removed.csv: row %d, column root: no thread names it", i+2))
-		}
-	}
-	return &exportReadResult{contacts: contacts, removed: removed, threads: threads, media: media}, nil
+	return &exportReadResult{contacts: contacts, threads: threads, media: media}, nil
 }
 
 // exportEnd is what the host gathered while it streamed messages.jsonl.
@@ -1167,7 +1137,7 @@ func checkMessage(doc map[string]any, names *messageNames) (map[string]any, *mem
 			return nil, &memberRefusal{"thread", "names no thread in threads.csv"}
 		}
 		if !names.contacts.has(contact) {
-			return nil, &memberRefusal{"contact", "names no root in contacts.csv or removed.csv"}
+			return nil, &memberRefusal{"contact", "names no contact in contacts.csv and no removed thread"}
 		}
 	}
 	if bad := oneOf("direction", msgDirections); bad != nil {
@@ -1434,42 +1404,26 @@ func truncateRunes(s string, n int) string {
 	return s
 }
 
+// threadCells is a thread row handed to export_write, as the longer header's cells: the two names
+// absent are empty, and the contact's own name for themselves is cut to 200 characters, on a
+// character (SPEC §9.2, what a contact controls).
 func threadCells(v any) ([]string, *cellRefusal) {
 	o, isObj := v.(map[string]any)
 	if !isObj {
 		return nil, &cellRefusal{0, "a thread row is an object"}
 	}
-	if k := stranger(o, threadColumns); k != "" {
+	if k := stranger(o, threadColumnsNamed); k != "" {
 		return nil, &cellRefusal{0, k + " is not a column of threads.csv"}
 	}
 	var cells []string
-	for k, col := range threadColumns {
-		s, isText := o[col].(string)
-		if !isText {
+	for k, col := range threadColumnsNamed {
+		val, has := o[col]
+		s, isText := val.(string)
+		switch {
+		case k >= len(threadColumns) && !has:
+		case !isText:
 			return nil, &cellRefusal{k, "missing, or not a string"}
-		}
-		cells = append(cells, s)
-	}
-	return cells, nil
-}
-
-// removedCells is a removed row handed to export_write, as its cells: the display name, the contact's
-// own claim, cut to 200 characters on a character (SPEC §9.2, what a contact controls).
-func removedCells(v any) ([]string, *cellRefusal) {
-	o, isObj := v.(map[string]any)
-	if !isObj {
-		return nil, &cellRefusal{0, "a removed row is an object"}
-	}
-	if k := stranger(o, removedColumns); k != "" {
-		return nil, &cellRefusal{0, k + " is not a column of removed.csv"}
-	}
-	var cells []string
-	for k, col := range removedColumns {
-		s, isText := o[col].(string)
-		if !isText {
-			return nil, &cellRefusal{k, "missing, or not a string"}
-		}
-		if col == "display_name" {
+		case col == "contact_display_name":
 			s = truncateRunes(s, ExportNameMax)
 		}
 		cells = append(cells, s)
@@ -1480,7 +1434,6 @@ func removedCells(v any) ([]string, *cellRefusal) {
 type exportWritten struct {
 	partial     map[string]any
 	contactsCSV string
-	removedCSV  *string
 	threadsCSV  *string
 }
 
@@ -1499,7 +1452,7 @@ func sortRows(rows []csvRowSort) {
 }
 
 // exportWrite is the canonical contacts.csv and threads.csv and the manifest without the messages.
-func exportWrite(owner, ownerName string, exportedAt time.Time, tool string, contacts, removed, threads, media []any) (*exportWritten, error) {
+func exportWrite(owner, ownerName string, exportedAt time.Time, tool string, contacts, threads, media []any) (*exportWritten, error) {
 	if !IsFingerprint(owner) {
 		return nil, exportRefuse("owner is not a fingerprint")
 	}
@@ -1553,54 +1506,21 @@ func exportWrite(owner, ownerName string, exportedAt time.Time, tool string, con
 		return nil, exportRefuse(fmt.Sprintf("contacts: over %d bytes as contacts.csv", ExportContactsMax))
 	}
 
-	var rrows []csvRowSort
-	named := make(strSet, len(roots)+len(removed))
-	for r := range roots {
-		named.add(r)
-	}
-	for i, v := range removed {
-		located := func(b *cellRefusal) error {
-			return exportRefuse(fmt.Sprintf("removed[%d], column %s: %s", i, removedColumns[b.col], b.why))
-		}
-		r, bad := removedCells(v)
-		if bad != nil {
-			return nil, located(bad)
-		}
-		if _, bad := removedRow(r, owner, roots); bad != nil {
-			return nil, located(bad)
-		}
-		if named.has(r[0]) {
-			return nil, exportRefuse(fmt.Sprintf("removed[%d], column root: appears twice", i))
-		}
-		named.add(r[0])
-		rrows = append(rrows, csvRowSort{r[0], r})
-	}
-	sortRows(rrows)
-	var removedCSV *string
-	if len(rrows) > 0 {
-		var rb strings.Builder
-		csvWriteRecord(&rb, removedColumns)
-		for _, r := range rrows {
-			csvWriteRecord(&rb, guarded(r.cells))
-		}
-		t := rb.String()
-		if len(t) > ExportRemovedMax {
-			return nil, exportRefuse(fmt.Sprintf("removed: over %d bytes as removed.csv", ExportRemovedMax))
-		}
-		removedCSV = &t
-	}
-
+	// Each thread held to the longer header's rules: a thread whose contact is no contact here is a
+	// removed thread, carrying its former contact's names, the same on every thread of that root.
+	// The longer header is written only when one is (SPEC §9.2): every other file is a 1.0 file.
 	var trows []csvRowSort
 	threadIDs := strSet{}
+	removed := removedNames{}
 	for i, t := range threads {
 		located := func(b *cellRefusal) error {
-			return exportRefuse(fmt.Sprintf("threads[%d], column %s: %s", i, threadColumns[b.col], b.why))
+			return exportRefuse(fmt.Sprintf("threads[%d], column %s: %s", i, threadColumnsNamed[b.col], b.why))
 		}
 		r, bad := threadCells(t)
 		if bad != nil {
 			return nil, located(bad)
 		}
-		row, bad := threadRow(r, named)
+		row, bad := threadRow(r, roots, true, owner)
 		if bad != nil {
 			return nil, located(bad)
 		}
@@ -1608,25 +1528,25 @@ func exportWrite(owner, ownerName string, exportedAt time.Time, tool string, con
 		if threadIDs.has(r[0]) {
 			return nil, exportRefuse(fmt.Sprintf("threads[%d], column id: appears twice", i))
 		}
+		if !roots.has(row.Contact) {
+			if col := removed.differs(row); col != 0 {
+				return nil, located(&cellRefusal{col, "not what an earlier removed thread of this contact says"})
+			}
+		}
 		threadIDs.add(r[0])
 		trows = append(trows, csvRowSort{r[0], r})
 	}
 	sortRows(trows)
-	withThread := make(strSet, len(rrows))
-	for _, t := range trows {
-		withThread.add(t.cells[1])
-	}
-	for i, v := range removed {
-		if root, _ := v.(map[string]any)["root"].(string); !withThread.has(root) {
-			return nil, exportRefuse(fmt.Sprintf("removed[%d], column root: no thread names it", i))
-		}
+	columns := threadColumnsNamed
+	if len(removed) == 0 {
+		columns = threadColumns
 	}
 	var threadsCSV *string
 	if len(trows) > 0 {
 		var tb strings.Builder
-		csvWriteRecord(&tb, threadColumns)
+		csvWriteRecord(&tb, columns)
 		for _, r := range trows {
-			csvWriteRecord(&tb, guarded(r.cells))
+			csvWriteRecord(&tb, guarded(r.cells[:len(columns)]))
 		}
 		t := tb.String()
 		threadsCSV = &t
@@ -1636,9 +1556,6 @@ func exportWrite(owner, ownerName string, exportedAt time.Time, tool string, con
 	}
 
 	files := map[string]any{"contacts.csv": sha256Hex([]byte(contactsCSV))}
-	if removedCSV != nil {
-		files["removed.csv"] = sha256Hex([]byte(*removedCSV))
-	}
 	if threadsCSV != nil {
 		files["threads.csv"] = sha256Hex([]byte(*threadsCSV))
 	}
@@ -1658,15 +1575,13 @@ func exportWrite(owner, ownerName string, exportedAt time.Time, tool string, con
 		}
 		hashes.add(hash)
 	}
-	counts := map[string]any{"contacts": int64(len(rows)), "threads": int64(len(trows)), "messages": int64(0), "media": int64(len(media))}
-	if removedCSV != nil {
-		counts["removed"] = int64(len(rrows))
-	}
 	partial := map[string]any{
 		"hdtp_export": int64(exportVersion), "owner": owner, "owner_name": ownerName,
-		"exported_at": timeOut(exportedAt), "tool": tool, "counts": counts, "files": files,
+		"exported_at": timeOut(exportedAt), "tool": tool,
+		"counts": map[string]any{"contacts": int64(len(rows)), "threads": int64(len(trows)), "messages": int64(0), "media": int64(len(media))},
+		"files":  files,
 	}
-	return &exportWritten{partial: partial, contactsCSV: contactsCSV, removedCSV: removedCSV, threadsCSV: threadsCSV}, nil
+	return &exportWritten{partial: partial, contactsCSV: contactsCSV, threadsCSV: threadsCSV}, nil
 }
 
 // ── the merge ───────────────────────────────────────────────────────────────────────────────────

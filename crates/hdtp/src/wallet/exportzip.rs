@@ -14,7 +14,6 @@ use std::path::Path;
 // The bounds of SPEC §9.2 are the core's, one copy of them (a test holds contract.json to them).
 const MANIFEST_MAX: u64 = export::MANIFEST_MAX as u64;
 const CONTACTS_MAX: u64 = export::CONTACTS_MAX as u64;
-const REMOVED_MAX: u64 = export::REMOVED_MAX as u64;
 const THREADS_MAX: u64 = export::THREADS_MAX as u64;
 const LINE_MAX: usize = export::LINE_MAX;
 const MEDIA_MAX: u64 = export::MEDIA_MAX as u64;
@@ -133,7 +132,6 @@ pub fn central_directory(f: &mut File) -> Option<Vec<Entry>> {
 /// What an export holds, once the whole file has been checked.
 pub struct Contents {
     pub contacts: Vec<Value>,
-    pub removed: Vec<Value>,
     pub threads: Vec<Value>,
     pub messages: Vec<Value>,
     pub media: Vec<Value>,
@@ -184,9 +182,7 @@ pub fn read_export(path: &Path, owner: &str, now: &str, ceiling: u64) -> Result<
     let has = |n: &str| entries.iter().any(|e| e.name == n);
     let mut n = Counter { read: 0, ceiling };
     let mut texts: Vec<(&str, Result<String, String>)> = Vec::new();
-    for (name, limit) in
-        [("manifest.json", MANIFEST_MAX), ("contacts.csv", CONTACTS_MAX), ("removed.csv", REMOVED_MAX), ("threads.csv", THREADS_MAX)]
-    {
+    for (name, limit) in [("manifest.json", MANIFEST_MAX), ("contacts.csv", CONTACTS_MAX), ("threads.csv", THREADS_MAX)] {
         if has(name) {
             texts.push((name, text_member(&mut zip, name, limit, &mut n)?));
         }
@@ -196,9 +192,7 @@ pub fn read_export(path: &Path, owner: &str, now: &str, ceiling: u64) -> Result<
     let directory: Vec<Value> =
         entries.iter().map(|e| json!({ "name": e.name, "size": e.size, "encrypted": e.encrypted, "mode": e.mode })).collect();
     let mut args = json!({ "directory": directory, "owner": owner, "now": now });
-    for (arg, name) in
-        [("manifest", "manifest.json"), ("contacts_csv", "contacts.csv"), ("removed_csv", "removed.csv"), ("threads_csv", "threads.csv")]
-    {
+    for (arg, name) in [("manifest", "manifest.json"), ("contacts_csv", "contacts.csv"), ("threads_csv", "threads.csv")] {
         if let Some(t) = text(name) {
             args[arg] = json!(t);
         }
@@ -209,7 +203,6 @@ pub fn read_export(path: &Path, owner: &str, now: &str, ceiling: u64) -> Result<
         let member = match why.as_str() {
             "manifest is required" => "manifest.json",
             "contacts_csv is required" => "contacts.csv",
-            "removed_csv is required: the file has removed.csv" => "removed.csv",
             "threads_csv is required: the file has threads.csv" => "threads.csv",
             _ => return why,
         };
@@ -218,8 +211,8 @@ pub fn read_export(path: &Path, owner: &str, now: &str, ceiling: u64) -> Result<
     let strings = |v: &Value, k: &str| -> Vec<String> {
         v.as_array().into_iter().flatten().filter_map(|x| x[k].as_str().map(String::from)).collect()
     };
-    // A message names a root of contacts.csv or of removed.csv.
-    let roots: Vec<String> = strings(&read["contacts"], "root").into_iter().chain(strings(&read["removed"], "root")).collect();
+    // A message names a contact, or the contact of a removed thread.
+    let roots: Vec<String> = strings(&read["contacts"], "root").into_iter().chain(strings(&read["threads"], "contact")).collect();
     let (thread_ids, hashes) = (strings(&read["threads"], "id"), strings(&read["media"], "hash"));
 
     let mut messages = Vec::new();
@@ -321,7 +314,6 @@ pub fn read_export(path: &Path, owner: &str, now: &str, ceiling: u64) -> Result<
     )?;
     Ok(Contents {
         contacts: read["contacts"].as_array().cloned().unwrap_or_default(),
-        removed: read["removed"].as_array().cloned().unwrap_or_default(),
         threads: read["threads"].as_array().cloned().unwrap_or_default(),
         messages,
         media: read["media"].as_array().cloned().unwrap_or_default(),
@@ -428,8 +420,11 @@ mod tests {
                     if got.contacts.iter().any(|r| leafless.contains(&r["root"].as_str().unwrap_or("")) && !r["leaf"].is_null()) {
                         wrong.push(format!("{file}: a leafless row's leaf pins"));
                     }
-                    let counts = [got.contacts.len(), got.removed.len(), got.threads.len(), got.messages.len(), got.media.len(), pinned];
-                    // `removed` is written only where a file carries removed rows.
+                    // A removed thread is one whose contact is no contact's root (SPEC §9.2).
+                    let roots: Vec<&str> = got.contacts.iter().filter_map(|r| r["root"].as_str()).collect();
+                    let removed = got.threads.iter().filter(|t| !roots.contains(&t["contact"].as_str().unwrap_or(""))).count();
+                    let counts = [got.contacts.len(), removed, got.threads.len(), got.messages.len(), got.media.len(), pinned];
+                    // `removed` is written only for a file that has removed threads.
                     let expected = ["contacts", "removed", "threads", "messages", "media", "pinned"]
                         .map(|k| want.get(k).and_then(|v| v.as_u64()).unwrap_or(0) as usize);
                     if counts != expected {
