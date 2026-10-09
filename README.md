@@ -95,7 +95,7 @@ leaves the machine before `make publish`; there is no CI (see "The gate is local
 
 ## Verifying the Wasm pin
 
-`js/manifest.json` is the authority on the bytes of `hdtp_identity_wasm_bg.wasm`: 868,687 bytes
+`js/manifest.json` is the authority on the bytes of `hdtp_identity_wasm_bg.wasm`: 872,293 bytes
 (843 KiB) in the pin of this commit, the same bytes in `pkg-web` and `pkg-node`, with the SHA-256
 of every package file beside it (release profile: `opt-level = "z"`, LTO, one codegen unit,
 `panic = "abort"`; `js/build.sh` passes `--no-opt`, so no `wasm-opt`).
