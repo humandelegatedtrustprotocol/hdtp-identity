@@ -7,9 +7,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed as proven that did not pass.
 
-Specification: **1.0.0**. **101** normative sentences, **2895** cross-port parity cases over **54** guarded functions.
+Specification: **1.0.0**. **101** normative sentences, **2931** cross-port parity cases over **54** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 1.0.0): **5790** answers, of which **0** do not hold to the shape it declares. Of **131** declared error codes, **131** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 1.0.0): **5862** answers, of which **0** do not hold to the shape it declares. Of **131** declared error codes, **131** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 101 normative sentences of the specification
 
@@ -231,7 +231,7 @@ by declaration. A row with nothing in its last column would fail `js/musts.mjs`.
 | `14.4#1` | An endpoint **MUST** keep the key identifiers of every leaf it has held for an identity it still serves — fingerprints, never keys past their `notAfter`. | `scenario:a former key of a still-served identity gets the current chain`, `gateway:TestStaleKidIsAnsweredWithTheCurrentChain` |
 | `14.4#2` | A caller **MUST** follow `certificate_renewed` at most once per call, and only when the chain it carries is newer than or equal to its pin (§14.3): an older chain, a chain to another root, or a chain naming another address is discarded and the call fails as it would have. | `rust:certificate_renewed_cases`, `go:TestChainCases` |
 
-## The 2895 cross-port parity cases
+## The 2931 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -239,7 +239,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **2895** cases (**1417** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
+At the run that generated this file: **2931** cases (**1428** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
 
 ### `address_guard` — 51 cases · whole on success
 
@@ -1007,13 +1007,14 @@ At the run that generated this file: **2895** cases (**1417** of the run's cases
 - generated · export_merge · held absent, rows "x"
 - generated · export_merge · rows absent, held "x"
 
-### `export_read` — 95 cases · whole on success
+### `export_read` — 113 cases · whole on success
 
 - export_read: what export_write wrote
 - export_read at an instant that does not read
 - export corpus valid-export.zip: export_read
 - export corpus valid-book.zip: export_read
 - export corpus local-names-differ.zip: export_read
+- export corpus valid-export-with-removed.zip: export_read
 - export corpus zip-slip.zip: export_read
 - export corpus absolute-path.zip: export_read
 - export corpus backslash.zip: export_read
@@ -1040,6 +1041,18 @@ At the run that generated this file: **2895** cases (**1417** of the run's cases
 - export corpus threads-over-16-mib.zip: export_read
 - export corpus media-over-5-mib.zip: export_read
 - export corpus root-cert-not-a-root.zip: export_read
+- export corpus removed-also-a-contact.zip: export_read
+- export corpus removed-is-owner.zip: export_read
+- export corpus removed-twice.zip: export_read
+- export corpus removed-unnamed.zip: export_read
+- export corpus removed-bad-header.zip: export_read
+- export corpus removed-header-only.zip: export_read
+- export corpus removed-count-zero.zip: export_read
+- export corpus key-in-a-removed-cell.zip: export_read
+- export corpus removed-not-listed.zip: export_read
+- export corpus removed-member-absent.zip: export_read
+- export corpus removed-counted-not-listed.zip: export_read
+- export corpus removed-over-16-mib.zip: export_read
 - export_read: what a contact controls, as written, reads back
 - export_read with nothing to work from
 - export_read with a directory entry that does not read
@@ -1084,6 +1097,8 @@ At the run that generated this file: **2895** cases (**1417** of the run's cases
 - generated · export_read · manifest 7
 - generated · export_read · contacts_csv ""
 - generated · export_read · contacts_csv 7
+- generated · export_read · removed_csv ""
+- generated · export_read · removed_csv 7
 - generated · export_read · threads_csv ""
 - generated · export_read · threads_csv 7
 - generated · export_read · an undeclared member
@@ -1091,26 +1106,30 @@ At the run that generated this file: **2895** cases (**1417** of the run's cases
 - generated · export_read · an undeclared member in directory.0
 - generated · export_read · directory absent, manifest 7
 - generated · export_read · directory absent, contacts_csv 7
+- generated · export_read · directory absent, removed_csv 7
 - generated · export_read · directory absent, threads_csv 7
 - generated · export_read · directory absent, owner 7
 - generated · export_read · directory absent, now 7
 - generated · export_read · owner absent, directory "x"
 - generated · export_read · owner absent, manifest 7
 - generated · export_read · owner absent, contacts_csv 7
+- generated · export_read · owner absent, removed_csv 7
 - generated · export_read · owner absent, threads_csv 7
 - generated · export_read · owner absent, now 7
 - generated · export_read · now absent, directory "x"
 - generated · export_read · now absent, manifest 7
 - generated · export_read · now absent, contacts_csv 7
+- generated · export_read · now absent, removed_csv 7
 - generated · export_read · now absent, threads_csv 7
 - generated · export_read · now absent, owner 7
 
-### `export_read_end` — 99 cases · whole on success
+### `export_read_end` — 100 cases · whole on success
 
 - export_read_end: what was written
 - export corpus valid-export.zip: export_read_end
 - export corpus valid-book.zip: export_read_end
 - export corpus local-names-differ.zip: export_read_end
+- export corpus valid-export-with-removed.zip: export_read_end
 - export corpus dangling-reply.zip: export_read_end
 - export corpus unreferenced-media.zip: export_read_end
 - export corpus message-count.zip: export_read_end
@@ -1207,18 +1226,20 @@ At the run that generated this file: **2895** cases (**1417** of the run's cases
 - generated · export_read_end · media absent, reply_tos "x"
 - generated · export_read_end · media absent, media_seen "x"
 
-### `export_read_messages` — 54 cases · whole on success
+### `export_read_messages` — 56 cases · whole on success
 
 - export_read_messages: what export_write_messages wrote
 - export corpus valid-export.zip: export_read_messages
 - export corpus valid-book.zip: export_read_messages
 - export corpus local-names-differ.zip: export_read_messages
+- export corpus valid-export-with-removed.zip: export_read_messages
 - export corpus dangling-message-thread.zip: export_read_messages
 - export corpus dangling-attachment.zip: export_read_messages
 - export corpus two-attachments.zip: export_read_messages
 - export corpus body-with-a-file.zip: export_read_messages
 - export corpus key-in-a-body.zip: export_read_messages
 - export corpus unknown-message-member.zip: export_read_messages
+- export corpus message-names-neither.zip: export_read_messages
 - export_read_messages: a line with a lone low surrogate escape
 - export_read_messages: a line with a surrogate pair
 - export_read_messages: a line with a number past the largest double
@@ -1264,10 +1285,19 @@ At the run that generated this file: **2895** cases (**1417** of the run's cases
 - generated · export_read_messages · media absent, contacts "x"
 - generated · export_read_messages · media absent, first_line "7"
 
-### `export_write` — 83 cases · whole on success
+### `export_write` — 98 cases · whole on success
 
 - export_write: every formula prefix, quoting and line breaks, sorted rows
 - export_write: a book
+- export_write: removed rows, sorted, guarded, a display name cut
+- export_write: a removed row whose root is a contact's
+- export_write: a removed row whose root is the owner
+- export_write: a removed row no thread names
+- export_write: one root in two removed rows
+- export_write: a removed row whose own name is over 200 characters
+- export_write: a removed row with a column removed.csv does not have
+- export_write: a removed row that is not an object
+- export_write: a thread whose root is in neither member
 - export_write: a 300-character display name and permissions §8 does not have
 - export_write: the rows book_rows made
 - export_write with nothing to work from
@@ -1300,6 +1330,7 @@ At the run that generated this file: **2895** cases (**1417** of the run's cases
 - generated · export_write · tool ""
 - generated · export_write · contacts absent
 - generated · export_write · contacts null
+- generated · export_write · removed "x"
 - generated · export_write · threads "x"
 - generated · export_write · media "x"
 - generated · export_write · an undeclared member
@@ -1323,30 +1354,35 @@ At the run that generated this file: **2895** cases (**1417** of the run's cases
 - generated · export_write · owner absent, exported_at 7
 - generated · export_write · owner absent, tool 7
 - generated · export_write · owner absent, contacts "x"
+- generated · export_write · owner absent, removed "x"
 - generated · export_write · owner absent, threads "x"
 - generated · export_write · owner absent, media "x"
 - generated · export_write · owner_name absent, owner 7
 - generated · export_write · owner_name absent, exported_at 7
 - generated · export_write · owner_name absent, tool 7
 - generated · export_write · owner_name absent, contacts "x"
+- generated · export_write · owner_name absent, removed "x"
 - generated · export_write · owner_name absent, threads "x"
 - generated · export_write · owner_name absent, media "x"
 - generated · export_write · exported_at absent, owner 7
 - generated · export_write · exported_at absent, owner_name 7
 - generated · export_write · exported_at absent, tool 7
 - generated · export_write · exported_at absent, contacts "x"
+- generated · export_write · exported_at absent, removed "x"
 - generated · export_write · exported_at absent, threads "x"
 - generated · export_write · exported_at absent, media "x"
 - generated · export_write · tool absent, owner 7
 - generated · export_write · tool absent, owner_name 7
 - generated · export_write · tool absent, exported_at 7
 - generated · export_write · tool absent, contacts "x"
+- generated · export_write · tool absent, removed "x"
 - generated · export_write · tool absent, threads "x"
 - generated · export_write · tool absent, media "x"
 - generated · export_write · contacts absent, owner 7
 - generated · export_write · contacts absent, owner_name 7
 - generated · export_write · contacts absent, exported_at 7
 - generated · export_write · contacts absent, tool 7
+- generated · export_write · contacts absent, removed "x"
 - generated · export_write · contacts absent, threads "x"
 - generated · export_write · contacts absent, media "x"
 
