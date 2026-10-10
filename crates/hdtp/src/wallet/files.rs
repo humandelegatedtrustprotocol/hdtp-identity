@@ -299,7 +299,7 @@ mod restore_tests {
     #[test]
     fn a_record_is_named_after_its_vault() {
         assert_eq!(record_path("alina.hdtp-vault.json"), "alina.hdtp-record.json");
-        assert_eq!(record_path("/home/a/alina.hdtp-vault.json"), "/home/a/alina.hdtp-record.json");
+        assert_eq!(record_path("/srv/a/alina.hdtp-vault.json"), "/srv/a/alina.hdtp-record.json");
         assert_eq!(record_path("v.json"), "v.hdtp-record.json");
         assert_eq!(record_path("vault"), "vault.hdtp-record.json");
     }
