@@ -286,7 +286,7 @@ func readAnswer(r *exportReadResult, threadsBytes int) json.RawMessage {
 	var b bytes.Buffer
 	// A thread's answer is its CSV row and some 57 bytes of keys and quotes.
 	// and a removed thread's two names some 44 more.
-	b.Grow(len(contacts) + len(media) + threadsBytes + 64*len(r.threads) + 48*removed + 64)
+	b.Grow(len(contacts) + len(media) + threadsBytes + r.threadsEscapes + 64*len(r.threads) + 48*removed + 64)
 	b.WriteString(`{"contacts":`)
 	b.Write(contacts)
 	b.WriteString(`,"threads":[`)

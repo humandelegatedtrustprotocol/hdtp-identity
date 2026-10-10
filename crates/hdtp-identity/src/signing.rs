@@ -210,8 +210,7 @@ pub fn check(request: &Value, origin: &str, now: i64, root_spkis: &[Vec<u8>]) ->
     }
     // Whose: the root the request names, and its certificate if the host sent one.
     let expect_root = get("expect_root");
-    let fp_ok = expect_root.strip_prefix("sha256:").is_some_and(|h| h.len() == 43 && is_b64url(h));
-    if !fp_ok {
+    if !crate::ledger::is_fingerprint(expect_root) {
         return refuse("expect_root is not a root fingerprint");
     }
     if let Some(cert) = string(request, "root_cert")? {

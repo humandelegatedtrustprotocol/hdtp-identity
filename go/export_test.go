@@ -173,7 +173,7 @@ func TestWriteExportZipRefusesRatherThanOmitsAFile(t *testing.T) {
 // SPEC §9.2, import step 2: an imported leaf never replaces a pin the host validated itself, and a
 // row the host holds without a leaf takes the row's (export_read kept it only because it validated).
 func TestExportMergeNeverReplacesAHeldPin(t *testing.T) {
-	a, b, c := "sha256:" + strings.Repeat("A", 42) + "A", "sha256:" + strings.Repeat("B", 42) + "A", "sha256:" + strings.Repeat("C", 42) + "A"
+	a, b, c := "sha256:"+strings.Repeat("A", 42)+"A", "sha256:"+strings.Repeat("B", 42)+"A", "sha256:"+strings.Repeat("C", 42)+"A"
 	row := func(root, endpoint string, leaf any) map[string]any {
 		return map[string]any{"root": root, "endpoint": endpoint, "leaf": leaf, "root_cert": nil}
 	}

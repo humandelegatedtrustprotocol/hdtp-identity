@@ -24,16 +24,29 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   two is refused naming both. The corpus gains `valid-export-with-removed-thread.zip`,
   `valid-export-with-a-nameless-removed-thread.zip` and fourteen refusals (60 cases);
   `valid-export.zip` and `valid-book.zip` are byte for byte what they were. The reader keeps a removed
-  thread's names by the row (Go) or as digests (Rust), never as copies: a file whose every thread is
-  removed with a root of its own allocates 7.5–7.7× its threads.csv in the Go port and peaks at
-  3.8–3.9× in the core (11.3–11.6× and 6.1× before), and the largest such file grows a Wasm instance
-  by 84.0 MB; the memory tests hold both at N and 4N rows.
+  thread's names by the row, never as copies: a file whose every thread is removed with a root of its
+  own allocates 7.5–7.7× its threads.csv in the Go port and peaks at 3.3–3.4× in the core
+  (11.3–11.6× and 6.1× before), and the largest such file grows a Wasm instance by 76.4 MB; the memory
+  tests hold all three at N and 4N rows and at the largest file. `hdtp vectors corpus --owner` carries
+  the owner's alias with the owner, so the owner-alias case names the new owner's alias.
+- **A member's control characters have a ceiling, and a writer drops them where a contact writes.**
+  A JSON answer writes a character below U+0020 other than tab, line feed and carriage return as six
+  bytes, so a legal threads.csv of removed threads named with 200 U+0001 each grew a Wasm instance by
+  413.9 MB, the core by 15.8× and the Go port by 30× its CSV. `export_read` now counts them in
+  `contacts.csv` and `threads.csv` before parsing and refuses a member with more than 65,536
+  (`ExportLimits.control_characters`, a ceiling of this library's as a host's own, SPEC §9.2): such a
+  file is refused at 2.4× its argument in the Go port, 2.0–2.4× its CSV in the core and 1.4–1.6× its
+  argument in Wasm; 64,000 removed threads holding 65,535 of them read at 7.6×, 3.4× and 4.85×.
+  `export_write` drops them from a `display_name`, a `contact_display_name` and a thread's `topic`,
+  the fields a contact's own text reaches, so an export this library writes is never refused for
+  them.
 - **A fingerprint has one spelling.** `sha256:` and 43 base64url characters whose last is one of
   `AEIMQUYcgkosw048`: the two spare bits are zero (RFC 4648 §3.5). Any other last character spells the
   same 32 bytes again, a second name for one root: a live contact's root so spelled would have read as
   a removed thread, the owner's as a removed thread that is not the owner, and two contacts.csv rows
-  as two roots. Both ports refuse it everywhere a fingerprint is read (SEP-0004, SPEC §2); the corpus
-  holds the three aliases.
+  as two roots. Both ports refuse it everywhere a fingerprint is read (SEP-0004, SPEC §2), the
+  `expect_root` a chain is verified against included, through the one shared check; the corpus holds
+  the three aliases.
 - **The seed's six stale-sender scenarios run on both ports.** `js/intrude.mjs` carries the
   scenarios hdtp-spec's `vectors/intrude.mjs` gained for the stolen leaf key in the small form of
   §13.2 and for the sender a renewal has not reached (§2): the superseded key the host still holds

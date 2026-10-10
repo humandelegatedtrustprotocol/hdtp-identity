@@ -231,7 +231,12 @@ func writeJSONString(b *bytes.Buffer, s string) {
 			b.WriteString(`\t`)
 		default:
 			if r < 0x20 {
-				fmt.Fprintf(b, `\u%04x`, r)
+				// Written by hand: fmt allocated for each one, which a member of thousands made the
+				// reader's cost.
+				const hexDigits = "0123456789abcdef"
+				b.WriteString(`\u00`)
+				b.WriteByte(hexDigits[r>>4])
+				b.WriteByte(hexDigits[r&0xf])
 			} else {
 				b.WriteRune(r)
 			}
