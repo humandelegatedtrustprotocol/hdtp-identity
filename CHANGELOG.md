@@ -10,6 +10,11 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+- **The memory tests run no dynamic code.** `js/wasm-memory.mjs` gives each case a fresh Wasm instance
+  in a worker thread of its own, which loads the node package unchanged, where it evaluated the
+  package's source with `new Function`; `js/export-memory.test.mjs` now requires each fresh instance
+  to grow, by at least its argument where it reads one, so a case run on a reused instance fails.
+
 ## 0.8.0 — 2026-10-10
 
 - **An export carries a former contact's conversation (SEP-0004).** A removed thread is a row of
