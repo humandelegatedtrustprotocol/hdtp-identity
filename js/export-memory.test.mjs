@@ -33,9 +33,14 @@ import { fresh } from './wasm-memory.mjs';
 //   A 64 MiB messages.jsonl, 160,430 lines, in batches of 500: 2.3 MB at the most.
 // Measured 2026-10-10, with removed threads (SEP-0004): contacts' threads 4.85–4.92× as before; a file
 //   whose every thread is removed with a root of its own 4.79–4.88× (16k, 64k), and the largest such
-//   threads.csv, 118,972 threads and 16,775,123 bytes, 76.4 MB; 64,000 of them holding the 65,535
-//   control characters the ceiling lets through, 4.85×. A member denser with characters a JSON answer
-//   writes as six bytes is refused before it is parsed, but its argument is some six times its CSV and
+//   threads.csv, 118,972 threads and 16,775,123 bytes, 76.4 MB; 64,000 of them holding the 65,536
+//   control characters the ceiling lets through, 4.85×. At the largest legal threads.csv, every topic
+//   1000 line feeds or tabs, which the argument and the answer each write as two bytes: 82.4 MB, 4.91×
+//   (118.0 MB, 7.03×, before the answer's room counted them and its buffer doubled); every thread
+//   removed under one root with names of 200 characters: 67.6 MB, 4.03×. These are the costliest files
+//   this library's writer writes, measured at 16 MiB; BatonDeck takes a threads.csv of 4 MiB at most,
+//   its backstop in production. A member denser with U+0001, which a JSON answer writes as six bytes,
+//   is refused before it is parsed, but its argument is some six times its CSV and
 //   the instance copies it in: at the format's largest threads.csv the argument alone is 84.6 MB and the
 //   instance grows 118.6 MB (1.4–1.6× the argument; it was 413.9 MB before, building the answer too).
 //   No reader can refuse an argument it has not been handed: a host bounds that by the member's bytes
@@ -60,8 +65,17 @@ const contacts = Array.from({ length: 200 }, (_, i) => ({
  * one, on every row.
  */
 function readArgs(rows, removed = false) {
+  return readArgsWith(rows, removed ? (i, t) => { t.contact = fp(1000 + i); } : () => {});
+}
+
+/** readArgs's contacts and `rows` threads, each handed to `edit` before export_write writes it. */
+function readArgsWith(rows, edit) {
   const w0 = fresh();
-  const threads = Array.from({ length: rows }, (_, i) => ({ id: uuid(i), contact: fp(removed ? 1000 + i : i % 200), topic: 'a topic', created_at: '2026-09-01T00:00:00Z', last_at: '2026-09-01T00:00:00Z' }));
+  const threads = Array.from({ length: rows }, (_, i) => {
+    const t = { id: uuid(i), contact: fp(i % 200), topic: 'a topic', created_at: '2026-09-01T00:00:00Z', last_at: '2026-09-01T00:00:00Z' };
+    edit(i, t);
+    return t;
+  });
   const w = w0.call('export_write', { owner, owner_name: '', exported_at: '2026-09-27T00:00:00Z', tool: 't', contacts, threads });
   assert.ok(!w.error, w.why);
   const manifest = w0.call('export_manifest', { partial: w.partial }).manifest;
@@ -122,6 +136,35 @@ test('the largest threads.csv of removed threads, each with a root of its own, f
   assert.ok(bytes <= LARGEST_CEILING, `${(bytes / 1e6).toFixed(1)} MB, over the ${LARGEST_CEILING / 1024 / 1024} MiB ceiling`);
 });
 
+/** readArgsWith at the most rows whose threads.csv fits the 16 MiB SPEC §9.2 allows, within 64 KiB. */
+function largest(edit) {
+  const one = readArgsWith(1, edit).csv, more = readArgsWith(1001, edit).csv;
+  const per = Math.floor((more - one) / 1000);
+  const rows = Math.floor((16 * 1024 * 1024 - 4096 - (one - per)) / per);
+  const r = readArgsWith(rows, edit);
+  assert.ok(r.csv <= 16 * 1024 * 1024 && r.csv > 16 * 1024 * 1024 - 64 * 1024, `threads.csv is ${r.csv} bytes`);
+  return { ...r, rows };
+}
+
+test('the costliest largest threads.csv files this library writes fit a Durable Object, within 6 bytes per byte', () => {
+  // Every topic a run of line feeds (or tabs), which the argument and the answer each write as two
+  // bytes; every thread removed under ONE root with two names of 200 characters, which the reader
+  // compares rather than keeps.
+  for (const [what, edit] of [
+    ['every topic 1000 line feeds', (_, t) => { t.topic = '\n'.repeat(1000); }],
+    ['every topic 1000 tabs', (_, t) => { t.topic = 'a' + '\t'.repeat(1000); }],
+    ['every thread removed under one root, names of 200 characters', (_, t) => { t.contact = fp(1000); t.contact_name = 'n'.repeat(200); t.contact_display_name = 'd'.repeat(200); }],
+  ]) {
+    const { args, csv, rows } = largest(edit);
+    const { bytes, answer } = grows('export_read', args);
+    assert.equal(answer.threads.length, rows);
+    const arg = Buffer.byteLength(JSON.stringify(args));
+    console.log(`  export_read of the largest threads.csv, ${what} (${rows} threads, ${csv} bytes, ${arg} of argument): linear memory grew ${(bytes / 1e6).toFixed(1)} MB, ${(bytes / csv).toFixed(2)}× the CSV`);
+    assert.ok(bytes <= PER_CSV_BYTE * csv, `${what}: ${(bytes / csv).toFixed(2)}× the CSV, over ${PER_CSV_BYTE}×`);
+    assert.ok(bytes <= LARGEST_CEILING, `${what}: ${(bytes / 1e6).toFixed(1)} MB, over the ${LARGEST_CEILING / 1024 / 1024} MiB ceiling`);
+  }
+});
+
 test('a 64 MiB messages.jsonl read in batches holds one batch, not the file', () => {
   const core = fresh();
   const before = core.bytes();
@@ -156,7 +199,7 @@ function controlArgs(rows, per, on = rows) {
   return { args: { ...args, threads_csv: csv, manifest: canonical(m) }, csv: Buffer.byteLength(csv) };
 }
 
-test('a member dense with characters a JSON answer writes as six bytes is refused before it is parsed, and one at the ceiling is read', () => {
+test('a member dense with U+0001, which a JSON answer writes as six bytes, is refused before it is parsed, and one at the ceiling is read', () => {
   // The argument a host hands in is some six times the CSV (each U+0001 is \u0001 in its JSON), and
   // the instance holds it; before the ceiling the answer was built as large again (24.7× the CSV).
   for (const rows of [4_000, 16_000, Math.floor((16 * 1024 * 1024 - 2048) / 741)]) {
@@ -172,8 +215,15 @@ test('a member dense with characters a JSON answer writes as six bytes is refuse
   }
   // At the ceiling: 64,000 threads, a topic and two names of one U+0001 each on as many as it takes.
   const rows = 64_000, on = Math.floor(65536 / 3);
-  const { args, csv } = controlArgs(rows, 1, on);
+  const c = controlArgs(rows, 1, on);
+  // And the one more that makes it exactly the ceiling.
+  const csvText = c.args.threads_csv.replace(',a topic,', `,${'\u0001'.repeat(65536 - 3 * on)},`);
+  const m = JSON.parse(c.args.manifest);
+  m.files['threads.csv'] = createHash('sha256').update(csvText).digest('hex');
+  const canonical = (v) => (Array.isArray(v) ? `[${v.map(canonical).join(',')}]` : v && typeof v === 'object' ? `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`).join(',')}}` : JSON.stringify(v));
+  const args = { ...c.args, threads_csv: csvText, manifest: canonical(m) };
+  const csv = Buffer.byteLength(csvText);
   const { bytes } = grows('export_read', args);
-  console.log(`  export_read of ${rows} threads holding ${3 * on} control characters (${csv} bytes): ${(bytes / csv).toFixed(2)}× the CSV`);
+  console.log(`  export_read of ${rows} threads holding 65536 control characters (${csv} bytes): ${(bytes / csv).toFixed(2)}× the CSV`);
   assert.ok(bytes <= PER_CSV_BYTE * csv, `at the ceiling: ${(bytes / csv).toFixed(2)}×, over ${PER_CSV_BYTE}×`);
 });

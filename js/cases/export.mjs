@@ -59,7 +59,7 @@ export default function exportCases({ add, expect }, f) {
   add('export_write: a thread name that is not a string', 'export_write', withRemoved([...threads, { ...removedThreads[2], contact_name: 7 }]));
   // What a contact controls, and the names beside it (SPEC §9.2): every name and a topic lose every
   // character below U+0020 but tab, line feed and carriage return, which a reader answers
-  // as six bytes each; both ports write what they write for the same rows without them.
+  // as two or six bytes each; both ports write what they write for the same rows without them.
   const ctl = (t) => `\u0001${t}\u001f\t\u0000`;
   const plain = (t) => `${t}\t`;
   const controlled = (f) => ({

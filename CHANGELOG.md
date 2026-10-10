@@ -30,13 +30,17 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   tests hold all three at N and 4N rows and at the largest file. `hdtp vectors corpus --owner` carries
   the owner's alias with the owner, so the owner-alias case names the new owner's alias.
 - **A member's control characters have a ceiling, and a writer drops them where a contact writes.**
-  A JSON answer writes a character below U+0020 other than tab, line feed and carriage return as six
-  bytes, so a legal threads.csv of removed threads named with 200 U+0001 each grew a Wasm instance by
-  413.9 MB, the core by 15.8× and the Go port by 30× its CSV. `export_read` now counts them in
+  A JSON answer writes U+0001 as six bytes (`\u0001`; every character below U+0020 but tab, line
+  feed, carriage return, U+0008 and U+000C so), so a legal threads.csv of removed threads named with
+  200 U+0001 each grew a Wasm instance by 413.9 MB, the core by 15.8× and the Go port by 30× its CSV. `export_read` now counts them in
   `contacts.csv` and `threads.csv` before parsing and refuses a member with more than 65,536
   (`ExportLimits.control_characters`, a ceiling of this library's as a host's own, SPEC §9.2): such a
   file is refused at 2.4× its argument in the Go port, 2.0–2.4× its CSV in the core and 1.4–1.6× its
-  argument in Wasm; 64,000 removed threads holding 65,535 of them read at 7.6×, 3.4× and 4.85×.
+  argument in Wasm; 64,000 removed threads holding 65,536 of them read at 7.6×, 3.4× and 4.85×. The
+  answer's room now counts the two bytes of each tab, line feed and carriage return too: the largest threads.csv whose
+  every topic is 1000 line feeds, which this writer writes, read at 7.91× in the Go port (9.15×
+  before, its buffer doubling), 2.98× in the core and 82.4 MB in Wasm (118.0 MB); one whose every
+  thread is removed under one root with names of 200 characters at 5.67×, 2.41× and 67.6 MB.
   `export_write` drops them from every name (`name`, `display_name`, `contact_name`,
   `contact_display_name`) and a thread's `topic`, before a name's length is checked. An `id` is
   written as given: a thread id is chosen by whoever sends first (SPEC §7), so a host that takes one
