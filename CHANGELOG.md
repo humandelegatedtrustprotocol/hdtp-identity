@@ -10,6 +10,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+## 0.8.0 — 2026-10-10
+
 - **An export carries a former contact's conversation (SEP-0004).** A removed thread is a row of
   `threads.csv` whose `contact` is not a root of `contacts.csv`. It carries the names the contact is
   known by in two new columns, `contact_name` and `contact_display_name`, which are empty on every
