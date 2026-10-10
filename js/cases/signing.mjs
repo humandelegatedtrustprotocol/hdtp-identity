@@ -2,6 +2,8 @@
 // person sees it. One request that must pass (the control, compared whole), and a refusal per rule.
 import { b64url } from '../../../hdtp-spec/vectors/lib/keys.mjs';
 
+const B64U = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+
 export default function signing({ add, expect }, f) {
   const { now, csr, rootCsr, rootFp, rootDer, rootSpki, leafDer, p256RootDer } = f;
   const at = (seconds) => new Date(Date.parse(now) + seconds * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -94,6 +96,9 @@ export default function signing({ add, expect }, f) {
     ['a state of 31 bytes', ask({ state: b64url(new Uint8Array(31).fill(7)) }), 'state is 32 bytes, base64url'],
     ['a state outside base64url', ask({ state: '+'.repeat(43) }), 'state is 32 bytes, base64url'],
     ['an expect_root that is no fingerprint', ask({ expect_root: 'alina' }), 'expect_root is not a root fingerprint'],
+    // The root's fingerprint with its last character's spare bits set: the same 32 bytes, a second
+    // spelling, which no reader takes (SPEC §2).
+    ['an expect_root that misspells the root', ask({ expect_root: rootFp.slice(0, -1) + B64U[B64U.indexOf(rootFp.at(-1)) + 1] }), 'expect_root is not a root fingerprint'],
     ['a root_cert outside base64url', ask({ root_cert: 'MII/' }), 'root_cert is not base64url'],
     ['a root_cert that is no certificate', ask({ root_cert: b64url(new Uint8Array([48, 3, 2, 1, 1])) }), 'root_cert is not a certificate'],
     ['a root_cert that is a leaf', ask({ root_cert: leafDer }), 'root_cert is not a root certificate'],

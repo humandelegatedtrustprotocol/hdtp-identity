@@ -13,11 +13,13 @@
 //!   export_read, at most 4 bytes per byte of threads.csv: the member once more (the text its
 //!   argument's JSON decodes to), the answer (the rows again with some 57 bytes of keys each), and a
 //!   40-byte digest per thread id — about 3×; 2.9–3.0× measured on 2026-09-27. 0.3.1 held 15–16×.
-//!   With removed threads (SEP-0004), 2026-10-10: 2.9× for contacts' threads, and 3.8–3.9× for a file
-//!   whose every thread is removed with a root of its own (each also keeps a 104-byte digest record
-//!   and some 44 bytes of names in the answer); the largest such threads.csv peaks at 64.1 MB beside
-//!   its 17.0 MB of argument text. Before a removed thread's names were kept as digests it was 6.1×,
-//!   and 104.8 MB.
+//!   With removed threads (SEP-0004), 2026-10-10: 2.9× for contacts' threads; 3.3–3.4× for a file
+//!   whose every thread is removed with a root of its own (each also keeps a 36-byte record and some 44
+//!   bytes of names in the answer), the largest such threads.csv peaking at 56.1 MB beside its 17.0 MB
+//!   of argument text (6.1× and 104.8 MB before a removed thread's names were left out of the record);
+//!   3.4× for 64,000 of them holding the 65,535 control characters `CONTROL_MAX` lets through. A member
+//!   denser with characters a JSON answer writes as six bytes is refused before it is parsed, at a peak
+//!   of 2.0–2.4× its CSV (15.8× before, building an answer six times it).
 //!
 //!   export_read_end, at most 2 bytes per byte of its lists: the ids as strings borrowed from the
 //!   argument text wherever JSON did not escape them, sorted, never copied — 1.15× measured. 0.3.1
@@ -91,8 +93,8 @@ struct File {
 }
 
 /// The export_read arguments of a file of 200 contacts and `rows` threads, or, when `removed`, the same
-/// rows each a removed thread with a root of its own (SPEC §9.2): the costliest legal file per row for
-/// what the reader keeps of a removed thread.
+/// rows each a removed thread with a root of its own (SPEC §9.2): what the reader keeps of a removed
+/// thread, on every row.
 fn a_file_of(rows: usize, removed: bool) -> File {
     use serde_json::json;
     let owner = format!("sha256:{}A", "O".repeat(42));
@@ -184,4 +186,61 @@ fn export_read_of_the_largest_file_of_removed_threads() {
         peak as f64 / f.csv_bytes as f64
     );
     assert!(peak <= 4 * f.csv_bytes, "{:.2}x the CSV, over 4x", peak as f64 / f.csv_bytes as f64);
+}
+
+/// `a_file_of`'s file of removed threads with every topic and both names of every thread `per`
+/// characters U+0001 (each six bytes as JSON), the manifest re-hashed: what a writer no longer writes,
+/// and a reader is handed all the same.
+fn a_control_file(rows: usize, per: usize) -> File {
+    a_control_file_on(rows, per, rows)
+}
+
+/// `a_control_file` with only the first `on` rows so written.
+fn a_control_file_on(rows: usize, per: usize, on: usize) -> File {
+    let f = a_file_of(rows, true);
+    let mut a: serde_json::Value = serde_json::from_str(&f.args).unwrap();
+    let c = "\u{1}".repeat(per);
+    let csv =
+        a["threads_csv"].as_str().unwrap().replacen(",a topic,", &format!(",{c},"), on).replacen(",,\r\n", &format!(",{c},{c}\r\n"), on);
+    let mut m: serde_json::Value = serde_json::from_str(a["manifest"].as_str().unwrap()).unwrap();
+    m["files"]["threads.csv"] = serde_json::json!(hdtp_identity::util::hex(&hdtp_identity::util::sha256(csv.as_bytes())));
+    let csv_bytes = csv.len();
+    a["threads_csv"] = serde_json::json!(csv);
+    a["manifest"] = serde_json::json!(hdtp_identity::canonical::canonical(&m));
+    File { args: a.to_string(), csv_bytes }
+}
+
+/// A member dense with characters a JSON answer writes as six bytes each is refused before it is
+/// parsed, at N and 4N rows and at the largest the format allows, holding less than its argument; one
+/// at the ceiling is read within the bound. Before the ceiling, a threads.csv of removed threads named
+/// and titled with U+0001 peaked at 15.8× its size, building an answer six times it.
+#[test]
+fn control_characters_are_bounded_where_they_enter() {
+    let _alone = alone();
+    for rows in [4_000, 16_000, (16 * 1024 * 1024 - 2048) / 741] {
+        let f = a_control_file(rows, 200);
+        let (peak, answer) = peak_of("export_read", &f.args);
+        assert!(answer.contains("characters below U+0020"), "{}", &answer[..answer.len().min(200)]);
+        eprintln!(
+            "export_read refusing {rows} threads dense with U+0001 ({} bytes of threads.csv, {} of argument): peak {:.1} MB, {:.2}x the CSV",
+            f.csv_bytes,
+            f.args.len(),
+            peak as f64 / 1e6,
+            peak as f64 / f.csv_bytes as f64
+        );
+        assert!(peak <= 4 * f.csv_bytes, "{rows} rows: {:.2}x the CSV, over 4x", peak as f64 / f.csv_bytes as f64);
+    }
+    // At the ceiling: 64,000 threads, a topic and two names of one U+0001 each on as many of them as
+    // the ceiling takes.
+    let (rows, on) = (64_000, hdtp_identity::export::CONTROL_MAX / 3);
+    let f = a_control_file_on(rows, 1, on);
+    let (peak, answer) = peak_of("export_read", &f.args);
+    assert!(!answer.contains("\"error\""), "{}", &answer[..answer.len().min(200)]);
+    eprintln!(
+        "export_read of {rows} threads holding {} control characters ({} bytes): {:.2}x",
+        3 * on,
+        f.csv_bytes,
+        peak as f64 / f.csv_bytes as f64
+    );
+    assert!(peak <= 4 * f.csv_bytes, "at the ceiling: {:.2}x the CSV, over 4x", peak as f64 / f.csv_bytes as f64);
 }

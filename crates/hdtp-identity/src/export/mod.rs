@@ -30,6 +30,42 @@ pub const MEDIA_MAX: usize = 5 * 1024 * 1024;
 pub const BODY_MAX: usize = 16 * 1024;
 pub const NAME_MAX: usize = 200;
 pub const ATTACHMENTS_MAX: usize = 1;
+/// This library's ceiling, as a host's own (SPEC §9.2, Ceilings), on the characters below U+0020 but
+/// tab, line feed and carriage return in one CSV member: each is six bytes in `export_read`'s answer
+/// (`\u00XX`), so a member dense with them would take a reader six times its size again. A
+/// conforming writer drops them from what a contact controls.
+pub const CONTROL_MAX: usize = 65536;
+
+/// A character below U+0020 but tab, line feed and carriage return: one a JSON answer writes as six
+/// bytes.
+fn escaped_control(c: u32) -> bool {
+    c < 0x20 && c != 0x09 && c != 0x0a && c != 0x0d
+}
+
+/// A member holding more of them than `CONTROL_MAX` is refused, naming the ceiling; otherwise, how
+/// many bytes more than the member its text becomes as JSON strings: five for each of them and one for
+/// each backslash (a quote is written as two bytes in either).
+fn control_ceiling(member: &str, text: &str) -> Result<usize> {
+    let (mut n, mut backslashes) = (0, 0);
+    for b in text.bytes() {
+        if escaped_control(u32::from(b)) {
+            n += 1;
+        } else if b == b'\\' {
+            backslashes += 1;
+        }
+    }
+    if n > CONTROL_MAX {
+        return refuse(format!(
+            "{member}: {n} characters below U+0020 but tab, line feed and carriage return, over the {CONTROL_MAX} this library takes in one member"
+        ));
+    }
+    Ok(5 * n + backslashes)
+}
+
+/// `s` without them: what a writer does to what a contact controls (SPEC §9.2).
+fn drop_control(s: &str) -> String {
+    s.chars().filter(|c| !escaped_control(u32::from(*c))).collect()
+}
 
 pub const CONTACT_COLUMNS: [&str; 11] =
     ["root", "endpoint", "name", "display_name", "status", "was_active", "permissions", "their_permissions", "leaf", "root_cert", "added"];
@@ -552,52 +588,67 @@ impl Repeats {
 }
 
 /// The removed threads as they pass, to find the earliest whose names are not those of its root's
-/// earliest removed thread (SPEC §9.2: one former contact, one pair of names): the root and each name
-/// as sha256 digests beside the row number, a fixed 104 bytes a removed row and never a copy of a
-/// name, so a file whose every thread is removed costs no more than its rows (the memory tests hold
-/// it). Looked for, as `Repeats` is, when a row is refused and when the rows end.
+/// earliest removed thread (SPEC §9.2: one former contact, one pair of names): the root as a sha256
+/// digest beside the row number, 36 bytes a removed row and never a copy of a name, so a file whose
+/// every thread is removed costs little more than its rows (the memory tests hold it). The names are
+/// read again from the member, exactly, for the roots that have more than one removed thread. Looked
+/// for, as `Repeats` is, when a row is refused and when the rows end.
 struct RemovedNames {
-    seen: Vec<RemovedSeen>,
+    seen: Vec<([u8; 32], u32)>,
 }
-
-/// A removed thread as `RemovedNames` keeps it: its root's digest, each name's, and its row.
-type RemovedSeen = ([u8; 32], [u8; 32], [u8; 32], usize);
 
 impl RemovedNames {
     fn push(&mut self, t: &ThreadRow<'_>, row: usize) {
-        use crate::util::sha256;
-        self.seen.push((sha256(t.contact.as_bytes()), sha256(t.contact_name.as_bytes()), sha256(t.contact_display_name.as_bytes()), row));
+        self.seen.push((crate::util::sha256(t.contact.as_bytes()), row as u32));
     }
-    /// The earliest removed thread whose names differ from its root's first, and the column.
-    fn first(&mut self) -> Option<(usize, usize)> {
-        self.seen.sort_unstable_by(|a, b| (a.0, a.3).cmp(&(b.0, b.3)));
-        let mut out: Option<(usize, usize)> = None;
+    /// The earliest removed thread whose names differ from its root's first, and the column, reading
+    /// the names of the rows that need it from `text`, the member.
+    fn first(&mut self, text: &str) -> Option<(usize, usize)> {
+        self.seen.sort_unstable();
+        // Each later removed thread of a root, by row, to the row of its root's first.
+        let mut base_of: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+        let mut bases: HashSet<u32> = HashSet::new();
         let mut base = 0;
         for i in 0..self.seen.len() {
-            let (t, b) = (&self.seen[i], &self.seen[base]);
-            if t.0 != b.0 {
+            if self.seen[i].0 != self.seen[base].0 {
                 base = i;
-                continue;
-            }
-            let col = if t.1 != b.1 {
-                5
-            } else if t.2 != b.2 {
-                6
-            } else {
-                continue;
-            };
-            if out.is_none_or(|(n, _)| t.3 < n) {
-                out = Some((t.3, col));
+            } else if i != base {
+                base_of.insert(self.seen[i].1, self.seen[base].1);
+                bases.insert(self.seen[base].1);
             }
         }
-        out
+        if base_of.is_empty() {
+            return None;
+        }
+        let mut names: std::collections::HashMap<u32, (String, String)> = std::collections::HashMap::new();
+        for (n, fields) in csv::Records::new(text).filter_map(|r| r.ok()) {
+            let n32 = n as u32;
+            if !bases.contains(&n32) && !base_of.contains_key(&n32) {
+                continue;
+            }
+            let cell = |k: usize| fields.get(k).map(|c| csv::unguard(c).to_string()).unwrap_or_default();
+            let (name, display) = (cell(5), cell(6));
+            if let Some(b) = base_of.get(&n32) {
+                let (bn, bd) = names.get(b).cloned().unwrap_or_default();
+                if bn != name {
+                    return Some((n, 5));
+                }
+                if bd != display {
+                    return Some((n, 6));
+                }
+            }
+            if bases.contains(&n32) {
+                names.insert(n32, (name, display));
+            }
+        }
+        None
     }
 }
 
 /// The earliest refusal the rows read so far hold, an id repeated or a removed thread's names, as
 /// reading them in order would name it: at one row, the repeat first.
-fn first_thread_problem(ids: &mut Repeats, names: &mut RemovedNames, columns: &[&str]) -> Result<()> {
-    match (ids.first(), names.first()) {
+fn first_thread_problem(ids: &mut Repeats, names: &mut RemovedNames, columns: &[&str], text: &str) -> Result<()> {
+    match (ids.first(), names.first(text)) {
         (Some(d), e) if e.is_none_or(|(n, _)| d <= n) => refuse(format!("threads.csv: row {d}, column id: appears twice")),
         (_, Some((n, col))) => {
             refuse(format!("threads.csv: row {n}, column {}: not what an earlier removed thread of this contact says", columns[col]))
@@ -728,6 +779,7 @@ pub fn read<'a>(
     if Some(&sha256_hex(contacts_text.as_bytes())) != m.files.get("contacts.csv") {
         return refuse("contacts.csv: its sha256 is not manifest.json's");
     }
+    control_ceiling("contacts.csv", contacts_text)?;
     let (count, rows) = table("contacts.csv", contacts_text, &CONTACT_COLUMNS)?;
     if count > CONTACTS_ROWS_MAX {
         return refuse(format!("contacts.csv: over {CONTACTS_ROWS_MAX} rows"));
@@ -778,6 +830,7 @@ pub fn read<'a>(
         if Some(&sha256_hex(threads_text.as_bytes())) != m.files.get("threads.csv") {
             return refuse("threads.csv: its sha256 is not manifest.json's");
         }
+        let escapes = control_ceiling("threads.csv", threads_text)?;
         let roots: HashSet<&str> = contacts.iter().map(|c| c.root.as_ref()).collect();
         let columns = threads_header(threads_text);
         let named = columns.len() == THREAD_COLUMNS_NAMED.len();
@@ -792,7 +845,7 @@ pub fn read<'a>(
         // A thread's answer is its CSV row and some 57 bytes of keys and quotes, and a removed
         // thread's two names some 44 more, which only the longer header can hold.
         let names_room = if named { 48 * count } else { 0 };
-        out.reserve_exact(threads_text.len() + 64 * count + names_room + 96 * media.len() + 16);
+        out.reserve_exact(threads_text.len() + escapes + 64 * count + names_room + 96 * media.len() + 16);
         // Sized once for a file whose header can hold removed threads: grown by doubling, the old
         // buffers stay in an instance's linear memory, which never shrinks.
         let mut removed = RemovedNames { seen: Vec::with_capacity(if named { count } else { 0 }) };
@@ -812,7 +865,7 @@ pub fn read<'a>(
             let row = match checked {
                 Ok(row) => row,
                 Err(why) => {
-                    first_thread_problem(&mut ids, &mut removed, columns)?;
+                    first_thread_problem(&mut ids, &mut removed, columns, threads_text)?;
                     return refuse(why);
                 }
             };
@@ -825,7 +878,7 @@ pub fn read<'a>(
             row.write_json(&mut out, is_removed);
             threads += 1;
         }
-        first_thread_problem(&mut ids, &mut removed, columns)?;
+        first_thread_problem(&mut ids, &mut removed, columns, threads_text)?;
         // The longer header only for a file that holds a removed thread: one form for one content.
         if named && removed.seen.is_empty() {
             return refuse("threads.csv: row 1: the header names contact_name and contact_display_name, and no thread is a removed thread");
@@ -928,7 +981,7 @@ fn contact_cells(v: &Value) -> std::result::Result<Vec<String>, (usize, String)>
             ("leaf" | "root_cert", None | Some(Value::Null)) => String::new(),
             // The contact's name for themselves is their own claim: cut to 200 characters, on a
             // character, rather than refused (SPEC §9.2, what a contact controls).
-            ("display_name", Some(Value::String(s))) => s.chars().take(NAME_MAX).collect(),
+            ("display_name", Some(Value::String(s))) => drop_control(s).chars().take(NAME_MAX).collect(),
             (_, Some(Value::String(s))) if !matches!(*col, "was_active" | "permissions" | "their_permissions") => s.clone(),
             _ => return Err((k, "missing, or of the wrong type".into())),
         };
@@ -950,7 +1003,8 @@ fn thread_cells(v: &Value) -> std::result::Result<Vec<String>, (usize, String)> 
         .enumerate()
         .map(|(k, col)| match (o.get(*col), o.get(*col).and_then(|c| c.as_str())) {
             (None, _) if k >= THREAD_COLUMNS.len() => Ok(String::new()),
-            (_, Some(s)) if *col == "contact_display_name" => Ok(s.chars().take(NAME_MAX).collect()),
+            (_, Some(s)) if *col == "contact_display_name" => Ok(drop_control(s).chars().take(NAME_MAX).collect()),
+            (_, Some(s)) if *col == "topic" => Ok(drop_control(s)),
             (_, Some(s)) => Ok(s.to_string()),
             _ => Err((k, "missing, or not a string".to_string())),
         })

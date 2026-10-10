@@ -265,7 +265,7 @@ func SigningRequestCheck(request map[string]any, origin string, now time.Time, r
 		return nil, refuseSigning("state is 32 bytes, base64url")
 	}
 	expect := text["expect_root"]
-	if h, found := strings.CutPrefix(expect, "sha256:"); !found || len(h) != 43 || !isB64url(h) {
+	if !IsFingerprint(expect) {
 		return nil, refuseSigning("expect_root is not a root fingerprint")
 	}
 	if cert, has := text["root_cert"]; has {

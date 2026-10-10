@@ -101,9 +101,22 @@ fn entries(zip: &[u8]) -> Result<Vec<Entry>, String> {
     Ok(out)
 }
 
-/// One file of the corpus with every `from` in its stored members replaced by `to`.
-fn reissue(file: &str, zip: &[u8], from: &str, to: &str) -> Result<Vec<u8>, String> {
-    let (from, to) = (from.as_bytes(), to.as_bytes());
+/// `fp` with its last character the next base64url one: the same root's bits with a spare bit set,
+/// the misspelling the owner-alias case carries. A canonical root's last character is never `_`.
+pub fn alias(fp: &str) -> String {
+    const B64: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let (head, last) = fp.split_at(fp.len() - 1);
+    let at = B64.iter().position(|&c| c == last.as_bytes()[0]).unwrap_or(B64.len() - 2);
+    format!("{head}{}", B64[at + 1] as char)
+}
+
+/// Each `from` in `text` replaced by its `to`, in order.
+fn replace_each(text: &[u8], pairs: &[(&[u8], &[u8])]) -> Vec<u8> {
+    pairs.iter().fold(text.to_vec(), |t, (from, to)| replace_all(&t, from, to))
+}
+
+/// One file of the corpus with every `from` in its stored members replaced by its `to`.
+fn reissue(file: &str, zip: &[u8], pairs: &[(&[u8], &[u8])]) -> Result<Vec<u8>, String> {
     let list = entries(zip).map_err(|e| format!("{file}: {e}"))?;
     let mut out = zip.to_vec();
     // The text members first: a manifest's hashes are of their NEW bytes.
@@ -113,7 +126,7 @@ fn reissue(file: &str, zip: &[u8], from: &str, to: &str) -> Result<Vec<u8>, Stri
         let old = &zip[e.data.clone()];
         match e.method {
             0 => {
-                let new = replace_all(old, from, to);
+                let new = replace_each(old, pairs);
                 if new != old {
                     if LISTED.contains(&e.name.as_str()) {
                         rehashed.push((sha(old), sha(&new)));
@@ -124,7 +137,7 @@ fn reissue(file: &str, zip: &[u8], from: &str, to: &str) -> Result<Vec<u8>, Stri
             8 => {
                 let mut text = Vec::new();
                 DeflateDecoder::new(old).read_to_end(&mut text).map_err(|e2| format!("{file}: {}: {e2}", e.name))?;
-                if contains(&text, from) {
+                if pairs.iter().any(|(from, _)| contains(&text, from)) {
                     return Err(format!("{file}: {} is deflated and holds the owner: it cannot be re-issued byte for byte", e.name));
                 }
             }
@@ -178,19 +191,23 @@ pub fn corpus_for(owner: &str) -> Result<Vec<(String, Vec<u8>)>, String> {
     }
     let index: serde_json::Value = serde_json::from_str(embedded::CASES).map_err(|e| format!("cases.json: {e}"))?;
     let fixed = index["owner"].as_str().ok_or("cases.json: no owner")?.to_string();
+    // The owner's alias goes with the owner, or the owner-alias case would name the old owner's.
+    let (fixed_alias, owner_alias) = (alias(&fixed), alias(owner));
     // A root the corpus already gives someone else (a contact, another identity's export) would
     // change what a file means: the owner would be a contact of their own, or the file theirs.
-    if owner != fixed
-        && (embedded::CASES.contains(owner)
+    let named = |root: &str| {
+        embedded::CASES.contains(root)
             || embedded::FILES
                 .iter()
-                .any(|(_, z)| entries(z).is_ok_and(|l| l.iter().any(|e| e.method == 0 && contains(&z[e.data.clone()], owner.as_bytes())))))
-    {
+                .any(|(_, z)| entries(z).is_ok_and(|l| l.iter().any(|e| e.method == 0 && contains(&z[e.data.clone()], root.as_bytes()))))
+    };
+    if owner != fixed && (named(owner) || named(&owner_alias)) {
         return Err(format!("{owner}: the corpus already names this root as someone other than the owner"));
     }
-    let mut out = vec![("cases.json".to_string(), embedded::CASES.replace(&fixed, owner).into_bytes())];
+    let pairs: [(&[u8], &[u8]); 2] = [(fixed.as_bytes(), owner.as_bytes()), (fixed_alias.as_bytes(), owner_alias.as_bytes())];
+    let mut out = vec![("cases.json".to_string(), embedded::CASES.replace(&fixed, owner).replace(&fixed_alias, &owner_alias).into_bytes())];
     for (name, zip) in embedded::FILES {
-        out.push((name.to_string(), reissue(name, zip, &fixed, owner)?));
+        out.push((name.to_string(), reissue(name, zip, &pairs)?));
     }
     Ok(out)
 }

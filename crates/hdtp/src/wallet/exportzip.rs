@@ -385,6 +385,14 @@ mod tests {
             let index: Value = serde_json::from_slice(&std::fs::read(dir.path().join("cases.json")).unwrap()).unwrap();
             assert_eq!(index["owner"], owner);
             assert!(!serde_json::to_string(&index).unwrap().contains(&fixed_owner), "cases.json still names the fixed owner");
+            // The owner-alias case carries THIS owner's alias, so its `about` stays true.
+            let aliased = std::fs::read(dir.path().join("removed-thread-alias-of-the-owner.zip")).unwrap();
+            let (old_alias, new_alias) = (crate::vectors::corpus::alias(&fixed_owner), crate::vectors::corpus::alias(&owner));
+            let stored = |zip: &[u8], root: &str| zip.windows(root.len()).any(|w| w == root.as_bytes());
+            assert!(stored(&aliased, &new_alias), "the owner-alias case lacks the new owner's alias");
+            for name in std::fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().path()) {
+                assert!(!stored(&std::fs::read(&name).unwrap(), &old_alias), "{}: still names the fixed owner's alias", name.display());
+            }
             answers_the_corpus_in(dir.path());
             // The control: the committed valid export, read as this owner, is another identity's.
             let refused = read_export(&corpus().join("valid-export.zip"), &owner, index["now"].as_str().unwrap(), 1 << 30).err().unwrap();

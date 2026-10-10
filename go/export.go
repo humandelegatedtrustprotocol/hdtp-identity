@@ -34,7 +34,12 @@ const (
 	ExportBodyMax        = 16 * 1024
 	ExportNameMax        = 200
 	ExportAttachmentsMax = 1
-	exportVersion        = 1
+	// ExportControlMax is this library's ceiling, as a host's own (SPEC §9.2, Ceilings), on the
+	// characters below U+0020 but tab, line feed and carriage return in one CSV member: each is six
+	// bytes in export_read's answer (\u00XX), so a member dense with them would take a reader six times
+	// its size again. A conforming writer drops them from what a contact controls.
+	ExportControlMax = 65536
+	exportVersion    = 1
 )
 
 var (
@@ -518,6 +523,42 @@ func firstNamesDiffer(threads []ThreadRow, at []removedAt) (n, col int, found bo
 	return n, col, found
 }
 
+// escapedControl is a character below U+0020 but tab, line feed and carriage return: one a JSON
+// answer writes as six bytes.
+func escapedControl(b byte) bool { return b < 0x20 && b != '\t' && b != '\n' && b != '\r' }
+
+// controlCeiling refuses a member holding more of them than ExportControlMax, naming the ceiling,
+// and answers how many bytes more than the member its text becomes as JSON strings: five for each of
+// them and one for each backslash (a quote is written as two bytes in either).
+func controlCeiling(member, text string) (int, error) {
+	n, backslashes := 0, 0
+	for i := 0; i < len(text); i++ {
+		switch {
+		case escapedControl(text[i]):
+			n++
+		case text[i] == '\\':
+			backslashes++
+		}
+	}
+	if n > ExportControlMax {
+		return 0, exportRefuse(fmt.Sprintf("%s: %d characters below U+0020 but tab, line feed and carriage return, over the %d this library takes in one member", member, n, ExportControlMax))
+	}
+	return 5*n + backslashes, nil
+}
+
+// dropControl is s without them: what a writer does to what a contact controls (SPEC §9.2).
+func dropControl(s string) string {
+	if strings.IndexFunc(s, func(r rune) bool { return r < 0x20 && escapedControl(byte(r)) }) < 0 {
+		return s
+	}
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 && escapedControl(byte(r)) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
 // threadsHeaderRefusal is the refusal of a threads.csv header that is neither of SPEC §9.2's two.
 const threadsHeaderRefusal = "threads.csv: row 1: the header is not id,contact,topic,created_at,last_at, nor that and contact_name,contact_display_name"
 
@@ -862,9 +903,11 @@ func memberLimit(name string) int {
 }
 
 type exportReadResult struct {
-	contacts []any
-	threads  []ThreadRow
-	media    []ExportMedia
+	// threadsEscapes is how many bytes more than threads.csv its text becomes in the answer.
+	threadsEscapes int
+	contacts       []any
+	threads        []ThreadRow
+	media          []ExportMedia
 }
 
 // exportRead is §9.2's validation of everything but the messages and the media bytes, in the core's
@@ -957,6 +1000,9 @@ func exportRead(directory []ExportEntry, manifestText, contactsCSV, threadsCSV *
 	if sha256Hex([]byte(*contactsCSV)) != m.files["contacts.csv"] {
 		return nil, exportRefuse("contacts.csv: its sha256 is not manifest.json's")
 	}
+	if _, err := controlCeiling("contacts.csv", *contactsCSV); err != nil {
+		return nil, err
+	}
 	var count int
 	if err := csvTable("contacts.csv", *contactsCSV, contactColumns, &count, nil); err != nil {
 		return nil, err
@@ -989,6 +1035,7 @@ func exportRead(directory []ExportEntry, manifestText, contactsCSV, threadsCSV *
 	}
 
 	var threads []ThreadRow
+	escapes := 0
 	if has("threads.csv") {
 		if threadsCSV == nil {
 			return nil, exportRefuse("threads_csv is required: the file has threads.csv")
@@ -998,6 +1045,9 @@ func exportRead(directory []ExportEntry, manifestText, contactsCSV, threadsCSV *
 		}
 		if sha256Hex([]byte(*threadsCSV)) != m.files["threads.csv"] {
 			return nil, exportRefuse("threads.csv: its sha256 is not manifest.json's")
+		}
+		if escapes, err = controlCeiling("threads.csv", *threadsCSV); err != nil {
+			return nil, err
 		}
 		columns := threadsHeader(*threadsCSV)
 		named := len(columns) == len(threadColumnsNamed)
@@ -1060,7 +1110,7 @@ func exportRead(directory []ExportEntry, manifestText, contactsCSV, threadsCSV *
 	} else if threadsCSV != nil {
 		return nil, exportRefuse("threads_csv is given, and the file has no threads.csv")
 	}
-	return &exportReadResult{contacts: contacts, threads: threads, media: media}, nil
+	return &exportReadResult{threadsEscapes: escapes, contacts: contacts, threads: threads, media: media}, nil
 }
 
 // exportEnd is what the host gathered while it streamed messages.jsonl.
@@ -1444,9 +1494,10 @@ func contactCells(v any) ([]string, *cellRefusal) {
 				return nil, wrong
 			}
 			if col == "display_name" {
-				// The contact's name for themselves is their own claim: cut to 200 characters, on a
-				// character, rather than refused (SPEC §9.2, what a contact controls).
-				s = truncateRunes(s, ExportNameMax)
+				// The contact's name for themselves is their own claim: its control characters
+				// dropped, and cut to 200 characters, on a character, rather than refused (SPEC §9.2,
+				// what a contact controls).
+				s = truncateRunes(dropControl(s), ExportNameMax)
 			}
 			cells = append(cells, s)
 		}
@@ -1485,7 +1536,9 @@ func threadCells(v any) ([]string, *cellRefusal) {
 		case !isText:
 			return nil, &cellRefusal{k, "missing, or not a string"}
 		case col == "contact_display_name":
-			s = truncateRunes(s, ExportNameMax)
+			s = truncateRunes(dropControl(s), ExportNameMax)
+		case col == "topic":
+			s = dropControl(s)
 		}
 		cells = append(cells, s)
 	}

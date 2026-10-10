@@ -27,7 +27,7 @@ func TestTheContractsExportLimitsAreThePortsConstants(t *testing.T) {
 	}
 	port := map[string]int{
 		"manifest": ExportManifestMax, "contacts_csv": ExportContactsMax, "contacts_rows": ExportContactsRowMax, "threads_csv": ExportThreadsMax,
-		"messages_line": ExportLineMax, "media_file": ExportMediaMax, "body": ExportBodyMax, "name_characters": ExportNameMax, "attachments": ExportAttachmentsMax,
+		"messages_line": ExportLineMax, "media_file": ExportMediaMax, "body": ExportBodyMax, "name_characters": ExportNameMax, "attachments": ExportAttachmentsMax, "control_characters": ExportControlMax,
 	}
 	if !reflect.DeepEqual(contract.Defs.ExportLimits.Const, port) {
 		t.Fatalf("contract/contract.json's ExportLimits %v and the Go port's constants %v", contract.Defs.ExportLimits.Const, port)
