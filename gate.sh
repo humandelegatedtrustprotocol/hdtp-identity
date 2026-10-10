@@ -157,10 +157,28 @@ step "No tracked text carries a path from the machine that wrote it"
 # writer's own machine, and in a public repository that is a stranger reading someone's home directory
 # layout. Refused in every tracked text (-I leaves the binaries alone); a commit message is held to the
 # same rule by githooks/commit-msg, which this step cannot see.
-if git grep -n -I -E '/(Users|home/[A-Za-z0-9._-]+)/' -- . >&2; then
+LOCAL_PATH='/(Users|home/[A-Za-z0-9._-]+)/'
+if git grep -n -I -E "$LOCAL_PATH" -- . >&2; then
   echo "gate: the lines above carry a path from the machine that wrote them; say \"the worktree\" or \"the sibling checkout\"" >&2
   exit 1
 fi
+# The hook and the pattern above are two copies of one rule: each planted message is judged by both.
+# The plants are spelled in two halves so that this file does not carry what it plants.
+MSGS="$(mktemp -d)"
+MAC="/Users""/alina/x"
+LINUX="/home""/alina/x"
+for kept in "$MAC" "$LINUX"; do
+  printf 'Fix\n\nbuilt in %s\n' "$kept" > "$MSGS/m"
+  printf '%s\n' "$kept" | grep -q -E "$LOCAL_PATH" || { echo "gate: the tree's pattern lets $kept through" >&2; exit 1; }
+  if bash githooks/commit-msg "$MSGS/m" 2>/dev/null; then echo "gate: githooks/commit-msg let $kept through" >&2; exit 1; fi
+done
+printf 'Fix\n\nbuilt in the worktree\n' > "$MSGS/clean"
+printf 'Fix\n\nbuilt in the worktree\n# %s\n' "$MAC" > "$MSGS/comment"
+printf 'Fix\n\nbuilt in the worktree\n# ------------------------ >8 ------------------------\n%s\n' "$LINUX" > "$MSGS/scissors"
+for m in clean comment scissors; do
+  bash githooks/commit-msg "$MSGS/$m" || { echo "gate: githooks/commit-msg refused a message that keeps no path ($m)" >&2; exit 1; }
+done
+rm -rf "$MSGS"
 
 step "Every MUST in the specification names something that holds it, and the record is current"
 node js/musts.mjs
