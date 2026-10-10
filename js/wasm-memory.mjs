@@ -10,7 +10,8 @@ import { createRequire } from 'node:module';
 import { MessageChannel, Worker, receiveMessageOnPort, workerData } from 'node:worker_threads';
 
 const ROLE = 'hdtp-identity wasm-memory';
-const TIMEOUT_MS = 120_000;
+// Under the gate's --test-timeout of 60 s, which cannot fire while this thread waits.
+const TIMEOUT_MS = 50_000;
 
 if (workerData && workerData.role === ROLE) {
   const { port, flag } = workerData;
@@ -54,7 +55,11 @@ export function fresh() {
     if (closed) throw new Error('this instance is closed');
     Atomics.store(flag, 0, 0);
     port1.postMessage(request);
-    if (Atomics.wait(flag, 0, 0, TIMEOUT_MS) === 'timed-out') throw new Error(`the Wasm worker did not answer within ${TIMEOUT_MS} ms`);
+    if (Atomics.wait(flag, 0, 0, TIMEOUT_MS) === 'timed-out') {
+      closed = true;
+      worker.terminate();
+      throw new Error(`the Wasm worker did not answer within ${TIMEOUT_MS} ms`);
+    }
     const reply = receiveMessageOnPort(port1).message;
     if (reply.failed) throw new Error(reply.failed);
     return reply;

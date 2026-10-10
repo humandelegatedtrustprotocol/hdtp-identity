@@ -95,7 +95,12 @@ function grows(name, args) {
     const before = core.bytes();
     const answer = core.call(name, args);
     assert.ok(!answer.error, `${name}: ${answer.why}`);
-    return { bytes: core.bytes() - before, answer };
+    const bytes = core.bytes() - before;
+    // The instance copies its argument in, so a fresh one grows by at least that much: less means the
+    // call ran on memory an earlier call had already grown.
+    const arg = Buffer.byteLength(JSON.stringify(args));
+    assert.ok(bytes >= arg, `${name}: grew ${bytes} bytes, less than its ${arg}-byte argument`);
+    return { bytes, answer };
   } finally {
     core.close();
   }
@@ -193,6 +198,7 @@ test('a 64 MiB messages.jsonl read in batches holds one batch, not the file', (t
     assert.ok(!r.error, r.why);
     peak = Math.max(peak, core.bytes() - before);
   }
+  assert.ok(peak > 0, 'the instance did not grow');
   console.log(`  export_read_messages over ${bytes} bytes (${n} lines) in batches of 500: linear memory grew ${(peak / 1e6).toFixed(1)} MB at the most`);
   assert.ok(peak <= BATCHES_CEILING, `${(peak / 1e6).toFixed(1)} MB, over ${BATCHES_CEILING / 1024 / 1024} MiB`);
 });
@@ -219,6 +225,7 @@ test('a member dense with U+0001, which a JSON answer writes as six bytes, is re
     const before = core.bytes();
     const answer = core.call('export_read', args);
     const bytes = core.bytes() - before;
+    assert.ok(bytes > 0, `${rows} rows: the instance did not grow`);
     assert.ok(answer.error && /characters below U\+0020/.test(answer.why), JSON.stringify(answer).slice(0, 200));
     const arg = Buffer.byteLength(JSON.stringify(args));
     console.log(`  export_read refusing ${rows} threads dense with U+0001 (${csv} bytes, ${arg} of argument): linear memory grew ${(bytes / 1e6).toFixed(1)} MB, ${(bytes / arg).toFixed(2)}× the argument`);
