@@ -70,15 +70,20 @@ function readArgs(rows, removed = false) {
 
 /** readArgs's contacts and `rows` threads, each handed to `edit` before export_write writes it. */
 function readArgsWith(rows, edit) {
-  const w0 = fresh();
   const threads = Array.from({ length: rows }, (_, i) => {
     const t = { id: uuid(i), contact: fp(i % 200), topic: 'a topic', created_at: '2026-09-01T00:00:00Z', last_at: '2026-09-01T00:00:00Z' };
     edit(i, t);
     return t;
   });
-  const w = w0.call('export_write', { owner, owner_name: '', exported_at: '2026-09-27T00:00:00Z', tool: 't', contacts, threads });
-  assert.ok(!w.error, w.why);
-  const manifest = w0.call('export_manifest', { partial: w.partial }).manifest;
+  const w0 = fresh();
+  let w, manifest;
+  try {
+    w = w0.call('export_write', { owner, owner_name: '', exported_at: '2026-09-27T00:00:00Z', tool: 't', contacts, threads });
+    assert.ok(!w.error, w.why);
+    manifest = w0.call('export_manifest', { partial: w.partial }).manifest;
+  } finally {
+    w0.close();
+  }
   const directory = ['manifest.json', 'contacts.csv', 'threads.csv'].map((name) => ({ name, size: 1, encrypted: false, mode: 0 }));
   return { args: { directory, manifest, contacts_csv: w.contacts_csv, threads_csv: w.threads_csv, owner, now: '2026-09-27T00:00:00Z' }, csv: Buffer.byteLength(w.threads_csv) };
 }
@@ -86,10 +91,14 @@ function readArgsWith(rows, edit) {
 /** The growth of a fresh instance's linear memory across one call, and the answer. */
 function grows(name, args) {
   const core = fresh();
-  const before = core.bytes();
-  const answer = core.call(name, args);
-  assert.ok(!answer.error, `${name}: ${answer.why}`);
-  return { bytes: core.bytes() - before, answer };
+  try {
+    const before = core.bytes();
+    const answer = core.call(name, args);
+    assert.ok(!answer.error, `${name}: ${answer.why}`);
+    return { bytes: core.bytes() - before, answer };
+  } finally {
+    core.close();
+  }
 }
 
 test('export_read holds at most 6 bytes per byte of threads.csv, at N and 4N rows, and when every thread is removed', () => {
@@ -165,8 +174,9 @@ test('the costliest largest threads.csv files this library writes fit a Durable 
   }
 });
 
-test('a 64 MiB messages.jsonl read in batches holds one batch, not the file', () => {
+test('a 64 MiB messages.jsonl read in batches holds one batch, not the file', (t) => {
   const core = fresh();
+  t.after(() => core.close());
   const before = core.bytes();
   const threads = Array.from({ length: 2000 }, (_, i) => uuid(i));
   const roots = contacts.map((c) => c.root);
@@ -199,12 +209,13 @@ function controlArgs(rows, per, on = rows) {
   return { args: { ...args, threads_csv: csv, manifest: canonical(m) }, csv: Buffer.byteLength(csv) };
 }
 
-test('a member dense with U+0001, which a JSON answer writes as six bytes, is refused before it is parsed, and one at the ceiling is read', () => {
+test('a member dense with U+0001, which a JSON answer writes as six bytes, is refused before it is parsed, and one at the ceiling is read', (t) => {
   // The argument a host hands in is some six times the CSV (each U+0001 is \u0001 in its JSON), and
   // the instance holds it; before the ceiling the answer was built as large again (24.7× the CSV).
   for (const rows of [4_000, 16_000, Math.floor((16 * 1024 * 1024 - 2048) / 741)]) {
     const { args, csv } = controlArgs(rows, 200);
     const core = fresh();
+    t.after(() => core.close());
     const before = core.bytes();
     const answer = core.call('export_read', args);
     const bytes = core.bytes() - before;
