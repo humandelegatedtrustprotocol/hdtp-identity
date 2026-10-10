@@ -95,6 +95,7 @@ will be none. This repository's hooks are its own, in `githooks/`, installed by
 | Hook | Runs |
 |---|---|
 | `pre-commit` | rustfmt over each staged `.rs` file, re-staged; `cargo clippy --workspace --all-targets --locked -- -D warnings` |
+| `commit-msg` | refuses a message that carries a path under `/Users` or `/home`: a message is published with its commit, and the gate holds the tracked files to the same rule but cannot see a message. Say "the worktree" or "the sibling checkout" instead |
 | `post-commit` | `node js/verify.mjs --inputs`: says when the commit moved a build input and the pin is behind |
 | `pre-push` | `sh gate.sh` |
 
@@ -105,7 +106,7 @@ the pin was built from, and the bytes in `js/pkg-*` are the pinned ones; Appendi
 Wasm and through the Go port; the intrusion scenarios through both; the contract's validator and
 `CONTRACT.md`; hdtp-spec's committed JSON Schema against this contract; the parity of the two
 ports; the harness's own tests; the article before the name, which takes "an"; no generation
-suffix in a name; the MUST registry and `PROOFS.md`; the seed proving the specification; and one line per suite. It needs `../hdtp-spec` and the pinned packages above.
+suffix in a name; no path from the machine that wrote it in any tracked text; the MUST registry and `PROOFS.md`; the seed proving the specification; and one line per suite. It needs `../hdtp-spec` and the pinned packages above.
 
 Outside contributors who cannot run the whole gate say in the pull request which steps they ran.
 
