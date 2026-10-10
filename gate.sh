@@ -157,9 +157,10 @@ step "No tracked text carries a path from the machine that wrote it"
 # writer's own machine, and in a public repository that is a stranger reading someone's home directory
 # layout. Refused in every tracked text (-I leaves the binaries alone); a commit message is held to the
 # same rule by githooks/commit-msg, which this step cannot see. A /home path counts where it begins a
-# path (not inside one, as in a route like a/home/x) and names someone, whatever follows the name.
+# path (not inside one, as in a route like a/home/x) and names someone, whatever follows the name (a
+# slash, a space, punctuation or the end of the line).
 # The pattern and the plants are spelled in halves so that this file does not carry what it refuses.
-LOCAL_PATH="/Users""/|(^|[^A-Za-z0-9_/-])/home""/[A-Za-z0-9._-]+([/\"'\`]|[[:space:]]|\$)"
+LOCAL_PATH="/Users""/|(^|[^A-Za-z0-9_/-])/home""/[A-Za-z0-9._-]+"
 if git grep -n -I -E "$LOCAL_PATH" -- . >&2; then
   echo "gate: the lines above carry a path from the machine that wrote them; say \"the worktree\" or \"the sibling checkout\"" >&2
   exit 1
@@ -174,9 +175,10 @@ SCISSORS="# ------------------------ >8 ------------------------"
 printf 'Fix\n\nbuilt in %s\n' "$MAC" > "$MSGS/mac"
 printf 'Fix\n\nbuilt in %s\n' "$LINUX" > "$MSGS/linux"
 printf 'Fix\n\n%s\n' "$BARE" > "$MSGS/bare"
+printf 'Fix\n\n(see %s)\n' "/home""/alina" > "$MSGS/paren"
 printf 'Fix\n\nbuilt in the worktree\n# %s\n' "$MAC" > "$MSGS/comment"
 printf 'Fix\n\nbuilt in the worktree\n%s\n%s\n' "$SCISSORS" "$LINUX" > "$MSGS/scissors"
-for m in mac linux bare comment scissors; do
+for m in mac linux bare paren comment scissors; do
   grep -q -E "$LOCAL_PATH" "$MSGS/$m" || { echo "gate: the tree's pattern lets the $m plant through" >&2; exit 1; }
   if bash githooks/commit-msg "$MSGS/$m" 2>/dev/null; then echo "gate: githooks/commit-msg let the $m plant through" >&2; exit 1; fi
 done
