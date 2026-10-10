@@ -152,6 +152,16 @@ if { git grep -n -I -E "$GENERATION" -- . ; git ls-files | grep -E "$GENERATION"
   exit 1
 fi
 
+step "No tracked text carries a path from the machine that wrote it"
+# A home directory on macOS or Linux — a path under /Users or /home, whatever the name — is the
+# writer's own machine, and in a public repository that is a stranger reading someone's home directory
+# layout. Refused in every tracked text (-I leaves the binaries alone); a commit message is held to the
+# same rule by githooks/commit-msg, which this step cannot see.
+if git grep -n -I -E '/(Users|home/[A-Za-z0-9._-]+)/' -- . >&2; then
+  echo "gate: the lines above carry a path from the machine that wrote them; say \"the worktree\" or \"the sibling checkout\"" >&2
+  exit 1
+fi
+
 step "Every MUST in the specification names something that holds it, and the record is current"
 node js/musts.mjs
 node js/record.mjs --check --manifest "$HDTP_RESULTS/parity-manifest.json"
