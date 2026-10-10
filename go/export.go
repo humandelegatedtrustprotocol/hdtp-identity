@@ -1499,6 +1499,9 @@ func contactCells(v any) ([]string, *cellRefusal) {
 				// what a contact controls).
 				s = truncateRunes(dropControl(s), ExportNameMax)
 			}
+			if col == "name" {
+				s = dropControl(s)
+			}
 			cells = append(cells, s)
 		}
 	}
@@ -1537,7 +1540,7 @@ func threadCells(v any) ([]string, *cellRefusal) {
 			return nil, &cellRefusal{k, "missing, or not a string"}
 		case col == "contact_display_name":
 			s = truncateRunes(dropControl(s), ExportNameMax)
-		case col == "topic":
+		case col == "topic", col == "contact_name":
 			s = dropControl(s)
 		}
 		cells = append(cells, s)
