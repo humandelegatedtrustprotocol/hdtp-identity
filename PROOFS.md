@@ -7,9 +7,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed as proven that did not pass.
 
-Specification: **1.0.0**. **101** normative sentences, **2923** cross-port parity cases over **54** guarded functions.
+Specification: **1.0.0**. **101** normative sentences, **2926** cross-port parity cases over **54** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 1.0.0): **5846** answers, of which **0** do not hold to the shape it declares. Of **131** declared error codes, **131** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 1.0.0): **5852** answers, of which **0** do not hold to the shape it declares. Of **131** declared error codes, **131** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 101 normative sentences of the specification
 
@@ -231,7 +231,7 @@ by declaration. A row with nothing in its last column would fail `js/musts.mjs`.
 | `14.4#1` | An endpoint **MUST** keep the key identifiers of every leaf it has held for an identity it still serves — fingerprints, never keys past their `notAfter`. | `scenario:a former key of a still-served identity gets the current chain`, `gateway:TestStaleKidIsAnsweredWithTheCurrentChain` |
 | `14.4#2` | A caller **MUST** follow `certificate_renewed` at most once per call, and only when the chain it carries is newer than or equal to its pin (§14.3): an older chain, a chain to another root, or a chain naming another address is discarded and the call fails as it would have. | `rust:certificate_renewed_cases`, `go:TestChainCases` |
 
-## The 2923 cross-port parity cases
+## The 2926 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -239,7 +239,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **2923** cases (**1417** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
+At the run that generated this file: **2926** cases (**1417** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
 
 ### `address_guard` — 51 cases · whole on success
 
@@ -1007,7 +1007,7 @@ At the run that generated this file: **2923** cases (**1417** of the run's cases
 - generated · export_merge · held absent, rows "x"
 - generated · export_merge · rows absent, held "x"
 
-### `export_read` — 110 cases · whole on success
+### `export_read` — 112 cases · whole on success
 
 - export_read: what export_write wrote
 - export_read at an instant that does not read
@@ -1058,6 +1058,7 @@ At the run that generated this file: **2923** cases (**1417** of the run's cases
 - export_read: what a contact controls, as written, reads back
 - export_read with nothing to work from
 - export_read with a directory entry that does not read
+- export_read: threads.csv with as many control characters as the ceiling
 - export_read: contacts.csv stated over 4 MiB
 - export_read: contacts.csv over 4 MiB though its entry says less
 - export_read: contacts.csv of 5001 rows
@@ -1072,6 +1073,7 @@ At the run that generated this file: **2923** cases (**1417** of the run's cases
 - export_read: a contact whose root_cert is a leaf
 - export_read: a contact whose root_cert is another identity's root
 - export_read: a manifest with a member it does not hold
+- export_read: threads.csv with one control character over the ceiling
 - export_read: a contact added at an instant with a lower-case z
 - export_read: a thread created at an instant with a lower-case z
 - export_read: a manifest exported at an instant with a lower-case z
@@ -1284,7 +1286,7 @@ At the run that generated this file: **2923** cases (**1417** of the run's cases
 - generated · export_read_messages · media absent, contacts "x"
 - generated · export_read_messages · media absent, first_line "7"
 
-### `export_write` — 90 cases · whole on success
+### `export_write` — 91 cases · whole on success
 
 - export_write: every formula prefix, quoting and line breaks, sorted rows
 - export_write: a book
@@ -1295,6 +1297,7 @@ At the run that generated this file: **2923** cases (**1417** of the run's cases
 - export_write: two removed threads of one root with different names
 - export_write: a removed thread whose own name is over 200 characters
 - export_write: a thread name that is not a string
+- export_write: control characters in what a contact controls, dropped
 - export_write: a 300-character display name and permissions §8 does not have
 - export_write: the rows book_rows made
 - export_write with nothing to work from
