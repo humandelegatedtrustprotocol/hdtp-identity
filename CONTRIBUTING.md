@@ -95,7 +95,7 @@ will be none. This repository's hooks are its own, in `githooks/`, installed by
 | Hook | Runs |
 |---|---|
 | `pre-commit` | rustfmt over each staged `.rs` file, re-staged; `cargo clippy --workspace --all-targets --locked -- -D warnings` |
-| `commit-msg` | refuses a message that carries a path under `/Users` or `/home`: a message is published with its commit, and the gate holds the tracked files to the same rule but cannot see a message. Say "the worktree" or "the sibling checkout" instead |
+| `commit-msg` | refuses a message that carries a path under `/Users` or `/home`: a message is published with its commit, and the gate holds the tracked files to the same rule but cannot see a message. The whole message file is read, comment lines and a scissors tail included, since git keeps both for `-m` and `-F`; a `git commit -v` whose diff removes such a path is refused, so commit that without `-v`. Say "the worktree" or "the sibling checkout" instead |
 | `post-commit` | `node js/verify.mjs --inputs`: says when the commit moved a build input and the pin is behind |
 | `pre-push` | `sh gate.sh` |
 
