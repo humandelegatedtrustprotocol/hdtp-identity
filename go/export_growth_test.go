@@ -1,3 +1,5 @@
+//go:build unix
+
 package hdtpidentity
 
 import (
@@ -6,20 +8,29 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"runtime"
+	"runtime/debug"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
 
 // The export's functions grow linearly in the rows a file holds. Each is timed at N and 4N rows
-// (threads, messages, and held and imported contacts), the two sizes interleaved over five rounds so
-// a busy machine slows both alike, the best round of each kept; 4N may take at most 8× N. Why 8:
-// linear work is 4×, n·log n about 4.6×, and a scan per row 16× — the defect of 0.3.0, where
-// export_read took 0.2 s at 2k threads and 11 s at 16k in the Wasm core. 8 is halfway (in log terms)
-// between linear and quadratic: a 2× margin for noise that no quadratic fits in. A function under
-// 20 ms at 4N is too fast to judge and passes. The bound is on rows and a ratio, never on seconds,
-// so it cannot go stale with the machine. The Rust core's
-// export_functions_grow_linearly_in_the_rows_of_a_file is the same test.
+// (threads, messages, and held and imported contacts), the two sizes interleaved over five rounds,
+// the best round of each kept; 4N may take at most 8× N. Why 8: linear work is 4×, n·log n about
+// 4.6×, and a scan per row 16× — the defect of 0.3.0, where export_read took 0.2 s at 2k threads
+// and 11 s at 16k in the Wasm core. 8 is halfway (in log terms) between linear and quadratic: a 2×
+// margin for noise that no quadratic fits in. A function under 20 ms at 4N is too fast to judge and
+// passes. The bound is on rows and a ratio, never on seconds, so it cannot go stale with the
+// machine.
+//
+// The time is the process's CPU time (getrusage), not the wall clock, with the collector off while
+// a function runs and a collection before each: the bound is on the functions' own work. On the wall
+// clock, with 24 busy processes beside the test, the bound failed 10 runs of 10 at ratios up to 31×
+// for unchanged code; on CPU time with the collector running it failed 3 of 50, export_read_messages
+// at 8.1× to 8.3× (5.7× on an idle machine), and 4.0× with the collector off. The Rust core's
+// export_functions_grow_linearly_in_the_rows_of_a_file holds the same bound on the wall clock.
 func TestExportFunctionsGrowLinearlyInTheRowsOfAFile(t *testing.T) {
 	const n = 5000
 	owner := "sha256:" + strings.Repeat("O", 42) + "A"
@@ -66,36 +77,46 @@ func TestExportFunctionsGrowLinearlyInTheRowsOfAFile(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	cpu := func() float64 {
+		var ru syscall.Rusage
+		must(syscall.Getrusage(syscall.RUSAGE_SELF, &ru))
+		return float64(ru.Utime.Nano()+ru.Stime.Nano()) / 1e9
+	}
+	start := func() float64 {
+		runtime.GC()
+		return cpu()
+	}
+	defer debug.SetGCPercent(debug.SetGCPercent(-1))
 	pass := func(d data) [6]float64 {
 		var out [6]float64
-		clock := time.Now()
+		clock := start()
 		w, err := exportWrite(owner, "", time.Unix(0, 0), "t", contacts, d.threads, nil)
 		must(err)
-		out[0] = time.Since(clock).Seconds()
+		out[0] = cpu() - clock
 		partial, _ := json.Marshal(w.partial)
 		manifest, err := finishManifest(partial, nil, 0)
 		must(err)
-		clock = time.Now()
+		clock = start()
 		_, err = exportRead(directory, &manifest, &w.contactsCSV, w.threadsCSV, owner, time.Unix(0, 0))
 		must(err)
-		out[1] = time.Since(clock).Seconds()
-		clock = time.Now()
+		out[1] = cpu() - clock
+		clock = start()
 		lines, _, err := exportWriteMessages(d.messages, nil)
 		must(err)
-		out[2] = time.Since(clock).Seconds()
-		clock = time.Now()
+		out[2] = cpu() - clock
+		clock = start()
 		_, _, err = exportReadMessages(lines, 1, messageNames{threads: setOf(d.threadIDs), contacts: setOf(roots), media: strSet{}})
 		must(err)
-		out[3] = time.Since(clock).Seconds()
+		out[3] = cpu() - clock
 		withMessages, err := finishManifest(partial, &hash, uint64(d.rows))
 		must(err)
-		clock = time.Now()
+		clock = start()
 		must(exportReadEnd(withMessages, exportEnd{messagesSHA256: &hash, lines: uint64(d.rows), ids: d.ids, msgIDs: d.msgIDs, replyTos: d.replyTos, mediaSeen: []string{}}))
-		out[4] = time.Since(clock).Seconds()
-		clock = time.Now()
+		out[4] = cpu() - clock
+		clock = start()
 		_, _, _, err = exportMerge(d.many, d.many)
 		must(err)
-		out[5] = time.Since(clock).Seconds()
+		out[5] = cpu() - clock
 		return out
 	}
 	names := []string{"export_write", "export_read", "export_write_messages", "export_read_messages", "export_read_end", "export_merge"}
