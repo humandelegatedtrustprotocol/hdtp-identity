@@ -31,27 +31,36 @@ pub const BODY_MAX: usize = 16 * 1024;
 pub const NAME_MAX: usize = 200;
 pub const ATTACHMENTS_MAX: usize = 1;
 /// This library's ceiling, as a host's own (SPEC §9.2, Ceilings), on the characters below U+0020 but
-/// tab, line feed and carriage return in one CSV member: each is six bytes in `export_read`'s answer
-/// (`\u00XX`), so a member dense with them would take a reader six times its size again. A
-/// conforming writer drops them from what a contact controls.
+/// tab, line feed and carriage return in one CSV member: `export_read`'s answer writes U+0008 and
+/// U+000C as two bytes (`\b`, `\f`) and every other one as six (`\u00XX`), so a member dense with
+/// them would take a reader up to six times its size again. A conforming writer drops them from every
+/// name and topic.
 pub const CONTROL_MAX: usize = 65536;
 
-/// A character below U+0020 but tab, line feed and carriage return: one a JSON answer writes as six
-/// bytes.
+/// A character below U+0020 but tab, line feed and carriage return: one a JSON answer writes as two
+/// bytes (U+0008, U+000C) or six (the rest).
 fn escaped_control(c: u32) -> bool {
     c < 0x20 && c != 0x09 && c != 0x0a && c != 0x0d
 }
 
 /// A member holding more of them than `CONTROL_MAX` is refused, naming the ceiling; otherwise, how
-/// many bytes more than the member its text becomes as JSON strings: five for each of them and one for
-/// each backslash (a quote is written as two bytes in either).
+/// many bytes more than the member its text becomes as JSON strings: one for each U+0008, U+000C,
+/// tab, line feed, carriage return and backslash, five for each other character below U+0020 (a quote
+/// is written as two bytes in either).
 fn control_ceiling(member: &str, text: &str) -> Result<usize> {
-    let (mut n, mut backslashes) = (0, 0);
+    let (mut n, mut more) = (0, 0);
     for b in text.bytes() {
-        if escaped_control(u32::from(b)) {
-            n += 1;
-        } else if b == b'\\' {
-            backslashes += 1;
+        match b {
+            0x08 | 0x0c => {
+                n += 1;
+                more += 1;
+            }
+            b'\t' | b'\n' | b'\r' | b'\\' => more += 1,
+            _ if escaped_control(u32::from(b)) => {
+                n += 1;
+                more += 5;
+            }
+            _ => {}
         }
     }
     if n > CONTROL_MAX {
@@ -59,7 +68,7 @@ fn control_ceiling(member: &str, text: &str) -> Result<usize> {
             "{member}: {n} characters below U+0020 but tab, line feed and carriage return, over the {CONTROL_MAX} this library takes in one member"
         ));
     }
-    Ok(5 * n + backslashes)
+    Ok(more)
 }
 
 /// `s` without them: what a writer does to what a contact controls (SPEC §9.2).
@@ -590,7 +599,8 @@ impl Repeats {
 /// The removed threads as they pass, to find the earliest whose names are not those of its root's
 /// earliest removed thread (SPEC §9.2: one former contact, one pair of names): the root as a sha256
 /// digest beside the row number, 36 bytes a removed row and never a copy of a name, so a file whose
-/// every thread is removed costs little more than its rows (the memory tests hold it). The names are
+/// every thread is removed costs little more than its rows (tests/memory.rs holds it for a file whose
+/// every thread has a root of its own, and for one whose every thread shares one root). The names are
 /// read again from the member, exactly, for the roots that have more than one removed thread. Looked
 /// for, as `Repeats` is, when a row is refused and when the rows end.
 struct RemovedNames {

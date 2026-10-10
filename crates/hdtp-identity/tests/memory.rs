@@ -17,9 +17,12 @@
 //!   whose every thread is removed with a root of its own (each also keeps a 36-byte record and some 44
 //!   bytes of names in the answer), the largest such threads.csv peaking at 56.1 MB beside its 17.0 MB
 //!   of argument text (6.1× and 104.8 MB before a removed thread's names were left out of the record);
-//!   3.4× for 64,000 of them holding the 65,535 control characters `CONTROL_MAX` lets through. A member
-//!   denser with characters a JSON answer writes as six bytes is refused before it is parsed, at a peak
-//!   of 2.0–2.4× its CSV (15.8× before, building an answer six times it).
+//!   3.4× for 64,000 of them holding the 65,536 control characters `CONTROL_MAX` lets through. At the
+//!   largest legal threads.csv: every topic 1000 line feeds or tabs, which the answer writes as two
+//!   bytes each, 2.98× (3.16× before the answer's room counted them); every thread removed under one
+//!   root with names of 200 characters, 2.41× (40.5 MB). A member denser with U+0001, which a JSON
+//!   answer writes as six bytes, is refused before it is parsed, at a peak of 2.0–2.4× its CSV (15.8×
+//!   before, building an answer six times it).
 //!
 //!   export_read_end, at most 2 bytes per byte of its lists: the ids as strings borrowed from the
 //!   argument text wherever JSON did not escape them, sorted, never copied — 1.15× measured. 0.3.1
@@ -96,6 +99,15 @@ struct File {
 /// rows each a removed thread with a root of its own (SPEC §9.2): what the reader keeps of a removed
 /// thread, on every row.
 fn a_file_of(rows: usize, removed: bool) -> File {
+    if removed {
+        a_file_with(rows, |i, t| t["contact"] = serde_json::json!(fp(1000 + i)))
+    } else {
+        a_file_with(rows, |_, _| {})
+    }
+}
+
+/// `a_file_of`'s contacts and `rows` threads, each handed to `edit` before export_write writes it.
+fn a_file_with(rows: usize, edit: impl Fn(usize, &mut serde_json::Value)) -> File {
     use serde_json::json;
     let owner = format!("sha256:{}A", "O".repeat(42));
     let contacts: Vec<_> = (0..200)
@@ -106,8 +118,9 @@ fn a_file_of(rows: usize, removed: bool) -> File {
         .collect();
     let threads: Vec<_> = (0..rows)
         .map(|i| {
-            let contact = if removed { fp(1000 + i) } else { fp(i % 200) };
-            json!({ "id": uuid(i), "contact": contact, "topic": "a topic", "created_at": "2026-09-01T00:00:00Z", "last_at": "2026-09-01T00:00:00Z" })
+            let mut t = json!({ "id": uuid(i), "contact": fp(i % 200), "topic": "a topic", "created_at": "2026-09-01T00:00:00Z", "last_at": "2026-09-01T00:00:00Z" });
+            edit(i, &mut t);
+            t
         })
         .collect();
     let w: serde_json::Value = serde_json::from_str(&hdtp_identity::call(
@@ -188,8 +201,51 @@ fn export_read_of_the_largest_file_of_removed_threads() {
     assert!(peak <= 4 * f.csv_bytes, "{:.2}x the CSV, over 4x", peak as f64 / f.csv_bytes as f64);
 }
 
+/// `a_file_with` at the most rows whose threads.csv fits the 16 MiB SPEC §9.2 allows, within 64 KiB of
+/// it: a row's size is measured on 1000 of them.
+fn the_largest(edit: impl Fn(usize, &mut serde_json::Value) + Copy) -> (File, usize) {
+    let (one, more) = (a_file_with(1, edit).csv_bytes, a_file_with(1001, edit).csv_bytes);
+    let per = (more - one) / 1000;
+    let rows = (16 * 1024 * 1024 - 4096 - (one - per)) / per;
+    let f = a_file_with(rows, edit);
+    assert!(f.csv_bytes <= 16 * 1024 * 1024 && f.csv_bytes > 16 * 1024 * 1024 - 64 * 1024, "threads.csv is {} bytes", f.csv_bytes);
+    (f, rows)
+}
+
+/// The largest legal threads.csv that each costs the reader most per byte, as this library's writer
+/// writes it, each within the same 4x: every topic a run of line feeds (or tabs), which the answer
+/// writes as two bytes each, and every thread removed under ONE root with two names of 200 characters,
+/// which the reader compares rather than keeps.
+#[test]
+fn export_read_of_the_costliest_largest_files() {
+    let _alone = alone();
+    let lf = |_: usize, t: &mut serde_json::Value| t["topic"] = serde_json::json!("\n".repeat(1000));
+    let tab = |_: usize, t: &mut serde_json::Value| t["topic"] = serde_json::json!(format!("a{}", "\t".repeat(1000)));
+    let one_root = |_: usize, t: &mut serde_json::Value| {
+        t["contact"] = serde_json::json!(fp(1000));
+        t["contact_name"] = serde_json::json!("n".repeat(200));
+        t["contact_display_name"] = serde_json::json!("d".repeat(200));
+    };
+    for (what, (f, rows)) in [
+        ("every topic 1000 line feeds", the_largest(lf)),
+        ("every topic 1000 tabs", the_largest(tab)),
+        ("every thread removed under one root, names of 200 characters", the_largest(one_root)),
+    ] {
+        let (peak, answer) = peak_of("export_read", &f.args);
+        assert!(!answer.contains("\"error\""), "{}", &answer[..answer.len().min(200)]);
+        eprintln!(
+            "export_read of the largest threads.csv, {what} ({rows} threads, {} bytes; argument text {} bytes): peak {:.1} MB, {:.2}x",
+            f.csv_bytes,
+            f.args.len(),
+            peak as f64 / 1e6,
+            peak as f64 / f.csv_bytes as f64
+        );
+        assert!(peak <= 4 * f.csv_bytes, "{what}: {:.2}x the CSV, over 4x", peak as f64 / f.csv_bytes as f64);
+    }
+}
+
 /// `a_file_of`'s file of removed threads with every topic and both names of every thread `per`
-/// characters U+0001 (each six bytes as JSON), the manifest re-hashed: what a writer no longer writes,
+/// characters U+0001 (each six bytes as JSON: `\u0001`), the manifest re-hashed: what a writer no longer writes,
 /// and a reader is handed all the same.
 fn a_control_file(rows: usize, per: usize) -> File {
     a_control_file_on(rows, per, rows)
@@ -210,7 +266,7 @@ fn a_control_file_on(rows: usize, per: usize, on: usize) -> File {
     File { args: a.to_string(), csv_bytes }
 }
 
-/// A member dense with characters a JSON answer writes as six bytes each is refused before it is
+/// A member dense with U+0001, which a JSON answer writes as six bytes each, is refused before it is
 /// parsed, at N and 4N rows and at the largest the format allows, holding less than its argument; one
 /// at the ceiling is read within the bound. Before the ceiling, a threads.csv of removed threads named
 /// and titled with U+0001 peaked at 15.8× its size, building an answer six times it.
@@ -233,12 +289,22 @@ fn control_characters_are_bounded_where_they_enter() {
     // At the ceiling: 64,000 threads, a topic and two names of one U+0001 each on as many of them as
     // the ceiling takes.
     let (rows, on) = (64_000, hdtp_identity::export::CONTROL_MAX / 3);
-    let f = a_control_file_on(rows, 1, on);
+    let mut f = a_control_file_on(rows, 1, on);
+    // And the one more that makes it exactly the ceiling.
+    let extra = hdtp_identity::export::CONTROL_MAX - 3 * on;
+    let mut a: serde_json::Value = serde_json::from_str(&f.args).unwrap();
+    let csv = a["threads_csv"].as_str().unwrap().replacen(",a topic,", &format!(",{},", "\u{1}".repeat(extra)), 1);
+    let mut m: serde_json::Value = serde_json::from_str(a["manifest"].as_str().unwrap()).unwrap();
+    m["files"]["threads.csv"] = serde_json::json!(hdtp_identity::util::hex(&hdtp_identity::util::sha256(csv.as_bytes())));
+    f.csv_bytes = csv.len();
+    a["threads_csv"] = serde_json::json!(csv);
+    a["manifest"] = serde_json::json!(hdtp_identity::canonical::canonical(&m));
+    f.args = a.to_string();
     let (peak, answer) = peak_of("export_read", &f.args);
     assert!(!answer.contains("\"error\""), "{}", &answer[..answer.len().min(200)]);
     eprintln!(
         "export_read of {rows} threads holding {} control characters ({} bytes): {:.2}x",
-        3 * on,
+        hdtp_identity::export::CONTROL_MAX,
         f.csv_bytes,
         peak as f64 / f.csv_bytes as f64
     );

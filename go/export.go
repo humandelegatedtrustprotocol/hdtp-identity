@@ -35,9 +35,10 @@ const (
 	ExportNameMax        = 200
 	ExportAttachmentsMax = 1
 	// ExportControlMax is this library's ceiling, as a host's own (SPEC §9.2, Ceilings), on the
-	// characters below U+0020 but tab, line feed and carriage return in one CSV member: each is six
-	// bytes in export_read's answer (\u00XX), so a member dense with them would take a reader six times
-	// its size again. A conforming writer drops them from what a contact controls.
+	// characters below U+0020 but tab, line feed and carriage return in one CSV member: export_read's
+	// answer writes U+0008 and U+000C as two bytes (\b, \f) and every other one as six (\u00XX), so a
+	// member dense with them would take a reader up to six times its size again. A conforming writer
+	// drops them from every name and topic.
 	ExportControlMax = 65536
 	exportVersion    = 1
 )
@@ -488,7 +489,8 @@ func threadRow(cells []string, roots strSet, named bool, owner string) (ThreadRo
 
 // removedAt is a removed thread as the reader passes it: its place among the rows read and its row
 // number. Eight bytes a row, the names held by the row itself, so a file whose every thread is
-// removed costs no copy of any name (the memory tests hold it).
+// removed costs no copy of any name (export_memory_test.go holds it for a file whose every thread has
+// a root of its own, and for one whose every thread shares one root).
 type removedAt struct{ idx, n int32 }
 
 // firstNamesDiffer is the earliest removed thread whose names are not those of the earliest removed
@@ -524,26 +526,31 @@ func firstNamesDiffer(threads []ThreadRow, at []removedAt) (n, col int, found bo
 }
 
 // escapedControl is a character below U+0020 but tab, line feed and carriage return: one a JSON
-// answer writes as six bytes.
+// answer writes as two bytes (U+0008, U+000C) or six (the rest).
 func escapedControl(b byte) bool { return b < 0x20 && b != '\t' && b != '\n' && b != '\r' }
 
 // controlCeiling refuses a member holding more of them than ExportControlMax, naming the ceiling,
-// and answers how many bytes more than the member its text becomes as JSON strings: five for each of
-// them and one for each backslash (a quote is written as two bytes in either).
+// and answers how many bytes more than the member its text becomes as JSON strings: one for each
+// U+0008, U+000C, tab, line feed, carriage return and backslash, five for each other character below
+// U+0020 (a quote is written as two bytes in either).
 func controlCeiling(member, text string) (int, error) {
-	n, backslashes := 0, 0
+	n, more := 0, 0
 	for i := 0; i < len(text); i++ {
-		switch {
-		case escapedControl(text[i]):
+		switch c := text[i]; {
+		case c == '\b' || c == '\f':
 			n++
-		case text[i] == '\\':
-			backslashes++
+			more++
+		case c == '\t' || c == '\n' || c == '\r' || c == '\\':
+			more++
+		case escapedControl(c):
+			n++
+			more += 5
 		}
 	}
 	if n > ExportControlMax {
 		return 0, exportRefuse(fmt.Sprintf("%s: %d characters below U+0020 but tab, line feed and carriage return, over the %d this library takes in one member", member, n, ExportControlMax))
 	}
-	return 5*n + backslashes, nil
+	return more, nil
 }
 
 // dropControl is s without them: what a writer does to what a contact controls (SPEC §9.2).

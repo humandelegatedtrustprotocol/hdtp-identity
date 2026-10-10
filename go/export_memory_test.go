@@ -27,10 +27,14 @@ import (
 //   Measured again on 2026-10-10 with removed threads (SEP-0004): 6.8–7.0× for contacts' threads;
 //   7.5–7.7× for a file whose every thread is removed with a root of its own (11.3–11.6× before a
 //   removed thread's names were held by the row rather than copied); 7.6× for 64,000 of them holding
-//   the 65,535 control characters ExportControlMax lets through. A member denser with characters a JSON
-//   answer writes as six bytes is refused before it is parsed; such a file's argument is some six times
-//   its CSV, which the call decodes once, 2.4× the argument (it built an answer as large again before:
-//   30× the CSV).
+//   the 65,536 control characters ExportControlMax lets through. At the largest legal threads.csv: every
+//   topic 1000 line feeds or tabs, which the answer writes as two bytes each, 7.91× (9.15× before the
+//   answer's room counted them, its buffer doubling); every thread removed under one root with names
+//   of 200 characters, 5.67×. A member denser with U+0001, which a JSON answer writes as six bytes, is
+//   refused before it is parsed; such a file's argument is some six times its CSV, which the call
+//   decodes once, 2.4× the argument (it built an answer as large again before: 30× the CSV). A host
+//   bounds the argument by the member's bytes before the call: BatonDeck takes a threads.csv of 4 MiB
+//   at most, a quarter of what these figures are measured at.
 //
 //   export_read_end, at most 6 bytes per byte of its lists: each list's raw JSON and the strings it
 //   decodes to, and the ids and msg_ids sorted — 4.4× measured. 0.3.1 allocated 10×.
@@ -53,6 +57,14 @@ func memReadArgs(t *testing.T, rows int) ([]byte, int) { return memReadArgsOf(t,
 // memReadArgsOf is memReadArgs, or, when removed, the same rows each a removed thread with a root of
 // its own (SPEC §9.2): what the reader keeps of a removed thread, on every row.
 func memReadArgsOf(t *testing.T, rows int, removed bool) ([]byte, int) {
+	if !removed {
+		return memReadArgsWith(t, rows, nil)
+	}
+	return memReadArgsWith(t, rows, func(i int, th map[string]any) { th["contact"] = memFP(1000 + i) })
+}
+
+// memReadArgsWith is memReadArgs with each thread handed to `edit` before export_write writes it.
+func memReadArgsWith(t *testing.T, rows int, edit func(i int, th map[string]any)) ([]byte, int) {
 	owner := "sha256:" + strings.Repeat("O", 42) + "A"
 	contacts := []any{}
 	for i := 0; i < 200; i++ {
@@ -61,12 +73,12 @@ func memReadArgsOf(t *testing.T, rows int, removed bool) ([]byte, int) {
 	}
 	threads := []any{}
 	for i := 0; i < rows; i++ {
-		contact := memFP(i % 200)
-		if removed {
-			contact = memFP(1000 + i)
+		th := map[string]any{"id": memUUID(i), "contact": memFP(i % 200), "topic": "a topic",
+			"created_at": "2026-09-01T00:00:00Z", "last_at": "2026-09-01T00:00:00Z"}
+		if edit != nil {
+			edit(i, th)
 		}
-		threads = append(threads, map[string]any{"id": memUUID(i), "contact": contact, "topic": "a topic",
-			"created_at": "2026-09-01T00:00:00Z", "last_at": "2026-09-01T00:00:00Z"})
+		threads = append(threads, th)
 	}
 	var w map[string]any
 	in, _ := json.Marshal(map[string]any{"owner": owner, "owner_name": "", "exported_at": "2026-09-27T00:00:00Z", "tool": "t", "contacts": contacts, "threads": threads})
@@ -146,6 +158,47 @@ func TestExportReadEndAllocatesABoundedAmountPerID(t *testing.T) {
 // 28.4×); the costliest batch of the 64 MiB messages.jsonl (160,430 lines) 4.4 MB (0.3.1: 5.6 MB).
 // 2026-10-10: the largest threads.csv 114.3 MB (6.81×), and the largest of removed threads, each with a
 // root of its own, 125.9 MB (7.50×; 189.1 MB, 11.27×, before the names were held by the row).
+// memLargest is memReadArgsWith at the most rows whose threads.csv fits the 16 MiB SPEC §9.2 allows,
+// within 64 KiB of it: a row's size is measured on 1000 of them.
+func memLargest(t *testing.T, edit func(i int, th map[string]any)) ([]byte, int, int) {
+	_, one := memReadArgsWith(t, 1, edit)
+	_, more := memReadArgsWith(t, 1001, edit)
+	per := (more - one) / 1000
+	rows := (16*1024*1024 - 4096 - (one - per)) / per
+	args, csv := memReadArgsWith(t, rows, edit)
+	if csv > 16*1024*1024 || csv < 16*1024*1024-64*1024 {
+		t.Fatalf("threads.csv is %d bytes, not the largest the bound allows", csv)
+	}
+	return args, csv, rows
+}
+
+// The largest legal threads.csv that each costs the reader most per byte, as this library's writer
+// writes it, each within the same 9x: every topic a run of line feeds (or tabs), which the answer
+// writes as two bytes each, and every thread removed under ONE root with two names of 200 characters,
+// which the reader compares rather than keeps.
+func TestTheCostliestLargestFilesAllocateWithinTheirBounds(t *testing.T) {
+	for _, c := range []struct {
+		what string
+		edit func(i int, th map[string]any)
+	}{
+		{"every topic 1000 line feeds", func(i int, th map[string]any) { th["topic"] = strings.Repeat("\n", 1000) }},
+		{"every topic 1000 tabs", func(i int, th map[string]any) { th["topic"] = "a" + strings.Repeat("\t", 1000) }},
+		{"every thread removed under one root, names of 200 characters", func(i int, th map[string]any) {
+			th["contact"], th["contact_name"], th["contact_display_name"] = memFP(1000), strings.Repeat("n", 200), strings.Repeat("d", 200)
+		}},
+	} {
+		args, csv, rows := memLargest(t, c.edit)
+		n, out := memOf(t, "export_read", args)
+		if strings.Contains(string(out[:min(len(out), 100)]), `"error"`) {
+			t.Fatal(string(out[:200]))
+		}
+		t.Logf("export_read of the largest threads.csv, %s (%d threads, %d bytes): %.1f MB allocated, %.2fx", c.what, rows, csv, float64(n)/1e6, float64(n)/float64(csv))
+		if n > 9*uint64(csv) {
+			t.Errorf("%s: %.2fx the CSV, over 9x", c.what, float64(n)/float64(csv))
+		}
+	}
+}
+
 func TestTheLargestFilesAllocateWithinTheirBounds(t *testing.T) {
 	rows := (16*1024*1024 - 2048) / 139
 	args, csvBytes := memReadArgs(t, rows)
@@ -205,7 +258,7 @@ func TestTheLargestFilesAllocateWithinTheirBounds(t *testing.T) {
 }
 
 // memControlArgs is memReadArgsOf's file of removed threads with every topic and both names of every
-// thread `per` characters U+0001 (each six bytes as JSON), the manifest re-hashed: what a writer no
+// thread `per` characters U+0001 (each six bytes as JSON: \u0001), the manifest re-hashed: what a writer no
 // longer writes, and a reader is handed all the same.
 func memControlArgs(t *testing.T, rows, per int) ([]byte, int) {
 	return memControlArgsOn(t, rows, per, -1)
@@ -222,6 +275,19 @@ func memControlArgsOn(t *testing.T, rows, per, on int) ([]byte, int) {
 	csv := a["threads_csv"].(string)
 	csv = strings.Replace(csv, ",a topic,", ","+c+",", on)
 	csv = strings.Replace(csv, ",,\r\n", ","+c+","+c+"\r\n", on)
+	a["threads_csv"] = csv
+	out, _ := json.Marshal(a)
+	return memRewrite(t, out, func(s string) string { return s })
+}
+
+// memRewrite is export_read's arguments with threads.csv rewritten by `change` and the manifest
+// re-hashed for it.
+func memRewrite(t *testing.T, args []byte, change func(string) string) ([]byte, int) {
+	var a map[string]any
+	if err := json.Unmarshal(args, &a); err != nil {
+		t.Fatal(err)
+	}
+	csv := change(a["threads_csv"].(string))
 	var m map[string]any
 	if err := json.Unmarshal([]byte(a["manifest"].(string)), &m); err != nil {
 		t.Fatal(err)
@@ -233,7 +299,7 @@ func memControlArgsOn(t *testing.T, rows, per, on int) ([]byte, int) {
 	return out, len(csv)
 }
 
-// A member dense with characters a JSON answer writes as six bytes each is refused before it is
+// A member dense with U+0001, which a JSON answer writes as six bytes each, is refused before it is
 // parsed, at N and 4N rows and at the largest the format allows; one at the ceiling (ExportControlMax)
 // is read. Such a file reaches the reader as an argument some six times its CSV (each U+0001 is
 // \u0001 in the argument's JSON too, which the host wrote), so its cost is held per byte of that
@@ -256,11 +322,14 @@ func TestControlCharactersAreBoundedWhereTheyEnter(t *testing.T) {
 	// the ceiling takes.
 	rows := 64000
 	args, csvBytes := memControlArgsOn(t, rows, 1, ExportControlMax/3)
+	args, csvBytes = memRewrite(t, args, func(csv string) string {
+		return strings.Replace(csv, ",a topic,", ","+strings.Repeat("\x01", ExportControlMax-3*(ExportControlMax/3))+",", 1)
+	})
 	n, out := memOf(t, "export_read", args)
 	if strings.Contains(string(out[:min(len(out), 100)]), `"error"`) {
 		t.Fatal(string(out[:200]))
 	}
-	t.Logf("export_read of %d threads holding %d control characters (%d bytes of threads.csv): %.2fx", rows, 3*(ExportControlMax/3), csvBytes, float64(n)/float64(csvBytes))
+	t.Logf("export_read of %d threads holding %d control characters (%d bytes of threads.csv): %.2fx", rows, ExportControlMax, csvBytes, float64(n)/float64(csvBytes))
 	if n > 9*uint64(csvBytes) {
 		t.Errorf("at the ceiling: %.2fx the CSV, over 9x", float64(n)/float64(csvBytes))
 	}
