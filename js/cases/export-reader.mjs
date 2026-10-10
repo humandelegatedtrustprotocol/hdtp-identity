@@ -67,7 +67,16 @@ export default function readerCases({ add, expect }) {
     ['a contact whose root_cert is another identity\'s root', withCell(4, 9, bharatRoot), 'contacts.csv: row 4, column root_cert: not the certificate of this row\'s root'],
     ['a manifest with a member it does not hold', (m) => { m.manifest.note = 'hello'; }, 'manifest.json: "note" is not a member of a manifest'],
   ];
-  for (const [what, change, why] of [...sizeCases, ...rowCases]) {
+  // ── the library's ceiling on control characters in one member (ExportLimits.control_characters) ──
+  // Each is answered as six bytes; more than the ceiling is refused before the member is parsed, and
+  // the ceiling itself reads.
+  const CONTROL_MAX = 65536;
+  const controlTopic = (n) => (m) => { m.threads = m.threads.replace("'-minus: a topic", `'-minus: ${'\u0001'.repeat(n)}a topic`); };
+  const controlCases = [
+    ['threads.csv with one control character over the ceiling', controlTopic(CONTROL_MAX + 1), `threads.csv: ${CONTROL_MAX + 1} characters below U+0020 but tab, line feed and carriage return, over the ${CONTROL_MAX} this library takes in one member`],
+  ];
+  add('export_read: threads.csv with as many control characters as the ceiling', 'export_read', readArgs(controlTopic(CONTROL_MAX)));
+  for (const [what, change, why] of [...sizeCases, ...rowCases, ...controlCases]) {
     add(`export_read: ${what}`, 'export_read', readArgs(change));
     expect(`export_read: ${what}`, refused(why));
   }

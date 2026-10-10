@@ -57,6 +57,18 @@ export default function exportCases({ add, expect }, f) {
   add('export_write: two removed threads of one root with different names', 'export_write', withRemoved([...threads, removedThreads[2], { ...removedThreads[3], contact_name: 'other' }]));
   add('export_write: a removed thread whose own name is over 200 characters', 'export_write', withRemoved([...threads, { ...removedThreads[2], contact_name: 'n'.repeat(201) }]));
   add('export_write: a thread name that is not a string', 'export_write', withRemoved([...threads, { ...removedThreads[2], contact_name: 7 }]));
+  // What a contact controls (SPEC §9.2): a display name, a removed thread's display name and a topic
+  // lose every character below U+0020 but tab, line feed and carriage return, which a reader answers
+  // as six bytes each; both ports write what they write for the same rows without them.
+  const ctl = (t) => `\u0001${t}\u001f\t\u0000`;
+  const plain = (t) => `${t}\t`;
+  const controlled = (f) => ({
+    ...writeArgs,
+    contacts: [row({ display_name: f('Alina') }), ...contacts.slice(1)],
+    threads: [{ ...threads[0], topic: f('a topic') }, threads[1], { ...removedThreads[2], contact_display_name: f('Former') + 'x'.repeat(196) }],
+  });
+  add('export_write: control characters in what a contact controls, dropped', 'export_write', controlled(ctl));
+  expect('export_write: control characters in what a contact controls, dropped', wasm.call('export_write', controlled(plain)));
   const messages = [
     { id: 'm1', thread: 't2', contact: rootFp, msg_id: 'x-1', direction: 'in', sender: 'human', time: '2026-09-10T10:00:00.9Z', body: 'Hello\n"there" ', reply_to: null, status: 'delivered', attachments: [] },
     { id: 'm2', thread: 't2', contact: rootFp, msg_id: 'x-2', direction: 'out', sender: 'agent', time: '2026-09-11T10:00:00Z', body: '', reply_to: 'x-1', status: 'read', attachments: [{ file, filename: 'a.pdf', mime: 'application/pdf', size: 5 }] },
