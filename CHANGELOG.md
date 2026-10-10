@@ -37,9 +37,11 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   (`ExportLimits.control_characters`, a ceiling of this library's as a host's own, SPEC §9.2): such a
   file is refused at 2.4× its argument in the Go port, 2.0–2.4× its CSV in the core and 1.4–1.6× its
   argument in Wasm; 64,000 removed threads holding 65,535 of them read at 7.6×, 3.4× and 4.85×.
-  `export_write` drops them from a `display_name`, a `contact_display_name` and a thread's `topic`,
-  the fields a contact's own text reaches, so an export this library writes is never refused for
-  them.
+  `export_write` drops them from every name (`name`, `display_name`, `contact_name`,
+  `contact_display_name`) and a thread's `topic`, before a name's length is checked. An `id` is
+  written as given: a thread id is chosen by whoever sends first (SPEC §7), so a host that takes one
+  holding them can still write a file this reader refuses; that is bounded where the id enters, not
+  here.
 - **A fingerprint has one spelling.** `sha256:` and 43 base64url characters whose last is one of
   `AEIMQUYcgkosw048`: the two spare bits are zero (RFC 4648 §3.5). Any other last character spells the
   same 32 bytes again, a second name for one root: a live contact's root so spelled would have read as

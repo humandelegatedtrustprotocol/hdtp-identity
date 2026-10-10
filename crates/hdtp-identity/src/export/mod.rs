@@ -982,6 +982,7 @@ fn contact_cells(v: &Value) -> std::result::Result<Vec<String>, (usize, String)>
             // The contact's name for themselves is their own claim: cut to 200 characters, on a
             // character, rather than refused (SPEC §9.2, what a contact controls).
             ("display_name", Some(Value::String(s))) => drop_control(s).chars().take(NAME_MAX).collect(),
+            ("name", Some(Value::String(s))) => drop_control(s),
             (_, Some(Value::String(s))) if !matches!(*col, "was_active" | "permissions" | "their_permissions") => s.clone(),
             _ => return Err((k, "missing, or of the wrong type".into())),
         };
@@ -1004,7 +1005,7 @@ fn thread_cells(v: &Value) -> std::result::Result<Vec<String>, (usize, String)> 
         .map(|(k, col)| match (o.get(*col), o.get(*col).and_then(|c| c.as_str())) {
             (None, _) if k >= THREAD_COLUMNS.len() => Ok(String::new()),
             (_, Some(s)) if *col == "contact_display_name" => Ok(drop_control(s).chars().take(NAME_MAX).collect()),
-            (_, Some(s)) if *col == "topic" => Ok(drop_control(s)),
+            (_, Some(s)) if *col == "topic" || *col == "contact_name" => Ok(drop_control(s)),
             (_, Some(s)) => Ok(s.to_string()),
             _ => Err((k, "missing, or not a string".to_string())),
         })
