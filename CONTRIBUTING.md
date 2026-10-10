@@ -117,9 +117,6 @@ Outside contributors who cannot run the whole gate say in the pull request which
   build input carries its pin (`js/manifest.json`) in the commit after it.
 - Inbound is outbound. A contribution is accepted only under the terms the repository gives out:
   the Apache License 2.0 (`LICENSE`, with `NOTICE`).
-- Every commit carries a sign-off: a `Signed-off-by: Your Name <you@example.com>` line, which
-  `git commit -s` adds. It certifies the Developer Certificate of Origin 1.1
-  (<https://developercertificate.org/>): that you wrote the contribution or otherwise have the
-  right to submit it under the terms above. A pull request with a commit that has no sign-off is
-  not merged.
+- There is no sign-off and no CLA: under section 5 of that licence, a contribution you intentionally
+  submit for inclusion is under its terms unless you explicitly state otherwise.
 - Conduct is `CODE_OF_CONDUCT.md`, the Contributor Covenant 2.1.
