@@ -564,6 +564,13 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 	if len(enc) != SuiteNpk(suite) {
 		return invalid("encapsulated key is not the suite's length")
 	}
+	// Read before the form decides anything, so the small form cannot answer `chain_required` to a
+	// `sig` the chain form refuses: a member in any other spelling is refused (§13.1). An empty `sig`
+	// is the one spelling of zero bytes, and fails as a signature (§13.3 step 7).
+	sig, err := wireB64url(env.Sig)
+	if err != nil {
+		return invalid("sig is not base64url")
+	}
 	plaintext, err := Open(suite, priv, heldLeaf.PublicKey, []byte(Info), aad, enc, ct)
 	if err != nil {
 		return invalid("does not open")
@@ -585,8 +592,6 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 		return invalid("plaintext shape")
 	}
 	signed := concat(aad, enc, ct)
-	// An undecodable signature is no signature: it fails below, in the words of the form it came in.
-	sig, _ := wireB64url(env.Sig)
 	params, _ := body["params"].(map[string]any)
 	tool, hasTool := "", false
 	if params != nil {

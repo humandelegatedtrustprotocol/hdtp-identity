@@ -106,6 +106,10 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
     if enc.len() != suite.npk() {
         return Ok(invalid("encapsulated key is not the suite's length"));
     }
+    // Read before the form decides anything, so the small form cannot answer `chain_required` to a
+    // `sig` the chain form refuses: a member in any other spelling is refused (§13.1). An empty `sig`
+    // is the one spelling of zero bytes, and fails as a signature (§13.3 step 7).
+    let Ok(sig) = wire_b64u(&e.sig) else { return Ok(invalid("sig is not base64url")) };
     let body: Value =
         match hpke::open(suite, &key, &held_leaf.public_key, INFO, &aad, &enc, &ct).ok().and_then(|p| serde_json::from_slice(&p).ok()) {
             Some(b) => b,
@@ -122,7 +126,6 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
     let mut signed = aad.clone();
     signed.extend_from_slice(&enc);
     signed.extend_from_slice(&ct);
-    let sig = wire_b64u(&e.sig).unwrap_or_default();
     let tool: Option<String> = body["params"].get("name").and_then(|n| n.as_str()).map(|s| s.to_string());
     // What a `pending_out` pin may do: call one of the pending tier's tools (§6.1, §6.2), or list them.
     // A listing names no tool; `tools/list` returns what the caller's tier may use (§6), and a sealed

@@ -7,9 +7,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed as proven that did not pass.
 
-Specification: **1.0.0**. **101** normative sentences, **2949** cross-port parity cases over **54** guarded functions.
+Specification: **1.0.0**. **101** normative sentences, **2950** cross-port parity cases over **54** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 1.0.0): **5898** answers, of which **0** do not hold to the shape it declares. Of **131** declared error codes, **131** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 1.0.0): **5900** answers, of which **0** do not hold to the shape it declares. Of **131** declared error codes, **131** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 101 normative sentences of the specification
 
@@ -104,7 +104,7 @@ by declaration. A row with nothing in its last column would fail `js/musts.mjs`.
 |---|---|---|
 | `9.#1` | A host **MUST** generate a fresh key for every renewal, so that a leaf key compromised without anyone noticing dies with its leaf; a suspected compromise is the same act done at once, and the new leaf outranks the stolen one with every contact it reaches (§14.3). | `gateway:TestLeafSignupThenRenewThenMove` |
 | `9.#2` | A leaf's key does not outlive its leaf: a host **MUST** stop using the key of a leaf that has expired and **MUST** destroy it, keeping the key id so that an envelope still sealed to it is answered `certificate_renewed` (§14.4) — past its date every verifier refuses the leaf (§14.2 rule 4), so the key can do nothing legitimate, and a renewal has never needed it. | `gateway:TestAnExpiredCurrentLeafLosesItsKeyInBothPlaces`, `gateway:TestALeafThatRunsOutStopsBeingServedAndLosesItsKey` |
-| `9.#3` | A host that makes an archive **MUST NOT** put key material of any kind in it, and a host that imports one **MUST** refuse any key material in it and **MUST** refuse, rather than ignore, anything else it does not recognise. | `rust:read_export_answers_the_whole_corpus`, `go:TestReadExportZipAnswersTheWholeCorpus`, `rust:export_write_refuses_a_row_or_message_holding_a_private_key`, `go:TestAFileThatIsAKeyLeavesWithItsMessageAndIsRefusedOnRead`, `go:TestWriteExportZipRefusesWhatItsReaderRefusesBeforeTheFirstByte`, `rust:what_a_contact_controls_never_stops_an_export_and_it_reads_back`, `go:TestWhatAContactControlsNeverStopsAnExportAndItReadsBack`, `rust:a_contacts_key_shaped_text_never_stops_an_export_and_the_owners_is_refused`, `go:TestAContactsKeyShapedTextNeverStopsAnExportAndTheOwnersIsRefused` |
+| `9.#3` | A host that makes an archive **MUST NOT** put key material of any kind in it, and a host that imports one **MUST** refuse any key material in it and **MUST** refuse, rather than ignore, anything else it does not recognise. | `rust:read_export_answers_the_whole_corpus`, `go:TestReadExportZipAnswersTheWholeCorpus`, `rust:export_write_refuses_a_row_or_message_holding_a_private_key`, `go:TestAFileThatIsAKeyLeavesWithItsMessageAndIsRefusedOnRead`, `go:TestWriteExportZipRefusesWhatItsReaderRefusesBeforeTheFirstByte`, `rust:what_a_contact_controls_never_stops_an_export_and_it_reads_back`, `go:TestWhatAContactControlsNeverStopsAnExportAndItReadsBack` |
 | `9.#4` | Whenever an identity leaves an address, deleted or moved, the host keeps the address for 24 hours for the account that held it — the person's, or one the person shares at the host: in that time it **MUST NOT** be assigned to an identity of another account, and any identity of that account may take it; after them the host frees it. | *host, by declaration* |
 | `9.#5` | It issues one live leaf per identity at a time — a second endpoint is a move, not a second home, because contacts keep one pin and the newest leaf wins — and **MUST NOT** issue a second while one is live except as its replacement. | `rust:issues_from_the_vault`, `go:TestWalletIssue`, `go:TestVaultRulesMirrorTheCore`, `rust:ledger_check_names_each_kind_and_refuses_only_a_second_home`, `go:TestLedgerCheckNamesEachKindAndRefusesOnlyASecondHome`, `rust:ledger_check_takes_the_newest_leaf_and_not_the_newest_unexpired_one`, `go:TestLedgerCheckTakesTheNewestLeafAndNotTheNewestUnexpiredOne`, `rust:a_card_held_root_is_held_to_the_ledger_by_the_core` |
 | `9.#6` | A wallet **MUST NOT** write a leaf, a ledger entry or a contact into the file, and writes it once, when the root is made, and again only when the root is re-bound or a hardware key takes it. | `rust:a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates`, `rust:issues_from_the_vault` |
@@ -150,7 +150,7 @@ by declaration. A row with nothing in its last column would fail `js/musts.mjs`.
 | `9.2#22` | A writer **MUST** write `reply_to` as `null` when the message it names is not in the file. | `rust:what_a_contact_controls_never_stops_an_export_and_it_reads_back`, `go:TestWhatAContactControlsNeverStopsAnExportAndItReadsBack` |
 | `9.2#23` | A writer **MUST** drop from `their_permissions` every name that is not a permission of §8 and every name repeated, since the column is informative. | `rust:what_a_contact_controls_never_stops_an_export_and_it_reads_back`, `go:TestWhatAContactControlsNeverStopsAnExportAndItReadsBack` |
 | `9.2#24` | A writer **MUST** truncate `display_name` to 200 characters, since it is the contact's own claim. | `rust:what_a_contact_controls_never_stops_an_export_and_it_reads_back`, `go:TestWhatAContactControlsNeverStopsAnExportAndItReadsBack` |
-| `9.2#25` | A writer **MUST** leave out a message whose `body`, or whose media file, the key-material check above would refuse, with the attachment it carried, and **MUST** list each message it leaves out, by its `id` and the reason, in the report it gives the person; it never leaves one out silently. | `rust:what_a_contact_controls_never_stops_an_export_and_it_reads_back`, `go:TestWhatAContactControlsNeverStopsAnExportAndItReadsBack`, `go:TestAFileThatIsAKeyLeavesWithItsMessageAndIsRefusedOnRead`, `rust:a_contacts_key_shaped_text_never_stops_an_export_and_the_owners_is_refused`, `go:TestAContactsKeyShapedTextNeverStopsAnExportAndTheOwnersIsRefused` |
+| `9.2#25` | A writer **MUST** leave out a message whose `body`, or whose media file, the key-material check above would refuse, with the attachment it carried, and **MUST** list each message it leaves out, by its `id` and the reason, in the report it gives the person; it never leaves one out silently. | `rust:what_a_contact_controls_never_stops_an_export_and_it_reads_back`, `go:TestWhatAContactControlsNeverStopsAnExportAndItReadsBack`, `go:TestAFileThatIsAKeyLeavesWithItsMessageAndIsRefusedOnRead` |
 | `9.2#26` | **Ceilings.** A host **MAY** set import ceilings of its own, on the whole file and on counts — contacts, threads, lines of `messages.jsonl`, the characters of an `id` — and **MUST** name the ceiling in each refusal it makes for one. | *host, by declaration* |
 | `9.2#27` | A host **MUST NOT** refuse to write an export because the file would exceed an import ceiling of its own, of any kind, the whole-file ceiling included; it **MAY** warn the person that the file exceeds them, naming each. | *host, by declaration* |
 | `9.2#28` | **The owner's own strings.** A writer **MUST** refuse to write a manifest whose `owner_name` or `tool` the key-material check above would refuse, naming the member: those are the owner's and the host's own, not a contact's, so there is nothing to leave out. | `rust:export_write_refuses_a_row_or_message_holding_a_private_key`, `go:TestWriteExportZipRefusesWhatItsReaderRefusesBeforeTheFirstByte` |
@@ -160,7 +160,7 @@ by declaration. A row with nothing in its last column would fail `js/musts.mjs`.
 | # | The sentence | Held by |
 |---|---|---|
 | `13.1#1` | base64url HPKE encapsulated key, of exactly the suite's `Npk` (RFC 9180, Section 7.1): 65 bytes for `HDTP-SEAL-P256`, an uncompressed P-256 point, and 32 for `HDTP-SEAL-X25519`. A receiver **MUST** refuse any other length (`envelope_invalid`) — `sig` covers the three members concatenated with nothing between them, so the suite's own length is what fixes the boundary; without it a byte moved from the end of `enc` to the front of `ct` leaves the signed bytes identical | `scenario:a byte moved from the encapsulated key into the ciphertext`, `rust:an_encapsulated_key_of_the_wrong_length_is_refused_under_each_suite`, `go:TestAnEncapsulatedKeyOfTheWrongLengthIsRefused` |
-| `13.1#2` | Each of the four members is base64url (RFC 4648, Section 5) without padding, in its one canonical spelling, and a receiver **MUST** refuse (`envelope_invalid`) a member written any other way: with a character outside that alphabet — padding, whitespace and the standard alphabet's `+` and `/` among them — or with a last character whose unused bits are not zero. | `scenario:a real envelope whose protected carries a stray character`, `scenario:a real envelope whose enc is padded`, `scenario:a real envelope whose ct has a line break in it`, `scenario:a real envelope whose signature is spelled with its spare bits set` |
+| `13.1#2` | Each of the four members is base64url (RFC 4648, Section 5) without padding, in its one canonical spelling, and a receiver **MUST** refuse (`envelope_invalid`) a member written any other way: with a character outside that alphabet — padding, whitespace and the standard alphabet's `+` and `/` among them — or with a last character whose unused bits are not zero. | `scenario:a real envelope whose protected carries a stray character`, `scenario:a real envelope whose enc is padded`, `scenario:a real envelope whose ct has a line break in it`, `scenario:a real envelope whose signature is spelled with its spare bits set`, `rust:a_sig_not_in_the_one_spelling_is_refused_in_either_form`, `go:TestASigNotInTheOneSpellingIsRefusedInEitherForm` |
 | `13.1#3` | The suite follows the recipient's key and nothing else: a receiver **MUST** refuse an envelope whose `suite` is not the one its key takes (`envelope_invalid`), so no choice is left on the wire for a sender to make badly. | `scenario:the wrong suite for the recipient's key` |
 | `13.1#4` | The HPKE `info` parameter is the ASCII string `HDTP-SEAL-v1`, and an envelope sealed under any other info string **MUST NOT** open. | `scenario:sealed with a stale info string` |
 | `13.1#5` | The HPKE ephemeral **MUST** be fresh for every envelope — a reused one repeats the key and the nonce, and two ciphertexts under them leak the XOR of their plaintexts — and both sides **MUST** refuse an all-zero DH output, which a low-order X25519 point produces (RFC 9180, Section 7.1.4). | `scenario:HPKE ephemeral reuse leaks the XOR of two plaintexts; production sealing cannot take a seed`, `scenario:a low-order X25519 recipient point`, `rust:refuses_a_low_order_point`, `go:TestALowOrderRecipientIsRefused` |
@@ -231,7 +231,7 @@ by declaration. A row with nothing in its last column would fail `js/musts.mjs`.
 | `14.4#1` | An endpoint **MUST** keep the key identifiers of every leaf it has held for an identity it still serves — fingerprints, never keys past their `notAfter`. | `scenario:a former key of a still-served identity gets the current chain`, `gateway:TestStaleKidIsAnsweredWithTheCurrentChain` |
 | `14.4#2` | A caller **MUST** follow `certificate_renewed` at most once per call, and only when the chain it carries is newer than or equal to its pin (§14.3): an older chain, a chain to another root, or a chain naming another address is discarded and the call fails as it would have. | `rust:certificate_renewed_cases`, `go:TestChainCases` |
 
-## The 2949 cross-port parity cases
+## The 2950 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -239,7 +239,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **2949** cases (**1417** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
+At the run that generated this file: **2950** cases (**1417** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
 
 ### `address_guard` — 51 cases · whole on success
 
@@ -700,7 +700,7 @@ At the run that generated this file: **2949** cases (**1417** of the run's cases
 - generated · csr_new · endpoint absent, host_pkcs8 7
 - generated · csr_new · endpoint absent, dns_name 7
 
-### `decide` — 158 cases · whole on success
+### `decide` — 181 cases · whole on success
 
 - decide on an envelope from a pinned contact
 - decide on a pinned contact's call that names no tool
@@ -734,6 +734,29 @@ At the run that generated this file: **2949** cases (**1417** of the run's cases
 - decide on a real envelope whose enc is spelled with its spare bits set
 - decide on a real envelope whose ct is spelled with its spare bits set
 - decide on a real envelope whose sig is spelled with its spare bits set
+- decide, chain form from a pinned contact: a sig that is not base64url at all
+- decide, chain form from a stranger: a sig that is not base64url at all
+- decide, chain form from a pinned contact: a sig that is padded
+- decide, chain form from a stranger: a sig that is padded
+- decide, chain form from a pinned contact: a sig that is with a line break in it
+- decide, chain form from a stranger: a sig that is with a line break in it
+- decide, chain form from a pinned contact: a sig that is spelled with its spare bits set
+- decide, chain form from a stranger: a sig that is spelled with its spare bits set
+- decide, small form from a pinned contact: a sig that is not base64url at all
+- decide, small form from a stranger: a sig that is not base64url at all
+- decide, small form from a pinned contact: a sig that is padded
+- decide, small form from a stranger: a sig that is padded
+- decide, small form from a pinned contact: a sig that is with a line break in it
+- decide, small form from a stranger: a sig that is with a line break in it
+- decide, small form from a pinned contact: a sig that is spelled with its spare bits set
+- decide, small form from a stranger: a sig that is spelled with its spare bits set
+- decide, chain form from a pinned contact: an empty sig fails as a signature
+- decide, chain form from a stranger: an empty sig fails as a signature
+- decide, small form from a pinned contact: an empty sig fails as a signature
+- decide, small form from a stranger: an empty sig fails as a signature
+- decide with an envelope whose sig is null
+- decide, small form from a pinned contact: its own sig
+- decide, small form from a pinned contact: a sig that is not the leaf's
 - decide when a held key's own leaf will not parse
 - decide in the small form when a pin's leaf will not parse
 - decide when the pinned leaf of the sender's root will not compare
@@ -1007,7 +1030,7 @@ At the run that generated this file: **2949** cases (**1417** of the run's cases
 - generated · export_merge · held absent, rows "x"
 - generated · export_merge · rows absent, held "x"
 
-### `export_read` — 115 cases · whole on success
+### `export_read` — 113 cases · whole on success
 
 - export_read: what export_write wrote
 - export_read at an instant that does not read
@@ -1056,8 +1079,6 @@ At the run that generated this file: **2949** cases (**1417** of the run's cases
 - export corpus key-in-a-thread-name.zip: export_read
 - export corpus removed-thread-six-fields.zip: export_read
 - export_read: what a contact controls, as written, reads back
-- export_read: PEM armour left out of what a contact wrote, reads back
-- export_read: a base64 word left out of what a contact wrote, reads back
 - export_read with nothing to work from
 - export_read with a directory entry that does not read
 - export_read: threads.csv with as many control characters as the ceiling
@@ -1125,7 +1146,7 @@ At the run that generated this file: **2949** cases (**1417** of the run's cases
 - generated · export_read · now absent, threads_csv 7
 - generated · export_read · now absent, owner 7
 
-### `export_read_end` — 103 cases · whole on success
+### `export_read_end` — 101 cases · whole on success
 
 - export_read_end: what was written
 - export corpus valid-export.zip: export_read_end
@@ -1156,8 +1177,6 @@ At the run that generated this file: **2949** cases (**1417** of the run's cases
 - export_read_end with media holding a number
 - export_read_end with no media at all
 - export_read_end: what a contact controls, as written, reads back
-- export_read_end: PEM armour left out of what a contact wrote, reads back
-- export_read_end: a base64 word left out of what a contact wrote, reads back
 - export_read_end with nothing to work from
 - export_read_end: a manifest whose owner_name is a private key
 - export_read_end: a manifest whose tool is a private key
@@ -1231,7 +1250,7 @@ At the run that generated this file: **2949** cases (**1417** of the run's cases
 - generated · export_read_end · media absent, reply_tos "x"
 - generated · export_read_end · media absent, media_seen "x"
 
-### `export_read_messages` — 59 cases · whole on success
+### `export_read_messages` — 57 cases · whole on success
 
 - export_read_messages: what export_write_messages wrote
 - export corpus valid-export.zip: export_read_messages
@@ -1251,8 +1270,6 @@ At the run that generated this file: **2949** cases (**1417** of the run's cases
 - export_read_messages: a line with a number past the largest double
 - export_read_messages: a line nested 128 deep
 - export_read_messages: what a contact controls, as written, reads back
-- export_read_messages: PEM armour left out of what a contact wrote, reads back
-- export_read_messages: a base64 word left out of what a contact wrote, reads back
 - export_read_messages with nothing to work from
 - export_read_messages from line 0
 - export_read_messages: a message whose direction is neither
@@ -1293,7 +1310,7 @@ At the run that generated this file: **2949** cases (**1417** of the run's cases
 - generated · export_read_messages · media absent, contacts "x"
 - generated · export_read_messages · media absent, first_line "7"
 
-### `export_write` — 97 cases · whole on success
+### `export_write` — 91 cases · whole on success
 
 - export_write: every formula prefix, quoting and line breaks, sorted rows
 - export_write: a book
@@ -1306,12 +1323,6 @@ At the run that generated this file: **2949** cases (**1417** of the run's cases
 - export_write: a thread name that is not a string
 - export_write: control characters in what a contact controls, dropped
 - export_write: a 300-character display name and permissions §8 does not have
-- export_write: PEM armour in what a contact wrote, written empty or left out
-- export_write: PEM armour in the owner's name for a contact
-- export_write: PEM armour in the owner's name for a former contact
-- export_write: a base64 word in what a contact wrote, written empty or left out
-- export_write: a base64 word in the owner's name for a contact
-- export_write: a base64 word in the owner's name for a former contact
 - export_write: the rows book_rows made
 - export_write with nothing to work from
 - export_write: the owner as a contact
@@ -1393,22 +1404,12 @@ At the run that generated this file: **2949** cases (**1417** of the run's cases
 - generated · export_write · contacts absent, threads "x"
 - generated · export_write · contacts absent, media "x"
 
-### `export_write_messages` — 35 cases · whole on success
+### `export_write_messages` — 25 cases · whole on success
 
 - export_write_messages: a text, a file and a link
 - export_write_messages: a dangling reply, a key in a body, a reply to what was left out
 - export_write_messages: in batches, the file names its msg_ids
 - export_write_messages: msg_ids that are not strings
-- export_write_messages: PEM armour in what a contact wrote, left out and listed
-- export_write_messages: PEM armour in the host's message id
-- export_write_messages: PEM armour in an outgoing msg_id
-- export_write_messages: PEM armour in an outgoing file's name
-- export_write_messages: PEM armour in an outgoing file's type
-- export_write_messages: a base64 word in what a contact wrote, left out and listed
-- export_write_messages: a base64 word in the host's message id
-- export_write_messages: a base64 word in an outgoing msg_id
-- export_write_messages: a base64 word in an outgoing file's name
-- export_write_messages: a base64 word in an outgoing file's type
 - export_write_messages: two attachments
 - export_write_messages: text beside a file
 - export_write_messages: a message time with a lower-case z

@@ -313,6 +313,46 @@ export default function envelopes({ add, expect }, f) {
     if (again) add(`decide on a real envelope whose ${member} is spelled with its spare bits set`, 'decide', { now, envelope: { ...spelt, [member]: again }, node });
   }
 
+  // D1 — a `sig` not in the one spelling is refused before the form decides anything. Both ports read it leniently, alike, so comparing them found nothing: the small form from
+  // a pinned contact answered `chain_required` where the chain form refused. Each case carries its
+  // answer, so a port that is wrong the same way as the other still fails.
+  const smallSpelt = request({ reference: true, params: { name: 'send_message' }, msgId: 'p-small-spelt', ephemeralSeed: seed('parity/small-spelt') });
+  for (const [form, e] of [['chain form', spelt], ['small form', smallSpelt]]) {
+    for (const [what, sig, why] of [
+      ['not base64url at all', '!!!', 'sig is not base64url'],
+      ['padded', `${e.sig}==`, 'sig is not base64url'],
+      ['with a line break in it', `${e.sig.slice(0, 8)}\n${e.sig.slice(8)}`, 'sig is not base64url'],
+      ['spelled with its spare bits set', respell(e.sig), 'sig is not base64url'],
+    ]) {
+      for (const [whom, pins] of [['a pinned contact', pinned], ['a stranger', []]]) {
+        const id = `decide, ${form} from ${whom}: a sig that is ${what}`;
+        add(id, 'decide', { now, envelope: { ...e, sig }, node: { ...node, pins } });
+        expect(id, { result: { code: 'envelope_invalid', why }, effects: [] });
+      }
+    }
+  }
+  // An empty `sig` is the one spelling of zero bytes: it reads, and fails as a signature (§13.3 step
+  // 7), as the form answers one. A host whose reader cannot see presence (Go's Envelope) gets this
+  // answer for an absent or null `sig` too, so it checks presence itself.
+  for (const [form, e, failed] of [
+    ['chain form', spelt, { code: 'envelope_invalid', why: 'signature is not the chain\'s leaf key' }],
+    ['small form', smallSpelt, { code: 'chain_required' }],
+  ]) {
+    for (const [whom, pins] of [['a pinned contact', pinned], ['a stranger', []]]) {
+      const id = `decide, ${form} from ${whom}: an empty sig fails as a signature`;
+      add(id, 'decide', { now, envelope: { ...e, sig: '' }, node: { ...node, pins } });
+      expect(id, { result: failed, effects: [] });
+    }
+  }
+  add('decide with an envelope whose sig is null', 'decide', { now, envelope: { ...smallSpelt, sig: null }, node: { ...node, pins: pinned } });
+  expect('decide with an envelope whose sig is null', { error: 'bad_request', why: 'envelope.sig is required' });
+  // The controls: the small form's own signature passes, and one in the one spelling that is not the
+  // leaf's is still `chain_required` (§13.2).
+  add('decide, small form from a pinned contact: its own sig', 'decide', { now, envelope: smallSpelt, node: { ...node, pins: pinned } });
+  expect('decide, small form from a pinned contact: its own sig', { code: 'ok', form: 'leaf', tier: 'contact' });
+  add('decide, small form from a pinned contact: a sig that is not the leaf\'s', 'decide', { now, envelope: { ...smallSpelt, sig: b64url(new Uint8Array(64)) }, node: { ...node, pins: pinned } });
+  expect('decide, small form from a pinned contact: a sig that is not the leaf\'s', { result: { code: 'chain_required' }, effects: [] });
+
   // B3 — the node's OWN state, unreadable. The seed throws; so does the core.
   add('decide when a held key\'s own leaf will not parse', 'decide', { now, envelope: sealed, node: { ...node, keys: [{ ...node.keys[0], leaf: '!!!' }] } });
   add('decide in the small form when a pin\'s leaf will not parse', 'decide', { now, envelope: small, node: { ...node, pins: [{ root: rootFp, endpoint: ENDPOINT, leaf: 'AAAA', state: 'active' }] } });
