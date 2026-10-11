@@ -1,6 +1,5 @@
 //! `decide`: the receiving side of §13.3, §6.1, §5.3 and §14.4 as one pure function over the state
-//! the host supplies (`state.rs`). `envelope.mjs receive()` is its specification, line for line, but
-//! for a `sig` that is not base64url, which this refuses first (CONTRACT §5.1).
+//! the host supplies (`state.rs`). `envelope.mjs receive()` is its specification, line for line.
 use super::state::{host_roots, DecideInput, DecideOutput, NodeState};
 use super::{
     chain_of, decode_header, header_checks, members, pin_holding, timing, Timing, CLAIM_WINDOW_S, CTY_CALL, GUEST_TOOLS, INFO,

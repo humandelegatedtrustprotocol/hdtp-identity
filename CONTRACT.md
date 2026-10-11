@@ -332,11 +332,7 @@ host holding an older pin of that leaf's key learns the root above it (§14.3) a
 proved and the request's `msg_id`, so a host can seal the refusal back to the caller (§13.2) without
 opening the envelope again; its effects are the pin's own moves, never `seen`; and
 `{"code": "ok", "replayed": true}` for a seen `msg_id`.
-The `why` strings are the seed's, verbatim, so the intrusion suite reads both ports alike, except
-`sig is not base64url`: for now the seed lags the §13.1 spelling MUST for `sig` — its `receive()` reads
-a `sig` that does not read as a signature that fails, so its small form answers `chain_required` where
-both ports refuse — and `js/intrude.mjs` expects the ports' words for the respelled `sig` until the
-seed follows.
+The `why` strings are the seed's, verbatim, so the intrusion suite reads both ports alike.
 
 Order, as `receive()` has it (freshness also refuses `exp − ts` over 30 days, §13.1, as `exp too far from ts`): decode `protected` → header members exactly `cty,exp,kid,msg_id,suite,ts,v`
 → their types (`v`, `ts`, `exp` integers, the rest strings, else `header member types`)
