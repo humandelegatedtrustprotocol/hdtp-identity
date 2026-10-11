@@ -7,9 +7,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed as proven that did not pass.
 
-Specification: **1.0.0**. **101** normative sentences, **2974** cross-port parity cases over **54** guarded functions.
+Specification: **1.0.0**. **101** normative sentences, **3057** cross-port parity cases over **54** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 1.0.0): **5948** answers, of which **0** do not hold to the shape it declares. Of **131** declared error codes, **131** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 1.0.0): **6114** answers, of which **0** do not hold to the shape it declares. Of **131** declared error codes, **131** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 101 normative sentences of the specification
 
@@ -231,7 +231,7 @@ by declaration. A row with nothing in its last column would fail `js/musts.mjs`.
 | `14.4#1` | An endpoint **MUST** keep the key identifiers of every leaf it has held for an identity it still serves — fingerprints, never keys past their `notAfter`. | `scenario:a former key of a still-served identity gets the current chain`, `gateway:TestStaleKidIsAnsweredWithTheCurrentChain` |
 | `14.4#2` | A caller **MUST** follow `certificate_renewed` at most once per call, and only when the chain it carries is newer than or equal to its pin (§14.3): an older chain, a chain to another root, or a chain naming another address is discarded and the call fails as it would have. | `rust:certificate_renewed_cases`, `go:TestChainCases` |
 
-## The 2974 cross-port parity cases
+## The 3057 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -239,7 +239,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **2974** cases (**1417** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
+At the run that generated this file: **3057** cases (**1464** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
 
 ### `address_guard` — 51 cases · whole on success
 
@@ -700,7 +700,7 @@ At the run that generated this file: **2974** cases (**1417** of the run's cases
 - generated · csr_new · endpoint absent, host_pkcs8 7
 - generated · csr_new · endpoint absent, dns_name 7
 
-### `decide` — 181 cases · whole on success
+### `decide` — 205 cases · whole on success
 
 - decide on an envelope from a pinned contact
 - decide on a pinned contact's call that names no tool
@@ -757,6 +757,30 @@ At the run that generated this file: **2974** cases (**1417** of the run's cases
 - decide with an envelope whose sig is null
 - decide, small form from a pinned contact: its own sig
 - decide, small form from a pinned contact: a sig that is not the leaf's
+- decide, a contact's send_message with a thread_id of 65 letters and digits
+- decide, a contact's send_message with a thread_id of 65 dots: the length is checked first
+- decide, a contact's send_message with a thread_id of 33 two-byte characters
+- decide, a contact's send_message with a thread_id of two dots
+- decide, a contact's send_message with a thread_id that is empty
+- decide, a contact's send_message with a thread_id with a hyphen that is not a UUID
+- decide, a contact's send_message with a thread_id of r- and 62 hex digits
+- decide, a contact's send_message with a thread_id that is a UUID in upper case
+- decide, a contact's send_message with a thread_id ending in a line break
+- decide, a contact's send_message with a thread_id of one non-ASCII letter
+- decide, a contact's send_message with a thread_id that is a number
+- decide, a contact's send_message with a thread_id that is a list
+- decide, a contact's send_media with a thread_id of neither form
+- decide, a contact's book_slot with a thread_id of neither form
+- decide, the small form: a contact's send_message with a thread_id of neither form
+- decide, a contact's call with a null thread_id is no thread_id (control)
+- decide, a contact's call with no thread_id (control)
+- decide, a contact's call with a thread_id of 64 letters and digits (control)
+- decide, a contact's call with a thread_id of r and 62 hex digits (control)
+- decide, a contact's call with a lower-case UUID thread_id (control)
+- decide, a contact's call with a lower-case UUID thread_id at book_slot (control)
+- decide, a contact's call with a tool that takes no thread_id, carrying one of neither form (control)
+- decide, a contact's call with arguments that are not an object (control)
+- decide, a pending_out contact's send_message with a thread_id of neither form waits
 - decide when a held key's own leaf will not parse
 - decide in the small form when a pin's leaf will not parse
 - decide when the pinned leaf of the sender's root will not compare
@@ -1030,7 +1054,7 @@ At the run that generated this file: **2974** cases (**1417** of the run's cases
 - generated · export_merge · held absent, rows "x"
 - generated · export_merge · rows absent, held "x"
 
-### `export_read` — 115 cases · whole on success
+### `export_read` — 117 cases · whole on success
 
 - export_read: what export_write wrote
 - export_read at an instant that does not read
@@ -1039,6 +1063,8 @@ At the run that generated this file: **2974** cases (**1417** of the run's cases
 - export corpus local-names-differ.zip: export_read
 - export corpus valid-export-with-removed-thread.zip: export_read
 - export corpus valid-export-with-a-nameless-removed-thread.zip: export_read
+- export corpus valid-export-with-a-left-out-thread.zip: export_read
+- export corpus valid-export-with-a-0.8.1-reissued-thread-id.zip: export_read
 - export corpus zip-slip.zip: export_read
 - export corpus absolute-path.zip: export_read
 - export corpus backslash.zip: export_read
@@ -1148,7 +1174,7 @@ At the run that generated this file: **2974** cases (**1417** of the run's cases
 - generated · export_read · now absent, threads_csv 7
 - generated · export_read · now absent, owner 7
 
-### `export_read_end` — 103 cases · whole on success
+### `export_read_end` — 145 cases · whole on success
 
 - export_read_end: what was written
 - export corpus valid-export.zip: export_read_end
@@ -1156,6 +1182,8 @@ At the run that generated this file: **2974** cases (**1417** of the run's cases
 - export corpus local-names-differ.zip: export_read_end
 - export corpus valid-export-with-removed-thread.zip: export_read_end
 - export corpus valid-export-with-a-nameless-removed-thread.zip: export_read_end
+- export corpus valid-export-with-a-left-out-thread.zip: export_read_end
+- export corpus valid-export-with-a-0.8.1-reissued-thread-id.zip: export_read_end
 - export corpus dangling-reply.zip: export_read_end
 - export corpus unreferenced-media.zip: export_read_end
 - export corpus message-count.zip: export_read_end
@@ -1178,6 +1206,10 @@ At the run that generated this file: **2974** cases (**1417** of the run's cases
 - export_read_end with lines given as text
 - export_read_end with media holding a number
 - export_read_end with no media at all
+- export_read_end with no kept_msg_ids at all
+- export_read_end with kept_msg_ids holding a number
+- export_read_end with no media_kept at all
+- export_read_end: a reply into a left-out message, and a file only a left-out message names
 - export_read_end: what a contact controls, as written, reads back
 - export_read_end: PEM armour written anew in what a contact wrote, reads back
 - export_read_end: a base64 word written anew in what a contact wrote, reads back
@@ -1201,6 +1233,10 @@ At the run that generated this file: **2974** cases (**1417** of the run's cases
 - generated · export_read_end · media_seen null
 - generated · export_read_end · media absent
 - generated · export_read_end · media null
+- generated · export_read_end · kept_msg_ids absent
+- generated · export_read_end · kept_msg_ids null
+- generated · export_read_end · media_kept absent
+- generated · export_read_end · media_kept null
 - generated · export_read_end · messages_sha256 ""
 - generated · export_read_end · messages_sha256 7
 - generated · export_read_end · an undeclared member
@@ -1211,6 +1247,8 @@ At the run that generated this file: **2974** cases (**1417** of the run's cases
 - generated · export_read_end · manifest absent, reply_tos "x"
 - generated · export_read_end · manifest absent, media_seen "x"
 - generated · export_read_end · manifest absent, media "x"
+- generated · export_read_end · manifest absent, kept_msg_ids "x"
+- generated · export_read_end · manifest absent, media_kept "x"
 - generated · export_read_end · lines absent, manifest 7
 - generated · export_read_end · lines absent, messages_sha256 7
 - generated · export_read_end · lines absent, ids "x"
@@ -1218,6 +1256,8 @@ At the run that generated this file: **2974** cases (**1417** of the run's cases
 - generated · export_read_end · lines absent, reply_tos "x"
 - generated · export_read_end · lines absent, media_seen "x"
 - generated · export_read_end · lines absent, media "x"
+- generated · export_read_end · lines absent, kept_msg_ids "x"
+- generated · export_read_end · lines absent, media_kept "x"
 - generated · export_read_end · ids absent, manifest 7
 - generated · export_read_end · ids absent, messages_sha256 7
 - generated · export_read_end · ids absent, lines "7"
@@ -1225,6 +1265,8 @@ At the run that generated this file: **2974** cases (**1417** of the run's cases
 - generated · export_read_end · ids absent, reply_tos "x"
 - generated · export_read_end · ids absent, media_seen "x"
 - generated · export_read_end · ids absent, media "x"
+- generated · export_read_end · ids absent, kept_msg_ids "x"
+- generated · export_read_end · ids absent, media_kept "x"
 - generated · export_read_end · msg_ids absent, manifest 7
 - generated · export_read_end · msg_ids absent, messages_sha256 7
 - generated · export_read_end · msg_ids absent, lines "7"
@@ -1232,6 +1274,8 @@ At the run that generated this file: **2974** cases (**1417** of the run's cases
 - generated · export_read_end · msg_ids absent, reply_tos "x"
 - generated · export_read_end · msg_ids absent, media_seen "x"
 - generated · export_read_end · msg_ids absent, media "x"
+- generated · export_read_end · msg_ids absent, kept_msg_ids "x"
+- generated · export_read_end · msg_ids absent, media_kept "x"
 - generated · export_read_end · reply_tos absent, manifest 7
 - generated · export_read_end · reply_tos absent, messages_sha256 7
 - generated · export_read_end · reply_tos absent, lines "7"
@@ -1239,6 +1283,8 @@ At the run that generated this file: **2974** cases (**1417** of the run's cases
 - generated · export_read_end · reply_tos absent, msg_ids "x"
 - generated · export_read_end · reply_tos absent, media_seen "x"
 - generated · export_read_end · reply_tos absent, media "x"
+- generated · export_read_end · reply_tos absent, kept_msg_ids "x"
+- generated · export_read_end · reply_tos absent, media_kept "x"
 - generated · export_read_end · media_seen absent, manifest 7
 - generated · export_read_end · media_seen absent, messages_sha256 7
 - generated · export_read_end · media_seen absent, lines "7"
@@ -1246,6 +1292,8 @@ At the run that generated this file: **2974** cases (**1417** of the run's cases
 - generated · export_read_end · media_seen absent, msg_ids "x"
 - generated · export_read_end · media_seen absent, reply_tos "x"
 - generated · export_read_end · media_seen absent, media "x"
+- generated · export_read_end · media_seen absent, kept_msg_ids "x"
+- generated · export_read_end · media_seen absent, media_kept "x"
 - generated · export_read_end · media absent, manifest 7
 - generated · export_read_end · media absent, messages_sha256 7
 - generated · export_read_end · media absent, lines "7"
@@ -1253,8 +1301,28 @@ At the run that generated this file: **2974** cases (**1417** of the run's cases
 - generated · export_read_end · media absent, msg_ids "x"
 - generated · export_read_end · media absent, reply_tos "x"
 - generated · export_read_end · media absent, media_seen "x"
+- generated · export_read_end · media absent, kept_msg_ids "x"
+- generated · export_read_end · media absent, media_kept "x"
+- generated · export_read_end · kept_msg_ids absent, manifest 7
+- generated · export_read_end · kept_msg_ids absent, messages_sha256 7
+- generated · export_read_end · kept_msg_ids absent, lines "7"
+- generated · export_read_end · kept_msg_ids absent, ids "x"
+- generated · export_read_end · kept_msg_ids absent, msg_ids "x"
+- generated · export_read_end · kept_msg_ids absent, reply_tos "x"
+- generated · export_read_end · kept_msg_ids absent, media_seen "x"
+- generated · export_read_end · kept_msg_ids absent, media "x"
+- generated · export_read_end · kept_msg_ids absent, media_kept "x"
+- generated · export_read_end · media_kept absent, manifest 7
+- generated · export_read_end · media_kept absent, messages_sha256 7
+- generated · export_read_end · media_kept absent, lines "7"
+- generated · export_read_end · media_kept absent, ids "x"
+- generated · export_read_end · media_kept absent, msg_ids "x"
+- generated · export_read_end · media_kept absent, reply_tos "x"
+- generated · export_read_end · media_kept absent, media_seen "x"
+- generated · export_read_end · media_kept absent, media "x"
+- generated · export_read_end · media_kept absent, kept_msg_ids "x"
 
-### `export_read_messages` — 59 cases · whole on success
+### `export_read_messages` — 74 cases · whole on success
 
 - export_read_messages: what export_write_messages wrote
 - export corpus valid-export.zip: export_read_messages
@@ -1262,6 +1330,8 @@ At the run that generated this file: **2974** cases (**1417** of the run's cases
 - export corpus local-names-differ.zip: export_read_messages
 - export corpus valid-export-with-removed-thread.zip: export_read_messages
 - export corpus valid-export-with-a-nameless-removed-thread.zip: export_read_messages
+- export corpus valid-export-with-a-left-out-thread.zip: export_read_messages
+- export corpus valid-export-with-a-0.8.1-reissued-thread-id.zip: export_read_messages
 - export corpus dangling-message-thread.zip: export_read_messages
 - export corpus dangling-attachment.zip: export_read_messages
 - export corpus two-attachments.zip: export_read_messages
@@ -1284,6 +1354,8 @@ At the run that generated this file: **2974** cases (**1417** of the run's cases
 - export_read_messages: a message whose body is over 16 KiB
 - export_read_messages: a message missing a member
 - export_read_messages: the valid export's lines
+- export_read_messages: the valid export's lines, t2 left out
+- export_read_messages: a message of a thread neither kept nor left out
 - export_read_messages: a message time with a lower-case z
 - export_read_messages: a message time with a lower-case t
 - export_read_messages: a message time with a comma before the fraction
@@ -1293,6 +1365,8 @@ At the run that generated this file: **2974** cases (**1417** of the run's cases
 - generated · export_read_messages · lines null
 - generated · export_read_messages · threads absent
 - generated · export_read_messages · threads null
+- generated · export_read_messages · left_out_threads absent
+- generated · export_read_messages · left_out_threads null
 - generated · export_read_messages · contacts absent
 - generated · export_read_messages · contacts null
 - generated · export_read_messages · media absent
@@ -1300,19 +1374,28 @@ At the run that generated this file: **2974** cases (**1417** of the run's cases
 - generated · export_read_messages · first_line "7"
 - generated · export_read_messages · an undeclared member
 - generated · export_read_messages · lines absent, threads "x"
+- generated · export_read_messages · lines absent, left_out_threads "x"
 - generated · export_read_messages · lines absent, contacts "x"
 - generated · export_read_messages · lines absent, media "x"
 - generated · export_read_messages · lines absent, first_line "7"
 - generated · export_read_messages · threads absent, lines "x"
+- generated · export_read_messages · threads absent, left_out_threads "x"
 - generated · export_read_messages · threads absent, contacts "x"
 - generated · export_read_messages · threads absent, media "x"
 - generated · export_read_messages · threads absent, first_line "7"
+- generated · export_read_messages · left_out_threads absent, lines "x"
+- generated · export_read_messages · left_out_threads absent, threads "x"
+- generated · export_read_messages · left_out_threads absent, contacts "x"
+- generated · export_read_messages · left_out_threads absent, media "x"
+- generated · export_read_messages · left_out_threads absent, first_line "7"
 - generated · export_read_messages · contacts absent, lines "x"
 - generated · export_read_messages · contacts absent, threads "x"
+- generated · export_read_messages · contacts absent, left_out_threads "x"
 - generated · export_read_messages · contacts absent, media "x"
 - generated · export_read_messages · contacts absent, first_line "7"
 - generated · export_read_messages · media absent, lines "x"
 - generated · export_read_messages · media absent, threads "x"
+- generated · export_read_messages · media absent, left_out_threads "x"
 - generated · export_read_messages · media absent, contacts "x"
 - generated · export_read_messages · media absent, first_line "7"
 
