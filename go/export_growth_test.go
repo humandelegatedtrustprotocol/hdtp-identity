@@ -30,7 +30,7 @@ import (
 // clock, with 24 busy processes beside the test, the bound failed 10 runs of 10 at ratios up to 31×
 // for unchanged code; on CPU time with the collector running it failed 3 of 50, export_read_messages
 // at 8.1× to 8.3× (5.7× on an idle machine), and 4.0× with the collector off. The Rust core's
-// export_functions_grow_linearly_in_the_rows_of_a_file holds the same bound on the wall clock.
+// export_functions_grow_linearly_in_the_rows_of_a_file holds the same bound on its thread's CPU time.
 func TestExportFunctionsGrowLinearlyInTheRowsOfAFile(t *testing.T) {
 	const n = 5000
 	owner := "sha256:" + strings.Repeat("O", 42) + "A"

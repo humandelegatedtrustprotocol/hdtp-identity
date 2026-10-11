@@ -676,6 +676,7 @@ dependencies = [
  "getrandom 0.2.17",
  "hdtp-limits",
  "hmac",
+ "libc",
  "p256",
  "serde",
  "serde_json",
