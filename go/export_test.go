@@ -242,6 +242,121 @@ func TestWhatAContactControlsNeverStopsAnExportAndItReadsBack(t *testing.T) {
 	}
 }
 
+// SPEC §9.2, what a contact controls, for every member a contact may have written: text there that
+// reads as a private key never stops the owner's export, no file carries it, and what WriteExportZip
+// writes reads back whole; the same text where the owner's side wrote it is refused. Both shapes the
+// check knows: PEM armour, and a base64 word that decodes to a PKCS #8 key.
+func TestAContactsKeyShapedTextNeverStopsAnExportAndTheOwnersIsRefused(t *testing.T) {
+	former := "sha256:" + strings.Repeat("F", 42) + "A"
+	for _, key := range []string{"x PRIVATE KEY----- y", "MAoCAQAwAwYBAAQA"} {
+		if !holdsPrivateKey(key) {
+			t.Fatalf("%q does not read as a key", key)
+		}
+		in, files := exportFixture(t)
+		at := "2026-09-02T00:00:00Z"
+		in.Contacts[0].DisplayName = key
+		in.Threads[0].Topic = key
+		in.Threads = append(in.Threads,
+			ThreadRow{ID: key, Contact: exportPeer, Topic: "lunch", CreatedAt: at, LastAt: at},
+			ThreadRow{ID: "r-1", Contact: former, CreatedAt: at, LastAt: at, ContactName: "Chitra", ContactDisplayName: key + " "})
+		msg := func(id, thread, msgID, direction string, replyTo *string) MessageRow {
+			return MessageRow{ID: id, Thread: thread, Contact: exportPeer, MsgID: msgID, Direction: direction, Sender: "human",
+				Time: at, Body: "hi", ReplyTo: replyTo, Status: "read", Attachments: []Attachment{}}
+		}
+		k := key
+		in.Messages[0].Attachments[0].Filename = key // the message that carries the one file
+		in.Messages[1].ReplyTo = &k
+		in.Messages = append(in.Messages,
+			msg("3", key, "m-3", "in", nil),
+			msg("4", "t-1", key, "in", nil),
+			msg("5", "t-1", "m-5", "in", &k))
+		var b bytes.Buffer
+		leftOut, err := WriteExportZip(&b, in, func(h string) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(files[h])), nil })
+		if err != nil {
+			t.Fatalf("%q: the export was refused: %v", key, err)
+		}
+		want := []ExportLeftOut{{"1", exportFileNameHoldsAKey}, {"3", exportThreadHoldsAKey}, {"4", exportMsgIDHoldsAKey}}
+		if !reflect.DeepEqual(leftOut, want) {
+			t.Errorf("%q: left out %+v", key, leftOut)
+		}
+		zr, err := zip.NewReader(bytes.NewReader(b.Bytes()), int64(b.Len()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range zr.File {
+			if strings.HasPrefix(f.Name, "media/") {
+				t.Errorf("%s: the file of a message left out went into the export", f.Name)
+			}
+			rc, _ := f.Open()
+			body, _ := io.ReadAll(rc)
+			rc.Close()
+			if strings.Contains(string(body), key) {
+				t.Errorf("%q: %s carries it", key, f.Name)
+			}
+		}
+		got, err := ReadExportZip(zr, exportOwner, in.ExportedAt, 1<<30)
+		if err != nil {
+			t.Fatalf("%q: what was written does not read: %v", key, err)
+		}
+		if got.Contacts[0].DisplayName != "" {
+			t.Errorf("display_name: %q", got.Contacts[0].DisplayName)
+		}
+		var ids []string
+		for _, th := range got.Threads {
+			ids = append(ids, th.ID+"|"+th.Topic+"|"+th.ContactDisplayName)
+		}
+		if !reflect.DeepEqual(ids, []string{"r-1||", "t-1||"}) {
+			t.Errorf("threads (id|topic|contact_display_name): %q", ids)
+		}
+		var kept []string
+		for _, m := range got.Messages {
+			kept = append(kept, m.ID)
+			if m.ReplyTo != nil {
+				t.Errorf("message %s: reply_to %q", m.ID, *m.ReplyTo)
+			}
+		}
+		if !reflect.DeepEqual(kept, []string{"2", "5"}) {
+			t.Errorf("messages: %v", kept)
+		}
+
+		// What the owner's side wrote is refused, naming where.
+		for _, tc := range []struct {
+			what   string
+			change func(in *ExportInput)
+			want   string
+		}{
+			{"the owner's name for the contact", func(in *ExportInput) { in.Contacts[0].Name = key }, "contacts[0], column name: holds a private key"},
+			{"the owner's name for a former contact", func(in *ExportInput) {
+				in.Threads = append(in.Threads, ThreadRow{ID: "r-1", Contact: former, CreatedAt: at, LastAt: at, ContactName: key})
+			}, "threads[1], column contact_name: holds a private key"},
+			{"the host's message id", func(in *ExportInput) { in.Messages[1].ID = key }, "messages[1], member id: holds a private key"},
+			{"an outgoing msg_id", func(in *ExportInput) { in.Messages[1].MsgID = key }, "messages[1], member msg_id: holds a private key"},
+			{"an outgoing file's name", func(in *ExportInput) {
+				in.Messages[0].Direction = "out"
+				in.Messages[0].Attachments[0].Filename = key
+			}, "messages[0], member attachments: holds a private key"},
+			{"an outgoing file's type", func(in *ExportInput) {
+				in.Messages[0].Direction = "out"
+				in.Messages[0].Attachments[0].MIME = key
+			}, "messages[0], member attachments: holds a private key"},
+		} {
+			in, files := exportFixture(t)
+			tc.change(&in)
+			_, err := WriteExportZip(&bytes.Buffer{}, in, func(h string) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(files[h])), nil })
+			if err == nil || err.Error() != tc.want {
+				t.Errorf("%q, %s:\n  got  %v\n  want %s", key, tc.what, err, tc.want)
+			}
+		}
+	}
+	// The control: the fixture, with the same members written plainly, writes whole.
+	in, files := exportFixture(t)
+	in.Threads = append(in.Threads, ThreadRow{ID: "r-1", Contact: former, CreatedAt: "2026-09-02T00:00:00Z", LastAt: "2026-09-02T00:00:00Z", ContactName: "Chitra", ContactDisplayName: "C"})
+	leftOut, err := WriteExportZip(&bytes.Buffer{}, in, func(h string) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(files[h])), nil })
+	if err != nil || len(leftOut) != 0 {
+		t.Errorf("the control: %v, left out %+v", err, leftOut)
+	}
+}
+
 // A contact held without a leaf, blocked and granted one thing, keeps what the person decided when a
 // file brings its leaf: it stays blocked and granted what it was, and each difference is a conflict.
 func TestExportMergeKeepsWhatThePersonDecidedAboutAHeldContact(t *testing.T) {

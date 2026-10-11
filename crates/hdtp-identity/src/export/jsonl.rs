@@ -172,23 +172,66 @@ pub struct LeftOut {
 
 /// Why a message is left out: its body is what the key-material check refuses.
 pub const BODY_HOLDS_A_KEY: &str = "its body holds what reads as a private key, which an export never carries";
+/// Why a message is left out: its thread's id, which the contact may have chosen, is what the
+/// key-material check refuses, and the thread is left out with it.
+pub const THREAD_HOLDS_A_KEY: &str = "its thread's id holds what reads as a private key, which an export never carries";
+/// Why an incoming message is left out: the contact's own `msg_id` is what the check refuses.
+pub const MSG_ID_HOLDS_A_KEY: &str = "its msg_id holds what reads as a private key, which an export never carries";
+/// Why an incoming message is left out: the name or the type the contact gave its file is what the
+/// check refuses.
+pub const FILE_NAME_HOLDS_A_KEY: &str = "its file's name or type holds what reads as a private key, which an export never carries";
+
+/// Why a message is left out, if it is: a member a contact wrote reads as a private key (SPEC §9.2,
+/// what a contact controls). The body, whoever wrote it, as §9.2 says; the thread's id, which either
+/// side may have chosen (§7); and on a message that came in, its `msg_id` and its file's name and
+/// type, which the sender chose. What the owner's side wrote is refused by `message`.
+fn left_out_for(doc: &Map<String, Value>) -> Option<&'static str> {
+    let holds = |m: &str| doc.get(m).and_then(|v| v.as_str()).is_some_and(holds_private_key);
+    if holds("body") {
+        return Some(BODY_HOLDS_A_KEY);
+    }
+    if holds("thread") {
+        return Some(THREAD_HOLDS_A_KEY);
+    }
+    if doc.get("direction").and_then(|d| d.as_str()) != Some("in") {
+        return None;
+    }
+    if holds("msg_id") {
+        return Some(MSG_ID_HOLDS_A_KEY);
+    }
+    let file_named = doc.get("attachments").and_then(|a| a.as_array()).is_some_and(|items| {
+        items.iter().any(|a| ["filename", "mime"].iter().any(|m| a.get(*m).and_then(|v| v.as_str()).is_some_and(holds_private_key)))
+    });
+    file_named.then_some(FILE_NAME_HOLDS_A_KEY)
+}
 
 /// The lines of `messages.jsonl` for these messages, in the order given, each checked by the
 /// reader's rules but the references (the host holds those) and written as RFC 8785 JSON. What a
-/// contact controls never stops the export (SPEC §9.2): a message whose body holds what reads as a
-/// private key is left out and listed, and a `reply_to` naming a message the file does not carry is
-/// written `null`. The file's messages are these, less those left out; a host writing in batches
-/// names them all in `file_msg_ids`.
+/// contact controls never stops the export (SPEC §9.2): a message is left out and listed when a member
+/// a contact may have written holds what reads as a private key (`left_out_for`), and a `reply_to`
+/// naming a message the file does not carry, or reading as a key, is written `null`: it names a
+/// msg_id, which may be the contact's, and a message whose msg_id reads as a key is never carried.
+/// The file's messages are these, less those left out; a host writing in batches names them all in
+/// `file_msg_ids`.
 pub fn write(messages: &[Value], file_msg_ids: Option<&[&str]>) -> Result<(Vec<String>, Vec<LeftOut>)> {
     let mut kept = Vec::new();
     let mut left_out = Vec::new();
     for (i, v) in messages.iter().enumerate() {
         let Some(doc) = v.as_object() else { return refuse(format!("messages[{i}]: a message is an object")) };
-        if doc.get("body").and_then(|b| b.as_str()).is_some_and(holds_private_key) {
+        if let Some(reason) = left_out_for(doc) {
             let id = doc.get("id").and_then(|x| x.as_str()).unwrap_or_default().to_string();
-            left_out.push(LeftOut { id, reason: BODY_HOLDS_A_KEY });
+            left_out.push(LeftOut { id, reason });
             continue;
         }
+        let unkeyed;
+        let doc = if doc.get("reply_to").and_then(|r| r.as_str()).is_some_and(holds_private_key) {
+            let mut d = doc.clone();
+            d.insert("reply_to".into(), Value::Null);
+            unkeyed = d;
+            &unkeyed
+        } else {
+            doc
+        };
         let m = message(doc, None).map_err(|(member, why)| {
             crate::util::Error::new(
                 "bad_request",

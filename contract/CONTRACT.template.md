@@ -422,6 +422,11 @@ a Rust host that write the same rows write the same file. A media file is stored
 What a contact controls never stops the export (SPEC 9.2#22–25): `export_write_messages` leaves out
 a message whose body is a private key and answers it in `left_out`, and a host that writes in
 batches names the file's msg_ids in `msg_ids`, so a reply to a message not carried is written null.
+Nor does text a contact may have written that reads as a private key: `export_write` writes a
+contact's `display_name`, a removed thread's `contact_display_name` and a thread's `topic` empty and
+leaves out a thread whose id reads as one, and `export_write_messages` leaves out and lists a message
+whose thread id does, or, coming in, whose `msg_id` or file's name or type does, and writes such a
+`reply_to` null. What the owner's side wrote is refused as before; the reader refuses all of it.
 The core never sees a media file's bytes unless it is handed them, so the host checks each before it
 writes, with `media_holds_private_key`: a message whose file is a private key is left out with the file
 and listed with the rest, for the host to report to the person.

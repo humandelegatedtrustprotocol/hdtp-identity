@@ -1385,15 +1385,55 @@ type ExportLeftOut struct {
 	Reason string `json:"reason"`
 }
 
-// exportBodyHoldsAKey is why a message is left out: its body is what the key-material check refuses.
-const exportBodyHoldsAKey = "its body holds what reads as a private key, which an export never carries"
+// Why a message is left out (SPEC §9.2, what a contact controls): its body; its thread's id, which
+// the contact may have chosen, the thread left out with it; on a message that came in, the
+// contact's own msg_id, or the name or type the contact gave its file — each what the key-material
+// check refuses.
+const (
+	exportBodyHoldsAKey     = "its body holds what reads as a private key, which an export never carries"
+	exportThreadHoldsAKey   = "its thread's id holds what reads as a private key, which an export never carries"
+	exportMsgIDHoldsAKey    = "its msg_id holds what reads as a private key, which an export never carries"
+	exportFileNameHoldsAKey = "its file's name or type holds what reads as a private key, which an export never carries"
+)
+
+// exportLeftOutFor is why a message is left out, or "": a member a contact wrote reads as a private
+// key. The body, whoever wrote it, as §9.2 says; the thread's id, which either side may have chosen
+// (§7); and on a message that came in, its msg_id and its file's name and type, which the sender
+// chose. What the owner's side wrote is refused by checkMessage.
+func exportLeftOutFor(doc map[string]any) string {
+	holds := func(v any) bool {
+		s, isText := v.(string)
+		return isText && holdsPrivateKey(s)
+	}
+	if holds(doc["body"]) {
+		return exportBodyHoldsAKey
+	}
+	if holds(doc["thread"]) {
+		return exportThreadHoldsAKey
+	}
+	if d, _ := doc["direction"].(string); d != "in" {
+		return ""
+	}
+	if holds(doc["msg_id"]) {
+		return exportMsgIDHoldsAKey
+	}
+	items, _ := doc["attachments"].([]any)
+	for _, a := range items {
+		if o, isObj := a.(map[string]any); isObj && (holds(o["filename"]) || holds(o["mime"])) {
+			return exportFileNameHoldsAKey
+		}
+	}
+	return ""
+}
 
 // exportWriteMessages is the lines of messages.jsonl for these messages, in the order given, each
 // checked by the reader's rules but the references (the host holds those) and written as RFC 8785
-// JSON. What a contact controls never stops the export (SPEC §9.2): a message whose body holds what
-// reads as a private key is left out and listed, and a reply_to naming a message the file does not
-// carry is written null. The file's messages are these, less those left out; a host writing in
-// batches names them all in fileMsgIDs.
+// JSON. What a contact controls never stops the export (SPEC §9.2): a message is left out and listed
+// when a member a contact may have written holds what reads as a private key (exportLeftOutFor), and
+// a reply_to naming a message the file does not carry, or reading as a key, is written null: it names
+// a msg_id, which may be the contact's, and a message whose msg_id reads as a key is never carried.
+// The file's messages are these, less those left out; a host writing in batches names them all in
+// fileMsgIDs.
 func exportWriteMessages(messages []any, fileMsgIDs []string) ([]string, []ExportLeftOut, error) {
 	var kept []map[string]any
 	var at []int
@@ -1403,10 +1443,18 @@ func exportWriteMessages(messages []any, fileMsgIDs []string) ([]string, []Expor
 		if !isObj {
 			return nil, nil, exportRefuse(fmt.Sprintf("messages[%d]: a message is an object", i))
 		}
-		if body, isText := doc["body"].(string); isText && holdsPrivateKey(body) {
+		if reason := exportLeftOutFor(doc); reason != "" {
 			id, _ := doc["id"].(string)
-			leftOut = append(leftOut, ExportLeftOut{ID: id, Reason: exportBodyHoldsAKey})
+			leftOut = append(leftOut, ExportLeftOut{ID: id, Reason: reason})
 			continue
+		}
+		if r, isText := doc["reply_to"].(string); isText && holdsPrivateKey(r) {
+			unkeyed := make(map[string]any, len(doc))
+			for k, v := range doc {
+				unkeyed[k] = v
+			}
+			unkeyed["reply_to"] = nil
+			doc = unkeyed
 		}
 		m, bad := checkMessage(doc, nil)
 		if bad != nil {
@@ -1502,9 +1550,9 @@ func contactCells(v any) ([]string, *cellRefusal) {
 			}
 			if col == "display_name" {
 				// The contact's name for themselves is their own claim: its control characters
-				// dropped, and cut to 200 characters, on a character, rather than refused (SPEC §9.2,
-				// what a contact controls).
-				s = truncateRunes(dropControl(s), ExportNameMax)
+				// dropped, and cut to 200 characters, on a character, rather than refused, and
+				// written empty when what is left reads as a key (SPEC §9.2, what a contact controls).
+				s = contactText(truncateRunes(dropControl(s), ExportNameMax))
 			}
 			if col == "name" {
 				s = dropControl(s)
@@ -1526,9 +1574,19 @@ func truncateRunes(s string, n int) string {
 	return s
 }
 
+// contactText is text a contact wrote, as a writer writes it: empty when it reads as a private key,
+// so that what a contact controls never stops the owner's export and no file carries it (SPEC §9.2).
+func contactText(s string) string {
+	if holdsPrivateKey(s) {
+		return ""
+	}
+	return s
+}
+
 // threadCells is a thread row handed to export_write, as the longer header's cells: the two names
 // absent are empty, and the contact's own name for themselves is cut to 200 characters, on a
-// character (SPEC §9.2, what a contact controls).
+// character; it and the topic are written empty when they read as a key (SPEC §9.2, what a contact
+// controls).
 func threadCells(v any) ([]string, *cellRefusal) {
 	o, isObj := v.(map[string]any)
 	if !isObj {
@@ -1546,8 +1604,10 @@ func threadCells(v any) ([]string, *cellRefusal) {
 		case !isText:
 			return nil, &cellRefusal{k, "missing, or not a string"}
 		case col == "contact_display_name":
-			s = truncateRunes(dropControl(s), ExportNameMax)
-		case col == "topic", col == "contact_name":
+			s = contactText(truncateRunes(dropControl(s), ExportNameMax))
+		case col == "topic":
+			s = contactText(dropControl(s))
+		case col == "contact_name":
 			s = dropControl(s)
 		}
 		cells = append(cells, s)
@@ -1581,7 +1641,7 @@ func exportWrite(owner, ownerName string, exportedAt time.Time, tool string, con
 		return nil, exportRefuse("owner is not a fingerprint")
 	}
 	// SPEC 9.2#28: the owner's and the host's own strings are refused, naming the member —
-	// there is nothing of a contact's to leave out.
+	// neither is a contact's to leave out.
 	for _, m := range [][2]string{{"owner_name", ownerName}, {"tool", tool}} {
 		if holdsPrivateKey(m[1]) {
 			return nil, exportRefuse(m[0] + " holds a private key")
@@ -1643,6 +1703,12 @@ func exportWrite(owner, ownerName string, exportedAt time.Time, tool string, con
 		r, bad := threadCells(t)
 		if bad != nil {
 			return nil, located(bad)
+		}
+		// A thread id is chosen by whichever side sent first (SPEC §7), so it may be the contact's:
+		// a thread whose id reads as a key is left out, and exportWriteMessages leaves out and lists
+		// each of its messages, whose thread is the same id.
+		if holdsPrivateKey(r[0]) {
+			continue
 		}
 		row, bad := threadRow(r, roots, true, owner)
 		if bad != nil {

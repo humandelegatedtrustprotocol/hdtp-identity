@@ -990,8 +990,9 @@ fn contact_cells(v: &Value) -> std::result::Result<Vec<String>, (usize, String)>
             }
             ("leaf" | "root_cert", None | Some(Value::Null)) => String::new(),
             // The contact's name for themselves is their own claim: cut to 200 characters, on a
-            // character, rather than refused (SPEC §9.2, what a contact controls).
-            ("display_name", Some(Value::String(s))) => drop_control(s).chars().take(NAME_MAX).collect(),
+            // character, rather than refused, and written empty when what is left reads as a key
+            // (SPEC §9.2, what a contact controls).
+            ("display_name", Some(Value::String(s))) => contact_text(drop_control(s).chars().take(NAME_MAX).collect()),
             ("name", Some(Value::String(s))) => drop_control(s),
             (_, Some(Value::String(s))) if !matches!(*col, "was_active" | "permissions" | "their_permissions") => s.clone(),
             _ => return Err((k, "missing, or of the wrong type".into())),
@@ -1001,9 +1002,19 @@ fn contact_cells(v: &Value) -> std::result::Result<Vec<String>, (usize, String)>
     Ok(cells)
 }
 
+/// Text a contact wrote, as a writer writes it: empty when it reads as a private key, so that what a
+/// contact controls never stops the owner's export and no file carries it (SPEC §9.2).
+fn contact_text(s: String) -> String {
+    if holds_private_key(&s) {
+        String::new()
+    } else {
+        s
+    }
+}
+
 /// A ThreadRow handed to `export_write`, as the longer header's cells: the two names absent are empty,
-/// and the contact's own name for themselves is cut to 200 characters, on a character (SPEC §9.2,
-/// what a contact controls).
+/// and the contact's own name for themselves is cut to 200 characters, on a character; it and the
+/// topic are written empty when they read as a key (SPEC §9.2, what a contact controls).
 fn thread_cells(v: &Value) -> std::result::Result<Vec<String>, (usize, String)> {
     let Some(o) = v.as_object() else { return Err((0, "a thread row is an object".into())) };
     if let Some(k) = crate::util::stranger(o, &THREAD_COLUMNS_NAMED) {
@@ -1014,8 +1025,9 @@ fn thread_cells(v: &Value) -> std::result::Result<Vec<String>, (usize, String)> 
         .enumerate()
         .map(|(k, col)| match (o.get(*col), o.get(*col).and_then(|c| c.as_str())) {
             (None, _) if k >= THREAD_COLUMNS.len() => Ok(String::new()),
-            (_, Some(s)) if *col == "contact_display_name" => Ok(drop_control(s).chars().take(NAME_MAX).collect()),
-            (_, Some(s)) if *col == "topic" || *col == "contact_name" => Ok(drop_control(s)),
+            (_, Some(s)) if *col == "contact_display_name" => Ok(contact_text(drop_control(s).chars().take(NAME_MAX).collect())),
+            (_, Some(s)) if *col == "topic" => Ok(contact_text(drop_control(s))),
+            (_, Some(s)) if *col == "contact_name" => Ok(drop_control(s)),
             (_, Some(s)) => Ok(s.to_string()),
             _ => Err((k, "missing, or not a string".to_string())),
         })
@@ -1044,7 +1056,7 @@ pub fn write(
         return refuse("owner is not a fingerprint");
     }
     // SPEC 9.2#28: the owner's and the host's own strings are refused, naming the member —
-    // there is nothing of a contact's to leave out.
+    // neither is a contact's to leave out.
     for (m, text) in [("owner_name", owner_name), ("tool", tool)] {
         if holds_private_key(text) {
             return refuse(format!("{m} holds a private key"));
@@ -1089,6 +1101,12 @@ pub fn write(
         let located =
             |(k, why): (usize, String)| Error::new("bad_request", format!("threads[{i}], column {}: {why}", THREAD_COLUMNS_NAMED[k]));
         let mut r = thread_cells(t).map_err(located)?;
+        // A thread id is chosen by whichever side sent first (SPEC §7), so it may be the contact's: a
+        // thread whose id reads as a key is left out, and `jsonl::write` leaves out and lists each of
+        // its messages, whose `thread` is the same id.
+        if holds_private_key(&r[0]) {
+            continue;
+        }
         let (created, last, differs) = {
             let row = thread_row(r.iter().map(|c| Cow::Borrowed(c.as_str())).collect(), &root_refs, true, owner).map_err(located)?;
             if !thread_ids.insert(r[0].clone()) {
@@ -1239,13 +1257,131 @@ mod tests {
         let (lines, left_out) = jsonl::write(std::slice::from_ref(&message), None).unwrap();
         assert!(lines.is_empty());
         assert_eq!(left_out.iter().map(|l| (l.id.as_str(), l.reason)).collect::<Vec<_>>(), [("1", jsonl::BODY_HOLDS_A_KEY)]);
-        let mut in_a_thread = message;
-        in_a_thread["body"] = json!("hi");
-        in_a_thread["thread"] = json!(body);
+        let mut in_its_id = message;
+        in_its_id["body"] = json!("hi");
+        in_its_id["id"] = json!(body);
         assert_eq!(
-            jsonl::write(&[in_a_thread], None).map(|_| ()).map_err(|e| e.why),
-            Err("messages[0], member thread: holds a private key".to_string())
+            jsonl::write(&[in_its_id], None).map(|_| ()).map_err(|e| e.why),
+            Err("messages[0], member id: holds a private key".to_string())
         );
+    }
+
+    /// SPEC §9.2, what a contact controls, for every member a contact may have written: text there
+    /// that reads as a private key never stops the owner's export, no file carries it, and what is
+    /// written reads back whole; the same text where the owner's side wrote it is refused. Both shapes
+    /// the check knows: PEM armour, and a base64 word that decodes to a PKCS #8 key.
+    #[test]
+    fn a_contacts_key_shaped_text_never_stops_an_export_and_the_owners_is_refused() {
+        let owner = format!("sha256:{}A", "O".repeat(42));
+        let peer = format!("sha256:{}A", "B".repeat(42));
+        let former = format!("sha256:{}A", "F".repeat(42));
+        let pem = "x PRIVATE KEY----- y";
+        let word = "MAoCAQAwAwYBAAQA";
+        assert!(holds_private_key(pem) && holds_private_key(word), "both read as a key");
+        let time = "2026-09-27T10:00:00Z";
+        let contact = |name: &str, display: &str| {
+            json!({ "root": peer, "endpoint": "https://b.example/mcp", "name": name, "display_name": display, "status": "active",
+                "was_active": true, "permissions": [], "their_permissions": [], "leaf": null, "root_cert": null, "added": time })
+        };
+        let thread = |id: &str, topic: &str| json!({ "id": id, "contact": peer, "topic": topic, "created_at": time, "last_at": time });
+        let removed = |name: &str, display: &str| {
+            json!({ "id": "r1", "contact": former, "topic": "", "created_at": time, "last_at": time,
+                "contact_name": name, "contact_display_name": display })
+        };
+        let message = |id: &str, thread: &str, msg_id: &str, direction: &str, reply_to: Value| {
+            json!({ "id": id, "thread": thread, "contact": peer, "msg_id": msg_id, "direction": direction, "sender": "human",
+                "time": time, "body": "hi", "reply_to": reply_to, "status": "read", "attachments": [] })
+        };
+        let with_file = |mut m: Value, filename: &str, mime: &str| {
+            m["body"] = json!("");
+            m["attachments"] = json!([{ "file": "a".repeat(64), "filename": filename, "mime": mime, "size": 1 }]);
+            m
+        };
+        let write_rows = |contacts: &[Value], threads: &[Value]| write(&owner, "Alina", 0, "t", contacts, threads, &[]);
+        for key in [pem, word] {
+            // What the contact wrote, in a row: written empty, or the thread left out.
+            let w =
+                write_rows(&[contact("Bharat", key)], &[thread("t1", key), thread(key, "lunch"), removed("Chitra", &format!("{key} "))])
+                    .unwrap();
+            let cells = csv::read(&w.contacts_csv).unwrap();
+            assert_eq!(cells[1][3], "", "display_name: written empty");
+            let threads = csv::read(w.threads_csv.as_deref().unwrap()).unwrap();
+            let ids: Vec<&str> = threads[1..].iter().map(|r| r[0].as_str()).collect();
+            assert_eq!(ids, ["r1", "t1"], "the thread whose id reads as a key is left out");
+            assert_eq!((threads[1][6].as_str(), threads[2][2].as_str()), ("", ""), "contact_display_name and topic: written empty");
+            assert_eq!(w.partial["counts"]["threads"], 2);
+            // What the contact wrote, in a message: left out and listed, or the reply written null.
+            let messages = [
+                message("m1", "t1", "x1", "in", Value::Null),
+                message("m2", key, "x2", "in", Value::Null),
+                message("m3", "t1", key, "in", Value::Null),
+                with_file(message("m4", "t1", "x4", "in", Value::Null), key, "text/plain"),
+                with_file(message("m5", "t1", "x5", "in", Value::Null), "a.txt", key),
+                message("m6", "t1", "x6", "in", json!(key)),
+                message("m7", "t1", "x7", "out", json!(key)),
+            ];
+            let (lines, left_out) = jsonl::write(&messages, None).unwrap();
+            assert_eq!(
+                left_out.iter().map(|l| (l.id.as_str(), l.reason)).collect::<Vec<_>>(),
+                [
+                    ("m2", jsonl::THREAD_HOLDS_A_KEY),
+                    ("m3", jsonl::MSG_ID_HOLDS_A_KEY),
+                    ("m4", jsonl::FILE_NAME_HOLDS_A_KEY),
+                    ("m5", jsonl::FILE_NAME_HOLDS_A_KEY)
+                ],
+            );
+            assert!(!lines.iter().any(|l| l.contains(key)), "no line carries it");
+            // And the file reads back whole.
+            let text = lines_to_file(&lines);
+            let m = manifest::finish(&w.partial, Some(&sha256_hex(text.as_bytes())), lines.len() as u64).unwrap();
+            let entry = |name: &str| Entry { name: name.into(), size: 1, encrypted: false, mode: 0 };
+            let directory = [entry("manifest.json"), entry("contacts.csv"), entry("threads.csv"), entry("messages.jsonl")];
+            read(&directory, Some(&m), Some(&w.contacts_csv), w.threads_csv.as_deref(), &owner, 0).unwrap();
+            let file_lines: Vec<&str> = text.lines().collect();
+            let (threads, contacts) = (["t1", "r1"], [peer.as_str()]);
+            let (back, _) = jsonl::read(&file_lines, 1, &jsonl::Names { threads: &threads, contacts: &contacts, media: &[] }).unwrap();
+            let ids: Vec<&str> = back.iter().filter_map(|m| m["id"].as_str()).collect();
+            assert_eq!(ids, ["m1", "m6", "m7"]);
+            assert!(back.iter().all(|m| m["reply_to"].is_null()), "a reply_to that reads as a key is written null");
+            let msg_ids: Vec<&str> = back.iter().filter_map(|m| m["msg_id"].as_str()).collect();
+            let end = End {
+                messages_sha256: Some(&sha256_hex(text.as_bytes())),
+                lines: 3,
+                ids: &ids,
+                msg_ids: &msg_ids,
+                reply_tos: &[],
+                media_seen: &[],
+                media: &[],
+            };
+            read_end(&m, &end).unwrap();
+
+            // What the owner's side wrote is refused, naming where.
+            let refused = |r: Result<Written>| r.map(|_| ()).map_err(|e| e.why);
+            assert_eq!(refused(write_rows(&[contact(key, "")], &[])), Err("contacts[0], column name: holds a private key".to_string()));
+            assert_eq!(
+                refused(write_rows(&[], &[removed(key, "")])),
+                Err("threads[0], column contact_name: holds a private key".to_string())
+            );
+            let one = |m: Value| jsonl::write(&[m], None).map(|_| ()).map_err(|e| e.why);
+            assert_eq!(one(message(key, "t1", "x1", "in", Value::Null)), Err("messages[0], member id: holds a private key".to_string()));
+            assert_eq!(
+                one(message("m1", "t1", key, "out", Value::Null)),
+                Err("messages[0], member msg_id: holds a private key".to_string())
+            );
+            let mine = message("m1", "t1", "x1", "out", Value::Null);
+            for (filename, mime) in [(key, "text/plain"), ("a.txt", key)] {
+                assert_eq!(
+                    one(with_file(mine.clone(), filename, mime)),
+                    Err("messages[0], member attachments: holds a private key".to_string())
+                );
+            }
+        }
+        // The control: the same rows without the key write whole, nothing left out.
+        let w = write_rows(&[contact("Bharat", "B")], &[thread("t1", "lunch"), thread("t2", "lunch"), removed("Chitra", "C")]).unwrap();
+        assert_eq!(w.partial["counts"]["threads"], 3);
+        let (lines, left_out) = jsonl::write(&[message("m1", "t1", "x1", "in", json!("x0"))], Some(&["x0", "x1"])).unwrap();
+        assert!(left_out.is_empty());
+        assert!(lines[0].contains("\"reply_to\":\"x0\""));
     }
 
     /// SPEC §9.2, what a contact controls: none of it stops the owner's export, and what is written

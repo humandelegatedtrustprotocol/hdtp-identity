@@ -10,6 +10,19 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+- **A contact can no longer stop the owner's export with text that reads as a private key.** The
+  writer refused the whole export when any cell or message member held such text, so a contact
+  could block it by choosing a thread id, a `msg_id`, a topic or a display name like
+  `MAoCAQAwAwYBAAQA`, which decodes to a PKCS #8 key. What a contact may have written is no longer
+  refused, and it is still never written. `export_write` writes a contact's `display_name`, a removed
+  thread's `contact_display_name` and a thread's `topic` empty, and leaves out a thread whose id
+  reads as a key, since either side may choose a thread id (SPEC §7). `export_write_messages` leaves
+  out a message whose `thread` reads as a key, and, on a message that came in, one whose `msg_id`,
+  `filename` or `mime` does. Each one is listed in `left_out` with its own reason, and the host
+  leaves out its file. A `reply_to` that reads as a key is written `null`. What the owner's side
+  wrote is still refused: the owner's `name` and `contact_name` for a contact, `owner_name`, `tool`,
+  a message's `id`, and an outgoing message's `msg_id`, `filename` and `mime`. The reader is
+  unchanged and refuses key material wherever it is (SPEC §9.2).
 - **The memory tests run no dynamic code.** `js/wasm-memory.mjs` gives each case a fresh Wasm instance
   in a worker thread of its own, which loads the node package unchanged, where it evaluated the
   package's source with `new Function`; `js/export-memory.test.mjs` now requires each fresh instance
