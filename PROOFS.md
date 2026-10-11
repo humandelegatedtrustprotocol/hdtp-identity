@@ -160,7 +160,7 @@ by declaration. A row with nothing in its last column would fail `js/musts.mjs`.
 | # | The sentence | Held by |
 |---|---|---|
 | `13.1#1` | base64url HPKE encapsulated key, of exactly the suite's `Npk` (RFC 9180, Section 7.1): 65 bytes for `HDTP-SEAL-P256`, an uncompressed P-256 point, and 32 for `HDTP-SEAL-X25519`. A receiver **MUST** refuse any other length (`envelope_invalid`) — `sig` covers the three members concatenated with nothing between them, so the suite's own length is what fixes the boundary; without it a byte moved from the end of `enc` to the front of `ct` leaves the signed bytes identical | `scenario:a byte moved from the encapsulated key into the ciphertext`, `rust:an_encapsulated_key_of_the_wrong_length_is_refused_under_each_suite`, `go:TestAnEncapsulatedKeyOfTheWrongLengthIsRefused` |
-| `13.1#2` | Each of the four members is base64url (RFC 4648, Section 5) without padding, in its one canonical spelling, and a receiver **MUST** refuse (`envelope_invalid`) a member written any other way: with a character outside that alphabet — padding, whitespace and the standard alphabet's `+` and `/` among them — or with a last character whose unused bits are not zero. | `scenario:a real envelope whose protected carries a stray character`, `scenario:a real envelope whose enc is padded`, `scenario:a real envelope whose ct has a line break in it`, `scenario:a real envelope whose signature is spelled with its spare bits set`, `rust:a_sig_that_is_empty_or_not_base64url_is_refused_in_either_form`, `go:TestASigThatIsEmptyOrNotBase64urlIsRefusedInEitherForm` |
+| `13.1#2` | Each of the four members is base64url (RFC 4648, Section 5) without padding, in its one canonical spelling, and a receiver **MUST** refuse (`envelope_invalid`) a member written any other way: with a character outside that alphabet — padding, whitespace and the standard alphabet's `+` and `/` among them — or with a last character whose unused bits are not zero. | `scenario:a real envelope whose protected carries a stray character`, `scenario:a real envelope whose enc is padded`, `scenario:a real envelope whose ct has a line break in it`, `scenario:a real envelope whose signature is spelled with its spare bits set`, `rust:a_sig_not_in_the_one_spelling_is_refused_in_either_form`, `go:TestASigNotInTheOneSpellingIsRefusedInEitherForm` |
 | `13.1#3` | The suite follows the recipient's key and nothing else: a receiver **MUST** refuse an envelope whose `suite` is not the one its key takes (`envelope_invalid`), so no choice is left on the wire for a sender to make badly. | `scenario:the wrong suite for the recipient's key` |
 | `13.1#4` | The HPKE `info` parameter is the ASCII string `HDTP-SEAL-v1`, and an envelope sealed under any other info string **MUST NOT** open. | `scenario:sealed with a stale info string` |
 | `13.1#5` | The HPKE ephemeral **MUST** be fresh for every envelope — a reused one repeats the key and the nonce, and two ciphertexts under them leak the XOR of their plaintexts — and both sides **MUST** refuse an all-zero DH output, which a low-order X25519 point produces (RFC 9180, Section 7.1.4). | `scenario:HPKE ephemeral reuse leaks the XOR of two plaintexts; production sealing cannot take a seed`, `scenario:a low-order X25519 recipient point`, `rust:refuses_a_low_order_point`, `go:TestALowOrderRecipientIsRefused` |
@@ -734,8 +734,6 @@ At the run that generated this file: **2950** cases (**1417** of the run's cases
 - decide on a real envelope whose enc is spelled with its spare bits set
 - decide on a real envelope whose ct is spelled with its spare bits set
 - decide on a real envelope whose sig is spelled with its spare bits set
-- decide, chain form from a pinned contact: a sig that is empty
-- decide, chain form from a stranger: a sig that is empty
 - decide, chain form from a pinned contact: a sig that is not base64url at all
 - decide, chain form from a stranger: a sig that is not base64url at all
 - decide, chain form from a pinned contact: a sig that is padded
@@ -744,8 +742,6 @@ At the run that generated this file: **2950** cases (**1417** of the run's cases
 - decide, chain form from a stranger: a sig that is with a line break in it
 - decide, chain form from a pinned contact: a sig that is spelled with its spare bits set
 - decide, chain form from a stranger: a sig that is spelled with its spare bits set
-- decide, small form from a pinned contact: a sig that is empty
-- decide, small form from a stranger: a sig that is empty
 - decide, small form from a pinned contact: a sig that is not base64url at all
 - decide, small form from a stranger: a sig that is not base64url at all
 - decide, small form from a pinned contact: a sig that is padded
@@ -754,6 +750,10 @@ At the run that generated this file: **2950** cases (**1417** of the run's cases
 - decide, small form from a stranger: a sig that is with a line break in it
 - decide, small form from a pinned contact: a sig that is spelled with its spare bits set
 - decide, small form from a stranger: a sig that is spelled with its spare bits set
+- decide, chain form from a pinned contact: an empty sig fails as a signature
+- decide, chain form from a stranger: an empty sig fails as a signature
+- decide, small form from a pinned contact: an empty sig fails as a signature
+- decide, small form from a stranger: an empty sig fails as a signature
 - decide with an envelope whose sig is null
 - decide, small form from a pinned contact: its own sig
 - decide, small form from a pinned contact: a sig that is not the leaf's
