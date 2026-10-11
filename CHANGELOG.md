@@ -10,6 +10,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+## 0.9.0 — 2026-10-11
+
 - **What a host changes (a change of the contract, hence 0.9.0).** `export_read_messages` requires
   `left_out_threads`, the ids `export_read` answered under that name, and `export_read_end` requires
   `kept_msg_ids` and `media_kept`; each absent or null is `<name> is required`. An
