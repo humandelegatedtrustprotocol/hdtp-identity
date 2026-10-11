@@ -1367,12 +1367,20 @@ mod tests {
 
     /// The export's functions grow linearly in the rows a file holds. Each is timed at N and 4N rows
     /// (threads, messages, and held and imported contacts), the two sizes interleaved over five
-    /// rounds so a busy machine slows both alike, the best round of each kept; 4N may take at most 8×
-    /// N. Why 8: linear work is 4×, n·log n about 4.6×, and a scan per row 16× — the defect of 0.3.0,
-    /// where export_read took 0.2 s at 2k threads and 11 s at 16k. 8 is halfway (in log terms)
-    /// between linear and quadratic, a 2× margin for noise that no quadratic fits in. A function under
-    /// 20 ms at 4N is too fast to judge and passes: a scan per row at 4N rows is far above that. The
-    /// bound is on rows and a ratio, never on seconds, so it cannot go stale with the machine.
+    /// rounds, the best round of each kept; 4N may take at most 8× N. Why 8: linear work is 4×,
+    /// n·log n about 4.6×, and a scan per row 16× — the defect of 0.3.0, where export_read took 0.2 s
+    /// at 2k threads and 11 s at 16k. 8 is halfway (in log terms) between linear and quadratic, a 2×
+    /// margin for noise that no quadratic fits in. A function under 20 ms at 4N is too fast to judge
+    /// and passes: a scan per row at 4N rows is far above that. The bound is on rows and a ratio,
+    /// never on seconds, so it cannot go stale with the machine.
+    ///
+    /// The time is the CPU time of the thread running the test (`CLOCK_THREAD_CPUTIME_ID`), not the
+    /// wall clock and not the process's, which counts the tests beside it: the bound is on the
+    /// functions' own work. On the wall clock, with 48 busy processes beside the test (load average
+    /// 29 to 241), the bound failed 7 runs of 10 at ratios up to 28× for unchanged code; on the
+    /// thread's CPU time it passed 10 runs of 10 under the same load, at most 5.4×. A scan per row
+    /// in `jsonl::write` turns it red (export_write_messages 16.9×).
+    #[cfg(unix)]
     #[test]
     fn export_functions_grow_linearly_in_the_rows_of_a_file() {
         let n = 5_000;
@@ -1418,24 +1426,29 @@ mod tests {
         let entry = |name: &str| Entry { name: name.into(), size: 1, encrypted: false, mode: 0 };
         let directory = [entry("manifest.json"), entry("contacts.csv"), entry("threads.csv")];
         let hash = "a".repeat(64);
-        // One pass over every function at one size: the seconds each took.
+        // One pass over every function at one size: the CPU seconds each took.
         let pass = |d: &Data| -> [f64; 6] {
-            let clock = std::time::Instant::now;
-            let t = clock();
+            let cpu = || {
+                let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+                // SAFETY: `ts` is a valid, writable timespec for the length of the call.
+                assert_eq!(unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut ts) }, 0);
+                ts.tv_sec as f64 + ts.tv_nsec as f64 / 1e9
+            };
+            let t = cpu();
             let w = write(&owner, "", 0, "t", &contacts, &d.threads, &[]).unwrap();
-            let t_write = t.elapsed().as_secs_f64();
+            let t_write = cpu() - t;
             let manifest_text = manifest::finish(&w.partial, None, 0).unwrap();
-            let t = clock();
+            let t = cpu();
             read(&directory, Some(&manifest_text), Some(&w.contacts_csv), w.threads_csv.as_deref(), &owner, 0).unwrap();
-            let t_read = t.elapsed().as_secs_f64();
-            let t = clock();
+            let t_read = cpu() - t;
+            let t = cpu();
             let lines = jsonl::write(&d.messages, None).unwrap().0;
-            let t_write_messages = t.elapsed().as_secs_f64();
+            let t_write_messages = cpu() - t;
             let (thread_ids, roots, lines) = (refs(&d.thread_ids), refs(&roots), refs(&lines));
             let names = jsonl::Names { threads: &thread_ids, contacts: &roots, media: &[] };
-            let t = clock();
+            let t = cpu();
             jsonl::read(&lines, 1, &names).unwrap();
-            let t_read_messages = t.elapsed().as_secs_f64();
+            let t_read_messages = cpu() - t;
             let with_messages = manifest::finish(&w.partial, Some(&hash), d.rows as u64).unwrap();
             fn refs(l: &[String]) -> Vec<&str> {
                 l.iter().map(String::as_str).collect()
@@ -1450,12 +1463,12 @@ mod tests {
                 media_seen: &[],
                 media: &[],
             };
-            let t = clock();
+            let t = cpu();
             read_end(&with_messages, &end).unwrap();
-            let t_read_end = t.elapsed().as_secs_f64();
-            let t = clock();
+            let t_read_end = cpu() - t;
+            let t = cpu();
             merge::merge(&d.many, &d.many).unwrap();
-            [t_write, t_read, t_write_messages, t_read_messages, t_read_end, t.elapsed().as_secs_f64()]
+            [t_write, t_read, t_write_messages, t_read_messages, t_read_end, cpu() - t]
         };
         let names = ["export_write", "export_read", "export_write_messages", "export_read_messages", "export_read_end", "export_merge"];
         let (small, large) = (data(n), data(4 * n));
