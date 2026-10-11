@@ -496,6 +496,75 @@ fn decide_on_the_vector_envelopes() {
     assert_eq!(out["result"]["tier"], "contact");
 }
 
+/// A `sig` that is empty or not in the one spelling (§13.1) is `envelope_invalid` before the form
+/// decides anything. The small form from a pinned contact answered `chain_required` to every one of
+/// them, while the chain form refused them: the same envelope, two answers, by form alone.
+#[test]
+fn a_sig_that_is_empty_or_not_base64url_is_refused_in_either_form() {
+    let v = vectors();
+    let der = der_of(&v);
+    let envelopes = v["envelopes"].as_array().unwrap();
+    let full = &envelopes[0];
+    let small = &envelopes[2];
+    let root_a = fingerprint_of(&parse(&der["root_a"]).unwrap());
+    let pin_a = json!({ "root": root_a, "endpoint": ENDPOINT_A, "leaf": b64u(&der["leaf_a"]), "state": "active" });
+    let with_sig = |e: &Value, sig: Value| json!({ "protected": e["protected"], "enc": e["enc"], "ct": e["ct"], "sig": sig });
+    let decide = |envelope: Value, pins: Vec<Value>| {
+        let input = DecideInput::read(&json!({ "now": NOW, "envelope": envelope, "node": node_for(&v, &der, "leaf_b", "root_b", pins) }));
+        envelope::decide(&input.unwrap()).unwrap()
+    };
+    const A64: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    for (form, e) in [("chain", full), ("small", small)] {
+        let good = e["sig"].as_str().unwrap();
+        let last = A64.find(good.chars().last().unwrap()).unwrap();
+        assert_eq!(good.len() % 4, 2, "{form}: a 64-byte signature leaves four spare bits in its last character");
+        let spare = format!("{}{}", &good[..good.len() - 1], &A64[last | 1..(last | 1) + 1]);
+        let mut standard = good.replace('-', "+").replace('_', "/");
+        if standard == good {
+            standard = format!("{}+", &good[..good.len() - 1]);
+        }
+        for (what, sig, why) in [
+            ("empty", String::new(), "sig is empty"),
+            ("not base64url at all", "!!!".to_string(), "sig is not base64url"),
+            ("padded", format!("{good}=="), "sig is not base64url"),
+            ("in the standard alphabet", standard, "sig is not base64url"),
+            ("with a line break", format!("{}\n{}", &good[..8], &good[8..]), "sig is not base64url"),
+            ("with its spare bits set", spare, "sig is not base64url"),
+        ] {
+            for (whom, pins) in [("a pinned contact", vec![pin_a.clone()]), ("a stranger", vec![])] {
+                let out = decide(with_sig(e, json!(sig)), pins);
+                assert_eq!(out.result, json!({ "code": "envelope_invalid", "why": why }), "{form} form from {whom}, sig {what}");
+                assert!(out.effects.is_empty(), "{form} form from {whom}, sig {what}");
+            }
+        }
+        // Absent or null never reaches the decision: the envelope is the host's argument, refused by its path.
+        for sig in [None, Some(Value::Null)] {
+            let mut envelope = with_sig(e, Value::Null);
+            if sig.is_none() {
+                envelope.as_object_mut().unwrap().remove("sig");
+            }
+            let node = node_for(&v, &der, "leaf_b", "root_b", vec![pin_a.clone()]);
+            let out: Value = serde_json::from_str(&hdtp_identity::call(
+                "decide",
+                &json!({ "now": NOW, "envelope": envelope, "node": node }).to_string(),
+            ))
+            .unwrap();
+            assert_eq!(out, json!({ "error": "bad_request", "why": "envelope.sig is required" }), "{form} form, sig {sig:?}");
+        }
+    }
+
+    // The controls: the vector's own signature passes in both forms, and a signature in the one
+    // spelling that is not the leaf's is still the small form's `chain_required` (§13.2).
+    let out = decide(with_sig(full, full["sig"].clone()), vec![pin_a.clone()]);
+    assert_eq!((out.result["code"].as_str(), out.result["form"].as_str()), (Some("ok"), Some("chain")), "{}", out.result);
+    let out = decide(with_sig(small, small["sig"].clone()), vec![pin_a.clone()]);
+    assert_eq!((out.result["code"].as_str(), out.result["form"].as_str()), (Some("ok"), Some("leaf")), "{}", out.result);
+    let out = decide(with_sig(small, json!(b64u(&[0u8; 64]))), vec![pin_a.clone()]);
+    assert_eq!(out.result, json!({ "code": "chain_required" }));
+    let out = decide(with_sig(full, json!(b64u(&[0u8; 64]))), vec![pin_a]);
+    assert_eq!(out.result, json!({ "code": "envelope_invalid", "why": "signature is not the chain's leaf key" }));
+}
+
 #[test]
 fn a_result_seals_back_and_opens_on_the_caller_side() {
     let v = vectors();
