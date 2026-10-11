@@ -15,7 +15,8 @@
 #   5. tags that commit vX.Y.Z and go/vX.Y.Z (annotated; the Go module lives in go/);
 #   6. packs dist/X.Y.Z/: hdtp-identity-wasm-web-X.Y.Z.tgz (the pinned pkg-web/),
 #      hdtp-identity-exportcorpus-X.Y.Z.tgz (go/exportcorpus's cases.json and zips), the `hdtp` CLI
-#      for each target, manifest.json (scripts/release-manifest.mjs) and SHA256SUMS; the release
+#      for each target (refused if any asset holds this machine's $HOME), manifest.json
+#      (scripts/release-manifest.mjs) and SHA256SUMS; the release
 #      notes go to dist/X.Y.Z-notes.md.
 # Nothing is pushed and nothing is published: that is scripts/publish.sh, a separate step, so all
 # of the above can be looked at first. Every commit goes through this repository's hooks.
@@ -131,6 +132,8 @@ echo "release: hdtp CLI for $TARGETS"
 # shellcheck disable=SC2086 # the targets are words
 sh -c "$CLI \"\$@\"" cli "v$VERSION" "$DIST" "$VERSION" $TARGETS
 for t in $TARGETS; do [ -s "$DIST/hdtp-$VERSION-$t" ] || refuse "no CLI binary for $t"; done
+leaked="$(grep -a -F -l "$HOME" "$DIST"/* || true)"
+[ -z "$leaked" ] || refuse "$(echo "$leaked" | tr '\n' ' ')holds this machine's home directory"
 
 node scripts/release-manifest.mjs "$DIST" "$VERSION" "$COMMIT" "$PROTOCOL_COMMIT"
 node scripts/changelog.mjs --notes "$VERSION" > "dist/$VERSION-notes.md"
