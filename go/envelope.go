@@ -57,11 +57,12 @@ func IsThreadID(s string) bool {
 	return alnum || uuid
 }
 
-// threadIDRefusal is the refusal SPEC §7 gives a call's thread_id, as code and why, or "" for none:
+// ThreadIDRefusal is the refusal SPEC §7 gives a call's thread_id, as code and why, or "" for none:
 // at a tool that takes one, a thread_id that is not a string is bad_request, one over 64 bytes
 // too_large, checked before the form, and any other of neither form, the empty string included,
-// bad_request. Absent or null is no thread_id.
-func threadIDRefusal(tool string, params map[string]any) (string, string) {
+// bad_request. Absent or null is no thread_id. Decide applies it to a contact's call; a host's door
+// that takes a call outside an envelope applies the same.
+func ThreadIDRefusal(tool string, params map[string]any) (string, string) {
 	if !threadTools[tool] || params == nil {
 		return "", ""
 	}
@@ -718,7 +719,7 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 	// recorded, with what the signature proved and the msg_id, as a call that waits is, so the host
 	// can seal the refusal back. The pin's own moves stand; the envelope's `seen` is never added.
 	contact := func(root, endpoint, form string) Decision {
-		if code, why := threadIDRefusal(tool, params); code != "" {
+		if code, why := ThreadIDRefusal(tool, params); code != "" {
 			return Decision{Result: map[string]any{"code": code, "why": why, "root": root, "endpoint": endpoint, "leaf": leafB64, "form": form, "msg_id": msgID}, Effects: effects}
 		}
 		return result("contact", root, endpoint, form, nil)
@@ -843,8 +844,8 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 // (pinDecision; N1, N2). The chain is validated at now with no expectation, as Decide validates a
 // peer's, and one that fails is envelope_invalid `chain rule <n>: <reason>`, Decide's words for the
 // same chain. What is the call's and not the chain's — a guest's tools and card, the receiver's own
-// address, what a pending_out pin may call — the host applies to each call, as Decide applies it to
-// the envelope's. No `seen`: there is no envelope. The error is the node's own state that will not
+// address, what a pending_out pin may call, a thread_id of neither form of SPEC §7 (ThreadIDRefusal)
+// — the host applies to each call, as Decide applies it to the envelope's. No `seen`: there is no envelope. The error is the node's own state that will not
 // read, as Decide's is.
 func DecideChain(now time.Time, chain [][]byte, node NodeState) (Decision, error) {
 	if err := hostRoots(node); err != nil {

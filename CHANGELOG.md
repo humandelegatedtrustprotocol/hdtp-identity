@@ -21,7 +21,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   host can seal it back, and carries no `seen` effect, so nothing is recorded; the pin's own moves
   stand. This changes what a host built on this library accepts: a call from a 1.0 sender whose
   `thread_id` is of neither form is refused. `is_thread_id` (Rust) and `IsThreadID` (Go) are the one
-  test of the two forms. `js/intrude.mjs` runs the seed's 22 new `thread` scenarios by their names on
+  test of the two forms, and `thread_id_refusal` (Rust) and `ThreadIDRefusal` (Go) the one refusal,
+  for a host door that takes a call outside an envelope, as `decide_chain`'s does. `js/intrude.mjs` runs the seed's 22 new `thread` scenarios by their names on
   both ports (180 of 180 agree with the seed of hdtp-spec #62).
 
 - **The writer re-issues an id as `r` and the first 62 hex digits of its sha256 (63 characters), no

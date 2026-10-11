@@ -289,8 +289,8 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
 /// (`pinned`, below; N1, N2). The chain is validated at `now` with no expectation, as `decide` validates
 /// a peer's, and one that fails is `envelope_invalid` `chain rule <n>: <reason>`, `decide`'s words for
 /// the same chain. What is the call's and not the chain's — a guest's tools and card, the receiver's own
-/// address, what a `pending_out` pin may call — the host applies to each call, as `decide` applies it
-/// to the envelope's. No `seen`: there is no envelope.
+/// address, what a `pending_out` pin may call, a `thread_id` of neither form of SPEC §7
+/// (`thread_id_refusal`) — the host applies to each call, as `decide` applies it to the envelope's. No `seen`: there is no envelope.
 pub fn decide_chain(node: &NodeState, chain: &[Vec<u8>], now: i64) -> Result<DecideOutput> {
     host_roots(node)?;
     let v = match validate_chain(chain, now, None, None) {
