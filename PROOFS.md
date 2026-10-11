@@ -7,9 +7,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed as proven that did not pass.
 
-Specification: **1.0.0**. **101** normative sentences, **2950** cross-port parity cases over **54** guarded functions.
+Specification: **1.0.0**. **101** normative sentences, **2974** cross-port parity cases over **54** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 1.0.0): **5900** answers, of which **0** do not hold to the shape it declares. Of **131** declared error codes, **131** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 1.0.0): **5948** answers, of which **0** do not hold to the shape it declares. Of **131** declared error codes, **131** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 101 normative sentences of the specification
 
@@ -104,7 +104,7 @@ by declaration. A row with nothing in its last column would fail `js/musts.mjs`.
 |---|---|---|
 | `9.#1` | A host **MUST** generate a fresh key for every renewal, so that a leaf key compromised without anyone noticing dies with its leaf; a suspected compromise is the same act done at once, and the new leaf outranks the stolen one with every contact it reaches (§14.3). | `gateway:TestLeafSignupThenRenewThenMove` |
 | `9.#2` | A leaf's key does not outlive its leaf: a host **MUST** stop using the key of a leaf that has expired and **MUST** destroy it, keeping the key id so that an envelope still sealed to it is answered `certificate_renewed` (§14.4) — past its date every verifier refuses the leaf (§14.2 rule 4), so the key can do nothing legitimate, and a renewal has never needed it. | `gateway:TestAnExpiredCurrentLeafLosesItsKeyInBothPlaces`, `gateway:TestALeafThatRunsOutStopsBeingServedAndLosesItsKey` |
-| `9.#3` | A host that makes an archive **MUST NOT** put key material of any kind in it, and a host that imports one **MUST** refuse any key material in it and **MUST** refuse, rather than ignore, anything else it does not recognise. | `rust:read_export_answers_the_whole_corpus`, `go:TestReadExportZipAnswersTheWholeCorpus`, `rust:export_write_refuses_a_row_or_message_holding_a_private_key`, `go:TestAFileThatIsAKeyLeavesWithItsMessageAndIsRefusedOnRead`, `go:TestWriteExportZipRefusesWhatItsReaderRefusesBeforeTheFirstByte`, `rust:what_a_contact_controls_never_stops_an_export_and_it_reads_back`, `go:TestWhatAContactControlsNeverStopsAnExportAndItReadsBack` |
+| `9.#3` | A host that makes an archive **MUST NOT** put key material of any kind in it, and a host that imports one **MUST** refuse any key material in it and **MUST** refuse, rather than ignore, anything else it does not recognise. | `rust:read_export_answers_the_whole_corpus`, `go:TestReadExportZipAnswersTheWholeCorpus`, `rust:export_write_refuses_a_row_or_message_holding_a_private_key`, `go:TestAFileThatIsAKeyLeavesWithItsMessageAndIsRefusedOnRead`, `go:TestWriteExportZipRefusesWhatItsReaderRefusesBeforeTheFirstByte`, `rust:what_a_contact_controls_never_stops_an_export_and_it_reads_back`, `go:TestWhatAContactControlsNeverStopsAnExportAndItReadsBack`, `rust:a_contacts_key_shaped_text_never_stops_an_export_and_the_owners_is_refused`, `go:TestAContactsKeyShapedTextNeverStopsAnExportAndTheOwnersIsRefused` |
 | `9.#4` | Whenever an identity leaves an address, deleted or moved, the host keeps the address for 24 hours for the account that held it — the person's, or one the person shares at the host: in that time it **MUST NOT** be assigned to an identity of another account, and any identity of that account may take it; after them the host frees it. | *host, by declaration* |
 | `9.#5` | It issues one live leaf per identity at a time — a second endpoint is a move, not a second home, because contacts keep one pin and the newest leaf wins — and **MUST NOT** issue a second while one is live except as its replacement. | `rust:issues_from_the_vault`, `go:TestWalletIssue`, `go:TestVaultRulesMirrorTheCore`, `rust:ledger_check_names_each_kind_and_refuses_only_a_second_home`, `go:TestLedgerCheckNamesEachKindAndRefusesOnlyASecondHome`, `rust:ledger_check_takes_the_newest_leaf_and_not_the_newest_unexpired_one`, `go:TestLedgerCheckTakesTheNewestLeafAndNotTheNewestUnexpiredOne`, `rust:a_card_held_root_is_held_to_the_ledger_by_the_core` |
 | `9.#6` | A wallet **MUST NOT** write a leaf, a ledger entry or a contact into the file, and writes it once, when the root is made, and again only when the root is re-bound or a hardware key takes it. | `rust:a_host_key_a_request_an_identity_a_leaf_and_a_chain_that_validates`, `rust:issues_from_the_vault` |
@@ -231,7 +231,7 @@ by declaration. A row with nothing in its last column would fail `js/musts.mjs`.
 | `14.4#1` | An endpoint **MUST** keep the key identifiers of every leaf it has held for an identity it still serves — fingerprints, never keys past their `notAfter`. | `scenario:a former key of a still-served identity gets the current chain`, `gateway:TestStaleKidIsAnsweredWithTheCurrentChain` |
 | `14.4#2` | A caller **MUST** follow `certificate_renewed` at most once per call, and only when the chain it carries is newer than or equal to its pin (§14.3): an older chain, a chain to another root, or a chain naming another address is discarded and the call fails as it would have. | `rust:certificate_renewed_cases`, `go:TestChainCases` |
 
-## The 2950 cross-port parity cases
+## The 2974 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -239,7 +239,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **2950** cases (**1417** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
+At the run that generated this file: **2974** cases (**1417** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
 
 ### `address_guard` — 51 cases · whole on success
 
@@ -1030,7 +1030,7 @@ At the run that generated this file: **2950** cases (**1417** of the run's cases
 - generated · export_merge · held absent, rows "x"
 - generated · export_merge · rows absent, held "x"
 
-### `export_read` — 113 cases · whole on success
+### `export_read` — 115 cases · whole on success
 
 - export_read: what export_write wrote
 - export_read at an instant that does not read
@@ -1079,6 +1079,8 @@ At the run that generated this file: **2950** cases (**1417** of the run's cases
 - export corpus key-in-a-thread-name.zip: export_read
 - export corpus removed-thread-six-fields.zip: export_read
 - export_read: what a contact controls, as written, reads back
+- export_read: PEM armour written anew in what a contact wrote, reads back
+- export_read: a base64 word written anew in what a contact wrote, reads back
 - export_read with nothing to work from
 - export_read with a directory entry that does not read
 - export_read: threads.csv with as many control characters as the ceiling
@@ -1146,7 +1148,7 @@ At the run that generated this file: **2950** cases (**1417** of the run's cases
 - generated · export_read · now absent, threads_csv 7
 - generated · export_read · now absent, owner 7
 
-### `export_read_end` — 101 cases · whole on success
+### `export_read_end` — 103 cases · whole on success
 
 - export_read_end: what was written
 - export corpus valid-export.zip: export_read_end
@@ -1177,6 +1179,8 @@ At the run that generated this file: **2950** cases (**1417** of the run's cases
 - export_read_end with media holding a number
 - export_read_end with no media at all
 - export_read_end: what a contact controls, as written, reads back
+- export_read_end: PEM armour written anew in what a contact wrote, reads back
+- export_read_end: a base64 word written anew in what a contact wrote, reads back
 - export_read_end with nothing to work from
 - export_read_end: a manifest whose owner_name is a private key
 - export_read_end: a manifest whose tool is a private key
@@ -1250,7 +1254,7 @@ At the run that generated this file: **2950** cases (**1417** of the run's cases
 - generated · export_read_end · media absent, reply_tos "x"
 - generated · export_read_end · media absent, media_seen "x"
 
-### `export_read_messages` — 57 cases · whole on success
+### `export_read_messages` — 59 cases · whole on success
 
 - export_read_messages: what export_write_messages wrote
 - export corpus valid-export.zip: export_read_messages
@@ -1270,6 +1274,8 @@ At the run that generated this file: **2950** cases (**1417** of the run's cases
 - export_read_messages: a line with a number past the largest double
 - export_read_messages: a line nested 128 deep
 - export_read_messages: what a contact controls, as written, reads back
+- export_read_messages: PEM armour written anew in what a contact wrote, reads back
+- export_read_messages: a base64 word written anew in what a contact wrote, reads back
 - export_read_messages with nothing to work from
 - export_read_messages from line 0
 - export_read_messages: a message whose direction is neither
@@ -1310,7 +1316,7 @@ At the run that generated this file: **2950** cases (**1417** of the run's cases
 - generated · export_read_messages · media absent, contacts "x"
 - generated · export_read_messages · media absent, first_line "7"
 
-### `export_write` — 91 cases · whole on success
+### `export_write` — 97 cases · whole on success
 
 - export_write: every formula prefix, quoting and line breaks, sorted rows
 - export_write: a book
@@ -1323,6 +1329,12 @@ At the run that generated this file: **2950** cases (**1417** of the run's cases
 - export_write: a thread name that is not a string
 - export_write: control characters in what a contact controls, dropped
 - export_write: a 300-character display name and permissions §8 does not have
+- export_write: PEM armour in what a contact wrote, written anew or empty
+- export_write: PEM armour in the owner's name for a contact
+- export_write: PEM armour in the owner's name for a former contact
+- export_write: a base64 word in what a contact wrote, written anew or empty
+- export_write: a base64 word in the owner's name for a contact
+- export_write: a base64 word in the owner's name for a former contact
 - export_write: the rows book_rows made
 - export_write with nothing to work from
 - export_write: the owner as a contact
@@ -1404,12 +1416,24 @@ At the run that generated this file: **2950** cases (**1417** of the run's cases
 - generated · export_write · contacts absent, threads "x"
 - generated · export_write · contacts absent, media "x"
 
-### `export_write_messages` — 25 cases · whole on success
+### `export_write_messages` — 37 cases · whole on success
 
 - export_write_messages: a text, a file and a link
 - export_write_messages: a dangling reply, a key in a body, a reply to what was left out
 - export_write_messages: in batches, the file names its msg_ids
 - export_write_messages: msg_ids that are not strings
+- export_write_messages: PEM armour in what a contact wrote, written anew, nothing left out
+- export_write_messages: PEM armour, in batches, the file's msg_ids as the host holds them
+- export_write_messages: PEM armour in the host's message id
+- export_write_messages: PEM armour in an outgoing msg_id
+- export_write_messages: PEM armour in an outgoing file's name
+- export_write_messages: PEM armour in an outgoing file's type
+- export_write_messages: a base64 word in what a contact wrote, written anew, nothing left out
+- export_write_messages: a base64 word, in batches, the file's msg_ids as the host holds them
+- export_write_messages: a base64 word in the host's message id
+- export_write_messages: a base64 word in an outgoing msg_id
+- export_write_messages: a base64 word in an outgoing file's name
+- export_write_messages: a base64 word in an outgoing file's type
 - export_write_messages: two attachments
 - export_write_messages: text beside a file
 - export_write_messages: a message time with a lower-case z
