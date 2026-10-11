@@ -86,8 +86,8 @@ module), `js/index.mjs` for Node and the browser.
 **Versions.** One semver version for the crates, the Go module and the Wasm package, written in
 seven places — the workspace `Cargo.toml`, the four crates' entries in `Cargo.lock`,
 `js/package.json`, `go/api.go` — and held equal by `node scripts/version.mjs --check` (a gate
-step); what each release changed is in `CHANGELOG.md`. Before 1.0.0 a minor version may change the
-contract. `make release VERSION=X.Y.Z` cuts a release locally (gate, version commit, pin, tags,
+step); what each release changed is in `CHANGELOG.md`. Releases stay on 0.8.x, and each
+changelog entry lists what a host has to change, the contract included. `make release VERSION=X.Y.Z` cuts a release locally (gate, version commit, pin, tags,
 assets in `dist/X.Y.Z/`), `make publish VERSION=X.Y.Z` pushes it and creates the GitHub release,
 and `make verify-release VERSION=X.Y.Z` downloads a published one and checks it — against its sums
 and manifest, against the pin at its tag, and against a fresh container build of that tag. Nothing

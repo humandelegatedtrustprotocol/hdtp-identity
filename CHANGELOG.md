@@ -4,15 +4,15 @@ One version for everything in this repository: the Rust crates (`hdtp-identity`,
 `hdtp-identity-wasm`, `hdtp-limits`, the `hdtp` CLI), the Go module `github.com/humandelegatedtrustprotocol/hdtp-identity/go` and the
 Wasm package. A release is tagged `vX.Y.Z` and `go/vX.Y.Z` on one commit (`make release`), and its
 GitHub release carries the Wasm package, the CLI binaries, `manifest.json` and `SHA256SUMS`.
-Versions follow semver; before 1.0.0 a minor version may change the contract (`CONTRACT.md`).
+Releases stay on 0.8.x; each entry lists what a host has to change, the contract (`CONTRACT.md`) included.
 
 Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
-## 0.9.0 — 2026-10-11
+## 0.8.2 — 2026-10-11
 
-- **What a host changes (a change of the contract, hence 0.9.0).** `export_read_messages` requires
+- **What a host changes.** `export_read_messages` requires
   `left_out_threads`, the ids `export_read` answered under that name, and `export_read_end` requires
   `kept_msg_ids` and `media_kept`; each absent or null is `<name> is required`. An
   importer writes no thread in `left_out_threads` and no message in `left_out`, writes each
