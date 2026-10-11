@@ -10,6 +10,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+## 0.8.1 — 2026-10-11
+
 - **This library's writer no longer lets a contact stop the owner's export with text that reads as
   a private key, and leaves no conversation, message or file out for it.** The writer refused the
   whole export when any cell or message member held such text, so a contact could block it by
