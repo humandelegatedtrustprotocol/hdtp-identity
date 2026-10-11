@@ -10,8 +10,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
-- **A contact can no longer stop the owner's export with text that reads as a private key.** The
-  writer refused the whole export when any cell or message member held such text, so a contact
+- **This library's writer no longer lets a contact stop the owner's export with text that reads as
+  a private key.** The writer refused the whole export when any cell or message member held such text, so a contact
   could block it by choosing a thread id, a `msg_id`, a topic or a display name like
   `MAoCAQAwAwYBAAQA`, which decodes to a PKCS #8 key. What a contact may have written is no longer
   refused, and it is still never written. `export_write` writes a contact's `display_name`, a removed
