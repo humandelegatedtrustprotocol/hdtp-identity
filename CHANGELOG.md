@@ -30,7 +30,9 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   `reply_to` and an incoming `msg_id` that read as a private key, and any of them, an outgoing
   `msg_id` included, already `r` and 62 lowercase hex digits, are re-issued, with every reference
   alike; an outgoing `msg_id` that reads as a key is refused. An `r-` id a 0.8.1 writer issued is
-  now written as it is, and is a thread id of neither form.
+  now written as it is, and is a thread id of neither form. The writer no longer refuses a thread whose id is
+  empty (`threads[<i>], column id: empty`): like every id it does not re-issue, it is written as the
+  host holds it, and the reader leaves it out.
 
 - **The reader leaves out a thread whose id is of neither form, and never refuses the file for it
   (SPEC §9.2, Import, step 3).** Such a thread, the empty id included (which was refused, `column id:
