@@ -94,9 +94,9 @@ export default function exportCases({ add, expect }, f) {
   // `export_read` declares `parse`, and nothing produced it until the coverage gate asked (TC-1).
   add('export_read at an instant that does not read', 'export_read', { ...readArgs, now: 'nope' });
   const read = wasm.call('export_read', readArgs);
-  const names = { threads: read.threads.map((t) => t.id), contacts: read.contacts.map((c) => c.root), media: read.media.map((m) => m.hash) };
+  const names = { threads: read.threads.map((t) => t.id), left_out_threads: [], contacts: read.contacts.map((c) => c.root), media: read.media.map((m) => m.hash) };
   add('export_read_messages: what export_write_messages wrote', 'export_read_messages', { lines, ...names });
-  add('export_read_end: what was written', 'export_read_end', { manifest, messages_sha256: sha(jsonl), lines: lines.length, ids: ['m1', 'm2', 'm3'], msg_ids: ['x-1', 'x-2', 'x-3'], reply_tos: ['x-1'], media_seen: [file], media: [file] });
+  add('export_read_end: what was written', 'export_read_end', { manifest, messages_sha256: sha(jsonl), lines: lines.length, ids: ['m1', 'm2', 'm3'], msg_ids: ['x-1', 'x-2', 'x-3'], reply_tos: ['x-1'], media_seen: [file], media: [file], kept_msg_ids: ['x-1', 'x-2', 'x-3'], media_kept: [file] });
 
   // ── the corpus ──────────────────────────────────────────────────────────────────────────────
   const index = JSON.parse(readFileSync(new URL('cases.json', CORPUS), 'utf8'));
@@ -121,35 +121,49 @@ export default function exportCases({ add, expect }, f) {
     }
     const body = text('messages.jsonl') ?? '';
     const fileLines = body === '' ? [] : body.replace(/\n$/, '').split('\n');
-    // A message names a contact, or the contact of a removed thread.
-    const roots = [...first.contacts.map((r) => r.root), ...first.threads.map((t) => t.contact)];
-    const msgArgs = { lines: fileLines, threads: first.threads.map((t) => t.id), contacts: roots, media: first.media.map((m) => m.hash) };
+    // A message names a contact, or the contact of a removed thread, a left-out one included.
+    const roots = [...first.contacts.map((r) => r.root), ...first.threads.map((t) => t.contact), ...first.left_out_threads.map((t) => t.contact)];
+    const msgArgs = { lines: fileLines, threads: first.threads.map((t) => t.id), left_out_threads: first.left_out_threads.map((t) => t.id), contacts: roots, media: first.media.map((m) => m.hash) };
     const second = wasm.call('export_read_messages', msgArgs);
     if (second.error || c.accept) {
       add(`${label}: export_read_messages`, 'export_read_messages', msgArgs);
       if (second.error) { expect(`${label}: export_read_messages`, want); continue; }
     }
+    const every = [...second.messages, ...second.left_out];
     const endArgs = {
       manifest: args.manifest, messages_sha256: text('messages.jsonl') === undefined ? null : sha(Buffer.from(body, 'utf8')), lines: fileLines.length,
-      ids: second.messages.map((m) => m.id), msg_ids: second.messages.map((m) => m.msg_id),
-      reply_tos: second.messages.map((m) => m.reply_to).filter((r) => r !== null), media_seen: second.media_seen,
-      media: first.media.map((m) => m.hash),
+      ids: every.map((m) => m.id), msg_ids: every.map((m) => m.msg_id),
+      reply_tos: every.map((m) => m.reply_to).filter((r) => r !== null), media_seen: second.media_seen,
+      media: first.media.map((m) => m.hash), kept_msg_ids: second.messages.map((m) => m.msg_id), media_kept: second.media_kept,
     };
     add(`${label}: export_read_end`, 'export_read_end', endArgs);
     expect(`${label}: export_read_end`, want ?? { ok: true });
+    // What an accepted file holds after its left-out threads take theirs with them, as cases.json says.
+    if (c.accept?.left_out) {
+      const got = wasm.call('export_read_end', endArgs);
+      const held = {
+        left_out: first.left_out_threads.map((t) => t.id),
+        messages: second.messages.length,
+        media: first.media.filter((m) => !got.media_left_out.includes(m.hash)).length,
+        replies: second.messages.filter((m) => m.reply_to !== null && !got.reply_to_null.includes(m.reply_to)).length,
+      };
+      for (const k of Object.keys(held)) {
+        if (JSON.stringify(held[k]) !== JSON.stringify(c.accept[k])) throw new Error(`${label}: ${k} is ${JSON.stringify(held[k])}, cases.json says ${JSON.stringify(c.accept[k])}`);
+      }
+    }
   }
 
   // JSON the two ports' decoders read differently: a lone surrogate escape is refused by serde and
   // was replaced with U+FFFD by Go's encoding/json. A manifest and a message are JSON inside a string,
   // so a file carries one to both; the ports must refuse it alike. A pair is one character, and reads.
   const manifestWith = (name) => `{"hdtp_export":1,"owner":"${owner}","owner_name":"${name}","exported_at":"2026-09-27T10:00:00Z","tool":"t","counts":{"contacts":0,"threads":0,"messages":0,"media":0},"files":{}}`;
-  const end = (m) => ({ manifest: m, messages_sha256: null, lines: 0, ids: [], msg_ids: [], reply_tos: [], media_seen: [], media: [] });
+  const end = (m) => ({ manifest: m, messages_sha256: null, lines: 0, ids: [], msg_ids: [], reply_tos: [], media_seen: [], media: [], kept_msg_ids: [], media_kept: [] });
   add('export_read_end: a manifest with a lone surrogate escape', 'export_read_end', end(manifestWith('\\ud800')));
   expect('export_read_end: a manifest with a lone surrogate escape', { error: 'bad_request', why: 'manifest.json: not a JSON object' });
   add('export_read_end: a manifest with a surrogate pair', 'export_read_end', end(manifestWith('\\ud83d\\ude00')));
   add('export_read_end: a manifest with a count of -0', 'export_read_end', end(manifestWith('x').replace('"messages":0', '"messages":-0')));
   const lineWith = (body) => `{"id":"1","thread":"t1","contact":"${other('B')}","msg_id":"m","direction":"in","sender":"human","time":"2026-09-27T10:00:00Z","body":"${body}","reply_to":null,"status":"read","attachments":[]}`;
-  const lineNames = { threads: ['t1'], contacts: [other('B')], media: [] };
+  const lineNames = { threads: ['t1'], left_out_threads: [], contacts: [other('B')], media: [] };
   add('export_read_messages: a line with a lone low surrogate escape', 'export_read_messages', { lines: [lineWith('a\\udc00b')], ...lineNames });
   expect('export_read_messages: a line with a lone low surrogate escape', { error: 'bad_request', why: 'messages.jsonl: line 1: not a JSON object' });
   add('export_read_messages: a line with a surrogate pair', 'export_read_messages', { lines: [lineWith('\\ud83d\\ude00 \\\\ud800')], ...lineNames });
@@ -171,7 +185,7 @@ export default function exportCases({ add, expect }, f) {
 
   // export_read_end reads its lists straight from the argument text (0.3.2): every shape a list can
   // take, answered as the parsed arguments were.
-  const endWith = (over) => ({ manifest: manifestWith('x'), messages_sha256: null, lines: 0, ids: [], msg_ids: [], reply_tos: [], media_seen: [], media: [], ...over });
+  const endWith = (over) => ({ manifest: manifestWith('x'), messages_sha256: null, lines: 0, ids: [], msg_ids: [], reply_tos: [], media_seen: [], media: [], kept_msg_ids: [], media_kept: [], ...over });
   for (const [what, over] of [
     ['ids holding null', { ids: [null] }],
     ['ids holding a number', { ids: ['a', 5] }],
@@ -185,10 +199,22 @@ export default function exportCases({ add, expect }, f) {
     ['lines given as text', { lines: '3' }],
     ['media holding a number', { media: [5] }],
     ['no media at all', { media: undefined }],
+    ['no kept_msg_ids at all', { kept_msg_ids: undefined }],
+    ['kept_msg_ids holding a number', { kept_msg_ids: [5] }],
+    ['no media_kept at all', { media_kept: undefined }],
   ]) {
     const args = endWith(over);
     for (const k of Object.keys(args)) if (args[k] === undefined) delete args[k];
     add(`export_read_end with ${what}`, 'export_read_end', args);
+  }
+
+  // SEP-0006: what the left-out threads take with them, once the whole file passed — a reply_to that
+  // names no kept message, and a file no kept message names.
+  {
+    const [a, b] = ['a'.repeat(64), 'b'.repeat(64)];
+    const id = 'export_read_end: a reply into a left-out message, and a file only a left-out message names';
+    add(id, 'export_read_end', endWith({ ids: ['1', '2', '3'], msg_ids: ['x1', 'x2', 'x3'], reply_tos: ['x2', 'x1', 'x2'], media_seen: [a, b], media: [a, b], kept_msg_ids: ['x1', 'x3'], media_kept: [a] }));
+    expect(id, { ok: true, reply_to_null: ['x2'], media_left_out: [b] });
   }
 
   // ── the merge ───────────────────────────────────────────────────────────────────────────────
@@ -249,16 +275,17 @@ export default function exportCases({ add, expect }, f) {
     .map(([name, text]) => ({ name, size: Buffer.byteLength(text), encrypted: false, mode: 0o100644 }));
   add('export_read: what a contact controls, as written, reads back', 'export_read', { directory: cdir, manifest: cman, contacts_csv: cw.contacts_csv, threads_csv: cw.threads_csv, owner, now });
   const cread = wasm.call('export_read', { directory: cdir, manifest: cman, contacts_csv: cw.contacts_csv, threads_csv: cw.threads_csv, owner, now });
-  add('export_read_messages: what a contact controls, as written, reads back', 'export_read_messages', { lines: cl.lines, threads: cread.threads.map((t) => t.id), contacts: cread.contacts.map((c) => c.root), media: [] });
-  const cback = wasm.call('export_read_messages', { lines: cl.lines, threads: cread.threads.map((t) => t.id), contacts: cread.contacts.map((c) => c.root), media: [] }).messages;
+  add('export_read_messages: what a contact controls, as written, reads back', 'export_read_messages', { lines: cl.lines, threads: cread.threads.map((t) => t.id), left_out_threads: [], contacts: cread.contacts.map((c) => c.root), media: [] });
+  const cback = wasm.call('export_read_messages', { lines: cl.lines, threads: cread.threads.map((t) => t.id), left_out_threads: [], contacts: cread.contacts.map((c) => c.root), media: [] }).messages;
   add('export_read_end: what a contact controls, as written, reads back', 'export_read_end', {
     manifest: cman, messages_sha256: sha(cjsonl), lines: cl.lines.length, ids: cback.map((m) => m.id), msg_ids: cback.map((m) => m.msg_id),
     reply_tos: cback.map((m) => m.reply_to).filter((r) => r !== null), media_seen: [], media: [],
+    kept_msg_ids: cback.map((m) => m.msg_id), media_kept: [],
   });
-  expect('export_read_end: what a contact controls, as written, reads back', { ok: true });
+  expect('export_read_end: what a contact controls, as written, reads back', { ok: true, reply_to_null: [], media_left_out: [] });
 
   // ── what a contact may have written that reads as a private key (SPEC §9.2): never refused, never
-  //    written, no conversation, message or file left out — an id written anew (`r-` and 62 hex
+  //    written, no conversation, message or file left out — an id written anew (`r` and 62 hex
   //    digits of its sha256) with every reference to it, a name or a topic empty, a file's name and
   //    type neutral; the same text where the owner's side wrote it is refused. Both shapes the check knows.
   const peerB = other('B');
@@ -266,7 +293,7 @@ export default function exportCases({ add, expect }, f) {
   const keyMsg = (o) => ({ id: 'q', thread: 't1', contact: peerB, msg_id: 'q-1', direction: 'in', sender: 'human', time: at, body: 'hi', reply_to: null, status: 'read', attachments: [], ...o });
   const keyFile = (o) => ({ body: '', attachments: [{ file, filename: 'a.txt', mime: 'text/plain', size: 5, ...o }] });
   for (const [shape, key] of [['PEM armour', 'x PRIVATE KEY----- y'], ['a base64 word', 'MAoCAQAwAwYBAAQA']]) {
-    const newId = 'r-' + sha(key).slice(0, 62);
+    const newId = 'r' + sha(key).slice(0, 62);
     const keyArgs = {
       owner, owner_name: 'Olive', exported_at: now, tool: 'parity', media, contacts: [row({ root: peerB, endpoint: 'https://b.example/mcp', display_name: key, leaf: null, root_cert: null })],
       threads: [
@@ -301,18 +328,19 @@ export default function exportCases({ add, expect }, f) {
     kdir.push({ name: 'media/', size: 0, encrypted: false, mode: 0o040755 }, { name: `media/${file}`, size: 5, encrypted: false, mode: 0o100644 });
     add(`export_read: ${shape} written anew in what a contact wrote, reads back`, 'export_read', readArgs);
     const kread = wasm.call('export_read', readArgs);
-    const linesArgs = { lines: kl.lines, threads: kread.threads.map((t) => t.id), contacts: kread.contacts.map((c) => c.root), media: [file] };
+    const linesArgs = { lines: kl.lines, threads: kread.threads.map((t) => t.id), left_out_threads: [], contacts: kread.contacts.map((c) => c.root), media: [file] };
     add(`export_read_messages: ${shape} written anew in what a contact wrote, reads back`, 'export_read_messages', linesArgs);
     const kback = wasm.call('export_read_messages', linesArgs).messages;
     const whole = kback.map((m) => [m.id, m.thread, m.msg_id, m.reply_to].join('|')).join(' ');
-    const renamed = 'r-' + sha(newId).slice(0, 62);
+    const renamed = 'r' + sha(newId).slice(0, 62);
     if (whole !== `k1|t1|${newId}| k2|${newId}|k-2| k3|t1|k-3| k4|${renamed}|${renamed}|${newId} k5|t1|k-5|${newId}`) throw new Error(`${msgName}: read back ${whole}`);
     const endName = `export_read_end: ${shape} written anew in what a contact wrote, reads back`;
     add(endName, 'export_read_end', {
       manifest: kman, messages_sha256: sha(kjsonl), lines: kl.lines.length, ids: kback.map((m) => m.id), msg_ids: kback.map((m) => m.msg_id),
       reply_tos: kback.map((m) => m.reply_to).filter((r) => r !== null), media_seen: [file], media: [file],
+      kept_msg_ids: kback.map((m) => m.msg_id), media_kept: [file],
     });
-    expect(endName, { ok: true });
+    expect(endName, { ok: true, reply_to_null: [], media_left_out: [] });
     // What the owner's side wrote is refused, naming where.
     for (const [what, name, args, why] of [
       ['the owner\'s name for a contact', 'export_write', { ...keyArgs, contacts: [{ ...keyArgs.contacts[0], name: key }] }, 'contacts[0], column name: holds a private key'],
@@ -357,7 +385,7 @@ export default function exportCases({ add, expect }, f) {
   add('export_read with nothing to work from', 'export_read', {});
   add('export_read with a directory entry that does not read', 'export_read', { directory: [{ name: 'manifest.json' }], owner, now });
   add('export_read_messages with nothing to work from', 'export_read_messages', {});
-  add('export_read_messages from line 0', 'export_read_messages', { lines: [], threads: [], contacts: [], media: [], first_line: 0 });
+  add('export_read_messages from line 0', 'export_read_messages', { lines: [], threads: [], left_out_threads: [], contacts: [], media: [], first_line: 0 });
   add('export_read_end with nothing to work from', 'export_read_end', {});
   add('export_write with nothing to work from', 'export_write', {});
   add('export_write: the owner as a contact', 'export_write', { ...writeArgs, contacts: [row({ root: owner })] });

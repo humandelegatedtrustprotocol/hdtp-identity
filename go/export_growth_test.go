@@ -105,13 +105,14 @@ func TestExportFunctionsGrowLinearlyInTheRowsOfAFile(t *testing.T) {
 		must(err)
 		out[2] = cpu() - clock
 		clock = start()
-		_, _, err = exportReadMessages(lines, 1, messageNames{threads: setOf(d.threadIDs), contacts: setOf(roots), media: strSet{}})
+		_, err = exportReadMessages(lines, 1, messageNames{threads: setOf(d.threadIDs), leftOutThreads: strSet{}, contacts: setOf(roots), media: strSet{}})
 		must(err)
 		out[3] = cpu() - clock
 		withMessages, err := finishManifest(partial, &hash, uint64(d.rows))
 		must(err)
 		clock = start()
-		must(exportReadEnd(withMessages, exportEnd{messagesSHA256: &hash, lines: uint64(d.rows), ids: d.ids, msgIDs: d.msgIDs, replyTos: d.replyTos, mediaSeen: []string{}}))
+		_, err = exportReadEnd(withMessages, exportEnd{messagesSHA256: &hash, lines: uint64(d.rows), ids: d.ids, msgIDs: d.msgIDs, replyTos: d.replyTos, mediaSeen: []string{}, keptMsgIDs: d.msgIDs, mediaKept: []string{}})
+		must(err)
 		out[4] = cpu() - clock
 		clock = start()
 		_, _, _, err = exportMerge(d.many, d.many)

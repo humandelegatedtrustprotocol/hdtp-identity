@@ -13,9 +13,11 @@ const DIRECTIONS: [&str; 2] = ["in", "out"];
 const SENDERS: [&str; 2] = ["agent", "human"];
 const STATUSES: [&str; 4] = ["delivered", "queued", "failed", "read"];
 
-/// What a message may name: the file's threads, contacts and media.
+/// What a message may name: the file's threads, contacts and media. `left_out_threads` are the
+/// threads `export_read` left out (SPEC §9.2, Import, step 3), which a message may name too.
 pub struct Names<'a> {
     pub threads: &'a [&'a str],
+    pub left_out_threads: &'a [&'a str],
     pub contacts: &'a [&'a str],
     pub media: &'a [&'a str],
 }
@@ -33,6 +35,7 @@ fn key_material(v: &Value) -> bool {
 /// caller passed was a scan the file's size multiplied.
 pub struct Lookup<'a> {
     threads: HashSet<&'a str>,
+    left_out_threads: HashSet<&'a str>,
     contacts: HashSet<&'a str>,
     media: HashSet<&'a str>,
 }
@@ -40,7 +43,12 @@ pub struct Lookup<'a> {
 impl<'a> Lookup<'a> {
     pub fn of(names: &'a Names<'a>) -> Lookup<'a> {
         let set = |l: &'a [&'a str]| l.iter().copied().collect();
-        Lookup { threads: set(names.threads), contacts: set(names.contacts), media: set(names.media) }
+        Lookup {
+            threads: set(names.threads),
+            left_out_threads: set(names.left_out_threads),
+            contacts: set(names.contacts),
+            media: set(names.media),
+        }
     }
 }
 
@@ -74,7 +82,7 @@ pub fn message(doc: &Map<String, Value>, names: Option<&Lookup<'_>>) -> std::res
     let thread = text("thread")?;
     let contact = text("contact")?;
     if let Some(n) = names {
-        if !n.threads.contains(thread) {
+        if !n.threads.contains(thread) && !n.left_out_threads.contains(thread) {
             return Err((Some("thread"), "names no thread in threads.csv".into()));
         }
         if !n.contacts.contains(contact) {
@@ -130,12 +138,23 @@ pub fn message(doc: &Map<String, Value>, names: Option<&Lookup<'_>>) -> std::res
     }))
 }
 
-/// One batch of lines; `first_line` is the number of the first in the whole file. Answers the
-/// messages and the media they name.
-pub fn read(lines: &[&str], first_line: u64, names: &Names<'_>) -> Result<(Vec<Value>, Vec<String>)> {
+/// What one batch of lines holds: the messages to write, the messages of a thread `export_read` left
+/// out (checked as every message is, and not written), every file a message names, and the files a
+/// message to write names.
+pub struct Batch {
+    pub messages: Vec<Value>,
+    pub left_out: Vec<Value>,
+    pub media_seen: Vec<String>,
+    pub media_kept: Vec<String>,
+}
+
+/// One batch of lines; `first_line` is the number of the first in the whole file.
+pub fn read(lines: &[&str], first_line: u64, names: &Names<'_>) -> Result<Batch> {
     let lookup = Lookup::of(names);
     let mut messages = Vec::new();
+    let mut left_out = Vec::new();
     let mut seen: Vec<String> = Vec::new();
+    let mut kept: Vec<String> = Vec::new();
     for (i, line) in lines.iter().enumerate() {
         let n = first_line + i as u64;
         if line.len() > LINE_MAX {
@@ -153,16 +172,26 @@ pub fn read(lines: &[&str], first_line: u64, names: &Names<'_>) -> Result<(Vec<V
                 },
             )
         })?;
+        let leaves = m["thread"].as_str().is_some_and(|t| lookup.left_out_threads.contains(t));
         for a in m["attachments"].as_array().into_iter().flatten() {
             if let Some(f) = a["file"].as_str() {
                 seen.push(f.to_string());
+                if !leaves {
+                    kept.push(f.to_string());
+                }
             }
         }
-        messages.push(m);
+        if leaves {
+            left_out.push(m);
+        } else {
+            messages.push(m);
+        }
     }
-    seen.sort();
-    seen.dedup();
-    Ok((messages, seen))
+    for l in [&mut seen, &mut kept] {
+        l.sort();
+        l.dedup();
+    }
+    Ok(Batch { messages, left_out, media_seen: seen, media_kept: kept })
 }
 
 /// A message the writer left out, and why (SPEC §9.2, what a contact controls).

@@ -78,12 +78,16 @@ type ExportMedia struct {
 	Size int64  `json:"size"`
 }
 
-// ExportContents is what a validated export holds.
+// ExportContents is what a validated export holds, as an importer writes it: a thread whose id is
+// of neither form of SPEC §7 is in LeftOutThreads, to show the person, and its messages and the media
+// only they named are in none of the others; a reply_to that named one of its messages is nil
+// (§9.2, Import).
 type ExportContents struct {
-	Contacts []ContactRow
-	Threads  []ThreadRow
-	Messages []MessageRow
-	Media    []ExportMedia
+	Contacts       []ContactRow
+	Threads        []ThreadRow
+	LeftOutThreads []ExportLeftOutThread
+	Messages       []MessageRow
+	Media          []ExportMedia
 }
 
 // ExportInput is what WriteExportZip writes.
@@ -211,12 +215,12 @@ func ReadExportZip(zr *zip.Reader, owner string, now time.Time, ceiling int64) (
 		}
 		return nil, err
 	}
-	out := &ExportContents{Media: r.media}
+	out := &ExportContents{Media: r.media, LeftOutThreads: r.leftOut}
 	if err := convert(r.contacts, &out.Contacts); err != nil {
 		return nil, err
 	}
 	out.Threads = r.threads
-	names := messageNames{threads: strSet{}, contacts: strSet{}, media: strSet{}}
+	names := messageNames{threads: strSet{}, leftOutThreads: strSet{}, contacts: strSet{}, media: strSet{}}
 	for _, c := range out.Contacts {
 		names.contacts.add(c.Root)
 	}
@@ -225,11 +229,15 @@ func ReadExportZip(zr *zip.Reader, owner string, now time.Time, ceiling int64) (
 		names.threads.add(t.ID)
 		names.contacts.add(t.Contact)
 	}
+	for _, t := range out.LeftOutThreads {
+		names.leftOutThreads.add(t.ID)
+		names.contacts.add(t.Contact)
+	}
 	for _, m := range out.Media {
 		names.media.add(m.Hash)
 	}
 
-	end := exportEnd{ids: []string{}, msgIDs: []string{}, replyTos: []string{}, mediaSeen: []string{}}
+	end := exportEnd{ids: []string{}, msgIDs: []string{}, replyTos: []string{}, mediaSeen: []string{}, keptMsgIDs: []string{}, mediaKept: []string{}}
 	// Every media file of the directory must be named by a message (SPEC §9.2).
 	for _, m := range out.Media {
 		end.media = append(end.media, m.Hash)
@@ -248,9 +256,23 @@ func ReadExportZip(zr *zip.Reader, owner string, now time.Time, ceiling int64) (
 			}
 		}
 	}
-	if err := exportReadEnd(*texts["manifest.json"], end); err != nil {
+	left, err := exportReadEnd(*texts["manifest.json"], end)
+	if err != nil {
 		return nil, err
 	}
+	replyToNull, mediaLeftOut := setOf(left.replyToNull), setOf(left.mediaLeftOut)
+	for i := range out.Messages {
+		if r := out.Messages[i].ReplyTo; r != nil && replyToNull.has(*r) {
+			out.Messages[i].ReplyTo = nil
+		}
+	}
+	media := out.Media[:0:0]
+	for _, m := range out.Media {
+		if !mediaLeftOut.has(m.Hash) {
+			media = append(media, m)
+		}
+	}
+	out.Media = media
 	return out, nil
 }
 
@@ -262,34 +284,45 @@ func (h *exportHost) streamMessages(f *zip.File, names messageNames, end *export
 	defer rc.Close()
 	sum := sha256.New()
 	br := bufio.NewReader(io.TeeReader(rc, sum))
-	mediaSeen := setOf(end.mediaSeen)
+	mediaSeen, mediaKept := setOf(end.mediaSeen), setOf(end.mediaKept)
 	var batch []string
 	var n uint64
 	flush := func() error {
 		if len(batch) == 0 {
 			return nil
 		}
-		msgs, seen, err := exportReadMessages(batch, n-uint64(len(batch))+1, names)
+		b, err := exportReadMessages(batch, n-uint64(len(batch))+1, names)
 		if err != nil {
 			return err
 		}
-		for _, m := range msgs {
+		for k, m := range append(b.messages, b.leftOut...) {
+			kept := k < len(b.messages)
 			o := m.(map[string]any)
 			end.ids = append(end.ids, o["id"].(string))
 			end.msgIDs = append(end.msgIDs, o["msg_id"].(string))
 			if r, isText := o["reply_to"].(string); isText {
 				end.replyTos = append(end.replyTos, r)
 			}
+			if !kept {
+				continue
+			}
+			end.keptMsgIDs = append(end.keptMsgIDs, o["msg_id"].(string))
 			var row MessageRow
 			if err := convert(o, &row); err != nil {
 				return err
 			}
 			out.Messages = append(out.Messages, row)
 		}
-		for _, s := range seen {
+		for _, s := range b.mediaSeen {
 			if !mediaSeen.has(s) {
 				mediaSeen.add(s)
 				end.mediaSeen = append(end.mediaSeen, s)
+			}
+		}
+		for _, s := range b.mediaKept {
+			if !mediaKept.has(s) {
+				mediaKept.add(s)
+				end.mediaKept = append(end.mediaKept, s)
 			}
 		}
 		batch = batch[:0]
@@ -517,7 +550,7 @@ func WriteExportZip(w io.Writer, in ExportInput, media func(hash string) (io.Rea
 	}
 	// The reader's rules over what is about to be written, in the reader's words: every message's
 	// thread, contact and file, then the rules across the whole member.
-	names := messageNames{threads: strSet{}, contacts: strSet{}, media: strSet{}}
+	names := messageNames{threads: strSet{}, leftOutThreads: strSet{}, contacts: strSet{}, media: strSet{}}
 	for _, c := range in.Contacts {
 		names.contacts.add(c.Root)
 	}
@@ -528,11 +561,12 @@ func WriteExportZip(w io.Writer, in ExportInput, media func(hash string) (io.Rea
 	for _, m := range files {
 		names.media.add(m.Hash)
 	}
-	read, seen, err := exportReadMessages(lines, 1, names)
+	b, err := exportReadMessages(lines, 1, names)
 	if err != nil {
 		return nil, err
 	}
-	end := exportEnd{messagesSHA256: sha, lines: uint64(len(lines)), ids: []string{}, msgIDs: []string{}, replyTos: []string{}, mediaSeen: seen}
+	read := b.messages
+	end := exportEnd{messagesSHA256: sha, lines: uint64(len(lines)), ids: []string{}, msgIDs: []string{}, replyTos: []string{}, mediaSeen: b.mediaSeen, mediaKept: b.mediaKept}
 	for _, m := range files {
 		end.media = append(end.media, m.Hash)
 	}
@@ -542,11 +576,12 @@ func WriteExportZip(w io.Writer, in ExportInput, media func(hash string) (io.Rea
 		msgID, _ := o["msg_id"].(string)
 		end.ids = append(end.ids, id)
 		end.msgIDs = append(end.msgIDs, msgID)
+		end.keptMsgIDs = append(end.keptMsgIDs, msgID)
 		if r, isText := o["reply_to"].(string); isText {
 			end.replyTos = append(end.replyTos, r)
 		}
 	}
-	if err := exportReadEnd(manifest, end); err != nil {
+	if _, err := exportReadEnd(manifest, end); err != nil {
 		return nil, err
 	}
 

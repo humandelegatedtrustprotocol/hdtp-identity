@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -445,9 +446,6 @@ func threadRow(cells []string, roots strSet, named bool, owner string) (ThreadRo
 	}
 	if len(cells) != want {
 		return ThreadRow{}, &cellRefusal{0, fmt.Sprintf("%d fields, not %d", len(cells), want)}
-	}
-	if cells[0] == "" {
-		return ThreadRow{}, &cellRefusal{0, "empty"}
 	}
 	var contactName, contactDisplay string
 	removed := false
@@ -914,8 +912,23 @@ type exportReadResult struct {
 	threadsEscapes int
 	contacts       []any
 	threads        []ThreadRow
-	media          []ExportMedia
+	// leftOut are the threads whose id is of neither form of SPEC §7: checked as every row is, and
+	// not written (§9.2, Import, step 3).
+	leftOut []ExportLeftOutThread
+	media   []ExportMedia
 }
+
+// ExportLeftOutThread is a thread an importer leaves out, and why: its id is of neither form of
+// SPEC §7, so it, its messages and the media only they name are not written, and the person is shown
+// its id (§9.2, Import). It is never a reason to refuse the file.
+type ExportLeftOutThread struct {
+	ID      string `json:"id"`
+	Contact string `json:"contact"`
+	Reason  string `json:"reason"`
+}
+
+// exportThreadIDNeitherForm is why an importer leaves a thread out.
+const exportThreadIDNeitherForm = "its id is of neither form of a thread_id (SPEC §7)"
 
 // exportRead is §9.2's validation of everything but the messages and the media bytes, in the core's
 // order.
@@ -1117,7 +1130,20 @@ func exportRead(directory []ExportEntry, manifestText, contactsCSV, threadsCSV *
 	} else if threadsCSV != nil {
 		return nil, exportRefuse("threads_csv is given, and the file has no threads.csv")
 	}
-	return &exportReadResult{threadsEscapes: escapes, contacts: contacts, threads: threads, media: media}, nil
+	// A thread whose id is of neither form of SPEC §7 was checked as every row is, and counted; it is
+	// left out rather than answered, never a reason to refuse the file (§9.2, Import, step 3).
+	// Partitioned in place, so a file that leaves nothing out costs nothing more.
+	var leftOut []ExportLeftOutThread
+	kept := 0
+	for _, t := range threads {
+		if IsThreadID(t.ID) {
+			threads[kept] = t
+			kept++
+		} else {
+			leftOut = append(leftOut, ExportLeftOutThread{ID: t.ID, Contact: t.Contact, Reason: exportThreadIDNeitherForm})
+		}
+	}
+	return &exportReadResult{threadsEscapes: escapes, contacts: contacts, threads: threads[:kept], leftOut: leftOut, media: media}, nil
 }
 
 // exportEnd is what the host gathered while it streamed messages.jsonl.
@@ -1127,30 +1153,40 @@ type exportEnd struct {
 	ids, msgIDs, replyTos, mediaSeen []string
 	// media is the file's media members, by hash: export_read's media. Each must be named.
 	media []string
+	// keptMsgIDs are the msg_ids of the messages to write, not left out; mediaKept the files they
+	// name (export_read_messages's media_kept).
+	keptMsgIDs, mediaKept []string
+}
+
+// exportLeftBehind is what a file's left-out threads take with them (SPEC §9.2, Import, step 3),
+// once the whole file passed: the reply_to values a message to write writes as null, since they
+// name no message to write, and the media files no message to write names.
+type exportLeftBehind struct {
+	replyToNull, mediaLeftOut []string
 }
 
 // exportReadEnd is §9.2's cross-batch rules, once the host has streamed messages.jsonl.
-func exportReadEnd(manifestText string, e exportEnd) error {
+func exportReadEnd(manifestText string, e exportEnd) (*exportLeftBehind, error) {
 	m, err := parseManifest(manifestText, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if e.lines != m.messages {
-		return exportRefuse(fmt.Sprintf("manifest.json: counts: messages is %d, and messages.jsonl holds %d lines", m.messages, e.lines))
+		return nil, exportRefuse(fmt.Sprintf("manifest.json: counts: messages is %d, and messages.jsonl holds %d lines", m.messages, e.lines))
 	}
 	want, listed := m.files["messages.jsonl"]
 	switch {
 	case listed && e.messagesSHA256 != nil && want == *e.messagesSHA256:
 	case listed:
-		return exportRefuse("messages.jsonl: its sha256 is not manifest.json's")
+		return nil, exportRefuse("messages.jsonl: its sha256 is not manifest.json's")
 	case e.messagesSHA256 != nil:
-		return exportRefuse("messages.jsonl: manifest.json's files does not list it")
+		return nil, exportRefuse("messages.jsonl: manifest.json's files does not list it")
 	}
 	sorted := append([]string{}, e.ids...)
 	sort.Strings(sorted)
 	for i := 1; i < len(sorted); i++ {
 		if sorted[i] == sorted[i-1] {
-			return exportRefuse("messages.jsonl: id " + jsonString(sorted[i]) + " appears twice")
+			return nil, exportRefuse("messages.jsonl: id " + jsonString(sorted[i]) + " appears twice")
 		}
 	}
 	// The msg_ids sorted, looked up by binary search: a list of the strings already held, 16 bytes
@@ -1159,22 +1195,40 @@ func exportReadEnd(manifestText string, e exportEnd) error {
 	sort.Strings(msgIDs)
 	for _, r := range e.replyTos {
 		if i := sort.SearchStrings(msgIDs, r); i == len(msgIDs) || msgIDs[i] != r {
-			return exportRefuse("messages.jsonl: reply_to " + jsonString(r) + " names no message in the file")
+			return nil, exportRefuse("messages.jsonl: reply_to " + jsonString(r) + " names no message in the file")
 		}
 	}
 	mediaSeen := setOf(e.mediaSeen)
 	for _, h := range e.media {
 		if !mediaSeen.has(h) {
-			return exportRefuse("media/" + h + ": nothing names it")
+			return nil, exportRefuse("media/" + h + ": nothing names it")
 		}
 	}
-	return nil
+	left := &exportLeftBehind{replyToNull: []string{}, mediaLeftOut: []string{}}
+	// The kept msg_ids sorted in the list already made for the file's, looked up as those are.
+	kept := append(msgIDs[:0], e.keptMsgIDs...)
+	sort.Strings(kept)
+	for _, r := range e.replyTos {
+		if i := sort.SearchStrings(kept, r); i == len(kept) || kept[i] != r {
+			left.replyToNull = append(left.replyToNull, r)
+		}
+	}
+	sort.Strings(left.replyToNull)
+	left.replyToNull = slices.Compact(left.replyToNull)
+	keptMedia := setOf(e.mediaKept)
+	for _, h := range e.media {
+		if !keptMedia.has(h) {
+			left.mediaLeftOut = append(left.mediaLeftOut, h)
+		}
+	}
+	return left, nil
 }
 
 // ── messages.jsonl ──────────────────────────────────────────────────────────────────────────────
 
-// messageNames is what a message may name, as sets built once per call.
-type messageNames struct{ threads, contacts, media strSet }
+// messageNames is what a message may name, as sets built once per call. leftOutThreads are the
+// threads export_read left out (SPEC §9.2, Import, step 3), which a message may name too.
+type messageNames struct{ threads, leftOutThreads, contacts, media strSet }
 
 type memberRefusal struct {
 	member string // "" for the message as a whole
@@ -1251,7 +1305,7 @@ func checkMessage(doc map[string]any, names *messageNames) (map[string]any, *mem
 		return nil, bad
 	}
 	if names != nil {
-		if !names.threads.has(thread) {
+		if !names.threads.has(thread) && !names.leftOutThreads.has(thread) {
 			return nil, &memberRefusal{"thread", "names no thread in threads.csv"}
 		}
 		if !names.contacts.has(contact) {
@@ -1342,39 +1396,56 @@ func checkMessage(doc map[string]any, names *messageNames) (map[string]any, *mem
 	}, nil
 }
 
+// messagesBatch is what one batch of lines holds: the messages to write, the messages of a thread
+// export_read left out (checked as every message is, and not written), every file a message names,
+// and the files a message to write names.
+type messagesBatch struct {
+	messages, leftOut    []any
+	mediaSeen, mediaKept []string
+}
+
 // exportReadMessages reads one batch of lines; firstLine is the number of the first in the file.
-func exportReadMessages(lines []string, firstLine uint64, names messageNames) ([]any, []string, error) {
-	messages := []any{}
-	seen := []string{}
-	seenSet := strSet{}
+func exportReadMessages(lines []string, firstLine uint64, names messageNames) (*messagesBatch, error) {
+	b := &messagesBatch{messages: []any{}, leftOut: []any{}, mediaSeen: []string{}, mediaKept: []string{}}
+	seenSet, keptSet := strSet{}, strSet{}
 	for i, line := range lines {
 		n := firstLine + uint64(i)
 		if len(line) > ExportLineMax {
-			return nil, nil, exportRefuse(fmt.Sprintf("messages.jsonl: line %d: over %d bytes", n, ExportLineMax))
+			return nil, exportRefuse(fmt.Sprintf("messages.jsonl: line %d: over %d bytes", n, ExportLineMax))
 		}
 		v, err := decodeJSON([]byte(line))
 		doc, isObj := v.(map[string]any)
 		if err != nil || !isObj || loneSurrogate([]byte(line)) {
-			return nil, nil, exportRefuse(fmt.Sprintf("messages.jsonl: line %d: not a JSON object", n))
+			return nil, exportRefuse(fmt.Sprintf("messages.jsonl: line %d: not a JSON object", n))
 		}
 		m, bad := checkMessage(doc, &names)
 		if bad != nil {
 			if bad.member != "" {
-				return nil, nil, exportRefuse(fmt.Sprintf("messages.jsonl: line %d, member %s: %s", n, bad.member, bad.why))
+				return nil, exportRefuse(fmt.Sprintf("messages.jsonl: line %d, member %s: %s", n, bad.member, bad.why))
 			}
-			return nil, nil, exportRefuse(fmt.Sprintf("messages.jsonl: line %d: %s", n, bad.why))
+			return nil, exportRefuse(fmt.Sprintf("messages.jsonl: line %d: %s", n, bad.why))
 		}
+		leaves := names.leftOutThreads.has(m["thread"].(string))
 		for _, a := range m["attachments"].([]any) {
 			f := a.(map[string]any)["file"].(string)
 			if !seenSet.has(f) {
 				seenSet.add(f)
-				seen = append(seen, f)
+				b.mediaSeen = append(b.mediaSeen, f)
+			}
+			if !leaves && !keptSet.has(f) {
+				keptSet.add(f)
+				b.mediaKept = append(b.mediaKept, f)
 			}
 		}
-		messages = append(messages, m)
+		if leaves {
+			b.leftOut = append(b.leftOut, m)
+		} else {
+			b.messages = append(b.messages, m)
+		}
 	}
-	sort.Strings(seen)
-	return messages, seen, nil
+	sort.Strings(b.mediaSeen)
+	sort.Strings(b.mediaKept)
+	return b, nil
 }
 
 // exportWriteMessages is the lines of messages.jsonl for these messages, in the order given, each
@@ -1395,14 +1466,14 @@ const (
 	exportNeutralMIME     = "application/octet-stream"
 )
 
-// isReissuedForm is the form of an id a writer issues: "r-" and 62 lowercase hex digits, 64
-// characters, which no key-material check reads as a key and which SEP-0006's draft grammar for a
-// thread id (^[a-z0-9][a-z0-9-]{0,63}$) takes.
+// isReissuedForm is the form of an id a writer issues: "r" and 62 lowercase hex digits, 63
+// characters, which is of SPEC §7's first form of a thread id and which no key-material check reads
+// as a key (only a word that begins with "M" is decoded).
 func isReissuedForm(s string) bool {
-	if len(s) != 64 || !strings.HasPrefix(s, "r-") {
+	if len(s) != 63 || s[0] != 'r' {
 		return false
 	}
-	for _, c := range []byte(s[2:]) {
+	for _, c := range []byte(s[1:]) {
 		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
 			return false
 		}
@@ -1412,13 +1483,13 @@ func isReissuedForm(s string) bool {
 
 // exportReissuedID is an id a contact may have chosen — a thread id, a msg_id, a reply_to — as a
 // writer writes it (SPEC §9.2, what a contact controls): one that reads as a private key is written
-// as "r-" and the first 62 hex digits of its sha256, and so is one already of that form, so that no
+// as "r" and the first 62 hex digits of its sha256, and so is one already of that form, so that no
 // two ids of a file are ever written as one; every other id is written as it is. The same id is
 // written the same way in every call, so a host that writes threads.csv and messages.jsonl in
 // separate calls, or the messages in batches, writes every reference to it alike.
 func exportReissuedID(id string) string {
 	if holdsPrivateKey(id) || isReissuedForm(id) {
-		return "r-" + sha256Hex([]byte(id))[:62]
+		return "r" + sha256Hex([]byte(id))[:62]
 	}
 	return id
 }

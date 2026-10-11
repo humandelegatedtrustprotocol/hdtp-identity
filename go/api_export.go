@@ -71,7 +71,7 @@ func callExportReadMessages(a args) json.RawMessage {
 	for _, f := range []struct {
 		k  string
 		to *strSet
-	}{{"threads", &names.threads}, {"contacts", &names.contacts}, {"media", &names.media}} {
+	}{{"threads", &names.threads}, {"left_out_threads", &names.leftOutThreads}, {"contacts", &names.contacts}, {"media", &names.media}} {
 		list, err := a.strings(f.k)
 		if err != nil {
 			return failErr(codeArgs, err)
@@ -86,11 +86,11 @@ func callExportReadMessages(a args) json.RawMessage {
 		}
 		first = n
 	}
-	messages, seen, err := exportReadMessages(lines, first, names)
+	b, err := exportReadMessages(lines, first, names)
 	if err != nil {
 		return fail(codeArgs, err.Error())
 	}
-	return ok(map[string]any{"messages": messages, "media_seen": seen})
+	return ok(map[string]any{"messages": b.messages, "left_out": b.leftOut, "media_seen": b.mediaSeen, "media_kept": b.mediaKept})
 }
 
 func callExportReadEnd(a args) json.RawMessage {
@@ -117,15 +117,17 @@ func callExportReadEnd(a args) json.RawMessage {
 	for _, f := range []struct {
 		k  string
 		to *[]string
-	}{{"ids", &e.ids}, {"msg_ids", &e.msgIDs}, {"reply_tos", &e.replyTos}, {"media_seen", &e.mediaSeen}, {"media", &e.media}} {
+	}{{"ids", &e.ids}, {"msg_ids", &e.msgIDs}, {"reply_tos", &e.replyTos}, {"media_seen", &e.mediaSeen}, {"media", &e.media},
+		{"kept_msg_ids", &e.keptMsgIDs}, {"media_kept", &e.mediaKept}} {
 		if *f.to, err = a.strings(f.k); err != nil {
 			return failErr(codeArgs, err)
 		}
 	}
-	if err := exportReadEnd(text, e); err != nil {
+	left, err := exportReadEnd(text, e)
+	if err != nil {
 		return fail(codeArgs, err.Error())
 	}
-	return ok(map[string]any{"ok": true})
+	return ok(map[string]any{"ok": true, "reply_to_null": left.replyToNull, "media_left_out": left.mediaLeftOut})
 }
 
 func callExportWrite(a args) json.RawMessage {
@@ -312,6 +314,19 @@ func readAnswer(r *exportReadResult, threadsBytes int) json.RawMessage {
 			b.WriteString(`,"contact_display_name":`)
 			writeJSONString(&b, t.ContactDisplayName)
 		}
+		b.WriteByte('}')
+	}
+	b.WriteString(`],"left_out_threads":[`)
+	for k, t := range r.leftOut {
+		if k > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(`{"id":`)
+		writeJSONString(&b, t.ID)
+		b.WriteString(`,"contact":`)
+		writeJSONString(&b, t.Contact)
+		b.WriteString(`,"reason":`)
+		writeJSONString(&b, t.Reason)
 		b.WriteByte('}')
 	}
 	b.WriteString(`],"media":`)

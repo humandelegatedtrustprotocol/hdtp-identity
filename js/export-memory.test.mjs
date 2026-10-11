@@ -13,7 +13,8 @@
 //   the rows again with some 57 bytes of keys each: about 3.5×, 4.1–4.9× measured below (the rest is
 //   a 40-byte digest per thread id and the allocator's pages). 0.3.1 took 15–16×.
 //
-//   export_read_end: at most 2.5 bytes per byte of its argument text (ids, msg_ids, reply_tos): it
+//   export_read_end: at most 2.5 bytes per byte of its argument text (ids, msg_ids, reply_tos,
+//   kept_msg_ids): it
 //   holds the text and the strings it decodes to, borrowed and sorted, not copied. 1.7× measured;
 //   0.3.1 took 5.2×.
 //
@@ -122,8 +123,8 @@ test('export_read_end holds at most 2.5 bytes per byte of its lists, at N and 4N
     const msgIds = ids.map((x) => 'x' + x);
     const hash = 'a'.repeat(64);
     const manifest = JSON.stringify({ hdtp_export: 1, owner, owner_name: '', exported_at: '2026-09-27T00:00:00Z', tool: 't', counts: { contacts: 0, threads: 0, messages: rows, media: 0 }, files: { 'messages.jsonl': hash } });
-    const args = { manifest, messages_sha256: hash, lines: rows, ids, msg_ids: msgIds, reply_tos: msgIds.slice(1), media_seen: [], media: [] };
-    const listBytes = JSON.stringify([ids, msgIds, msgIds.slice(1)]).length;
+    const args = { manifest, messages_sha256: hash, lines: rows, ids, msg_ids: msgIds, reply_tos: msgIds.slice(1), media_seen: [], media: [], kept_msg_ids: msgIds, media_kept: [] };
+    const listBytes = JSON.stringify([ids, msgIds, msgIds.slice(1), msgIds]).length;
     const { bytes } = grows('export_read_end', args);
     console.log(`  export_read_end, ${rows} ids (${listBytes} bytes of lists): linear memory grew ${bytes} bytes, ${(bytes / listBytes).toFixed(2)}× the lists`);
     assert.ok(bytes <= PER_END_ARG_BYTE * listBytes, `${rows} ids: ${(bytes / listBytes).toFixed(2)}× the lists, over ${PER_END_ARG_BYTE}×`);
@@ -194,7 +195,7 @@ test('a 64 MiB messages.jsonl read in batches holds one batch, not the file', (t
       lines.push(l);
       bytes += Buffer.byteLength(l) + 1;
     }
-    const r = core.call('export_read_messages', { lines, threads, contacts: roots, media: [], first_line: n - lines.length + 1 });
+    const r = core.call('export_read_messages', { lines, threads, left_out_threads: [], contacts: roots, media: [], first_line: n - lines.length + 1 });
     assert.ok(!r.error, r.why);
     peak = Math.max(peak, core.bytes() - before);
   }

@@ -55,6 +55,40 @@ pub const CTY_RESULT: &str = "application/hdtp-result+json";
 pub const INFO: &[u8] = b"HDTP-SEAL-v1";
 const GUEST_TOOLS: [&str; 2] = ["redeem_invite", "request_contact"];
 const PENDING_TOOLS: [&str; 2] = ["contact_accepted", "contact_rejected"];
+/// The tools that take a `thread_id` (SPEC §7, §6.2).
+const THREAD_TOOLS: [&str; 3] = ["send_message", "send_media", "book_slot"];
+/// The most bytes a `thread_id` holds (SPEC §7).
+pub const THREAD_ID_MAX: usize = 64;
+
+/// Whether `s` is of one of SPEC §7's two forms of a `thread_id`: 1 to 64 ASCII letters and digits,
+/// or a UUID in RFC 9562's textual form, in lower case, whatever its version and variant.
+pub fn is_thread_id(s: &str) -> bool {
+    let b = s.as_bytes();
+    let alnum = !b.is_empty() && b.len() <= THREAD_ID_MAX && b.iter().all(|c| c.is_ascii_alphanumeric());
+    let uuid = b.len() == 36
+        && b.iter().enumerate().all(|(i, c)| match i {
+            8 | 13 | 18 | 23 => *c == b'-',
+            _ => c.is_ascii_digit() || (b'a'..=b'f').contains(c),
+        });
+    alnum || uuid
+}
+
+/// The refusal SPEC §7 gives a call's `thread_id`, as code and why: at a tool that takes one, a
+/// `thread_id` that is not a string is `bad_request`, one over 64 bytes `too_large`, checked before
+/// the form, and any other of neither form, the empty string included, `bad_request`. Absent or null
+/// is no `thread_id`.
+pub fn thread_id_refusal(tool: Option<&str>, args: &Value) -> Option<(&'static str, &'static str)> {
+    if !tool.is_some_and(|t| THREAD_TOOLS.contains(&t)) {
+        return None;
+    }
+    match args.get("thread_id") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(t)) if t.len() > THREAD_ID_MAX => Some(("too_large", "thread_id over 64 bytes")),
+        Some(Value::String(t)) if is_thread_id(t) => None,
+        Some(Value::String(_)) => Some(("bad_request", "thread_id of neither form")),
+        Some(_) => Some(("bad_request", "thread_id is not a string")),
+    }
+}
 
 /// The four wire members.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -451,6 +485,47 @@ pub fn suite_name(spki: &[u8]) -> Result<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// SPEC §7's two forms of a thread_id, at their edges, and the refusal a call's thread_id gets
+    /// (go/unit_test.go holds the Go port to the same cases).
+    #[test]
+    fn a_thread_id_is_of_one_of_two_forms() {
+        let uuid = "0f6e2c1a-7d4b-4f0e-9a51-3c2b8d9e4f10";
+        for ok in ["a", "Z", "0", &"Az09".repeat(16), uuid, "00000000-0000-0000-0000-000000000000", &format!("r{}", "ab".repeat(31))] {
+            assert!(is_thread_id(ok), "{ok:?} is of a form");
+        }
+        let upper = uuid.to_uppercase();
+        let one_hyphen = format!("{}-{}", &uuid.replace('-', "")[..8], &uuid.replace('-', "")[8..]);
+        for bad in [
+            "",
+            ".",
+            "..",
+            "a-b",
+            "a/b",
+            "a b",
+            "abc\n",
+            "\u{e9}",
+            &"a".repeat(65),
+            &upper,
+            &one_hyphen,
+            &format!("r-{}", "ab".repeat(31)),
+            "0f6e2c1a-7d4b-4f0e-9a51-3c2b8d9e4f1g",
+            "0f6e2c1a-7d4b-4f0e-9a51-3c2b8d9e4f1",
+        ] {
+            assert!(!is_thread_id(bad), "{bad:?} is of neither form");
+        }
+        let at = |tool: &str, t: Value| thread_id_refusal(Some(tool), &json!({ "thread_id": t }));
+        assert_eq!(at("send_message", json!("a".repeat(65))), Some(("too_large", "thread_id over 64 bytes")));
+        assert_eq!(at("send_message", json!(".".repeat(65))), Some(("too_large", "thread_id over 64 bytes")), "the length first");
+        assert_eq!(at("send_media", json!("..")), Some(("bad_request", "thread_id of neither form")));
+        assert_eq!(at("book_slot", json!("")), Some(("bad_request", "thread_id of neither form")));
+        assert_eq!(at("send_message", json!(7)), Some(("bad_request", "thread_id is not a string")));
+        assert_eq!(at("send_message", Value::Null), None);
+        assert_eq!(at("send_message", json!(uuid)), None);
+        assert_eq!(at("get_status", json!("..")), None, "a tool that takes no thread_id");
+        assert_eq!(thread_id_refusal(None, &json!({ "thread_id": ".." })), None);
+        assert_eq!(thread_id_refusal(Some("send_message"), &json!({})), None);
+    }
 
     /// The values that wrapped. `ts = i64::MIN + now` made `(now - ts).abs()` equal `i64::MIN`, which
     /// is <= 300; a JSON number cannot carry it exactly, so it is held here and not in js/parity.mjs.

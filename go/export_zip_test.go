@@ -193,7 +193,7 @@ func TestAnExportOf5000MediaWritesAndReadsBack(t *testing.T) {
 		h := sha256Hex(body)
 		files[h] = body
 		in.Media = append(in.Media, ExportMedia{Hash: h, Size: int64(len(body))})
-		in.Messages = append(in.Messages, MessageRow{ID: fmt.Sprintf("m%d", i), Thread: "t-1", Contact: exportPeer, MsgID: fmt.Sprintf("x%d", i),
+		in.Messages = append(in.Messages, MessageRow{ID: fmt.Sprintf("m%d", i), Thread: "t1", Contact: exportPeer, MsgID: fmt.Sprintf("x%d", i),
 			Direction: "in", Sender: "human", Time: "2026-09-02T00:00:00Z", Status: "read",
 			Attachments: []Attachment{{File: h, Filename: "f", MIME: "text/plain", Size: int64(len(body))}}})
 	}

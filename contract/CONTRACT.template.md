@@ -284,8 +284,11 @@ The other results, each with an empty `effects` list unless stated: `{"code": "e
 host holding an older pin of that leaf's key learns the root above it (§14.3) and decides again; `{"code": "chain_required"}`; `{"code": "certificate_renewed", "data": {"chain": [...]}}`;
 `{"code": "pending_approval", "root", "endpoint", "leaf", "form", "msg_id"}` — what the signature
 proved and the request's `msg_id`, so a host can seal the refusal back to the caller (§13.2) without
-opening the envelope again; its effects are the pin's own moves, never `seen`; and
-`{"code": "ok", "replayed": true}` for a seen `msg_id`.
+opening the envelope again; its effects are the pin's own moves, never `seen`;
+`{"code": "too_large" | "bad_request", "why", "root", "endpoint", "leaf", "form", "msg_id"}` — a
+contact's `send_message`, `send_media` or `book_slot` whose `thread_id` is of neither form of SPEC §7
+(below), named and sealed back as `pending_approval` is, its effects the pin's own moves, never
+`seen`; and `{"code": "ok", "replayed": true}` for a seen `msg_id`.
 The `why` strings are the seed's, verbatim, so the intrusion suite reads both ports alike.
 
 Order, as `receive()` has it (freshness also refuses `exp − ts` over 30 days, §13.1, as `exp too far from ts`): decode `protected` → header members exactly `cty,exp,kid,msg_id,suite,ts,v`
@@ -310,7 +313,11 @@ contact row — the host reads `demote`, never the words); conflict →
 and a `new_address` event; newer at the pinned endpoint → `pin_update` and a `renewal` event; then
 `pending_out` allows `tools/list` and `contact_accepted`/`contact_rejected` at tier `pending` (a listing
 names no tool, and answers at the tier the caller earns, SPEC §6, §13.2), else `pending_approval`; else
-contact.
+the call's `thread_id` (SPEC §7, SEP-0006), at `send_message`, `send_media` and `book_slot` only:
+absent or null is none; one that is not a string is `bad_request` (`thread_id is not a string`), one
+over 64 bytes `too_large` (`thread_id over 64 bytes`), checked before the form, and one that is neither
+1 to 64 ASCII letters and digits nor a lower-case UUID in RFC 9562's textual form `bad_request`
+(`thread_id of neither form`), the empty string included; else contact.
 
 A `pending_new_address` result is the host's to answer as SPEC §5.3 words it: the `update_contact` that
 brought the new address answers `{"status": "pending"}`; every other call from that address, until the
@@ -420,6 +427,21 @@ the host can do, and the words both hosts of this repository use for it (the Go 
 - hand `export_read_end` the media `export_read` answered, so a media file no message names is
   refused.
 
+**What an importer leaves out** (SPEC §9.2, Import, step 3; SEP-0006). A thread whose `id` is of
+neither form of SPEC §7 — 1 to 64 ASCII letters and digits, or a lower-case UUID; the empty id and an
+`r-` id of a 0.8.1 writer are of neither — is held to every rule of the file and counted, and is never
+a reason to refuse it; `export_read` answers it in `left_out_threads` (`id`, `contact`, `reason`), not
+`threads`, and the host shows the person each `id` before it writes anything. The host passes those
+ids to `export_read_messages` as `left_out_threads`, and the contact of each among `contacts`; a
+message of such a thread is checked as every message is and answered in `left_out`, not `messages`.
+The host hands `export_read_end` the `id`, `msg_id` and `reply_to` of every message, left out or not,
+and adds `kept_msg_ids` (the `msg_id` of each message in `messages`) and `media_kept` (every batch's):
+the file's rules still count every message, and the answer names what the left-out threads take with
+them — `reply_to_null`, each `reply_to` that names no message the host writes, which it writes as
+null, and `media_left_out`, each media file only left-out messages name, which it does not write.
+The Go port's `ReadExportZip` and the `hdtp` CLI apply both, and answer the left-out threads beside
+the rest.
+
 **Writing.** `export_write` answers the canonical `contacts.csv` and `threads.csv` and a partial
 manifest; `export_write_messages` answers the lines; `export_manifest` finishes the manifest with
 the host's count and hash of `messages.jsonl`. The bytes are the same from every port: a Go host and
@@ -431,8 +453,9 @@ Nor does text a contact may have written that reads as a private key, and no con
 or file is left out for it: a contact's `display_name`, a removed thread's `contact_display_name` and
 a thread's `topic` are written empty, and an incoming file's name or type is written `file` or
 `application/octet-stream`, the file kept; what was blanked or replaced is not in the file. A thread
-id, a `msg_id` (unless the message went out) and a `reply_to` are written as `r-` and the first 62
-hex digits of the id's sha256, an id already of that form too, the same in every call, so
+id, a `msg_id` (unless the message went out) and a `reply_to` are written as `r` and the first 62
+hex digits of the id's sha256 (63 characters, of SPEC §7's first form of a thread id), an id already
+of that form too, the same in every call, so
 `threads.csv`, a message's `thread` and every reply hold to one another however the host batches its
 calls. A thread id and a topic are rewritten whichever side wrote them, since the format cannot tell
 (SPEC §7). Nothing records which ids were written anew: the format has no place for it, and

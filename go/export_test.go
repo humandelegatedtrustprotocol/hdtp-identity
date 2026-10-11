@@ -74,11 +74,11 @@ func exportFixture(t *testing.T) (ExportInput, map[string][]byte) {
 		Owner: exportOwner, OwnerName: "Alina", Tool: "go test", ExportedAt: time.Date(2026, 9, 27, 10, 0, 0, 0, time.UTC),
 		Contacts: []ContactRow{{Root: exportPeer, Endpoint: "https://agent.bharat.example/mcp", Name: "=Bharat", DisplayName: "'Tis Bharat",
 			Status: "active", WasActive: true, Permissions: []string{"message.text", "message.media"}, TheirPermissions: []string{}, Added: "2026-09-01T00:00:00Z"}},
-		Threads: []ThreadRow{{ID: "t-1", Contact: exportPeer, Topic: "plans", CreatedAt: "2026-09-02T00:00:00Z", LastAt: "2026-09-03T00:00:00Z"}},
+		Threads: []ThreadRow{{ID: "t1", Contact: exportPeer, Topic: "plans", CreatedAt: "2026-09-02T00:00:00Z", LastAt: "2026-09-03T00:00:00Z"}},
 		Messages: []MessageRow{
-			{ID: "1", Thread: "t-1", Contact: exportPeer, MsgID: "m-1", Direction: "in", Sender: "human", Time: "2026-09-02T00:00:00Z",
+			{ID: "1", Thread: "t1", Contact: exportPeer, MsgID: "m-1", Direction: "in", Sender: "human", Time: "2026-09-02T00:00:00Z",
 				Body: "", Status: "delivered", Attachments: []Attachment{{File: h, Filename: "a.pdf", MIME: "application/pdf", Size: int64(len(file))}}},
-			{ID: "2", Thread: "t-1", Contact: exportPeer, MsgID: "m-2", Direction: "out", Sender: "agent", Time: "2026-09-03T00:00:00Z",
+			{ID: "2", Thread: "t1", Contact: exportPeer, MsgID: "m-2", Direction: "out", Sender: "agent", Time: "2026-09-03T00:00:00Z",
 				Body: "https://example.org/a-link", ReplyTo: &reply, Status: "queued", Attachments: []Attachment{}},
 		},
 		Media: []ExportMedia{{Hash: h, Size: int64(len(file))}},
@@ -143,8 +143,8 @@ func TestAMessageCarriesAtMostOneFile(t *testing.T) {
 	if err == nil || err.Error() != "messages[0], member attachments: more than one attachment: a message carries at most one file" {
 		t.Errorf("the writer: %v", err)
 	}
-	line := `{"attachments":[{"file":"` + in.Media[0].Hash + `","filename":"a","mime":"b","size":1},{"file":"` + in.Media[0].Hash + `","filename":"a","mime":"b","size":1}],"body":"","contact":"` + exportPeer + `","direction":"in","id":"1","msg_id":"m","reply_to":null,"sender":"human","status":"read","thread":"t-1","time":"2026-09-02T00:00:00Z"}`
-	_, _, err = exportReadMessages([]string{line}, 7, messageNames{threads: setOf([]string{"t-1"}), contacts: setOf([]string{exportPeer}), media: setOf([]string{in.Media[0].Hash})})
+	line := `{"attachments":[{"file":"` + in.Media[0].Hash + `","filename":"a","mime":"b","size":1},{"file":"` + in.Media[0].Hash + `","filename":"a","mime":"b","size":1}],"body":"","contact":"` + exportPeer + `","direction":"in","id":"1","msg_id":"m","reply_to":null,"sender":"human","status":"read","thread":"t1","time":"2026-09-02T00:00:00Z"}`
+	_, err = exportReadMessages([]string{line}, 7, messageNames{threads: setOf([]string{"t1"}), leftOutThreads: strSet{}, contacts: setOf([]string{exportPeer}), media: setOf([]string{in.Media[0].Hash})})
 	if err == nil || err.Error() != "messages.jsonl: line 7, member attachments: more than one attachment: a message carries at most one file" {
 		t.Errorf("the reader: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestAContactsKeyShapedTextNeverStopsAnExportAndTheOwnersIsRefused(t *testin
 		}
 		newID := exportReissuedID(key)
 		renamed := exportReissuedID(newID)
-		if len(newID) != 64 || !strings.HasPrefix(newID, "r-") || holdsPrivateKey(newID) || renamed == newID {
+		if len(newID) != 63 || newID[0] != 'r' || !IsThreadID(newID) || holdsPrivateKey(newID) || renamed == newID {
 			t.Fatalf("new ids %q, %q", newID, renamed)
 		}
 		in, files := exportFixture(t)
@@ -319,7 +319,7 @@ func TestAContactsKeyShapedTextNeverStopsAnExportAndTheOwnersIsRefused(t *testin
 		for _, th := range got.Threads {
 			threads = append(threads, th.ID+"|"+th.Topic+"|"+th.ContactDisplayName)
 		}
-		wantThreads := []string{newID + "|lunch|", renamed + "|tea|", exportReissuedID(key+" 2") + "||", "t-1||"}
+		wantThreads := []string{newID + "|lunch|", renamed + "|tea|", exportReissuedID(key+" 2") + "||", "t1||"}
 		sort.Strings(wantThreads)
 		if !reflect.DeepEqual(threads, wantThreads) {
 			t.Errorf("threads (id|topic|contact_display_name):\n got  %q\n want %q", threads, wantThreads)
@@ -332,7 +332,7 @@ func TestAContactsKeyShapedTextNeverStopsAnExportAndTheOwnersIsRefused(t *testin
 			}
 			messages = append(messages, strings.Join([]string{m.ID, m.Thread, m.MsgID, r}, "|"))
 		}
-		wantMessages := []string{"1|t-1|" + newID + "|null", "2|t-1|m-2|" + newID, "3|" + newID + "|m-3|null", "4|" + renamed + "|" + renamed + "|" + newID}
+		wantMessages := []string{"1|t1|" + newID + "|null", "2|t1|m-2|" + newID, "3|" + newID + "|m-3|null", "4|" + renamed + "|" + renamed + "|" + newID}
 		if !reflect.DeepEqual(messages, wantMessages) {
 			t.Errorf("messages (id|thread|msg_id|reply_to):\n got  %q\n want %q", messages, wantMessages)
 		}
@@ -357,7 +357,7 @@ func TestAContactsKeyShapedTextNeverStopsAnExportAndTheOwnersIsRefused(t *testin
 		}{
 			{"the owner's name for the contact", func(in *ExportInput) { in.Contacts[0].Name = key }, "contacts[0], column name: holds a private key"},
 			{"the owner's name for a former contact", func(in *ExportInput) {
-				in.Threads = append(in.Threads, ThreadRow{ID: "r-1", Contact: former, CreatedAt: at, LastAt: at, ContactName: key})
+				in.Threads = append(in.Threads, ThreadRow{ID: "r1", Contact: former, CreatedAt: at, LastAt: at, ContactName: key})
 			}, "threads[1], column contact_name: holds a private key"},
 			{"the host's message id", func(in *ExportInput) { in.Messages[1].ID = key }, "messages[1], member id: holds a private key"},
 			{"an outgoing msg_id", func(in *ExportInput) { in.Messages[1].MsgID = key }, "messages[1], member msg_id: holds a private key"},
@@ -380,7 +380,7 @@ func TestAContactsKeyShapedTextNeverStopsAnExportAndTheOwnersIsRefused(t *testin
 	}
 	// The control: plain ids, names and files are written as they are.
 	in, files := exportFixture(t)
-	in.Threads = append(in.Threads, ThreadRow{ID: "r-1", Contact: former, CreatedAt: at, LastAt: at, ContactName: "Chitra", ContactDisplayName: "C"})
+	in.Threads = append(in.Threads, ThreadRow{ID: "r1", Contact: former, CreatedAt: at, LastAt: at, ContactName: "Chitra", ContactDisplayName: "C"})
 	var b bytes.Buffer
 	leftOut, err := WriteExportZip(&b, in, open(files))
 	if err != nil || len(leftOut) != 0 {

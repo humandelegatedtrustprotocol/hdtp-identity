@@ -14,6 +14,46 @@ import (
 	"time"
 )
 
+// SPEC §7's two forms of a thread_id, at their edges, and the refusal a call's thread_id gets (the
+// Rust core's envelope.rs tests hold it to the same cases).
+func TestAThreadIDIsOfOneOfTwoForms(t *testing.T) {
+	uuid := "0f6e2c1a-7d4b-4f0e-9a51-3c2b8d9e4f10"
+	for _, ok := range []string{"a", "Z", "0", strings.Repeat("Az09", 16), uuid, "00000000-0000-0000-0000-000000000000", "r" + strings.Repeat("ab", 31)} {
+		if !IsThreadID(ok) {
+			t.Errorf("%q is of a form", ok)
+		}
+	}
+	flat := strings.ReplaceAll(uuid, "-", "")
+	for _, bad := range []string{"", ".", "..", "a-b", "a/b", "a b", "abc\n", "\u00e9", strings.Repeat("a", 65), strings.ToUpper(uuid), flat[:8] + "-" + flat[8:],
+		"r-" + strings.Repeat("ab", 31), "0f6e2c1a-7d4b-4f0e-9a51-3c2b8d9e4f1g", "0f6e2c1a-7d4b-4f0e-9a51-3c2b8d9e4f1"} {
+		if IsThreadID(bad) {
+			t.Errorf("%q is of neither form", bad)
+		}
+	}
+	for _, c := range []struct {
+		tool      string
+		thread    any
+		code, why string
+	}{
+		{"send_message", strings.Repeat("a", 65), "too_large", "thread_id over 64 bytes"},
+		{"send_message", strings.Repeat(".", 65), "too_large", "thread_id over 64 bytes"},
+		{"send_media", "..", "bad_request", "thread_id of neither form"},
+		{"book_slot", "", "bad_request", "thread_id of neither form"},
+		{"send_message", 7.0, "bad_request", "thread_id is not a string"},
+		{"send_message", nil, "", ""},
+		{"send_message", uuid, "", ""},
+		{"get_status", "..", "", ""},
+	} {
+		code, why := threadIDRefusal(c.tool, map[string]any{"arguments": map[string]any{"thread_id": c.thread}})
+		if code != c.code || why != c.why {
+			t.Errorf("%s with %v: %q %q, want %q %q", c.tool, c.thread, code, why, c.code, c.why)
+		}
+	}
+	if code, _ := threadIDRefusal("send_message", map[string]any{"arguments": map[string]any{}}); code != "" {
+		t.Errorf("no thread_id: %q", code)
+	}
+}
+
 func TestIsNormalHTTPS(t *testing.T) {
 	good := []string{"https://agent.alina.example/mcp", "https://alina.host.example/alina/mcp", "https://a.example/x/y-z_1.2~", "https://a.example/%2F", "https://192.0.2.1/mcp", "https://[2001:db8::1]/mcp"}
 	bad := []string{"http://agent.alina.example/mcp", "https://agent.alina.example/", "https://agent.alina.example", "https://Agent.Alina.example/mcp", "https://agent.alina.example@mallory.example/mcp", "https://agent.alina.example:443/mcp", "https://agent.alina.example/mcp/", "https://agent.alina.example/mcp?x=1", "https://agent.alina.example/mcp#f", "https://agent.alina.example/mcp/../admin", "https://agent.alina.example/./mcp", "https://a.example/%2f", "https://a.example/%41", "https://a.example/a b", "https://a.example/a\\b", "https://a.example/ü", "https://a.example/%zz", "https://.a.example/mcp", "https://a..example/mcp", "https://01.2.3.4/mcp", "https://[2001:DB8::1]/mcp", "https://[::ffff:1.2.3.4]/mcp",
