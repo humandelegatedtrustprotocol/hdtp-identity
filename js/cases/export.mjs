@@ -57,6 +57,20 @@ export default function exportCases({ add, expect }, f) {
   add('export_write: two removed threads of one root with different names', 'export_write', withRemoved([...threads, removedThreads[2], { ...removedThreads[3], contact_name: 'other' }]));
   add('export_write: a removed thread whose own name is over 200 characters', 'export_write', withRemoved([...threads, { ...removedThreads[2], contact_name: 'n'.repeat(201) }]));
   add('export_write: a thread name that is not a string', 'export_write', withRemoved([...threads, { ...removedThreads[2], contact_name: 7 }]));
+  // SEP-0006: an empty thread id is of neither form of SPEC §7. The writer writes it as it is held,
+  // as every id but the re-issued ones, and the reader leaves the thread out, never refusing the file.
+  {
+    const emptyArgs = { ...writeArgs, threads: [...threads, { ...threads[0], id: '' }], media: [] };
+    add('export_write: a thread whose id is empty', 'export_write', emptyArgs);
+    const ew = wasm.call('export_write', emptyArgs);
+    if (ew.error) throw new Error(`export_write of an empty thread id: ${ew.why}`);
+    const eman = wasm.call('export_manifest', { partial: ew.partial }).manifest;
+    const edir = [['manifest.json', eman], ['contacts.csv', ew.contacts_csv], ['threads.csv', ew.threads_csv]]
+      .map(([name, text]) => ({ name, size: Buffer.byteLength(text), encrypted: false, mode: 0o100644 }));
+    const id = 'export_read: a thread whose id is empty is left out, not refused';
+    add(id, 'export_read', { directory: edir, manifest: eman, contacts_csv: ew.contacts_csv, threads_csv: ew.threads_csv, owner, now });
+    expect(id, { left_out_threads: [{ id: '', contact: threads[0].contact, reason: 'its id is of neither form of a thread_id (SPEC §7)' }] });
+  }
   // What a contact controls, and the names beside it (SPEC §9.2): every name and a topic lose every
   // character below U+0020 but tab, line feed and carriage return, which a reader answers
   // as two or six bytes each; both ports write what they write for the same rows without them.
