@@ -263,8 +263,8 @@ var functions = map[string]function{
 
 	// Export: api_export.go
 	"export_read":             {[]string{"directory", "manifest", "contacts_csv", "threads_csv", "owner", "now"}, callExportRead},
-	"export_read_messages":    {[]string{"lines", "threads", "contacts", "media", "first_line"}, callExportReadMessages},
-	"export_read_end":         {[]string{"manifest", "messages_sha256", "lines", "ids", "msg_ids", "reply_tos", "media_seen", "media"}, callExportReadEnd},
+	"export_read_messages":    {[]string{"lines", "threads", "left_out_threads", "contacts", "media", "first_line"}, callExportReadMessages},
+	"export_read_end":         {[]string{"manifest", "messages_sha256", "lines", "ids", "msg_ids", "reply_tos", "media_seen", "media", "kept_msg_ids", "media_kept"}, callExportReadEnd},
 	"export_write":            {[]string{"owner", "owner_name", "exported_at", "tool", "contacts", "threads", "media"}, callExportWrite},
 	"export_write_messages":   {[]string{"messages", "msg_ids"}, callExportWriteMessages},
 	"export_manifest":         {[]string{"partial", "hashes", "messages"}, callExportManifest},

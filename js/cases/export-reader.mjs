@@ -86,6 +86,7 @@ export default function readerCases({ add, expect }) {
   const lines = text['messages.jsonl'].replace(/\n$/, '').split('\n');
   const names = {
     threads: ['t1', 't2'],
+    left_out_threads: [],
     contacts: text['contacts.csv'].split('\r\n').slice(1).filter(Boolean).map((l) => cells(l)[0]),
     media: [media.name.slice(6)],
   };
@@ -106,6 +107,21 @@ export default function readerCases({ add, expect }) {
   }
   // The control: the valid export's own lines, with the same names, read.
   add('export_read_messages: the valid export\'s lines', 'export_read_messages', { lines, ...names });
+  // SEP-0006: the messages of a thread export_read left out are checked as every message is and
+  // answered in `left_out`; the files only they name are not in `media_kept`. The valid export's t2
+  // named as left out: its messages move, t1's stay.
+  {
+    const id = 'export_read_messages: the valid export\'s lines, t2 left out';
+    add(id, 'export_read_messages', { lines, ...names, threads: ['t1'], left_out_threads: ['t2'] });
+    const judge = (got) => Array.isArray(got?.messages) && got.messages.length > 0 && got.messages.every((m) => m.thread === 't1')
+      && got.left_out.length > 0 && got.left_out.every((m) => m.thread === 't2')
+      && got.media_kept.every((h) => got.messages.some((m) => m.attachments.some((a) => a.file === h)));
+    judge.label = 't1\'s messages in messages, t2\'s in left_out, media_kept named by messages only';
+    expect(id, judge);
+    const unnamed = 'export_read_messages: a message of a thread neither kept nor left out';
+    add(unnamed, 'export_read_messages', { lines, ...names, threads: ['t1'], left_out_threads: [] });
+    expect(unnamed, { error: 'bad_request', why: /^messages\.jsonl: line \d+, member thread: names no thread in threads\.csv$/ });
+  }
 
   // ── 9.2#13: one instant grammar, on read ────────────────────────────────────────
   // `Z` and `T` upper-case, no offset, `.` alone before a fraction: in a contact's `added`, a thread's

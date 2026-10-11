@@ -116,6 +116,19 @@ func answersCorpus(t *testing.T, fsys fs.FS) {
 				t.Errorf("%s: %d contacts (%d pinned), %d removed threads, %d threads, %d messages, %d media; want %+v", c.File, len(got.Contacts), pinned,
 					removed, len(got.Threads), len(got.Messages), len(got.Media), *c.Accept)
 			}
+			// The threads left out (SEP-0006), named; and the replies that still name a written message.
+			leftOut, replies := []string{}, 0
+			for _, th := range got.LeftOutThreads {
+				leftOut = append(leftOut, th.ID)
+			}
+			for _, m := range got.Messages {
+				if m.ReplyTo != nil {
+					replies++
+				}
+			}
+			if want := append([]string{}, c.Accept.LeftOut...); strings.Join(leftOut, "\n") != strings.Join(want, "\n") || (len(want) > 0 && replies != c.Accept.Replies) {
+				t.Errorf("%s: left out %q, %d replies; want %q, %d", c.File, leftOut, replies, want, c.Accept.Replies)
+			}
 		case err == nil:
 			t.Errorf("%s: accepted, and must be refused: %s%s", c.File, c.Refusal, c.RefusalPrefix)
 		case c.Refusal != "" && err.Error() != c.Refusal:
@@ -192,6 +205,18 @@ func TestWriteExportZipWritesTheCorpusControlsBack(t *testing.T) {
 			t.Fatalf("%s: %v", file, err)
 		}
 		again, _ := zip.NewReader(bytes.NewReader(out.Bytes()), int64(out.Len()))
+		// A file that leaves threads out is written back without them (SEP-0006): it reads as what was
+		// imported, and nothing is left out of it.
+		if len(c.Accept.LeftOut) > 0 {
+			second, err := hdtp.ReadExportZip(again, index.Owner, now, 1<<30)
+			if err != nil {
+				t.Fatalf("%s: what was written does not read: %v", file, err)
+			}
+			if len(second.LeftOutThreads) != 0 || !reflect.DeepEqual(first.Threads, second.Threads) || !reflect.DeepEqual(first.Messages, second.Messages) || !reflect.DeepEqual(first.Media, second.Media) {
+				t.Errorf("%s: what was imported, written again, reads back differently", file)
+			}
+			continue
+		}
 		now2 := members(again)
 		if len(now2) != len(was) {
 			t.Errorf("%s: %d members written, %d read", file, len(now2), len(was))

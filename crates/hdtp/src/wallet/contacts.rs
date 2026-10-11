@@ -71,6 +71,10 @@ pub fn contacts_import(vault: &str, file: &str, yes: bool) -> Res<i32> {
         plural(contents.messages.len(), "message", "messages"),
         plural(contents.media.len(), "file", "files")
     );
+    // SPEC §9.2, Import, step 1: the id of every thread an importer leaves out is shown.
+    for t in &contents.left_out_threads {
+        eprintln!("left out: thread {} ({})", t["id"], t["reason"].as_str().unwrap_or(""));
+    }
     let mut r = open_record(&v)?;
     if !r.found {
         eprintln!("no record at {}: starting one with this contact book", r.path);

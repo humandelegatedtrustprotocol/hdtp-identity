@@ -64,6 +64,12 @@ type Accept struct {
 	// Pinned counts the rows whose leaf is answered; Leafless names those whose leaf is not.
 	Pinned   int      `json:"pinned"`
 	Leafless []string `json:"leafless"`
+	// LeftOut names the threads an importer leaves out, their ids of neither form of SPEC §7
+	// (§9.2, Import, step 3); Threads, Messages and Media count what is written without them and
+	// what only their messages named, and Replies the written messages whose reply_to stays set.
+	// Both are written only for a file that leaves a thread out.
+	LeftOut []string `json:"left_out,omitempty"`
+	Replies int      `json:"replies,omitempty"`
 }
 
 // Index is cases.json.
@@ -276,37 +282,41 @@ func leaf(of identity, cn, host, endpoint string) (string, error) {
 
 // valid builds the valid export, the book, and the valid export with a former contact's
 // conversation added (a removed thread), through the library's own writer.
-func valid() (export, []byte, []string, export, error) {
+// leftOutOf builds an export whose threads.csv holds a thread with this id, which an importer leaves
+// out: a message of it carrying a file no other message names, and a message of t1 replying to it.
+type leftOutOf func(id string) (export, error)
+
+func valid() (export, []byte, []string, export, leftOutOf, error) {
 	var fail export
 	owner, err := root("owner", OwnerCN)
 	if err != nil {
-		return fail, nil, nil, fail, err
+		return fail, nil, nil, fail, nil, err
 	}
 	bharat, err := root("bharat", "Bharat")
 	if err != nil {
-		return fail, nil, nil, fail, err
+		return fail, nil, nil, fail, nil, err
 	}
 	chen, err := root("chen", "Chen")
 	if err != nil {
-		return fail, nil, nil, fail, err
+		return fail, nil, nil, fail, nil, err
 	}
 	dana, err := root("dana", "Dana")
 	if err != nil {
-		return fail, nil, nil, fail, err
+		return fail, nil, nil, fail, nil, err
 	}
 	eve, err := root("eve", "Eve")
 	if err != nil {
-		return fail, nil, nil, fail, err
+		return fail, nil, nil, fail, nil, err
 	}
 	bharatLeaf, err := leaf(bharat, "Bharat", "bharat", "https://agent.bharat.example/mcp")
 	if err != nil {
-		return fail, nil, nil, fail, err
+		return fail, nil, nil, fail, nil, err
 	}
 	// Chen's leaf names another address than Chen's row: it validates nowhere the row points, so
 	// it pins nothing and the reader answers it null.
 	chenLeaf, err := leaf(chen, "Chen", "chen", "https://old.chen.example/mcp")
 	if err != nil {
-		return fail, nil, nil, fail, err
+		return fail, nil, nil, fail, nil, err
 	}
 	media := []byte("%PDF-1.7\nthe bytes of a.pdf\n")
 	h := sum(media)
@@ -341,11 +351,11 @@ func valid() (export, []byte, []string, export, error) {
 	w, err := call("export_write", map[string]any{"owner": owner.fp, "owner_name": OwnerCN, "exported_at": "2026-09-27T10:00:00Z",
 		"tool": "hdtp-identity exportcorpus", "contacts": contacts, "threads": threads, "media": []any{map[string]any{"hash": h, "size": len(media)}}})
 	if err != nil {
-		return fail, nil, nil, fail, err
+		return fail, nil, nil, fail, nil, err
 	}
 	ml, err := call("export_write_messages", map[string]any{"messages": messages})
 	if err != nil {
-		return fail, nil, nil, fail, err
+		return fail, nil, nil, fail, nil, err
 	}
 	var jsonl []byte
 	for _, l := range ml["lines"].([]any) {
@@ -353,11 +363,11 @@ func valid() (export, []byte, []string, export, error) {
 	}
 	m, err := call("export_manifest", map[string]any{"partial": w["partial"], "hashes": map[string]any{"messages.jsonl": sum(jsonl)}, "messages": len(messages)})
 	if err != nil {
-		return fail, nil, nil, fail, err
+		return fail, nil, nil, fail, nil, err
 	}
 	var manifest map[string]any
 	if err := json.Unmarshal([]byte(m["manifest"].(string)), &manifest); err != nil {
-		return fail, nil, nil, fail, err
+		return fail, nil, nil, fail, nil, err
 	}
 	x := export{owner: owner.fp, manifest: manifest, members: []entry{
 		{name: "contacts.csv", data: []byte(w["contacts_csv"].(string))},
@@ -370,22 +380,22 @@ func valid() (export, []byte, []string, export, error) {
 	bw, err := call("export_write", map[string]any{"owner": owner.fp, "owner_name": OwnerCN, "exported_at": "2026-09-27T10:00:00Z",
 		"tool": "hdtp-identity exportcorpus", "contacts": []any{contacts[0], contacts[3]}})
 	if err != nil {
-		return fail, nil, nil, fail, err
+		return fail, nil, nil, fail, nil, err
 	}
 	bm, err := call("export_manifest", map[string]any{"partial": bw["partial"]})
 	if err != nil {
-		return fail, nil, nil, fail, err
+		return fail, nil, nil, fail, nil, err
 	}
 	book, err := zipOf([]entry{{name: "contacts.csv", data: []byte(bw["contacts_csv"].(string))}, {name: "manifest.json", data: []byte(bm["manifest"].(string))}})
 	if err != nil {
-		return fail, nil, nil, fail, err
+		return fail, nil, nil, fail, nil, err
 	}
 
 	// The same export, and a conversation with Farid, a former contact: a removed thread carrying
 	// his names, and a message carrying a second file.
 	farid, err := root("farid", "Farid")
 	if err != nil {
-		return fail, nil, nil, fail, err
+		return fail, nil, nil, fail, nil, err
 	}
 	notes := []byte("notes from the old job\n")
 	nh := sum(notes)
@@ -399,11 +409,11 @@ func valid() (export, []byte, []string, export, error) {
 		"tool": "hdtp-identity exportcorpus", "contacts": contacts, "threads": rthreads,
 		"media": []any{map[string]any{"hash": h, "size": len(media)}, map[string]any{"hash": nh, "size": len(notes)}}})
 	if err != nil {
-		return fail, nil, nil, fail, err
+		return fail, nil, nil, fail, nil, err
 	}
 	rml, err := call("export_write_messages", map[string]any{"messages": rmessages})
 	if err != nil {
-		return fail, nil, nil, fail, err
+		return fail, nil, nil, fail, nil, err
 	}
 	var rjsonl []byte
 	for _, l := range rml["lines"].([]any) {
@@ -411,11 +421,11 @@ func valid() (export, []byte, []string, export, error) {
 	}
 	rm, err := call("export_manifest", map[string]any{"partial": rw["partial"], "hashes": map[string]any{"messages.jsonl": sum(rjsonl)}, "messages": len(rmessages)})
 	if err != nil {
-		return fail, nil, nil, fail, err
+		return fail, nil, nil, fail, nil, err
 	}
 	var rmanifest map[string]any
 	if err := json.Unmarshal([]byte(rm["manifest"].(string)), &rmanifest); err != nil {
-		return fail, nil, nil, fail, err
+		return fail, nil, nil, fail, nil, err
 	}
 	xr := export{owner: owner.fp, manifest: rmanifest, members: []entry{
 		{name: "contacts.csv", data: []byte(rw["contacts_csv"].(string))},
@@ -425,7 +435,51 @@ func valid() (export, []byte, []string, export, error) {
 		{name: "media/" + h, data: media},
 		{name: "media/" + nh, data: notes},
 	}}
-	return x, book, []string{chen.fp}, xr, nil
+	// The same export, and a thread whose id is of neither form of SPEC §7, which an importer leaves
+	// out with its message and the file only that message names; t1's reply to it is written null.
+	lo := func(id string) (export, error) {
+		var fail export
+		photo := []byte("a photo only the left-out thread carried\n")
+		ph := sum(photo)
+		lthreads := append(append([]map[string]any{}, threads...),
+			map[string]any{"id": id, "contact": bharat.fp, "topic": "an old thread", "created_at": "2026-09-13T10:00:00Z", "last_at": "2026-09-13T10:00:00Z"})
+		lmessages := append(append([]map[string]any{}, messages...),
+			map[string]any{"id": "m5", "thread": id, "contact": bharat.fp, "msg_id": "msg-5", "direction": "in", "sender": "human", "time": "2026-09-13T10:00:00Z",
+				"body": "", "reply_to": nil, "status": "read", "attachments": []any{map[string]any{"file": ph, "filename": "photo.jpg", "mime": "image/jpeg", "size": len(photo)}}},
+			map[string]any{"id": "m6", "thread": "t1", "contact": bharat.fp, "msg_id": "msg-6", "direction": "out", "sender": "human", "time": "2026-09-13T11:00:00Z",
+				"body": "about that photo", "reply_to": "msg-5", "status": "delivered", "attachments": []any{}})
+		files := []any{map[string]any{"hash": h, "size": len(media)}, map[string]any{"hash": ph, "size": len(photo)}}
+		lw, err := call("export_write", map[string]any{"owner": owner.fp, "owner_name": OwnerCN, "exported_at": "2026-09-27T10:00:00Z",
+			"tool": "hdtp-identity exportcorpus", "contacts": contacts, "threads": lthreads, "media": files})
+		if err != nil {
+			return fail, err
+		}
+		lml, err := call("export_write_messages", map[string]any{"messages": lmessages})
+		if err != nil {
+			return fail, err
+		}
+		var ljsonl []byte
+		for _, l := range lml["lines"].([]any) {
+			ljsonl = append(append(ljsonl, l.(string)...), '\n')
+		}
+		lm, err := call("export_manifest", map[string]any{"partial": lw["partial"], "hashes": map[string]any{"messages.jsonl": sum(ljsonl)}, "messages": len(lmessages)})
+		if err != nil {
+			return fail, err
+		}
+		var lmanifest map[string]any
+		if err := json.Unmarshal([]byte(lm["manifest"].(string)), &lmanifest); err != nil {
+			return fail, err
+		}
+		return export{owner: owner.fp, manifest: lmanifest, members: []entry{
+			{name: "contacts.csv", data: []byte(lw["contacts_csv"].(string))},
+			{name: "threads.csv", data: []byte(lw["threads_csv"].(string))},
+			{name: "messages.jsonl", data: ljsonl},
+			{name: "media/"},
+			{name: "media/" + h, data: media},
+			{name: "media/" + ph, data: photo},
+		}}, nil
+	}
+	return x, book, []string{chen.fp}, xr, lo, nil
 }
 
 // alias is a fingerprint with its last character's two spare bits set: the same 32 bytes, spelled a
@@ -438,7 +492,7 @@ func alias(fp string) string {
 
 // Build answers every file of the corpus by name, cases.json included.
 func Build() (map[string][]byte, error) {
-	x, book, leafless, xr, err := valid()
+	x, book, leafless, xr, leftOut, err := valid()
 	if err != nil {
 		return nil, err
 	}
@@ -490,6 +544,24 @@ func Build() (map[string][]byte, error) {
 	if err := add(Case{File: "valid-export-with-a-nameless-removed-thread.zip", About: "the control with a removed thread whose two names are empty",
 		Accept: &Accept{Contacts: 4, Removed: 1, Threads: 3, Messages: 5, Media: 2, Pinned: 1, Leafless: leafless}}, withNameless, err); err != nil {
 		return nil, err
+	}
+
+	// SEP-0006: a thread whose id is of neither form of SPEC §7 is left out on import, never a reason
+	// to refuse the file: one id with a dot, and one a 0.8.1 writer issued (`r-` and 62 hex digits).
+	reissued081 := "r-" + sum([]byte("MAoCAQAwAwYBAAQA"))[:62]
+	for _, lc := range []struct{ file, about, id string }{
+		{"valid-export-with-a-left-out-thread.zip", "the control with a thread whose id holds a dot: left out with its message and the file only it names, and a reply to it written null", "t.old"},
+		{"valid-export-with-a-0.8.1-reissued-thread-id.zip", "the control with a thread whose id a 0.8.1 writer issued, r- and 62 hex digits: left out as a thread of neither form", reissued081},
+	} {
+		v, err := leftOut(lc.id)
+		var data []byte
+		if err == nil {
+			data, err = v.zip()
+		}
+		if err := add(Case{File: lc.file, About: lc.about,
+			Accept: &Accept{Contacts: 4, Threads: 2, Messages: 5, Media: 1, Pinned: 1, Leafless: leafless, LeftOut: []string{lc.id}, Replies: 2}}, data, err); err != nil {
+			return nil, err
+		}
 	}
 
 	// A variant: the valid export (or, for the removed thread's cases, the export with one) with one

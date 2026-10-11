@@ -130,9 +130,13 @@ pub fn central_directory(f: &mut File) -> Option<Vec<Entry>> {
 }
 
 /// What an export holds, once the whole file has been checked.
+/// The threads, messages and media are what an importer writes: a thread whose id is of neither form
+/// of SPEC §7 is in `left_out_threads`, to show the person, and its messages and the media only they
+/// named are in none of these; a `reply_to` that named one of its messages is `null` (§9.2, Import).
 pub struct Contents {
     pub contacts: Vec<Value>,
     pub threads: Vec<Value>,
+    pub left_out_threads: Vec<Value>,
     pub messages: Vec<Value>,
     pub media: Vec<Value>,
 }
@@ -211,12 +215,18 @@ pub fn read_export(path: &Path, owner: &str, now: &str, ceiling: u64) -> Result<
     let strings = |v: &Value, k: &str| -> Vec<String> {
         v.as_array().into_iter().flatten().filter_map(|x| x[k].as_str().map(String::from)).collect()
     };
-    // A message names a contact, or the contact of a removed thread.
-    let roots: Vec<String> = strings(&read["contacts"], "root").into_iter().chain(strings(&read["threads"], "contact")).collect();
-    let (thread_ids, hashes) = (strings(&read["threads"], "id"), strings(&read["media"], "hash"));
+    // A message names a contact, or the contact of a removed thread, a left-out one included.
+    let roots: Vec<String> = strings(&read["contacts"], "root")
+        .into_iter()
+        .chain(strings(&read["threads"], "contact"))
+        .chain(strings(&read["left_out_threads"], "contact"))
+        .collect();
+    let (thread_ids, left_out_ids, hashes) =
+        (strings(&read["threads"], "id"), strings(&read["left_out_threads"], "id"), strings(&read["media"], "hash"));
 
     let mut messages = Vec::new();
     let (mut ids, mut msg_ids, mut reply_tos, mut media_seen) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let (mut kept_msg_ids, mut media_kept) = (Vec::new(), Vec::new());
     let mut lines_read: u64 = 0;
     let mut messages_sha256 = None;
     if has("messages.jsonl") {
@@ -232,18 +242,28 @@ pub fn read_export(path: &Path, owner: &str, now: &str, ceiling: u64) -> Result<
             }
             let out = call(
                 "export_read_messages",
-                json!({ "lines": batch, "threads": thread_ids, "contacts": roots, "media": hashes, "first_line": *first }),
+                json!({ "lines": batch, "threads": thread_ids, "left_out_threads": left_out_ids, "contacts": roots, "media": hashes, "first_line": *first }),
             )?;
-            for m in out["messages"].as_array().into_iter().flatten() {
+            for (m, kept) in out["messages"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|m| (m, true))
+                .chain(out["left_out"].as_array().into_iter().flatten().map(|m| (m, false)))
+            {
                 ids.push(m["id"].as_str().unwrap_or_default().to_string());
-                msg_ids.push(m["msg_id"].as_str().unwrap_or_default().to_string());
+                let msg_id = m["msg_id"].as_str().unwrap_or_default().to_string();
                 if let Some(r) = m["reply_to"].as_str() {
                     reply_tos.push(r.to_string());
                 }
-                messages.push(m.clone());
+                if kept {
+                    kept_msg_ids.push(msg_id.clone());
+                    messages.push(m.clone());
+                }
+                msg_ids.push(msg_id);
             }
-            for h in out["media_seen"].as_array().into_iter().flatten().filter_map(|h| h.as_str()) {
-                media_seen.push(h.to_string());
+            for (k, into) in [("media_seen", &mut media_seen), ("media_kept", &mut media_kept)] {
+                into.extend(out[k].as_array().into_iter().flatten().filter_map(|h| h.as_str()).map(String::from));
             }
             *first += batch.len() as u64;
             batch.clear();
@@ -283,8 +303,10 @@ pub fn read_export(path: &Path, owner: &str, now: &str, ceiling: u64) -> Result<
         flush(&mut batch, &mut first)?;
         messages_sha256 = Some(hdtp_identity::util::hex(&hasher.finalize()));
     }
-    media_seen.sort();
-    media_seen.dedup();
+    for l in [&mut media_seen, &mut media_kept] {
+        l.sort();
+        l.dedup();
+    }
 
     for e in entries.iter().filter(|e| e.name.len() == 70 && e.name.starts_with("media/")) {
         let name = &e.name;
@@ -304,19 +326,36 @@ pub fn read_export(path: &Path, owner: &str, now: &str, ceiling: u64) -> Result<
             return Err(format!("{name}: holds a private key"));
         }
     }
-    call(
+    let end = call(
         "export_read_end",
         json!({
             "manifest": text("manifest.json").unwrap_or_default(), "messages_sha256": messages_sha256, "lines": lines_read,
             "ids": ids, "msg_ids": msg_ids, "reply_tos": reply_tos, "media_seen": media_seen,
-            "media": read["media"].as_array().into_iter().flatten().filter_map(|m| m["hash"].as_str()).collect::<Vec<_>>(),
+            "media": hashes, "kept_msg_ids": kept_msg_ids, "media_kept": media_kept,
         }),
     )?;
+    let listed = |k: &str| -> std::collections::HashSet<String> {
+        end[k].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(String::from)).collect()
+    };
+    let (reply_to_null, media_left_out) = (listed("reply_to_null"), listed("media_left_out"));
+    for m in &mut messages {
+        if m["reply_to"].as_str().is_some_and(|r| reply_to_null.contains(r)) {
+            m["reply_to"] = Value::Null;
+        }
+    }
+    let media = read["media"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|m| !m["hash"].as_str().is_some_and(|h| media_left_out.contains(h)))
+        .cloned()
+        .collect();
     Ok(Contents {
         contacts: read["contacts"].as_array().cloned().unwrap_or_default(),
         threads: read["threads"].as_array().cloned().unwrap_or_default(),
+        left_out_threads: read["left_out_threads"].as_array().cloned().unwrap_or_default(),
         messages,
-        media: read["media"].as_array().cloned().unwrap_or_default(),
+        media,
     })
 }
 
@@ -437,6 +476,15 @@ mod tests {
                         .map(|k| want.get(k).and_then(|v| v.as_u64()).unwrap_or(0) as usize);
                     if counts != expected {
                         wrong.push(format!("{file}: holds {counts:?}, want {expected:?}"));
+                    }
+                    // The threads left out (SEP-0006), named; and the replies that still name a written message.
+                    let left_out: Vec<&str> = got.left_out_threads.iter().filter_map(|t| t["id"].as_str()).collect();
+                    let want_left: Vec<&str> =
+                        want.get("left_out").and_then(|l| l.as_array()).into_iter().flatten().filter_map(|l| l.as_str()).collect();
+                    let replies = got.messages.iter().filter(|m| !m["reply_to"].is_null()).count() as u64;
+                    let want_replies = want.get("replies").and_then(|v| v.as_u64()).unwrap_or(0);
+                    if left_out != want_left || (!want_left.is_empty() && replies != want_replies) {
+                        wrong.push(format!("{file}: left out {left_out:?}, {replies} replies; want {want_left:?}, {want_replies}"));
                     }
                 }
                 (Value::Object(_), Err(why)) => wrong.push(format!("{file}: refused: {why}")),

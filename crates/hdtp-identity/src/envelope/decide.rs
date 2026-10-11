@@ -2,8 +2,8 @@
 //! the host supplies (`state.rs`). `envelope.mjs receive()` is its specification, line for line.
 use super::state::{host_roots, DecideInput, DecideOutput, NodeState};
 use super::{
-    chain_of, decode_header, header_checks, members, pin_holding, timing, Timing, CLAIM_WINDOW_S, CTY_CALL, GUEST_TOOLS, INFO,
-    PENDING_TOOLS, TOMBSTONE_S,
+    chain_of, decode_header, header_checks, members, pin_holding, thread_id_refusal, timing, Timing, CLAIM_WINDOW_S, CTY_CALL, GUEST_TOOLS,
+    INFO, PENDING_TOOLS, TOMBSTONE_S,
 };
 use crate::card;
 use crate::hpke::{self, suite_for};
@@ -178,9 +178,24 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
         w.insert("msg_id".into(), json!(msg_id));
         DecideOutput { result: Value::Object(w), effects: r.effects.into_iter().filter(|e| e["op"] != "seen").collect() }
     };
+    // A contact's call whose `thread_id` is of neither form of SPEC §7 is refused before anything is
+    // recorded, with what the signature proved and the msg_id, as a call that waits is, so the host
+    // can seal the refusal back. The pin's own moves stand; the envelope's `seen` does not.
+    let thread_refusal = thread_id_refusal(tool_ref, &body["params"]["arguments"]);
+    let contact_or_refused = |r: DecideOutput| -> DecideOutput {
+        let Some((code, why)) = thread_refusal else { return r };
+        let mut w = Map::new();
+        w.insert("code".into(), json!(code));
+        w.insert("why".into(), json!(why));
+        for k in ["root", "endpoint", "leaf", "form"] {
+            w.insert(k.into(), r.result[k].clone());
+        }
+        w.insert("msg_id".into(), json!(msg_id));
+        DecideOutput { result: Value::Object(w), effects: r.effects.into_iter().filter(|e| e["op"] != "seen").collect() }
+    };
     let pending_or = |tier_ok: DecideOutput, state: &str| -> DecideOutput {
         if state != "pending_out" {
-            tier_ok
+            contact_or_refused(tier_ok)
         } else if pending_allows {
             let mut r = tier_ok;
             r.result["tier"] = json!("pending");

@@ -73,6 +73,42 @@
       }
     },
     {
+      "file": "valid-export-with-a-left-out-thread.zip",
+      "about": "the control with a thread whose id holds a dot: left out with its message and the file only it names, and a reply to it written null",
+      "accept": {
+        "contacts": 4,
+        "threads": 2,
+        "messages": 5,
+        "media": 1,
+        "pinned": 1,
+        "leafless": [
+          "sha256:wfkWHDNr9Pj7Ci1sUzG2u1LLAQEjE-mUak_c65RWVPs"
+        ],
+        "left_out": [
+          "t.old"
+        ],
+        "replies": 2
+      }
+    },
+    {
+      "file": "valid-export-with-a-0.8.1-reissued-thread-id.zip",
+      "about": "the control with a thread whose id a 0.8.1 writer issued, r- and 62 hex digits: left out as a thread of neither form",
+      "accept": {
+        "contacts": 4,
+        "threads": 2,
+        "messages": 5,
+        "media": 1,
+        "pinned": 1,
+        "leafless": [
+          "sha256:wfkWHDNr9Pj7Ci1sUzG2u1LLAQEjE-mUak_c65RWVPs"
+        ],
+        "left_out": [
+          "r-1befa52ac38b81ad7c613993d759e88b6f5852c486d2398682725f248732a9"
+        ],
+        "replies": 2
+      }
+    },
+    {
       "file": "zip-slip.zip",
       "about": "a name that climbs out of the directory",
       "stage": "core",

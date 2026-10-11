@@ -10,6 +10,46 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+- **A `thread_id` has two forms, and `decide` refuses any other (SEP-0006, SPEC §7 of the draft).**
+  A `thread_id` is 1 to 64 ASCII letters and digits, or a UUID in RFC 9562's textual form in lower
+  case. At `send_message`, `send_media` and `book_slot`, a contact's call whose
+  `arguments.thread_id` is over 64 bytes is answered `too_large` (`thread_id over 64 bytes`), checked
+  first; one of neither form, the empty string included, `bad_request` (`thread_id of neither form`);
+  and one that is not a string `bad_request` (`thread_id is not a string`). Absent or null is no
+  `thread_id`. The check runs at the contact tier, after a `pending_out` pin's answer, in both forms;
+  the refusal names `root`, `endpoint`, `leaf`, `form` and `msg_id`, as `pending_approval` does, so a
+  host can seal it back, and carries no `seen` effect, so nothing is recorded; the pin's own moves
+  stand. This changes what a host built on this library accepts: a call from a 1.0 sender whose
+  `thread_id` is of neither form is refused. `is_thread_id` (Rust) and `IsThreadID` (Go) are the one
+  test of the two forms. `js/intrude.mjs` runs the seed's 22 new `thread` scenarios by their names on
+  both ports (180 of 180 agree with the seed of hdtp-spec #62).
+
+- **The writer re-issues an id as `r` and the first 62 hex digits of its sha256 (63 characters), no
+  longer `r-` and 62 (64).** The new form is of the two forms of a `thread_id`, so a re-issued thread
+  id reads back as a thread. The rule is otherwise 0.8.1's: a thread id, a message's `thread`, a
+  `reply_to` and an incoming `msg_id` that read as a private key, and any of them, an outgoing
+  `msg_id` included, already `r` and 62 lowercase hex digits, are re-issued, with every reference
+  alike; an outgoing `msg_id` that reads as a key is refused. An `r-` id a 0.8.1 writer issued is
+  now written as it is, and is a thread id of neither form.
+
+- **The reader leaves out a thread whose id is of neither form, and never refuses the file for it
+  (SPEC §9.2, Import, step 3).** Such a thread, the empty id included (which was refused, `column id:
+  empty`), is held to every other rule of the file and counted, and `export_read` answers it in
+  `left_out_threads` (`id`, `contact`, `reason`) instead of `threads`. `export_read_messages` takes
+  the left-out ids as `left_out_threads` (required) and answers a message of such a thread, checked
+  as every message is, in `left_out`, and the files the other messages name in `media_kept`.
+  `export_read_end` takes `kept_msg_ids` and `media_kept` (both required), still checks every
+  message, and answers `reply_to_null` (each `reply_to` that names no kept message, which a host
+  writes as null) and `media_left_out` (each file only left-out messages name, which it does not
+  write). Go's `ReadExportZip` and the `hdtp` CLI apply both: `ExportContents.LeftOutThreads` and
+  `Contents.left_out_threads` name the threads, and `hdtp contacts import` prints each one. The
+  export corpus gains `valid-export-with-a-left-out-thread.zip` and
+  `valid-export-with-a-0.8.1-reissued-thread-id.zip` (62 cases, 7 accepted). The memory tests of
+  `export_read_end` count the new list in the arguments they measure against.
+
+- SEP-0006's MUSTs are in the specification's draft; `js/musts.json` and PROOFS.md read 1.0.0 and do
+  not register them yet.
+
 ## 0.8.1 — 2026-10-11
 
 - **This library's writer no longer lets a contact stop the owner's export with text that reads as

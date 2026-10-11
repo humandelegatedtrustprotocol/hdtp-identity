@@ -48,13 +48,18 @@ pub(super) fn export_read(a: &Value) -> Result<Answer> {
 
 pub(super) fn export_read_messages(a: &Value) -> Result<Value> {
     let lines = strs(a, "lines")?;
-    let names = jsonl::Names { threads: &strs(a, "threads")?, contacts: &strs(a, "contacts")?, media: &strs(a, "media")? };
+    let names = jsonl::Names {
+        threads: &strs(a, "threads")?,
+        left_out_threads: &strs(a, "left_out_threads")?,
+        contacts: &strs(a, "contacts")?,
+        media: &strs(a, "media")?,
+    };
     let first = match a.get("first_line") {
         None | Some(Value::Null) => 1,
         Some(v) => v.as_u64().filter(|n| *n >= 1).ok_or_else(|| Error::new("bad_request", "first_line is a line number from 1"))?,
     };
-    let (messages, media_seen) = jsonl::read(&lines, first, &names)?;
-    Ok(json!({ "messages": messages, "media_seen": media_seen }))
+    let b = jsonl::read(&lines, first, &names)?;
+    Ok(json!({ "messages": b.messages, "left_out": b.left_out, "media_seen": b.media_seen, "media_kept": b.media_kept }))
 }
 
 /// A list-of-strings argument as it arrived: absent (or null), not a list, a list holding something
@@ -194,6 +199,10 @@ pub(super) struct EndArgs<'a> {
     media_seen: Option<StrList<'a>>,
     #[serde(borrow)]
     media: Option<StrList<'a>>,
+    #[serde(borrow)]
+    kept_msg_ids: Option<StrList<'a>>,
+    #[serde(borrow)]
+    media_kept: Option<StrList<'a>>,
 }
 
 impl<'a> EndArgs<'a> {
@@ -207,6 +216,8 @@ impl<'a> EndArgs<'a> {
             reply_tos: Some(StrList::of_value(a.get("reply_tos"))),
             media_seen: Some(StrList::of_value(a.get("media_seen"))),
             media: Some(StrList::of_value(a.get("media"))),
+            kept_msg_ids: Some(StrList::of_value(a.get("kept_msg_ids"))),
+            media_kept: Some(StrList::of_value(a.get("media_kept"))),
         }
     }
 }
@@ -326,7 +337,8 @@ fn read_end<'b>(a: &'b EndArgs<'_>) -> Result<Value> {
     let (ids, msg_ids, reply_tos, media_seen) =
         (list(&a.ids, "ids")?, list(&a.msg_ids, "msg_ids")?, list(&a.reply_tos, "reply_tos")?, list(&a.media_seen, "media_seen")?);
     let media = list(&a.media, "media")?;
-    export::read_end(
+    let (kept_msg_ids, media_kept) = (list(&a.kept_msg_ids, "kept_msg_ids")?, list(&a.media_kept, "media_kept")?);
+    let left = export::read_end(
         text,
         &export::End {
             messages_sha256: sha,
@@ -336,9 +348,11 @@ fn read_end<'b>(a: &'b EndArgs<'_>) -> Result<Value> {
             reply_tos: &reply_tos,
             media_seen: &media_seen,
             media: &media,
+            kept_msg_ids: &kept_msg_ids,
+            media_kept: &media_kept,
         },
     )?;
-    Ok(json!({ "ok": true }))
+    Ok(json!({ "ok": true, "reply_to_null": left.reply_to_null, "media_left_out": left.media_left_out }))
 }
 
 pub(super) fn export_write(a: &Value) -> Result<Value> {

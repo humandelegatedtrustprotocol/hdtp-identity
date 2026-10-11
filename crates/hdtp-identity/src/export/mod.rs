@@ -475,9 +475,6 @@ pub fn thread_row<'a>(
     let mut next = || cells.next().unwrap_or_default();
     let (id, contact, topic, created_at, last_at) = (next(), next(), next(), next(), next());
     let (mut contact_name, mut contact_display_name) = (Cow::Borrowed(""), Cow::Borrowed(""));
-    if id.is_empty() {
-        return Err((0, "empty".into()));
-    }
     let held = roots.contains(contact.as_ref());
     if !named && !held {
         return Err((1, "names no contact in contacts.csv".into()));
@@ -509,6 +506,9 @@ pub fn thread_row<'a>(
     let Ok(last) = crate::time::parse_rfc3339(&last_at) else { return Err((4, "not an RFC 3339 instant".into())) };
     Ok(ThreadRow { id, contact, topic, created_at: created, last_at: last, contact_name, contact_display_name })
 }
+
+/// Why an importer leaves a thread out (SPEC §9.2, Import, step 3).
+pub const THREAD_ID_NEITHER_FORM: &str = "its id is of neither form of a thread_id (SPEC §7)";
 
 /// The refusal of a `threads.csv` header that is neither of SPEC §9.2's two.
 const THREADS_HEADER_REFUSAL: &str =
@@ -833,6 +833,7 @@ pub fn read<'a>(
     }
     out.extend_from_slice(b"],\"threads\":[");
     let mut threads: u64 = 0;
+    let mut left_out_threads: Vec<u8> = Vec::new();
     if let Some(threads_text) = threads_text {
         if threads_text.len() > THREADS_MAX {
             return refuse(format!("threads.csv: over {THREADS_MAX} bytes"));
@@ -866,6 +867,10 @@ pub fn read<'a>(
         // it was when each row was looked up as it came.
         let mut ids = Repeats::with_capacity(count);
         let mut first = true;
+        // A thread whose id is of neither form of SPEC §7 is checked as every row is, counted, and then
+        // left out rather than answered: it, its messages and the files only they name are not written,
+        // and the person is shown its id (§9.2, Import). It is never a reason to refuse the file.
+        let mut left_out: Vec<u8> = Vec::new();
         for (n, r) in rows {
             let checked = if r.len() != columns.len() {
                 Err(format!("threads.csv: row {n}: {} fields, not {}", r.len(), columns.len()))
@@ -884,10 +889,24 @@ pub fn read<'a>(
             if is_removed {
                 removed.push(&row, n);
             }
+            threads += 1;
+            if !crate::envelope::is_thread_id(&row.id) {
+                if !left_out.is_empty() {
+                    left_out.push(b',');
+                }
+                left_out.extend_from_slice(b"{\"id\":");
+                json_str(&mut left_out, &row.id);
+                left_out.extend_from_slice(b",\"contact\":");
+                json_str(&mut left_out, &row.contact);
+                left_out.extend_from_slice(b",\"reason\":");
+                json_str(&mut left_out, THREAD_ID_NEITHER_FORM);
+                left_out.push(b'}');
+                continue;
+            }
             json_list_open(&mut out, &mut first);
             row.write_json(&mut out, is_removed);
-            threads += 1;
         }
+        left_out_threads = left_out;
         first_thread_problem(&mut ids, &mut removed, columns, threads_text)?;
         // The longer header only for a file that holds a removed thread: one form for one content.
         if named && removed.seen.is_empty() {
@@ -897,6 +916,9 @@ pub fn read<'a>(
             return refuse(format!("manifest.json: counts: threads is {}, and threads.csv holds {threads}", m.threads));
         }
     }
+    out.extend_from_slice(b"],\"left_out_threads\":[");
+    out.extend_from_slice(&left_out_threads);
+    drop(left_out_threads);
     out.extend_from_slice(b"],\"media\":[");
     let mut first = true;
     for (hash, size) in &media {
@@ -924,10 +946,22 @@ pub struct End<'a> {
     pub media_seen: &'a [&'a str],
     /// The file's media members, by hash: export_read's `media`. Each must be named by a message.
     pub media: &'a [&'a str],
+    /// The msg_ids of the messages export_read_messages answered to write, not left out.
+    pub kept_msg_ids: &'a [&'a str],
+    /// The files those messages name: export_read_messages's `media_kept`.
+    pub media_kept: &'a [&'a str],
 }
 
-pub fn read_end(manifest_text: &str, end: &End<'_>) -> Result<()> {
-    let End { messages_sha256, lines, ids, msg_ids, reply_tos, media_seen, media } = *end;
+/// What a file's left-out threads take with them (SPEC §9.2, Import, step 3), once the whole file
+/// passed: the `reply_to` values a message to write writes as `null`, since they name no message to
+/// write, and the media files no message to write names.
+pub struct LeftBehind {
+    pub reply_to_null: Vec<String>,
+    pub media_left_out: Vec<String>,
+}
+
+pub fn read_end(manifest_text: &str, end: &End<'_>) -> Result<LeftBehind> {
+    let End { messages_sha256, lines, ids, msg_ids, reply_tos, media_seen, media, kept_msg_ids, media_kept } = *end;
     let m = manifest::parse(manifest_text, None)?;
     if lines != m.messages {
         return refuse(format!("manifest.json: counts: messages is {}, and messages.jsonl holds {lines} lines", m.messages));
@@ -958,7 +992,19 @@ pub fn read_end(manifest_text: &str, end: &End<'_>) -> Result<()> {
             return refuse(format!("media/{hash}: nothing names it"));
         }
     }
-    Ok(())
+    drop(media_seen);
+    // The kept msg_ids sorted in the list already made for the file's, looked up as those are.
+    let mut kept = msg_ids;
+    kept.clear();
+    kept.extend_from_slice(kept_msg_ids);
+    kept.sort_unstable();
+    let mut reply_to_null: Vec<String> = reply_tos.iter().filter(|r| kept.binary_search(r).is_err()).map(|r| r.to_string()).collect();
+    reply_to_null.sort_unstable();
+    reply_to_null.dedup();
+    drop(kept);
+    let kept: HashSet<&str> = media_kept.iter().copied().collect();
+    let media_left_out = media.iter().filter(|h| !kept.contains(**h)).map(|h| h.to_string()).collect();
+    Ok(LeftBehind { reply_to_null, media_left_out })
 }
 
 /// A ContactRow handed to `export_write`, as its cells.
@@ -1012,22 +1058,22 @@ fn contact_text(s: String) -> String {
     }
 }
 
-/// The form of an id a writer issues: `r-` and 62 lowercase hex digits, 64 characters, which no
-/// key-material check reads as a key and which SEP-0006's draft grammar for a thread id
-/// (`^[a-z0-9][a-z0-9-]{0,63}$`) takes.
+/// The form of an id a writer issues: `r` and 62 lowercase hex digits, 63 characters, which is of
+/// SPEC §7's first form of a thread id and which no key-material check reads as a key (only a word
+/// that begins with `M` is decoded).
 fn is_reissued_form(s: &str) -> bool {
-    s.len() == 64 && s.starts_with("r-") && s.bytes().skip(2).all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+    s.len() == 63 && s.starts_with('r') && s.bytes().skip(1).all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
 }
 
 /// An id a contact may have chosen — a thread id, a `msg_id`, a `reply_to` — as a writer writes it
-/// (SPEC §9.2, what a contact controls): one that reads as a private key is written as `r-` and the
+/// (SPEC §9.2, what a contact controls): one that reads as a private key is written as `r` and the
 /// first 62 hex digits of its sha256, and so is one already of that form, so that no two ids of a file
 /// are ever written as one; every other id is written as it is. The same id is written the same way
 /// in every call, so a host that writes `threads.csv` and `messages.jsonl` in separate calls, or the
 /// messages in batches, writes every reference to it alike, and the file reads back whole.
 pub fn reissued_id(id: &str) -> Cow<'_, str> {
     if holds_private_key(id) || is_reissued_form(id) {
-        Cow::Owned(format!("r-{}", &sha256_hex(id.as_bytes())[..62]))
+        Cow::Owned(format!("r{}", &sha256_hex(id.as_bytes())[..62]))
     } else {
         Cow::Borrowed(id)
     }
@@ -1328,8 +1374,8 @@ mod tests {
         for key in [pem, word] {
             let new_id = reissued_id(key).into_owned();
             assert!(
-                new_id.len() == 64 && new_id.starts_with("r-") && !holds_private_key(&new_id),
-                "the new id is of SEP-0006's draft grammar and no key"
+                new_id.len() == 63 && new_id.starts_with('r') && crate::envelope::is_thread_id(&new_id) && !holds_private_key(&new_id),
+                "the new id is of SPEC §7's first form of a thread id and no key"
             );
             let renamed = reissued_id(&new_id).into_owned();
             assert_ne!(renamed, new_id, "an id already of the issued form is written anew too, so none is written as another");
@@ -1382,8 +1428,8 @@ mod tests {
             let thread_ids: Vec<&str> = answer["threads"].as_array().unwrap().iter().filter_map(|t| t["id"].as_str()).collect();
             let file_lines: Vec<&str> = text.lines().collect();
             let media = [file.as_str()];
-            let (back, seen) =
-                jsonl::read(&file_lines, 1, &jsonl::Names { threads: &thread_ids, contacts: &[peer.as_str()], media: &media }).unwrap();
+            let names = jsonl::Names { threads: &thread_ids, left_out_threads: &[], contacts: &[peer.as_str()], media: &media };
+            let jsonl::Batch { messages: back, media_seen: seen, .. } = jsonl::read(&file_lines, 1, &names).unwrap();
             let got: Vec<(&str, &str, &str, Value)> = back
                 .iter()
                 .map(|m| (m["id"].as_str().unwrap(), m["thread"].as_str().unwrap(), m["msg_id"].as_str().unwrap(), m["reply_to"].clone()))
@@ -1414,6 +1460,8 @@ mod tests {
                 reply_tos: &reply_tos,
                 media_seen: &seen,
                 media: &media,
+                kept_msg_ids: &msg_ids,
+                media_kept: &seen,
             };
             read_end(&m, &end).unwrap();
 
@@ -1503,7 +1551,8 @@ mod tests {
         assert!(r.answer.contains("\"their_permissions\":[\"integration.cal\",\"message.media\"]"));
         let file_lines: Vec<&str> = text.lines().collect();
         let (threads, contacts) = (["t1"], [peer.as_str()]);
-        let (read_back, _) = jsonl::read(&file_lines, 1, &jsonl::Names { threads: &threads, contacts: &contacts, media: &[] }).unwrap();
+        let names = jsonl::Names { threads: &threads, left_out_threads: &[], contacts: &contacts, media: &[] };
+        let read_back = jsonl::read(&file_lines, 1, &names).unwrap().messages;
         let ids: Vec<&str> = read_back.iter().filter_map(|m| m["id"].as_str()).collect();
         assert_eq!(ids, ["m1", "m3", "m4"]);
         let msg_ids: Vec<&str> = read_back.iter().filter_map(|m| m["msg_id"].as_str()).collect();
@@ -1518,6 +1567,8 @@ mod tests {
                 reply_tos: &reply_tos,
                 media_seen: &[],
                 media: &[],
+                kept_msg_ids: &msg_ids,
+                media_kept: &[],
             },
         )
         .unwrap();
@@ -1650,7 +1701,7 @@ mod tests {
             let lines = jsonl::write(&d.messages, None).unwrap().0;
             let t_write_messages = cpu() - t;
             let (thread_ids, roots, lines) = (refs(&d.thread_ids), refs(&roots), refs(&lines));
-            let names = jsonl::Names { threads: &thread_ids, contacts: &roots, media: &[] };
+            let names = jsonl::Names { threads: &thread_ids, left_out_threads: &[], contacts: &roots, media: &[] };
             let t = cpu();
             jsonl::read(&lines, 1, &names).unwrap();
             let t_read_messages = cpu() - t;
@@ -1667,6 +1718,8 @@ mod tests {
                 reply_tos: &reply_tos,
                 media_seen: &[],
                 media: &[],
+                kept_msg_ids: &msg_ids,
+                media_kept: &[],
             };
             let t = cpu();
             read_end(&with_messages, &end).unwrap();

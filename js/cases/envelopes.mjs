@@ -353,6 +353,80 @@ export default function envelopes({ add, expect }, f) {
   add('decide, small form from a pinned contact: a sig that is not the leaf\'s', 'decide', { now, envelope: { ...smallSpelt, sig: b64url(new Uint8Array(64)) }, node: { ...node, pins: pinned } });
   expect('decide, small form from a pinned contact: a sig that is not the leaf\'s', { result: { code: 'chain_required' }, effects: [] });
 
+  // SEP-0006 — a `thread_id` has two forms (SPEC §7): 1 to 64 ASCII letters and digits, or a
+  // lower-case UUID. At a tool that takes one, over 64 bytes is `too_large`, checked first, and any
+  // other of neither form `bad_request`, before anything is recorded; a refusal names what the
+  // signature proved and the msg_id, as `pending_approval` does, and adds no `seen`. Each case
+  // carries its answer, the seed's codes and words (vectors/lib/envelope.mjs threadIdRefusal).
+  const TOOL_ARGS = {
+    send_message: { msg_id: 'm', text: 'hello' },
+    send_media: { msg_id: 'm', url: 'https://files.example/a.pdf' },
+    book_slot: { msg_id: 'm', slot: { start: '2026-09-14T09:00:00Z', end: '2026-09-14T09:30:00Z', tz: 'UTC' }, subject: 'Coffee' },
+    get_status: {},
+  };
+  let threadN = 0;
+  const threaded = (tool, threadId, o = {}) => {
+    const msgId = `p-thread-${++threadN}`;
+    const args = threadId === undefined ? TOOL_ARGS[tool] : { ...TOOL_ARGS[tool], thread_id: threadId };
+    return { msgId, envelope: request({ params: { name: tool, arguments: o.arguments ?? args }, msgId, ephemeralSeed: seed(`parity/thread/${threadN}`), ...o.seal }) };
+  };
+  const refused = (code, why, form, msgId) => ({ result: { code, why, root: rootFp, endpoint: ENDPOINT, leaf: leafDer, form, msg_id: msgId }, effects: [] });
+  const UUID = '0f6e2c1a-7d4b-4f0e-9a51-3c2b8d9e4f10';
+  for (const [what, threadId, code, why] of [
+    ['of 65 letters and digits', 'a'.repeat(65), 'too_large', 'thread_id over 64 bytes'],
+    ['of 65 dots: the length is checked first', '.'.repeat(65), 'too_large', 'thread_id over 64 bytes'],
+    ['of 33 two-byte characters', 'é'.repeat(33), 'too_large', 'thread_id over 64 bytes'],
+    ['of two dots', '..', 'bad_request', 'thread_id of neither form'],
+    ['that is empty', '', 'bad_request', 'thread_id of neither form'],
+    ['with a hyphen that is not a UUID', 'a-b', 'bad_request', 'thread_id of neither form'],
+    ['of r- and 62 hex digits', 'r-' + 'ab'.repeat(31), 'bad_request', 'thread_id of neither form'],
+    ['that is a UUID in upper case', UUID.toUpperCase(), 'bad_request', 'thread_id of neither form'],
+    ['ending in a line break', 'abc\n', 'bad_request', 'thread_id of neither form'],
+    ['of one non-ASCII letter', 'é', 'bad_request', 'thread_id of neither form'],
+    ['that is a number', 7, 'bad_request', 'thread_id is not a string'],
+    ['that is a list', ['a'], 'bad_request', 'thread_id is not a string'],
+  ]) {
+    const { msgId, envelope } = threaded('send_message', threadId);
+    const id = `decide, a contact's send_message with a thread_id ${what}`;
+    add(id, 'decide', { now, envelope, node: { ...node, pins: pinned } });
+    expect(id, refused(code, why, 'chain', msgId));
+  }
+  for (const tool of ['send_media', 'book_slot']) {
+    const { msgId, envelope } = threaded(tool, '..');
+    const id = `decide, a contact's ${tool} with a thread_id of neither form`;
+    add(id, 'decide', { now, envelope, node: { ...node, pins: pinned } });
+    expect(id, refused('bad_request', 'thread_id of neither form', 'chain', msgId));
+  }
+  {
+    const { msgId, envelope } = threaded('send_message', '..', { seal: { reference: true } });
+    const id = 'decide, the small form: a contact\'s send_message with a thread_id of neither form';
+    add(id, 'decide', { now, envelope, node: { ...node, pins: pinned } });
+    expect(id, refused('bad_request', 'thread_id of neither form', 'leaf', msgId));
+  }
+  // The controls: each form, at its edge, and the calls the rule does not reach.
+  for (const [what, tool, threadId, o] of [
+    ['a null thread_id is no thread_id', 'send_message', null],
+    ['no thread_id', 'send_message', undefined],
+    ['a thread_id of 64 letters and digits', 'send_message', 'Az09'.repeat(16)],
+    ['a thread_id of r and 62 hex digits', 'send_message', 'r' + 'ab'.repeat(31)],
+    ['a lower-case UUID thread_id', 'send_message', UUID],
+    ['a lower-case UUID thread_id at book_slot', 'book_slot', UUID],
+    ['a tool that takes no thread_id, carrying one of neither form', 'get_status', '..'],
+    ['arguments that are not an object', 'send_message', undefined, { arguments: 'x' }],
+  ]) {
+    const { envelope } = threaded(tool, threadId, o);
+    const id = `decide, a contact's call with ${what} (control)`;
+    add(id, 'decide', { now, envelope, node: { ...node, pins: pinned } });
+    expect(id, { code: 'ok', tier: 'contact', form: 'chain' });
+  }
+  {
+    // A contact still pending_out waits for the answer whatever its thread_id: the order is the seed's.
+    const { msgId, envelope } = threaded('send_message', '..');
+    const id = 'decide, a pending_out contact\'s send_message with a thread_id of neither form waits';
+    add(id, 'decide', { now, envelope, node: { ...node, pins: [{ ...pinned[0], state: 'pending_out' }] } });
+    expect(id, { result: { code: 'pending_approval', root: rootFp, endpoint: ENDPOINT, leaf: leafDer, form: 'chain', msg_id: msgId }, effects: [] });
+  }
+
   // B3 — the node's OWN state, unreadable. The seed throws; so does the core.
   add('decide when a held key\'s own leaf will not parse', 'decide', { now, envelope: sealed, node: { ...node, keys: [{ ...node.keys[0], leaf: '!!!' }] } });
   add('decide in the small form when a pin\'s leaf will not parse', 'decide', { now, envelope: small, node: { ...node, pins: [{ root: rootFp, endpoint: ENDPOINT, leaf: 'AAAA', state: 'active' }] } });

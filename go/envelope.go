@@ -28,7 +28,59 @@ const (
 var (
 	guestTools   = map[string]bool{"redeem_invite": true, "request_contact": true}
 	pendingTools = map[string]bool{"contact_accepted": true, "contact_rejected": true}
+	// threadTools are the tools that take a thread_id (SPEC §7, §6.2).
+	threadTools = map[string]bool{"send_message": true, "send_media": true, "book_slot": true}
 )
+
+// ThreadIDMax is the most bytes a thread_id holds (SPEC §7).
+const ThreadIDMax = 64
+
+// IsThreadID reports whether s is of one of SPEC §7's two forms of a thread_id: 1 to 64 ASCII
+// letters and digits, or a UUID in RFC 9562's textual form, in lower case, whatever its version and
+// variant.
+func IsThreadID(s string) bool {
+	alnum := len(s) >= 1 && len(s) <= ThreadIDMax
+	for i := 0; alnum && i < len(s); i++ {
+		c := s[i]
+		alnum = c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+	}
+	uuid := len(s) == 36
+	for i := 0; uuid && i < len(s); i++ {
+		c := s[i]
+		switch i {
+		case 8, 13, 18, 23:
+			uuid = c == '-'
+		default:
+			uuid = c >= '0' && c <= '9' || c >= 'a' && c <= 'f'
+		}
+	}
+	return alnum || uuid
+}
+
+// threadIDRefusal is the refusal SPEC §7 gives a call's thread_id, as code and why, or "" for none:
+// at a tool that takes one, a thread_id that is not a string is bad_request, one over 64 bytes
+// too_large, checked before the form, and any other of neither form, the empty string included,
+// bad_request. Absent or null is no thread_id.
+func threadIDRefusal(tool string, params map[string]any) (string, string) {
+	if !threadTools[tool] || params == nil {
+		return "", ""
+	}
+	args, _ := params["arguments"].(map[string]any)
+	v, has := args["thread_id"]
+	if !has || v == nil {
+		return "", ""
+	}
+	t, isText := v.(string)
+	switch {
+	case !isText:
+		return "bad_request", "thread_id is not a string"
+	case len(t) > ThreadIDMax:
+		return "too_large", "thread_id over 64 bytes"
+	case !IsThreadID(t):
+		return "bad_request", "thread_id of neither form"
+	}
+	return "", ""
+}
 
 // Envelope is the four-member wire object.
 type Envelope struct {
@@ -662,6 +714,15 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 	pendingApproval := func(root, endpoint, form string) Decision {
 		return Decision{Result: map[string]any{"code": "pending_approval", "root": root, "endpoint": endpoint, "leaf": leafB64, "form": form, "msg_id": msgID}, Effects: effects}
 	}
+	// A contact's call whose thread_id is of neither form of SPEC §7 is refused before anything is
+	// recorded, with what the signature proved and the msg_id, as a call that waits is, so the host
+	// can seal the refusal back. The pin's own moves stand; the envelope's `seen` is never added.
+	contact := func(root, endpoint, form string) Decision {
+		if code, why := threadIDRefusal(tool, params); code != "" {
+			return Decision{Result: map[string]any{"code": code, "why": why, "root": root, "endpoint": endpoint, "leaf": leafB64, "form": form, "msg_id": msgID}, Effects: effects}
+		}
+		return result("contact", root, endpoint, form, nil)
+	}
 
 	// The small form: the sender names a leaf this node already holds. Anything that cannot be verified
 	// against a held leaf — unknown, blocked, or a bad signature — gets the same answer, so nothing leaks.
@@ -694,7 +755,7 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 			}
 			return pendingApproval(hit.Root, hit.Endpoint, "leaf")
 		}
-		return result("contact", hit.Root, hit.Endpoint, "leaf", nil)
+		return contact(hit.Root, hit.Endpoint, "leaf")
 	}
 
 	// The full form: a chain is a proof from the root and the one way a held leaf is updated.
@@ -774,7 +835,7 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 		}
 		return pendingApproval(root, endpoint, "chain")
 	}
-	return result("contact", root, endpoint, "chain", nil)
+	return contact(root, endpoint, "chain")
 }
 
 // DecideChain is a chain proven outside an envelope — at the TLS layer, where the handshake is the leaf
