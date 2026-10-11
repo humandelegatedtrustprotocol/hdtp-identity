@@ -411,7 +411,9 @@ func mediaHoldsPrivateKey(b []byte) bool {
 //
 // What a contact controls never stops the export (SPEC §9.2): a message whose body holds what reads
 // as a private key is left out, with the file it carried; a message carrying a file whose bytes are a
-// private key is left out, with that file; a reply to a message not carried is written null. Every
+// private key is left out, with that file; an id a contact may have chosen that reads as a key is
+// written anew, with every reference to it, and a name, a topic or a file's name or type that does
+// is replaced (exportRewritten); a reply to a message not carried is written null. Every
 // message left out is returned for the host to report to the person.
 func WriteExportZip(w io.Writer, in ExportInput, media func(hash string) (io.ReadCloser, error)) ([]ExportLeftOut, error) {
 	// The files, read once and checked, before anything is decided: the size and hash declared, and
@@ -520,7 +522,7 @@ func WriteExportZip(w io.Writer, in ExportInput, media func(hash string) (io.Rea
 		names.contacts.add(c.Root)
 	}
 	for _, t := range in.Threads {
-		names.threads.add(t.ID)
+		names.threads.add(exportReissuedID(t.ID))
 		names.contacts.add(t.Contact)
 	}
 	for _, m := range files {

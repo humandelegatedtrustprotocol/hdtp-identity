@@ -288,9 +288,11 @@
       "go:TestAFileThatIsAKeyLeavesWithItsMessageAndIsRefusedOnRead",
       "go:TestWriteExportZipRefusesWhatItsReaderRefusesBeforeTheFirstByte",
       "rust:what_a_contact_controls_never_stops_an_export_and_it_reads_back",
-      "go:TestWhatAContactControlsNeverStopsAnExportAndItReadsBack"
+      "go:TestWhatAContactControlsNeverStopsAnExportAndItReadsBack",
+      "rust:a_contacts_key_shaped_text_never_stops_an_export_and_the_owners_is_refused",
+      "go:TestAContactsKeyShapedTextNeverStopsAnExportAndTheOwnersIsRefused"
     ],
-    "why": "an archive is the §9.2 export, and both halves are this library's functions. The writer puts no key in a file: a key in a cell of a row the host writes, a message member the host writes, `owner_name` or `tool` is refused (export_write_refuses_a_row_or_message_holding_a_private_key; TestWriteExportZipRefusesWhatItsReaderRefusesBeforeTheFirstByte refuses before the first byte), and a message whose body or file is a key is left out with its file and listed (what_a_contact_controls_never_stops_an_export_and_it_reads_back, TestAFileThatIsAKeyLeavesWithItsMessageAndIsRefusedOnRead). The reader refuses key material and anything it does not recognise (key-in-a-cell.zip, key-in-a-body.zip, media-is-a-key.zip, unknown-file.zip, unknown-message-member.zip in the corpus). The new host reaching every contact, and the person telling the old host to leave, are the hosts'"
+    "why": "an archive is the §9.2 export, and both halves are this library's functions. The writer puts no key in a file: a key in a cell or a message member the owner's side wrote, `owner_name` or `tool` is refused (export_write_refuses_a_row_or_message_holding_a_private_key; TestWriteExportZipRefusesWhatItsReaderRefusesBeforeTheFirstByte refuses before the first byte), a message whose body or file is a key is left out with its file and listed (what_a_contact_controls_never_stops_an_export_and_it_reads_back, TestAFileThatIsAKeyLeavesWithItsMessageAndIsRefusedOnRead), and what a contact may have written that reads as a key is never refused and never written: a name or a topic is written empty, an id is written anew with every reference to it, an incoming file's name and type neutral (a_contacts_key_shaped_text_never_stops_an_export_and_the_owners_is_refused, TestAContactsKeyShapedTextNeverStopsAnExportAndTheOwnersIsRefused). The reader refuses key material and anything it does not recognise (key-in-a-cell.zip, key-in-a-body.zip, media-is-a-key.zip, unknown-file.zip, unknown-message-member.zip in the corpus). The new host reaching every contact, and the person telling the old host to leave, are the hosts'"
   },
   "9.#4": {
     "hash": "f835c346eb45",
