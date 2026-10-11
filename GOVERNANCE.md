@@ -25,8 +25,8 @@ the open where it can be, in a pull request or an issue.
   is generated from it (`schema/gen.mjs` there), and the gate here fails until that schema is
   regenerated, as a spec pull request.
 - **Versions.** One semver version for the Rust crates, the Go module and the Wasm package, written
-  in seven places and held equal by `node scripts/version.mjs --check`. Before 1.0.0 a minor version
-  may change the contract. `CHANGELOG.md` records what each release changed; entries go under
+  in seven places and held equal by `node scripts/version.mjs --check`. Releases stay on 0.8.x, and
+  each changelog entry lists what a host has to change, the contract included. `CHANGELOG.md` records what each release changed; entries go under
   `## Unreleased` as they land, and a release dates them.
 - **Releases** are cut by a maintainer, locally, and nothing leaves the machine before the second
   step:
