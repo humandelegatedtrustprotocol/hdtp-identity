@@ -36,6 +36,34 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   package's source with `new Function`; `js/export-memory.test.mjs` now requires each fresh instance
   to grow, by at least its argument where it reads one, so a case run on a reused instance fails.
 
+- **`decide` refuses a `sig` that is not base64url in its one spelling before the envelope is
+  opened, in either form.** Both ports read `sig` leniently: one that did not read became a
+  signature that failed, which the chain form refused (`envelope_invalid`) and the small form
+  answered `chain_required`, so one envelope had two answers by its form alone. `sig` is now read
+  after the `kid`, the suite and the `enc` length and before the open, and one that does not read
+  (padding, the standard alphabet, spare bits set) is `envelope_invalid`, `sig is not base64url`,
+  in both forms (SPEC §13.1). An empty `sig` reads, as the one spelling of zero bytes, and fails as
+  a signature (§13.3 step 7): `chain_required` in the small form, `signature is not the chain's
+  leaf key` in the chain form. Go's `Envelope` cannot tell an absent or null `sig` from an empty
+  one, so a host checks presence before it calls `Decide`. CONTRACT §5 says so; the seed's
+  `receive()` refuses the same `sig` at the same point (hdtp-spec #61), and `js/intrude.mjs` runs
+  its small-form respelling scenario on both ports.
+
+- **The export growth tests measure CPU time, not the wall clock.** The Go test reads the process's
+  CPU time (`getrusage`) with the collector run before and kept off during each measurement; the
+  Rust test reads the CPU clock of its own thread (`CLOCK_THREAD_CPUTIME_ID`). Both are unix-only
+  now, and `libc` is a unix dev-dependency of the core.
+
+- **No path from the writer's machine in tracked text or a commit message.** `gate.sh` refuses a
+  tracked text line carrying a home-directory path (under `/Users` or `/home`), naming file and
+  line, and `githooks/commit-msg` refuses one in a commit message; the gate holds the two copies of
+  the pattern to each other.
+
+- **No sign-off.** CONTRIBUTING no longer asks for a `Signed-off-by` line, and the pull-request
+  template drops its checkbox: there is no sign-off and no CLA, and section 5 of the Apache License
+  2.0 covers a contribution.
+
+
 ## 0.8.0 — 2026-10-10
 
 - **An export carries a former contact's conversation (SEP-0004).** A removed thread is a row of
