@@ -605,6 +605,94 @@ func TestDecideOnVectors(t *testing.T) {
 	}
 }
 
+// A `sig` that is empty or not in the one spelling (§13.1) is `envelope_invalid` before the form
+// decides anything. The small form from a pinned contact answered `chain_required` to every one of
+// them, while the chain form refused them: the same envelope, two answers, by form alone. A host that
+// reads the wire into an Envelope gets "" for a `sig` that is absent or null, so those are the empty
+// case here, read the way the host reads them.
+func TestASigThatIsEmptyOrNotBase64urlIsRefusedInEitherForm(t *testing.T) {
+	v := loadVectors(t)
+	now := mustTime(t, v.Now)
+	rootA, _ := Parse(hexBytes(t, v.Certificates["root_a"].DerHex))
+	pinA := Pin{Root: FingerprintOf(rootA), Endpoint: endpointA, Leaf: B64url(hexBytes(t, v.Certificates["leaf_a"].DerHex)), State: "active"}
+	envOf := func(name string) Envelope {
+		for _, e := range v.Envelopes {
+			if e.Name == name {
+				return Envelope{Protected: e.Protected, Enc: e.Enc, Ct: e.Ct, Sig: e.Sig}
+			}
+		}
+		t.Fatal("no envelope " + name)
+		return Envelope{}
+	}
+	const a64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	for _, form := range []struct{ name, envelope string }{{"chain", "alina-to-bharat"}, {"small", "alina-to-bharat-by-reference"}} {
+		e := envOf(form.envelope)
+		good := e.Sig
+		if len(good)%4 != 2 {
+			t.Fatalf("%s: a 64-byte signature leaves four spare bits in its last character", form.name)
+		}
+		last := strings.IndexByte(a64, good[len(good)-1])
+		standard := strings.NewReplacer("-", "+", "_", "/").Replace(good)
+		if standard == good {
+			standard = good[:len(good)-1] + "+"
+		}
+		arrived := map[string]Envelope{}
+		for _, raw := range []struct{ what, json string }{
+			{"absent", fmt.Sprintf(`{"protected":%q,"enc":%q,"ct":%q}`, e.Protected, e.Enc, e.Ct)},
+			{"null", fmt.Sprintf(`{"protected":%q,"enc":%q,"ct":%q,"sig":null}`, e.Protected, e.Enc, e.Ct)},
+		} {
+			var read Envelope
+			if err := json.Unmarshal([]byte(raw.json), &read); err != nil {
+				t.Fatal(err)
+			}
+			arrived[raw.what] = read
+		}
+		for _, c := range []struct {
+			what string
+			env  Envelope
+			why  string
+		}{
+			{"empty", Envelope{e.Protected, e.Enc, e.Ct, ""}, "sig is empty"},
+			{"absent, as a host reads it", arrived["absent"], "sig is empty"},
+			{"null, as a host reads it", arrived["null"], "sig is empty"},
+			{"not base64url at all", Envelope{e.Protected, e.Enc, e.Ct, "!!!"}, "sig is not base64url"},
+			{"padded", Envelope{e.Protected, e.Enc, e.Ct, good + "=="}, "sig is not base64url"},
+			{"in the standard alphabet", Envelope{e.Protected, e.Enc, e.Ct, standard}, "sig is not base64url"},
+			{"with a line break", Envelope{e.Protected, e.Enc, e.Ct, good[:8] + "\n" + good[8:]}, "sig is not base64url"},
+			{"with its spare bits set", Envelope{e.Protected, e.Enc, e.Ct, good[:len(good)-1] + string(a64[last|1])}, "sig is not base64url"},
+		} {
+			for _, whom := range []struct {
+				name string
+				pins []Pin
+			}{{"a pinned contact", []Pin{pinA}}, {"a stranger", nil}} {
+				d := decided(t, now, c.env, bharatNode(t, v, whom.pins))
+				if d.Result["code"] != "envelope_invalid" || d.Result["why"] != c.why || len(d.Result) != 2 || len(d.Effects) != 0 {
+					t.Errorf("%s form from %s, sig %s: %v %v", form.name, whom.name, c.what, d.Result, d.Effects)
+				}
+			}
+		}
+	}
+	// The controls: the vector's own signature passes in both forms, and a signature in the one
+	// spelling that is not the leaf's is still the small form's `chain_required` (§13.2).
+	if d := decided(t, now, envOf("alina-to-bharat"), bharatNode(t, v, []Pin{pinA})); d.Result["code"] != "ok" || d.Result["form"] != "chain" {
+		t.Errorf("chain form, its own sig: %v", d.Result)
+	}
+	if d := decided(t, now, envOf("alina-to-bharat-by-reference"), bharatNode(t, v, []Pin{pinA})); d.Result["code"] != "ok" || d.Result["form"] != "leaf" {
+		t.Errorf("small form, its own sig: %v", d.Result)
+	}
+	wrong := B64url(make([]byte, 64))
+	small := envOf("alina-to-bharat-by-reference")
+	small.Sig = wrong
+	if d := decided(t, now, small, bharatNode(t, v, []Pin{pinA})); d.Result["code"] != "chain_required" || len(d.Result) != 1 {
+		t.Errorf("small form, a sig that is not the leaf's: %v", d.Result)
+	}
+	full := envOf("alina-to-bharat")
+	full.Sig = wrong
+	if d := decided(t, now, full, bharatNode(t, v, []Pin{pinA})); d.Result["code"] != "envelope_invalid" || d.Result["why"] != "signature is not the chain's leaf key" {
+		t.Errorf("chain form, a sig that is not the leaf's: %v", d.Result)
+	}
+}
+
 // §2.1, recomputed from the published prf alone — so what passes is what a third implementation
 // reading Appendix B would have to reproduce, not what this port happened to write.
 func TestDerivationVectors(t *testing.T) {

@@ -1378,7 +1378,8 @@ mod tests {
     /// wall clock and not the process's, which counts the tests beside it: the bound is on the
     /// functions' own work. On the wall clock, with 48 busy processes beside the test (load average
     /// 29 to 241), the bound failed 7 runs of 10 at ratios up to 28× for unchanged code; on the
-    /// thread's CPU time it passed 10 runs of 10 under the same load, at most 5.4×. A scan per row
+    /// thread's CPU time it passed 10 runs of 10 under the same load, at most 5.4×. Every one of those
+    /// runs was this test alone (`--test-threads=1`), beside the load and no other test. A scan per row
     /// in `jsonl::write` turns it red (export_write_messages 16.9×).
     #[cfg(unix)]
     #[test]

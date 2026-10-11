@@ -1,5 +1,6 @@
 //! `decide`: the receiving side of §13.3, §6.1, §5.3 and §14.4 as one pure function over the state
-//! the host supplies (`state.rs`). `envelope.mjs receive()` is its specification, line for line.
+//! the host supplies (`state.rs`). `envelope.mjs receive()` is its specification, line for line, but
+//! for a `sig` that is empty or not base64url, which this refuses first (CONTRACT §5.1).
 use super::state::{host_roots, DecideInput, DecideOutput, NodeState};
 use super::{
     chain_of, decode_header, header_checks, members, pin_holding, timing, Timing, CLAIM_WINDOW_S, CTY_CALL, GUEST_TOOLS, INFO,
@@ -106,6 +107,13 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
     if enc.len() != suite.npk() {
         return Ok(invalid("encapsulated key is not the suite's length"));
     }
+    // Read before the form decides anything, so the small form cannot answer `chain_required` to a
+    // `sig` the chain form refuses: a member in any other spelling is refused (§13.1), and so is none.
+    let sig = match wire_b64u(&e.sig) {
+        Ok(s) if s.is_empty() => return Ok(invalid("sig is empty")),
+        Ok(s) => s,
+        Err(_) => return Ok(invalid("sig is not base64url")),
+    };
     let body: Value =
         match hpke::open(suite, &key, &held_leaf.public_key, INFO, &aad, &enc, &ct).ok().and_then(|p| serde_json::from_slice(&p).ok()) {
             Some(b) => b,
@@ -122,7 +130,6 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
     let mut signed = aad.clone();
     signed.extend_from_slice(&enc);
     signed.extend_from_slice(&ct);
-    let sig = wire_b64u(&e.sig).unwrap_or_default();
     let tool: Option<String> = body["params"].get("name").and_then(|n| n.as_str()).map(|s| s.to_string());
     // What a `pending_out` pin may do: call one of the pending tier's tools (§6.1, §6.2), or list them.
     // A listing names no tool; `tools/list` returns what the caller's tier may use (§6), and a sealed

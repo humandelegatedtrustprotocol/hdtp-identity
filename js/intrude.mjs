@@ -506,7 +506,7 @@ const respelled = (s) => s.slice(0, -1) + 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijk
 scenario('carrier', 'a real envelope whose protected carries a stray character', 'protected is not JSON', () => { const m = message(hostA, chainA, LEAF_B); return receive(bharat(), { ...m, protected: m.protected + '!' }).why; });
 scenario('carrier', 'a real envelope whose enc is padded', 'does not open', () => { const m = message(hostA, chainA, LEAF_B); return receive(bharat(), { ...m, enc: m.enc + '='.repeat((4 - (m.enc.length % 4)) % 4 || 4) }).why; });
 scenario('carrier', 'a real envelope whose ct has a line break in it', 'does not open', () => { const m = message(hostA, chainA, LEAF_B); return receive(bharat(), { ...m, ct: m.ct.slice(0, 8) + '\n' + m.ct.slice(8) }).why; });
-scenario('carrier', 'a real envelope whose signature is spelled with its spare bits set', "signature is not the chain's leaf key", () => { const m = message(hostA, chainA, LEAF_B); return receive(bharat(), { ...m, sig: respelled(m.sig) }).why; });
+scenario('carrier', 'a real envelope whose signature is spelled with its spare bits set', 'sig is not base64url', () => { const m = message(hostA, chainA, LEAF_B); return receive(bharat(), { ...m, sig: respelled(m.sig) }).why; });
 scenario('carrier', 'a card naming a major that is not 1', 'bad_request', () => decodeCard(card(chainA).replace('X-HDTP-VERSION:1', 'X-HDTP-VERSION:2')).error);
 // §3: any other X-HDTP-* property — an endpoint, a key, a gateway — is ignored. A carrier that
 // appends one to a card in flight must move nothing.
