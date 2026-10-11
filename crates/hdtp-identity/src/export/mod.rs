@@ -1012,6 +1012,27 @@ fn contact_text(s: String) -> String {
     }
 }
 
+/// The form of an id a writer issues: `r-` and 62 lowercase hex digits, 64 characters, which no
+/// key-material check reads as a key and which SEP-0006's draft grammar for a thread id
+/// (`^[a-z0-9][a-z0-9-]{0,63}$`) takes.
+fn is_reissued_form(s: &str) -> bool {
+    s.len() == 64 && s.starts_with("r-") && s.bytes().skip(2).all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+}
+
+/// An id a contact may have chosen — a thread id, a `msg_id`, a `reply_to` — as a writer writes it
+/// (SPEC §9.2, what a contact controls): one that reads as a private key is written as `r-` and the
+/// first 62 hex digits of its sha256, and so is one already of that form, so that no two ids of a file
+/// are ever written as one; every other id is written as it is. The same id is written the same way
+/// in every call, so a host that writes `threads.csv` and `messages.jsonl` in separate calls, or the
+/// messages in batches, writes every reference to it alike, and the file reads back whole.
+pub fn reissued_id(id: &str) -> Cow<'_, str> {
+    if holds_private_key(id) || is_reissued_form(id) {
+        Cow::Owned(format!("r-{}", &sha256_hex(id.as_bytes())[..62]))
+    } else {
+        Cow::Borrowed(id)
+    }
+}
+
 /// A ThreadRow handed to `export_write`, as the longer header's cells: the two names absent are empty,
 /// and the contact's own name for themselves is cut to 200 characters, on a character; it and the
 /// topic are written empty when they read as a key (SPEC §9.2, what a contact controls).
@@ -1101,11 +1122,10 @@ pub fn write(
         let located =
             |(k, why): (usize, String)| Error::new("bad_request", format!("threads[{i}], column {}: {why}", THREAD_COLUMNS_NAMED[k]));
         let mut r = thread_cells(t).map_err(located)?;
-        // A thread id is chosen by whichever side sent first (SPEC §7), so it may be the contact's: a
-        // thread whose id reads as a key is left out, and `jsonl::write` leaves out and lists each of
-        // its messages, whose `thread` is the same id.
-        if holds_private_key(&r[0]) {
-            continue;
+        // A thread id is chosen by whichever side sent first (SPEC §7), so it may be the contact's:
+        // one that reads as a key is written anew, as `jsonl::write` writes each message's `thread`.
+        if let Cow::Owned(id) = reissued_id(&r[0]) {
+            r[0] = id;
         }
         let (created, last, differs) = {
             let row = thread_row(r.iter().map(|c| Cow::Borrowed(c.as_str())).collect(), &root_refs, true, owner).map_err(located)?;
@@ -1267,9 +1287,11 @@ mod tests {
     }
 
     /// SPEC §9.2, what a contact controls, for every member a contact may have written: text there
-    /// that reads as a private key never stops the owner's export, no file carries it, and what is
-    /// written reads back whole; the same text where the owner's side wrote it is refused. Both shapes
-    /// the check knows: PEM armour, and a base64 word that decodes to a PKCS #8 key.
+    /// that reads as a private key never stops the owner's export, no file carries it, and nothing is
+    /// lost — an id is written anew with every reference to it, a name or a topic empty, a file's name
+    /// and type neutral, the file kept — and the file reads back whole; the same text where the owner's
+    /// side wrote it is refused. Both shapes the check knows: PEM armour, and a base64 word that
+    /// decodes to a PKCS #8 key.
     #[test]
     fn a_contacts_key_shaped_text_never_stops_an_export_and_the_owners_is_refused() {
         let owner = format!("sha256:{}A", "O".repeat(42));
@@ -1279,13 +1301,14 @@ mod tests {
         let word = "MAoCAQAwAwYBAAQA";
         assert!(holds_private_key(pem) && holds_private_key(word), "both read as a key");
         let time = "2026-09-27T10:00:00Z";
+        let file = "a".repeat(64);
         let contact = |name: &str, display: &str| {
             json!({ "root": peer, "endpoint": "https://b.example/mcp", "name": name, "display_name": display, "status": "active",
                 "was_active": true, "permissions": [], "their_permissions": [], "leaf": null, "root_cert": null, "added": time })
         };
         let thread = |id: &str, topic: &str| json!({ "id": id, "contact": peer, "topic": topic, "created_at": time, "last_at": time });
-        let removed = |name: &str, display: &str| {
-            json!({ "id": "r1", "contact": former, "topic": "", "created_at": time, "last_at": time,
+        let removed = |id: &str, name: &str, display: &str| {
+            json!({ "id": id, "contact": former, "topic": "", "created_at": time, "last_at": time,
                 "contact_name": name, "contact_display_name": display })
         };
         let message = |id: &str, thread: &str, msg_id: &str, direction: &str, reply_to: Value| {
@@ -1294,64 +1317,102 @@ mod tests {
         };
         let with_file = |mut m: Value, filename: &str, mime: &str| {
             m["body"] = json!("");
-            m["attachments"] = json!([{ "file": "a".repeat(64), "filename": filename, "mime": mime, "size": 1 }]);
+            m["attachments"] = json!([{ "file": file, "filename": filename, "mime": mime, "size": 1 }]);
             m
         };
-        let write_rows = |contacts: &[Value], threads: &[Value]| write(&owner, "Alina", 0, "t", contacts, threads, &[]);
+        let write_rows = |contacts: &[Value], threads: &[Value]| {
+            write(&owner, "Alina", 0, "t", contacts, threads, &[json!({ "hash": file, "size": 1 })])
+        };
+        let entry = |name: &str| Entry { name: name.into(), size: 1, encrypted: false, mode: 0 };
         for key in [pem, word] {
-            // What the contact wrote, in a row: written empty, or the thread left out.
-            let w =
-                write_rows(&[contact("Bharat", key)], &[thread("t1", key), thread(key, "lunch"), removed("Chitra", &format!("{key} "))])
-                    .unwrap();
-            let cells = csv::read(&w.contacts_csv).unwrap();
-            assert_eq!(cells[1][3], "", "display_name: written empty");
+            let new_id = reissued_id(key).into_owned();
+            assert!(
+                new_id.len() == 64 && new_id.starts_with("r-") && !holds_private_key(&new_id),
+                "the new id is of SEP-0006's draft grammar and no key"
+            );
+            let renamed = reissued_id(&new_id).into_owned();
+            assert_ne!(renamed, new_id, "an id already of the issued form is written anew too, so none is written as another");
+            // A thread whose id is the key, a thread whose id is the key's new id, a removed thread whose
+            // id is the key: all kept, under ids no two of which are one.
+            let w = write_rows(
+                &[contact("Bharat", key)],
+                &[
+                    thread("t1", key),
+                    thread(key, "lunch"),
+                    thread(&new_id, "tea"),
+                    removed(&format!("{key} 2"), "Chitra", &format!("{key} ")),
+                ],
+            )
+            .unwrap();
+            assert_eq!(csv::read(&w.contacts_csv).unwrap()[1][3], "", "display_name: written empty");
             let threads = csv::read(w.threads_csv.as_deref().unwrap()).unwrap();
-            let ids: Vec<&str> = threads[1..].iter().map(|r| r[0].as_str()).collect();
-            assert_eq!(ids, ["r1", "t1"], "the thread whose id reads as a key is left out");
-            assert_eq!((threads[1][6].as_str(), threads[2][2].as_str()), ("", ""), "contact_display_name and topic: written empty");
-            assert_eq!(w.partial["counts"]["threads"], 2);
-            // What the contact wrote, in a message: left out and listed, or the reply written null.
+            let rows: Vec<(&str, &str, &str)> = threads[1..].iter().map(|r| (r[0].as_str(), r[2].as_str(), r[6].as_str())).collect();
+            let removed_id = reissued_id(&format!("{key} 2")).into_owned();
+            let mut want =
+                vec![(new_id.as_str(), "lunch", ""), (renamed.as_str(), "tea", ""), (removed_id.as_str(), "", ""), ("t1", "", "")];
+            want.sort();
+            assert_eq!(rows, want, "every thread kept: ids written anew, topic and contact_display_name empty");
+            assert_eq!(w.partial["counts"]["threads"], 4);
+            // The messages: every id the contact chose written anew, every reference with it.
             let messages = [
-                message("m1", "t1", "x1", "in", Value::Null),
-                message("m2", key, "x2", "in", Value::Null),
-                message("m3", "t1", key, "in", Value::Null),
-                with_file(message("m4", "t1", "x4", "in", Value::Null), key, "text/plain"),
-                with_file(message("m5", "t1", "x5", "in", Value::Null), "a.txt", key),
-                message("m6", "t1", "x6", "in", json!(key)),
-                message("m7", "t1", "x7", "out", json!(key)),
+                message("m1", key, key, "in", Value::Null),
+                message("m2", key, "x2", "out", json!(key)),
+                with_file(message("m3", "t1", "x3", "in", json!("x2")), key, key),
+                message("m4", &new_id, &new_id, "in", json!(key)),
             ];
             let (lines, left_out) = jsonl::write(&messages, None).unwrap();
-            assert_eq!(
-                left_out.iter().map(|l| (l.id.as_str(), l.reason)).collect::<Vec<_>>(),
-                [
-                    ("m2", jsonl::THREAD_HOLDS_A_KEY),
-                    ("m3", jsonl::MSG_ID_HOLDS_A_KEY),
-                    ("m4", jsonl::FILE_NAME_HOLDS_A_KEY),
-                    ("m5", jsonl::FILE_NAME_HOLDS_A_KEY)
-                ],
-            );
+            assert!(left_out.is_empty(), "nothing is left out");
             assert!(!lines.iter().any(|l| l.contains(key)), "no line carries it");
-            // And the file reads back whole.
+            // In batches, the host names the file's msg_ids as it holds them.
+            let (batched, _) = jsonl::write(&messages[1..2], Some(&[key])).unwrap();
+            assert_eq!(batched[0], lines[1], "a batch writes what one call writes");
             let text = lines_to_file(&lines);
-            let m = manifest::finish(&w.partial, Some(&sha256_hex(text.as_bytes())), lines.len() as u64).unwrap();
-            let entry = |name: &str| Entry { name: name.into(), size: 1, encrypted: false, mode: 0 };
-            let directory = [entry("manifest.json"), entry("contacts.csv"), entry("threads.csv"), entry("messages.jsonl")];
-            read(&directory, Some(&m), Some(&w.contacts_csv), w.threads_csv.as_deref(), &owner, 0).unwrap();
+            let m = manifest::finish(&w.partial, Some(&sha256_hex(text.as_bytes())), 4).unwrap();
+            let directory = [
+                entry("manifest.json"),
+                entry("contacts.csv"),
+                entry("threads.csv"),
+                entry("messages.jsonl"),
+                entry("media/"),
+                entry(&format!("media/{file}")),
+            ];
+            let r = read(&directory, Some(&m), Some(&w.contacts_csv), w.threads_csv.as_deref(), &owner, 0).unwrap();
+            let answer: Value = serde_json::from_str(&r.answer).unwrap();
+            let thread_ids: Vec<&str> = answer["threads"].as_array().unwrap().iter().filter_map(|t| t["id"].as_str()).collect();
             let file_lines: Vec<&str> = text.lines().collect();
-            let (threads, contacts) = (["t1", "r1"], [peer.as_str()]);
-            let (back, _) = jsonl::read(&file_lines, 1, &jsonl::Names { threads: &threads, contacts: &contacts, media: &[] }).unwrap();
-            let ids: Vec<&str> = back.iter().filter_map(|m| m["id"].as_str()).collect();
-            assert_eq!(ids, ["m1", "m6", "m7"]);
-            assert!(back.iter().all(|m| m["reply_to"].is_null()), "a reply_to that reads as a key is written null");
-            let msg_ids: Vec<&str> = back.iter().filter_map(|m| m["msg_id"].as_str()).collect();
+            let media = [file.as_str()];
+            let (back, seen) =
+                jsonl::read(&file_lines, 1, &jsonl::Names { threads: &thread_ids, contacts: &[peer.as_str()], media: &media }).unwrap();
+            let got: Vec<(&str, &str, &str, Value)> = back
+                .iter()
+                .map(|m| (m["id"].as_str().unwrap(), m["thread"].as_str().unwrap(), m["msg_id"].as_str().unwrap(), m["reply_to"].clone()))
+                .collect();
+            assert_eq!(
+                got,
+                [
+                    ("m1", new_id.as_str(), new_id.as_str(), Value::Null),
+                    ("m2", new_id.as_str(), "x2", json!(new_id)),
+                    ("m3", "t1", "x3", json!("x2")),
+                    ("m4", renamed.as_str(), renamed.as_str(), json!(new_id)),
+                ],
+                "the conversation whole, every reference consistent"
+            );
+            assert_eq!(
+                back[2]["attachments"][0],
+                json!({ "file": file, "filename": jsonl::NEUTRAL_FILENAME, "mime": jsonl::NEUTRAL_MIME, "size": 1 })
+            );
+            let ids: Vec<&str> = got.iter().map(|g| g.0).collect();
+            let msg_ids: Vec<&str> = got.iter().map(|g| g.2).collect();
+            let reply_tos: Vec<&str> = back.iter().filter_map(|m| m["reply_to"].as_str()).collect();
+            let seen: Vec<&str> = seen.iter().map(String::as_str).collect();
             let end = End {
                 messages_sha256: Some(&sha256_hex(text.as_bytes())),
-                lines: 3,
+                lines: 4,
                 ids: &ids,
                 msg_ids: &msg_ids,
-                reply_tos: &[],
-                media_seen: &[],
-                media: &[],
+                reply_tos: &reply_tos,
+                media_seen: &seen,
+                media: &media,
             };
             read_end(&m, &end).unwrap();
 
@@ -1359,7 +1420,7 @@ mod tests {
             let refused = |r: Result<Written>| r.map(|_| ()).map_err(|e| e.why);
             assert_eq!(refused(write_rows(&[contact(key, "")], &[])), Err("contacts[0], column name: holds a private key".to_string()));
             assert_eq!(
-                refused(write_rows(&[], &[removed(key, "")])),
+                refused(write_rows(&[], &[removed("r1", key, "")])),
                 Err("threads[0], column contact_name: holds a private key".to_string())
             );
             let one = |m: Value| jsonl::write(&[m], None).map(|_| ()).map_err(|e| e.why);
@@ -1376,12 +1437,18 @@ mod tests {
                 );
             }
         }
-        // The control: the same rows without the key write whole, nothing left out.
-        let w = write_rows(&[contact("Bharat", "B")], &[thread("t1", "lunch"), thread("t2", "lunch"), removed("Chitra", "C")]).unwrap();
-        assert_eq!(w.partial["counts"]["threads"], 3);
-        let (lines, left_out) = jsonl::write(&[message("m1", "t1", "x1", "in", json!("x0"))], Some(&["x0", "x1"])).unwrap();
+        // The control: plain ids, names and files are written as they are.
+        let w = write_rows(&[contact("Bharat", "B")], &[thread("t1", "lunch"), removed("r1", "Chitra", "C")]).unwrap();
+        let threads = csv::read(w.threads_csv.as_deref().unwrap()).unwrap();
+        assert_eq!((threads[1][0].as_str(), threads[2][0].as_str(), threads[2][2].as_str()), ("r1", "t1", "lunch"));
+        let plain = with_file(message("m1", "t1", "x1", "in", json!("x0")), "a.txt", "text/plain");
+        let (lines, left_out) = jsonl::write(&[plain], Some(&["x0", "x1"])).unwrap();
         assert!(left_out.is_empty());
-        assert!(lines[0].contains("\"reply_to\":\"x0\""));
+        assert!(
+            lines[0].contains("\"reply_to\":\"x0\"")
+                && lines[0].contains("\"filename\":\"a.txt\"")
+                && lines[0].contains("\"msg_id\":\"x1\"")
+        );
     }
 
     /// SPEC §9.2, what a contact controls: none of it stops the owner's export, and what is written

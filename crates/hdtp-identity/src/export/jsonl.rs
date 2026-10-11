@@ -1,8 +1,9 @@
 //! `messages.jsonl` (SPEC §9.2): one message per line, read strictly batch by batch as the host
 //! streams it, and written as RFC 8785 JSON so both ports write the same bytes.
-use super::{holds_private_key, is_hash, refuse, BODY_MAX, LINE_MAX, MEDIA_MAX};
+use super::{holds_private_key, is_hash, refuse, reissued_id, BODY_MAX, LINE_MAX, MEDIA_MAX};
 use crate::util::Result;
 use serde_json::{json, Map, Value};
+use std::borrow::Cow;
 use std::collections::HashSet;
 
 pub const MEMBERS: [&str; 11] =
@@ -172,66 +173,76 @@ pub struct LeftOut {
 
 /// Why a message is left out: its body is what the key-material check refuses.
 pub const BODY_HOLDS_A_KEY: &str = "its body holds what reads as a private key, which an export never carries";
-/// Why a message is left out: its thread's id, which the contact may have chosen, is what the
-/// key-material check refuses, and the thread is left out with it.
-pub const THREAD_HOLDS_A_KEY: &str = "its thread's id holds what reads as a private key, which an export never carries";
-/// Why an incoming message is left out: the contact's own `msg_id` is what the check refuses.
-pub const MSG_ID_HOLDS_A_KEY: &str = "its msg_id holds what reads as a private key, which an export never carries";
-/// Why an incoming message is left out: the name or the type the contact gave its file is what the
-/// check refuses.
-pub const FILE_NAME_HOLDS_A_KEY: &str = "its file's name or type holds what reads as a private key, which an export never carries";
+/// What a writer puts in place of a file name a contact gave that reads as a private key.
+pub const NEUTRAL_FILENAME: &str = "file";
+/// What a writer puts in place of a file type a contact gave that reads as a private key.
+pub const NEUTRAL_MIME: &str = "application/octet-stream";
 
-/// Why a message is left out, if it is: a member a contact wrote reads as a private key (SPEC §9.2,
-/// what a contact controls). The body, whoever wrote it, as §9.2 says; the thread's id, which either
-/// side may have chosen (§7); and on a message that came in, its `msg_id` and its file's name and
-/// type, which the sender chose. What the owner's side wrote is refused by `message`.
-fn left_out_for(doc: &Map<String, Value>) -> Option<&'static str> {
-    let holds = |m: &str| doc.get(m).and_then(|v| v.as_str()).is_some_and(holds_private_key);
-    if holds("body") {
-        return Some(BODY_HOLDS_A_KEY);
+/// A message as a writer writes it (SPEC §9.2, what a contact controls): what a contact may have
+/// written that reads as a private key is replaced, never written and never a reason to stop the
+/// export. The thread's id, which either side may have chosen (§7), and every `reply_to` are written
+/// as `reissued_id` writes them; so is a `msg_id`, unless it reads as a key on a message that went
+/// out, which the owner's side wrote and `message` refuses; and on a message that came in, a file's
+/// name or type that reads as a key is written `NEUTRAL_FILENAME` or `NEUTRAL_MIME`. The file itself
+/// is kept. `None` when nothing changes.
+fn rewritten(doc: &Map<String, Value>) -> Option<Map<String, Value>> {
+    let incoming = doc.get("direction").and_then(|d| d.as_str()) == Some("in");
+    let mut out: Option<Map<String, Value>> = None;
+    let mut set = |m: &str, v: Value| {
+        out.get_or_insert_with(|| doc.clone()).insert(m.to_string(), v);
+    };
+    for m in ["thread", "msg_id", "reply_to"] {
+        let Some(s) = doc.get(m).and_then(|v| v.as_str()) else { continue };
+        if m == "msg_id" && !incoming && holds_private_key(s) {
+            continue;
+        }
+        if let Cow::Owned(new) = reissued_id(s) {
+            set(m, Value::String(new));
+        }
     }
-    if holds("thread") {
-        return Some(THREAD_HOLDS_A_KEY);
+    if incoming {
+        if let Some(items) = doc.get("attachments").and_then(|a| a.as_array()) {
+            let mut changed = false;
+            let neutral: Vec<Value> = items
+                .iter()
+                .map(|a| {
+                    let mut a = a.clone();
+                    for (m, neutral) in [("filename", NEUTRAL_FILENAME), ("mime", NEUTRAL_MIME)] {
+                        if a.get(m).and_then(|v| v.as_str()).is_some_and(holds_private_key) {
+                            a[m] = json!(neutral);
+                            changed = true;
+                        }
+                    }
+                    a
+                })
+                .collect();
+            if changed {
+                set("attachments", Value::Array(neutral));
+            }
+        }
     }
-    if doc.get("direction").and_then(|d| d.as_str()) != Some("in") {
-        return None;
-    }
-    if holds("msg_id") {
-        return Some(MSG_ID_HOLDS_A_KEY);
-    }
-    let file_named = doc.get("attachments").and_then(|a| a.as_array()).is_some_and(|items| {
-        items.iter().any(|a| ["filename", "mime"].iter().any(|m| a.get(*m).and_then(|v| v.as_str()).is_some_and(holds_private_key)))
-    });
-    file_named.then_some(FILE_NAME_HOLDS_A_KEY)
+    out
 }
 
 /// The lines of `messages.jsonl` for these messages, in the order given, each checked by the
 /// reader's rules but the references (the host holds those) and written as RFC 8785 JSON. What a
-/// contact controls never stops the export (SPEC §9.2): a message is left out and listed when a member
-/// a contact may have written holds what reads as a private key (`left_out_for`), and a `reply_to`
-/// naming a message the file does not carry, or reading as a key, is written `null`: it names a
-/// msg_id, which may be the contact's, and a message whose msg_id reads as a key is never carried.
-/// The file's messages are these, less those left out; a host writing in batches names them all in
-/// `file_msg_ids`.
+/// contact controls never stops the export (SPEC §9.2): a message whose body holds what reads as a
+/// private key is left out and listed; an id a contact may have chosen that reads as one is written
+/// anew, with every reference to it (`rewritten`); and a `reply_to` naming a message the file does not
+/// carry is written `null`. The file's messages are these, less those left out; a host writing in
+/// batches names them all in `file_msg_ids`, as it holds them.
 pub fn write(messages: &[Value], file_msg_ids: Option<&[&str]>) -> Result<(Vec<String>, Vec<LeftOut>)> {
     let mut kept = Vec::new();
     let mut left_out = Vec::new();
     for (i, v) in messages.iter().enumerate() {
         let Some(doc) = v.as_object() else { return refuse(format!("messages[{i}]: a message is an object")) };
-        if let Some(reason) = left_out_for(doc) {
+        if doc.get("body").and_then(|b| b.as_str()).is_some_and(holds_private_key) {
             let id = doc.get("id").and_then(|x| x.as_str()).unwrap_or_default().to_string();
-            left_out.push(LeftOut { id, reason });
+            left_out.push(LeftOut { id, reason: BODY_HOLDS_A_KEY });
             continue;
         }
-        let unkeyed;
-        let doc = if doc.get("reply_to").and_then(|r| r.as_str()).is_some_and(holds_private_key) {
-            let mut d = doc.clone();
-            d.insert("reply_to".into(), Value::Null);
-            unkeyed = d;
-            &unkeyed
-        } else {
-            doc
-        };
+        let rewritten = rewritten(doc);
+        let doc = rewritten.as_ref().unwrap_or(doc);
         let m = message(doc, None).map_err(|(member, why)| {
             crate::util::Error::new(
                 "bad_request",
@@ -243,9 +254,9 @@ pub fn write(messages: &[Value], file_msg_ids: Option<&[&str]>) -> Result<(Vec<S
         })?;
         kept.push((i, m));
     }
-    let carried: HashSet<&str> = match file_msg_ids {
-        Some(ids) => ids.iter().copied().collect(),
-        None => kept.iter().filter_map(|(_, m)| m["msg_id"].as_str()).collect(),
+    let carried: HashSet<Cow<'_, str>> = match file_msg_ids {
+        Some(ids) => ids.iter().map(|id| reissued_id(id)).collect(),
+        None => kept.iter().filter_map(|(_, m)| m["msg_id"].as_str()).map(Cow::Borrowed).collect(),
     };
     let dangling: Vec<usize> = kept
         .iter()

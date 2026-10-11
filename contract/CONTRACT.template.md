@@ -427,11 +427,15 @@ a Rust host that write the same rows write the same file. A media file is stored
 What a contact controls never stops the export (SPEC 9.2#22–25): `export_write_messages` leaves out
 a message whose body is a private key and answers it in `left_out`, and a host that writes in
 batches names the file's msg_ids in `msg_ids`, so a reply to a message not carried is written null.
-Nor does text a contact may have written that reads as a private key: `export_write` writes a
-contact's `display_name`, a removed thread's `contact_display_name` and a thread's `topic` empty and
-leaves out a thread whose id reads as one, and `export_write_messages` leaves out and lists a message
-whose thread id does, or, coming in, whose `msg_id` or file's name or type does, and writes such a
-`reply_to` null. What the owner's side wrote is refused as before; the reader refuses all of it.
+Nor does text a contact may have written that reads as a private key, and none of it is lost: a
+contact's `display_name`, a removed thread's `contact_display_name` and a thread's `topic` are
+written empty; a thread id, a `msg_id` (unless the message went out) and a `reply_to` are written as
+`r-` and the first 62 hex digits of the id's sha256, an id already of that form too, the same in
+every call, so `threads.csv`, a message's `thread` and every reply hold to one another however the
+host batches its calls; and an incoming file's name or type is written `file` or
+`application/octet-stream`, the file kept. Nothing records which ids were written anew: the format
+has no place for it, and `left_out` names messages the file does not carry. What the owner's side
+wrote is refused as before; the reader refuses all of it.
 The core never sees a media file's bytes unless it is handed them, so the host checks each before it
 writes, with `media_holds_private_key`: a message whose file is a private key is left out with the file
 and listed with the rest, for the host to report to the person.

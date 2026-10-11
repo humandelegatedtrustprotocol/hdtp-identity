@@ -11,18 +11,21 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 ## Unreleased
 
 - **This library's writer no longer lets a contact stop the owner's export with text that reads as
-  a private key.** The writer refused the whole export when any cell or message member held such text, so a contact
-  could block it by choosing a thread id, a `msg_id`, a topic or a display name like
-  `MAoCAQAwAwYBAAQA`, which decodes to a PKCS #8 key. What a contact may have written is no longer
-  refused, and it is still never written. `export_write` writes a contact's `display_name`, a removed
-  thread's `contact_display_name` and a thread's `topic` empty, and leaves out a thread whose id
-  reads as a key, since either side may choose a thread id (SPEC §7). `export_write_messages` leaves
-  out a message whose `thread` reads as a key, and, on a message that came in, one whose `msg_id`,
-  `filename` or `mime` does. Each one is listed in `left_out` with its own reason, and the host
-  leaves out its file. A `reply_to` that reads as a key is written `null`. What the owner's side
-  wrote is still refused: the owner's `name` and `contact_name` for a contact, `owner_name`, `tool`,
-  a message's `id`, and an outgoing message's `msg_id`, `filename` and `mime`. The reader is
-  unchanged and refuses key material wherever it is (SPEC §9.2).
+  a private key, and loses nothing for it.** The writer refused the whole export when any cell or
+  message member held such text, so a contact could block it by choosing a thread id, a `msg_id`, a
+  topic or a display name like `MAoCAQAwAwYBAAQA`, which decodes to a PKCS #8 key. Such text is now
+  never refused and never written. A contact's `display_name`, a removed thread's
+  `contact_display_name` and a thread's `topic` are written empty. A thread id, a `msg_id` (unless
+  the message went out) and a `reply_to` that read as a key are written as `r-` and the first 62 hex
+  digits of the id's sha256, as is an id already of that form, so no two ids are written as one; the
+  same id is written the same way in every call, so `threads.csv`, each message's `thread` and every
+  reply hold together and the conversation reads back whole. An incoming file's `filename` or `mime`
+  that reads as a key is written `file` or `application/octet-stream`, and the file is kept.
+  Nothing new is left out. What the owner's side wrote is still refused: the owner's `name` and
+  `contact_name` for a contact, `owner_name`, `tool`, a message's `id`, and an outgoing message's
+  `msg_id`, `filename` and `mime`. The reader is unchanged and refuses key material wherever it is
+  (SPEC §9.2).
+
 - **The memory tests run no dynamic code.** `js/wasm-memory.mjs` gives each case a fresh Wasm instance
   in a worker thread of its own, which loads the node package unchanged, where it evaluated the
   package's source with `new Function`; `js/export-memory.test.mjs` now requires each fresh instance

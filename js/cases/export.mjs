@@ -257,60 +257,66 @@ export default function exportCases({ add, expect }, f) {
   });
   expect('export_read_end: what a contact controls, as written, reads back', { ok: true });
 
-  // ── what a contact may have written that reads as a private key (SPEC §9.2, 9.2#25): written
-  //    empty, or left out with its thread, message or file and listed, never refused and never
-  //    written; the same text where the owner's side wrote it is refused. Both shapes the check knows.
+  // ── what a contact may have written that reads as a private key (SPEC §9.2): never refused, never
+  //    written, nothing lost — an id written anew (`r-` and 62 hex digits of its sha256) with every
+  //    reference to it, a name or a topic empty, a file's name and type neutral; the same text where
+  //    the owner's side wrote it is refused. Both shapes the check knows.
   const peerB = other('B');
   const at = '2026-09-27T10:00:00Z';
   const keyMsg = (o) => ({ id: 'q', thread: 't1', contact: peerB, msg_id: 'q-1', direction: 'in', sender: 'human', time: at, body: 'hi', reply_to: null, status: 'read', attachments: [], ...o });
   const keyFile = (o) => ({ body: '', attachments: [{ file, filename: 'a.txt', mime: 'text/plain', size: 5, ...o }] });
   for (const [shape, key] of [['PEM armour', 'x PRIVATE KEY----- y'], ['a base64 word', 'MAoCAQAwAwYBAAQA']]) {
+    const newId = 'r-' + sha(key).slice(0, 62);
     const keyArgs = {
-      owner, owner_name: 'Olive', exported_at: now, tool: 'parity', contacts: [row({ root: peerB, endpoint: 'https://b.example/mcp', display_name: key, leaf: null, root_cert: null })],
+      owner, owner_name: 'Olive', exported_at: now, tool: 'parity', media, contacts: [row({ root: peerB, endpoint: 'https://b.example/mcp', display_name: key, leaf: null, root_cert: null })],
       threads: [
         { id: 't1', contact: peerB, topic: key, created_at: at, last_at: at },
         { id: key, contact: peerB, topic: 'lunch', created_at: at, last_at: at },
+        { id: newId, contact: peerB, topic: 'tea', created_at: at, last_at: at },
         { id: 'r1', contact: other('R'), topic: '', created_at: at, last_at: at, contact_name: 'Chitra', contact_display_name: key },
       ],
     };
-    const keyName = `export_write: ${shape} in what a contact wrote, written empty or left out`;
+    const keyName = `export_write: ${shape} in what a contact wrote, written anew or empty`;
     add(keyName, 'export_write', keyArgs);
     const kw = wasm.call('export_write', keyArgs);
-    if (kw.contacts_csv.includes(key) || kw.threads_csv.includes(key) || kw.partial.counts.threads !== 2) throw new Error(`${keyName}: ${JSON.stringify(kw)}`);
+    if (kw.contacts_csv.includes(key) || kw.threads_csv.includes(key) || kw.partial.counts.threads !== 4) throw new Error(`${keyName}: ${JSON.stringify(kw)}`);
     const keyMessages = [
-      keyMsg({ id: 'k1', msg_id: 'k-1' }),
-      keyMsg({ id: 'k2', thread: key }),
-      keyMsg({ id: 'k3', msg_id: key }),
-      keyMsg({ id: 'k4', msg_id: 'k-4', ...keyFile({ filename: key }) }),
-      keyMsg({ id: 'k5', msg_id: 'k-5', ...keyFile({ mime: key }) }),
-      keyMsg({ id: 'k6', msg_id: 'k-6', reply_to: key }),
-      keyMsg({ id: 'k7', msg_id: 'k-7', direction: 'out', reply_to: key }),
+      keyMsg({ id: 'k1', msg_id: key }),
+      keyMsg({ id: 'k2', msg_id: 'k-2', thread: key }),
+      keyMsg({ id: 'k3', msg_id: 'k-3', ...keyFile({ filename: key, mime: key }) }),
+      keyMsg({ id: 'k4', msg_id: newId, thread: newId, reply_to: key }),
+      keyMsg({ id: 'k5', msg_id: 'k-5', direction: 'out', reply_to: key }),
     ];
-    const msgName = `export_write_messages: ${shape} in what a contact wrote, left out and listed`;
+    const msgName = `export_write_messages: ${shape} in what a contact wrote, written anew, nothing left out`;
     add(msgName, 'export_write_messages', { messages: keyMessages });
+    add(`export_write_messages: ${shape}, in batches, the file's msg_ids as the host holds them`, 'export_write_messages', { messages: keyMessages.slice(4), msg_ids: [key] });
     const kl = wasm.call('export_write_messages', { messages: keyMessages });
-    if (kl.lines.some((l) => l.includes(key)) || kl.left_out.map((l) => l.id).join() !== 'k2,k3,k4,k5') throw new Error(`${msgName}: ${JSON.stringify(kl)}`);
+    if (kl.lines.some((l) => l.includes(key)) || kl.left_out.length !== 0 || kl.lines.length !== 5) throw new Error(`${msgName}: ${JSON.stringify(kl)}`);
     // Read back: what was written is a file the reader takes whole.
     const kjsonl = kl.lines.map((l) => l + '\n').join('');
     const kman = wasm.call('export_manifest', { partial: kw.partial, hashes: { 'messages.jsonl': sha(kjsonl) }, messages: kl.lines.length }).manifest;
     const kdir = [['manifest.json', kman], ['contacts.csv', kw.contacts_csv], ['threads.csv', kw.threads_csv], ['messages.jsonl', kjsonl]]
       .map(([name, text]) => ({ name, size: Buffer.byteLength(text), encrypted: false, mode: 0o100644 }));
     const readArgs = { directory: kdir, manifest: kman, contacts_csv: kw.contacts_csv, threads_csv: kw.threads_csv, owner, now };
-    add(`export_read: ${shape} left out of what a contact wrote, reads back`, 'export_read', readArgs);
+    kdir.push({ name: 'media/', size: 0, encrypted: false, mode: 0o040755 }, { name: `media/${file}`, size: 5, encrypted: false, mode: 0o100644 });
+    add(`export_read: ${shape} written anew in what a contact wrote, reads back`, 'export_read', readArgs);
     const kread = wasm.call('export_read', readArgs);
-    const linesArgs = { lines: kl.lines, threads: kread.threads.map((t) => t.id), contacts: kread.contacts.map((c) => c.root), media: [] };
-    add(`export_read_messages: ${shape} left out of what a contact wrote, reads back`, 'export_read_messages', linesArgs);
+    const linesArgs = { lines: kl.lines, threads: kread.threads.map((t) => t.id), contacts: kread.contacts.map((c) => c.root), media: [file] };
+    add(`export_read_messages: ${shape} written anew in what a contact wrote, reads back`, 'export_read_messages', linesArgs);
     const kback = wasm.call('export_read_messages', linesArgs).messages;
-    const endName = `export_read_end: ${shape} left out of what a contact wrote, reads back`;
+    const whole = kback.map((m) => [m.id, m.thread, m.msg_id, m.reply_to].join('|')).join(' ');
+    const renamed = 'r-' + sha(newId).slice(0, 62);
+    if (whole !== `k1|t1|${newId}| k2|${newId}|k-2| k3|t1|k-3| k4|${renamed}|${renamed}|${newId} k5|t1|k-5|${newId}`) throw new Error(`${msgName}: read back ${whole}`);
+    const endName = `export_read_end: ${shape} written anew in what a contact wrote, reads back`;
     add(endName, 'export_read_end', {
       manifest: kman, messages_sha256: sha(kjsonl), lines: kl.lines.length, ids: kback.map((m) => m.id), msg_ids: kback.map((m) => m.msg_id),
-      reply_tos: kback.map((m) => m.reply_to).filter((r) => r !== null), media_seen: [], media: [],
+      reply_tos: kback.map((m) => m.reply_to).filter((r) => r !== null), media_seen: [file], media: [file],
     });
     expect(endName, { ok: true });
     // What the owner's side wrote is refused, naming where.
     for (const [what, name, args, why] of [
       ['the owner\'s name for a contact', 'export_write', { ...keyArgs, contacts: [{ ...keyArgs.contacts[0], name: key }] }, 'contacts[0], column name: holds a private key'],
-      ['the owner\'s name for a former contact', 'export_write', { ...keyArgs, threads: [{ ...keyArgs.threads[2], contact_name: key }] }, 'threads[0], column contact_name: holds a private key'],
+      ['the owner\'s name for a former contact', 'export_write', { ...keyArgs, threads: [{ ...keyArgs.threads[3], contact_name: key }] }, 'threads[0], column contact_name: holds a private key'],
       ['the host\'s message id', 'export_write_messages', { messages: [keyMsg({ id: key })] }, 'messages[0], member id: holds a private key'],
       ['an outgoing msg_id', 'export_write_messages', { messages: [keyMsg({ msg_id: key, direction: 'out' })] }, 'messages[0], member msg_id: holds a private key'],
       ['an outgoing file\'s name', 'export_write_messages', { messages: [keyMsg({ direction: 'out', ...keyFile({ filename: key }) })] }, 'messages[0], member attachments: holds a private key'],

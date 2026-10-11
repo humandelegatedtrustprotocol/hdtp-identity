@@ -1385,55 +1385,107 @@ type ExportLeftOut struct {
 	Reason string `json:"reason"`
 }
 
-// Why a message is left out (SPEC §9.2, what a contact controls): its body; its thread's id, which
-// the contact may have chosen, the thread left out with it; on a message that came in, the
-// contact's own msg_id, or the name or type the contact gave its file — each what the key-material
-// check refuses.
+// exportBodyHoldsAKey is why a message is left out: its body is what the key-material check refuses.
+const exportBodyHoldsAKey = "its body holds what reads as a private key, which an export never carries"
+
+// What a writer puts in place of a file name, or a file type, a contact gave that reads as a
+// private key.
 const (
-	exportBodyHoldsAKey     = "its body holds what reads as a private key, which an export never carries"
-	exportThreadHoldsAKey   = "its thread's id holds what reads as a private key, which an export never carries"
-	exportMsgIDHoldsAKey    = "its msg_id holds what reads as a private key, which an export never carries"
-	exportFileNameHoldsAKey = "its file's name or type holds what reads as a private key, which an export never carries"
+	exportNeutralFilename = "file"
+	exportNeutralMIME     = "application/octet-stream"
 )
 
-// exportLeftOutFor is why a message is left out, or "": a member a contact wrote reads as a private
-// key. The body, whoever wrote it, as §9.2 says; the thread's id, which either side may have chosen
-// (§7); and on a message that came in, its msg_id and its file's name and type, which the sender
-// chose. What the owner's side wrote is refused by checkMessage.
-func exportLeftOutFor(doc map[string]any) string {
-	holds := func(v any) bool {
-		s, isText := v.(string)
-		return isText && holdsPrivateKey(s)
+// isReissuedForm is the form of an id a writer issues: "r-" and 62 lowercase hex digits, 64
+// characters, which no key-material check reads as a key and which SEP-0006's draft grammar for a
+// thread id (^[a-z0-9][a-z0-9-]{0,63}$) takes.
+func isReissuedForm(s string) bool {
+	if len(s) != 64 || !strings.HasPrefix(s, "r-") {
+		return false
 	}
-	if holds(doc["body"]) {
-		return exportBodyHoldsAKey
-	}
-	if holds(doc["thread"]) {
-		return exportThreadHoldsAKey
-	}
-	if d, _ := doc["direction"].(string); d != "in" {
-		return ""
-	}
-	if holds(doc["msg_id"]) {
-		return exportMsgIDHoldsAKey
-	}
-	items, _ := doc["attachments"].([]any)
-	for _, a := range items {
-		if o, isObj := a.(map[string]any); isObj && (holds(o["filename"]) || holds(o["mime"])) {
-			return exportFileNameHoldsAKey
+	for _, c := range []byte(s[2:]) {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
 		}
 	}
-	return ""
+	return true
+}
+
+// exportReissuedID is an id a contact may have chosen — a thread id, a msg_id, a reply_to — as a
+// writer writes it (SPEC §9.2, what a contact controls): one that reads as a private key is written
+// as "r-" and the first 62 hex digits of its sha256, and so is one already of that form, so that no
+// two ids of a file are ever written as one; every other id is written as it is. The same id is
+// written the same way in every call, so a host that writes threads.csv and messages.jsonl in
+// separate calls, or the messages in batches, writes every reference to it alike.
+func exportReissuedID(id string) string {
+	if holdsPrivateKey(id) || isReissuedForm(id) {
+		return "r-" + sha256Hex([]byte(id))[:62]
+	}
+	return id
+}
+
+// exportRewritten is a message as a writer writes it (SPEC §9.2, what a contact controls): what a
+// contact may have written that reads as a private key is replaced, never written and never a reason
+// to stop the export. The thread's id, which either side may have chosen (§7), and every reply_to are
+// written as exportReissuedID writes them; so is a msg_id, unless it reads as a key on a message that
+// went out, which the owner's side wrote and checkMessage refuses; and on a message that came in, a
+// file's name or type that reads as a key is written exportNeutralFilename or exportNeutralMIME. The
+// file itself is kept. doc itself when nothing changes.
+func exportRewritten(doc map[string]any) map[string]any {
+	incoming := doc["direction"] == "in"
+	out, copied := doc, false
+	set := func(m string, v any) {
+		if !copied {
+			out, copied = make(map[string]any, len(doc)), true
+			for k, x := range doc {
+				out[k] = x
+			}
+		}
+		out[m] = v
+	}
+	for _, m := range []string{"thread", "msg_id", "reply_to"} {
+		s, isText := doc[m].(string)
+		if !isText || m == "msg_id" && !incoming && holdsPrivateKey(s) {
+			continue
+		}
+		if n := exportReissuedID(s); n != s {
+			set(m, n)
+		}
+	}
+	if items, isList := doc["attachments"].([]any); incoming && isList {
+		changed := false
+		neutral := make([]any, len(items))
+		for i, a := range items {
+			neutral[i] = a
+			o, isObj := a.(map[string]any)
+			if !isObj {
+				continue
+			}
+			a2 := make(map[string]any, len(o))
+			for k, x := range o {
+				a2[k] = x
+			}
+			for _, f := range [][2]string{{"filename", exportNeutralFilename}, {"mime", exportNeutralMIME}} {
+				if v, isText := o[f[0]].(string); isText && holdsPrivateKey(v) {
+					a2[f[0]] = f[1]
+					changed = true
+				}
+			}
+			neutral[i] = a2
+		}
+		if changed {
+			set("attachments", neutral)
+		}
+	}
+	return out
 }
 
 // exportWriteMessages is the lines of messages.jsonl for these messages, in the order given, each
 // checked by the reader's rules but the references (the host holds those) and written as RFC 8785
-// JSON. What a contact controls never stops the export (SPEC §9.2): a message is left out and listed
-// when a member a contact may have written holds what reads as a private key (exportLeftOutFor), and
-// a reply_to naming a message the file does not carry, or reading as a key, is written null: it names
-// a msg_id, which may be the contact's, and a message whose msg_id reads as a key is never carried.
-// The file's messages are these, less those left out; a host writing in batches names them all in
-// fileMsgIDs.
+// JSON. What a contact controls never stops the export (SPEC §9.2): a message whose body holds what
+// reads as a private key is left out and listed; an id a contact may have chosen that reads as one is
+// written anew, with every reference to it (exportRewritten); and a reply_to naming a message the
+// file does not carry is written null. The file's messages are these, less those left out; a host
+// writing in batches names them all in fileMsgIDs, as it holds them.
 func exportWriteMessages(messages []any, fileMsgIDs []string) ([]string, []ExportLeftOut, error) {
 	var kept []map[string]any
 	var at []int
@@ -1443,20 +1495,12 @@ func exportWriteMessages(messages []any, fileMsgIDs []string) ([]string, []Expor
 		if !isObj {
 			return nil, nil, exportRefuse(fmt.Sprintf("messages[%d]: a message is an object", i))
 		}
-		if reason := exportLeftOutFor(doc); reason != "" {
+		if body, isText := doc["body"].(string); isText && holdsPrivateKey(body) {
 			id, _ := doc["id"].(string)
-			leftOut = append(leftOut, ExportLeftOut{ID: id, Reason: reason})
+			leftOut = append(leftOut, ExportLeftOut{ID: id, Reason: exportBodyHoldsAKey})
 			continue
 		}
-		if r, isText := doc["reply_to"].(string); isText && holdsPrivateKey(r) {
-			unkeyed := make(map[string]any, len(doc))
-			for k, v := range doc {
-				unkeyed[k] = v
-			}
-			unkeyed["reply_to"] = nil
-			doc = unkeyed
-		}
-		m, bad := checkMessage(doc, nil)
+		m, bad := checkMessage(exportRewritten(doc), nil)
 		if bad != nil {
 			if bad.member != "" {
 				return nil, nil, exportRefuse(fmt.Sprintf("messages[%d], member %s: %s", i, bad.member, bad.why))
@@ -1468,7 +1512,9 @@ func exportWriteMessages(messages []any, fileMsgIDs []string) ([]string, []Expor
 	}
 	carried := strSet{}
 	if fileMsgIDs != nil {
-		carried = setOf(fileMsgIDs)
+		for _, id := range fileMsgIDs {
+			carried.add(exportReissuedID(id))
+		}
 	} else {
 		for _, m := range kept {
 			if id, isText := m["msg_id"].(string); isText {
@@ -1705,11 +1751,8 @@ func exportWrite(owner, ownerName string, exportedAt time.Time, tool string, con
 			return nil, located(bad)
 		}
 		// A thread id is chosen by whichever side sent first (SPEC §7), so it may be the contact's:
-		// a thread whose id reads as a key is left out, and exportWriteMessages leaves out and lists
-		// each of its messages, whose thread is the same id.
-		if holdsPrivateKey(r[0]) {
-			continue
-		}
+		// one that reads as a key is written anew, as exportWriteMessages writes each message's thread.
+		r[0] = exportReissuedID(r[0])
 		row, bad := threadRow(r, roots, true, owner)
 		if bad != nil {
 			return nil, located(bad)

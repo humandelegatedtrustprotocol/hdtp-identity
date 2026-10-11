@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"io"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -243,49 +244,59 @@ func TestWhatAContactControlsNeverStopsAnExportAndItReadsBack(t *testing.T) {
 }
 
 // SPEC §9.2, what a contact controls, for every member a contact may have written: text there that
-// reads as a private key never stops the owner's export, no file carries it, and what WriteExportZip
-// writes reads back whole; the same text where the owner's side wrote it is refused. Both shapes the
-// check knows: PEM armour, and a base64 word that decodes to a PKCS #8 key.
+// reads as a private key never stops the owner's export, no file carries it, and nothing is lost — an
+// id is written anew with every reference to it, a name or a topic empty, a file's name and type
+// neutral, the file kept — and what WriteExportZip writes reads back whole; the same text where the
+// owner's side wrote it is refused. Both shapes the check knows: PEM armour, and a base64 word that
+// decodes to a PKCS #8 key.
 func TestAContactsKeyShapedTextNeverStopsAnExportAndTheOwnersIsRefused(t *testing.T) {
 	former := "sha256:" + strings.Repeat("F", 42) + "A"
+	at := "2026-09-02T00:00:00Z"
+	open := func(files map[string][]byte) func(string) (io.ReadCloser, error) {
+		return func(h string) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(files[h])), nil }
+	}
 	for _, key := range []string{"x PRIVATE KEY----- y", "MAoCAQAwAwYBAAQA"} {
 		if !holdsPrivateKey(key) {
 			t.Fatalf("%q does not read as a key", key)
 		}
+		newID := exportReissuedID(key)
+		renamed := exportReissuedID(newID)
+		if len(newID) != 64 || !strings.HasPrefix(newID, "r-") || holdsPrivateKey(newID) || renamed == newID {
+			t.Fatalf("new ids %q, %q", newID, renamed)
+		}
 		in, files := exportFixture(t)
-		at := "2026-09-02T00:00:00Z"
 		in.Contacts[0].DisplayName = key
 		in.Threads[0].Topic = key
 		in.Threads = append(in.Threads,
 			ThreadRow{ID: key, Contact: exportPeer, Topic: "lunch", CreatedAt: at, LastAt: at},
-			ThreadRow{ID: "r-1", Contact: former, CreatedAt: at, LastAt: at, ContactName: "Chitra", ContactDisplayName: key + " "})
-		msg := func(id, thread, msgID, direction string, replyTo *string) MessageRow {
-			return MessageRow{ID: id, Thread: thread, Contact: exportPeer, MsgID: msgID, Direction: direction, Sender: "human",
+			ThreadRow{ID: newID, Contact: exportPeer, Topic: "tea", CreatedAt: at, LastAt: at},
+			ThreadRow{ID: key + " 2", Contact: former, CreatedAt: at, LastAt: at, ContactName: "Chitra", ContactDisplayName: key + " "})
+		msg := func(id, thread, msgID string, replyTo *string) MessageRow {
+			return MessageRow{ID: id, Thread: thread, Contact: exportPeer, MsgID: msgID, Direction: "in", Sender: "human",
 				Time: at, Body: "hi", ReplyTo: replyTo, Status: "read", Attachments: []Attachment{}}
 		}
 		k := key
-		in.Messages[0].Attachments[0].Filename = key // the message that carries the one file
+		in.Messages[0].MsgID = key // the message that carries the one file
+		in.Messages[0].Attachments[0].Filename = key
+		in.Messages[0].Attachments[0].MIME = key
 		in.Messages[1].ReplyTo = &k
-		in.Messages = append(in.Messages,
-			msg("3", key, "m-3", "in", nil),
-			msg("4", "t-1", key, "in", nil),
-			msg("5", "t-1", "m-5", "in", &k))
+		in.Messages = append(in.Messages, msg("3", key, "m-3", nil), msg("4", newID, newID, &k))
 		var b bytes.Buffer
-		leftOut, err := WriteExportZip(&b, in, func(h string) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(files[h])), nil })
+		leftOut, err := WriteExportZip(&b, in, open(files))
 		if err != nil {
 			t.Fatalf("%q: the export was refused: %v", key, err)
 		}
-		want := []ExportLeftOut{{"1", exportFileNameHoldsAKey}, {"3", exportThreadHoldsAKey}, {"4", exportMsgIDHoldsAKey}}
-		if !reflect.DeepEqual(leftOut, want) {
+		if len(leftOut) != 0 {
 			t.Errorf("%q: left out %+v", key, leftOut)
 		}
 		zr, err := zip.NewReader(bytes.NewReader(b.Bytes()), int64(b.Len()))
 		if err != nil {
 			t.Fatal(err)
 		}
+		media := 0
 		for _, f := range zr.File {
-			if strings.HasPrefix(f.Name, "media/") {
-				t.Errorf("%s: the file of a message left out went into the export", f.Name)
+			if strings.HasPrefix(f.Name, "media/") && f.Name != "media/" {
+				media++
 			}
 			rc, _ := f.Open()
 			body, _ := io.ReadAll(rc)
@@ -294,6 +305,9 @@ func TestAContactsKeyShapedTextNeverStopsAnExportAndTheOwnersIsRefused(t *testin
 				t.Errorf("%q: %s carries it", key, f.Name)
 			}
 		}
+		if media != 1 {
+			t.Errorf("%q: %d media files, want the one kept", key, media)
+		}
 		got, err := ReadExportZip(zr, exportOwner, in.ExportedAt, 1<<30)
 		if err != nil {
 			t.Fatalf("%q: what was written does not read: %v", key, err)
@@ -301,22 +315,38 @@ func TestAContactsKeyShapedTextNeverStopsAnExportAndTheOwnersIsRefused(t *testin
 		if got.Contacts[0].DisplayName != "" {
 			t.Errorf("display_name: %q", got.Contacts[0].DisplayName)
 		}
-		var ids []string
+		var threads []string
 		for _, th := range got.Threads {
-			ids = append(ids, th.ID+"|"+th.Topic+"|"+th.ContactDisplayName)
+			threads = append(threads, th.ID+"|"+th.Topic+"|"+th.ContactDisplayName)
 		}
-		if !reflect.DeepEqual(ids, []string{"r-1||", "t-1||"}) {
-			t.Errorf("threads (id|topic|contact_display_name): %q", ids)
+		wantThreads := []string{newID + "|lunch|", renamed + "|tea|", exportReissuedID(key+" 2") + "||", "t-1||"}
+		sort.Strings(wantThreads)
+		if !reflect.DeepEqual(threads, wantThreads) {
+			t.Errorf("threads (id|topic|contact_display_name):\n got  %q\n want %q", threads, wantThreads)
 		}
-		var kept []string
+		var messages []string
 		for _, m := range got.Messages {
-			kept = append(kept, m.ID)
+			r := "null"
 			if m.ReplyTo != nil {
-				t.Errorf("message %s: reply_to %q", m.ID, *m.ReplyTo)
+				r = *m.ReplyTo
 			}
+			messages = append(messages, strings.Join([]string{m.ID, m.Thread, m.MsgID, r}, "|"))
 		}
-		if !reflect.DeepEqual(kept, []string{"2", "5"}) {
-			t.Errorf("messages: %v", kept)
+		wantMessages := []string{"1|t-1|" + newID + "|null", "2|t-1|m-2|" + newID, "3|" + newID + "|m-3|null", "4|" + renamed + "|" + renamed + "|" + newID}
+		if !reflect.DeepEqual(messages, wantMessages) {
+			t.Errorf("messages (id|thread|msg_id|reply_to):\n got  %q\n want %q", messages, wantMessages)
+		}
+		if a := got.Messages[0].Attachments; len(a) != 1 || a[0].Filename != exportNeutralFilename || a[0].MIME != exportNeutralMIME || a[0].File != in.Media[0].Hash {
+			t.Errorf("attachment: %+v", a)
+		}
+		// In batches, the host names the file's msg_ids as it holds them.
+		var one []any
+		if err := convert(in.Messages[1:2], &one); err != nil {
+			t.Fatal(err)
+		}
+		lines, _, err := exportWriteMessages(one, []string{key})
+		if err != nil || len(lines) != 1 || !strings.Contains(lines[0], `"reply_to":"`+newID+`"`) {
+			t.Errorf("a batch: %v %v", lines, err)
 		}
 
 		// What the owner's side wrote is refused, naming where.
@@ -342,18 +372,24 @@ func TestAContactsKeyShapedTextNeverStopsAnExportAndTheOwnersIsRefused(t *testin
 		} {
 			in, files := exportFixture(t)
 			tc.change(&in)
-			_, err := WriteExportZip(&bytes.Buffer{}, in, func(h string) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(files[h])), nil })
+			_, err := WriteExportZip(&bytes.Buffer{}, in, open(files))
 			if err == nil || err.Error() != tc.want {
 				t.Errorf("%q, %s:\n  got  %v\n  want %s", key, tc.what, err, tc.want)
 			}
 		}
 	}
-	// The control: the fixture, with the same members written plainly, writes whole.
+	// The control: plain ids, names and files are written as they are.
 	in, files := exportFixture(t)
-	in.Threads = append(in.Threads, ThreadRow{ID: "r-1", Contact: former, CreatedAt: "2026-09-02T00:00:00Z", LastAt: "2026-09-02T00:00:00Z", ContactName: "Chitra", ContactDisplayName: "C"})
-	leftOut, err := WriteExportZip(&bytes.Buffer{}, in, func(h string) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(files[h])), nil })
+	in.Threads = append(in.Threads, ThreadRow{ID: "r-1", Contact: former, CreatedAt: at, LastAt: at, ContactName: "Chitra", ContactDisplayName: "C"})
+	var b bytes.Buffer
+	leftOut, err := WriteExportZip(&b, in, open(files))
 	if err != nil || len(leftOut) != 0 {
-		t.Errorf("the control: %v, left out %+v", err, leftOut)
+		t.Fatalf("the control: %v, left out %+v", err, leftOut)
+	}
+	zr, _ := zip.NewReader(bytes.NewReader(b.Bytes()), int64(b.Len()))
+	got, err := ReadExportZip(zr, exportOwner, in.ExportedAt, 1<<30)
+	if err != nil || got.Messages[0].MsgID != "m-1" || got.Messages[0].Attachments[0].Filename != "a.pdf" || *got.Messages[1].ReplyTo != "m-1" || got.Threads[1].Topic != "plans" {
+		t.Errorf("the control reads back changed: %v %+v", err, got)
 	}
 }
 
