@@ -10,6 +10,14 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+- **What a host changes (a change of the contract, hence 0.9.0).** `export_read_messages` requires
+  `left_out_threads`, the ids `export_read` answered under that name, and `export_read_end` requires
+  `kept_msg_ids` and `media_kept`; each absent or null is `<name> is required`. An
+  importer writes no thread in `left_out_threads` and no message in `left_out`, writes each
+  `reply_to` in `reply_to_null` as null, and writes no file in `media_left_out`. `decide` answers two
+  refusals it did not: `too_large` and `bad_request` for a contact's `thread_id` at `send_message`,
+  `send_media` and `book_slot`, with no `seen` effect. Each is described below.
+
 - **A `thread_id` has two forms, and `decide` refuses any other (SEP-0006, SPEC §7 of the draft).**
   A `thread_id` is 1 to 64 ASCII letters and digits, or a UUID in RFC 9562's textual form in lower
   case. At `send_message`, `send_media` and `book_slot`, a contact's call whose
