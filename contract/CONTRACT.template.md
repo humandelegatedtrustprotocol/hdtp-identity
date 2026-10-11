@@ -328,8 +328,9 @@ the handshake is the leaf key's signature — so a host's two doors cannot decid
 (the node's TLS door did, on a removal tombstone and on a conflicting leaf). Both functions take it
 from one place in each port; `js/doors.test.mjs` holds the two answers to each other over every
 outcome. What is the call's and not the chain's — the guest binding, the receiver's own address, what
-a `pending_out` pin may call — the host applies to each call on its TLS door, as `decide` applies it
-to the envelope's.
+a `pending_out` pin may call, a `thread_id` of neither form of SPEC §7 (the refusal `decide` gives,
+which Go exports as `ThreadIDRefusal` and Rust as `thread_id_refusal`) — the host applies to each call
+on its TLS door, as `decide` applies it to the envelope's.
 
 ## 6. Vault (SPEC §9; the format shared by the wallet page and the CLI)
 

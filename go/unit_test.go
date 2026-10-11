@@ -44,12 +44,12 @@ func TestAThreadIDIsOfOneOfTwoForms(t *testing.T) {
 		{"send_message", uuid, "", ""},
 		{"get_status", "..", "", ""},
 	} {
-		code, why := threadIDRefusal(c.tool, map[string]any{"arguments": map[string]any{"thread_id": c.thread}})
+		code, why := ThreadIDRefusal(c.tool, map[string]any{"arguments": map[string]any{"thread_id": c.thread}})
 		if code != c.code || why != c.why {
 			t.Errorf("%s with %v: %q %q, want %q %q", c.tool, c.thread, code, why, c.code, c.why)
 		}
 	}
-	if code, _ := threadIDRefusal("send_message", map[string]any{"arguments": map[string]any{}}); code != "" {
+	if code, _ := ThreadIDRefusal("send_message", map[string]any{"arguments": map[string]any{}}); code != "" {
 		t.Errorf("no thread_id: %q", code)
 	}
 }
