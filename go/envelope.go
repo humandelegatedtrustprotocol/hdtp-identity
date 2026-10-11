@@ -3,8 +3,7 @@ package hdtpidentity
 // Envelopes: sealing requests and results (§13.1, §13.2), the caller side of a result, following
 // certificate_renewed (§14.4), and Decide — the receiving side of §13.3 in order, §6.1 tiers, §5.3 new
 // addresses with the removal tombstone, and §14.4 — as one pure function over host-supplied state.
-// The seed's envelope.mjs is its specification line for line, and every `why` the seed's, verbatim,
-// but for a `sig` that is not base64url, which Decide refuses first (CONTRACT §5.1).
+// The seed's envelope.mjs is its specification line for line; every `why` is the seed's, verbatim.
 
 import (
 	"bytes"
