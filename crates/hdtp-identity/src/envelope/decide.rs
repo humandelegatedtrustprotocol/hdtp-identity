@@ -1,6 +1,6 @@
 //! `decide`: the receiving side of §13.3, §6.1, §5.3 and §14.4 as one pure function over the state
 //! the host supplies (`state.rs`). `envelope.mjs receive()` is its specification, line for line, but
-//! for a `sig` that is empty or not base64url, which this refuses first (CONTRACT §5.1).
+//! for a `sig` that is not base64url, which this refuses first (CONTRACT §5.1).
 use super::state::{host_roots, DecideInput, DecideOutput, NodeState};
 use super::{
     chain_of, decode_header, header_checks, members, pin_holding, timing, Timing, CLAIM_WINDOW_S, CTY_CALL, GUEST_TOOLS, INFO,
@@ -108,12 +108,9 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
         return Ok(invalid("encapsulated key is not the suite's length"));
     }
     // Read before the form decides anything, so the small form cannot answer `chain_required` to a
-    // `sig` the chain form refuses: a member in any other spelling is refused (§13.1), and so is none.
-    let sig = match wire_b64u(&e.sig) {
-        Ok(s) if s.is_empty() => return Ok(invalid("sig is empty")),
-        Ok(s) => s,
-        Err(_) => return Ok(invalid("sig is not base64url")),
-    };
+    // `sig` the chain form refuses: a member in any other spelling is refused (§13.1). An empty `sig`
+    // is the one spelling of zero bytes, and fails as a signature (§13.3 step 7).
+    let Ok(sig) = wire_b64u(&e.sig) else { return Ok(invalid("sig is not base64url")) };
     let body: Value =
         match hpke::open(suite, &key, &held_leaf.public_key, INFO, &aad, &enc, &ct).ok().and_then(|p| serde_json::from_slice(&p).ok()) {
             Some(b) => b,

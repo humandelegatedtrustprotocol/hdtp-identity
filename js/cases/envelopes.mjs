@@ -313,14 +313,12 @@ export default function envelopes({ add, expect }, f) {
     if (again) add(`decide on a real envelope whose ${member} is spelled with its spare bits set`, 'decide', { now, envelope: { ...spelt, [member]: again }, node });
   }
 
-  // D1 — a `sig` that is empty or not in the one spelling is refused before the form decides
-  // anything. Both ports read it leniently, alike, so comparing them found nothing: the small form from
+  // D1 — a `sig` not in the one spelling is refused before the form decides anything. Both ports read it leniently, alike, so comparing them found nothing: the small form from
   // a pinned contact answered `chain_required` where the chain form refused. Each case carries its
   // answer, so a port that is wrong the same way as the other still fails.
   const smallSpelt = request({ reference: true, params: { name: 'send_message' }, msgId: 'p-small-spelt', ephemeralSeed: seed('parity/small-spelt') });
   for (const [form, e] of [['chain form', spelt], ['small form', smallSpelt]]) {
     for (const [what, sig, why] of [
-      ['empty', '', 'sig is empty'],
       ['not base64url at all', '!!!', 'sig is not base64url'],
       ['padded', `${e.sig}==`, 'sig is not base64url'],
       ['with a line break in it', `${e.sig.slice(0, 8)}\n${e.sig.slice(8)}`, 'sig is not base64url'],
@@ -331,6 +329,19 @@ export default function envelopes({ add, expect }, f) {
         add(id, 'decide', { now, envelope: { ...e, sig }, node: { ...node, pins } });
         expect(id, { result: { code: 'envelope_invalid', why }, effects: [] });
       }
+    }
+  }
+  // An empty `sig` is the one spelling of zero bytes: it reads, and fails as a signature (§13.3 step
+  // 7), as the form answers one. A host whose reader cannot see presence (Go's Envelope) gets this
+  // answer for an absent or null `sig` too, so it checks presence itself.
+  for (const [form, e, failed] of [
+    ['chain form', spelt, { code: 'envelope_invalid', why: 'signature is not the chain\'s leaf key' }],
+    ['small form', smallSpelt, { code: 'chain_required' }],
+  ]) {
+    for (const [whom, pins] of [['a pinned contact', pinned], ['a stranger', []]]) {
+      const id = `decide, ${form} from ${whom}: an empty sig fails as a signature`;
+      add(id, 'decide', { now, envelope: { ...e, sig: '' }, node: { ...node, pins } });
+      expect(id, { result: failed, effects: [] });
     }
   }
   add('decide with an envelope whose sig is null', 'decide', { now, envelope: { ...smallSpelt, sig: null }, node: { ...node, pins: pinned } });

@@ -646,8 +646,8 @@
       "scenario:a real envelope whose enc is padded",
       "scenario:a real envelope whose ct has a line break in it",
       "scenario:a real envelope whose signature is spelled with its spare bits set",
-      "rust:a_sig_that_is_empty_or_not_base64url_is_refused_in_either_form",
-      "go:TestASigThatIsEmptyOrNotBase64urlIsRefusedInEitherForm"
+      "rust:a_sig_not_in_the_one_spelling_is_refused_in_either_form",
+      "go:TestASigNotInTheOneSpellingIsRefusedInEitherForm"
     ]
   },
   "13.1#3": {
