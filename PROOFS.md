@@ -7,9 +7,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed as proven that did not pass.
 
-Specification: **1.0.0**. **101** normative sentences, **2927** cross-port parity cases over **54** guarded functions.
+Specification: **1.0.0**. **101** normative sentences, **2950** cross-port parity cases over **54** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 1.0.0): **5854** answers, of which **0** do not hold to the shape it declares. Of **131** declared error codes, **131** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 1.0.0): **5900** answers, of which **0** do not hold to the shape it declares. Of **131** declared error codes, **131** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 101 normative sentences of the specification
 
@@ -160,7 +160,7 @@ by declaration. A row with nothing in its last column would fail `js/musts.mjs`.
 | # | The sentence | Held by |
 |---|---|---|
 | `13.1#1` | base64url HPKE encapsulated key, of exactly the suite's `Npk` (RFC 9180, Section 7.1): 65 bytes for `HDTP-SEAL-P256`, an uncompressed P-256 point, and 32 for `HDTP-SEAL-X25519`. A receiver **MUST** refuse any other length (`envelope_invalid`) — `sig` covers the three members concatenated with nothing between them, so the suite's own length is what fixes the boundary; without it a byte moved from the end of `enc` to the front of `ct` leaves the signed bytes identical | `scenario:a byte moved from the encapsulated key into the ciphertext`, `rust:an_encapsulated_key_of_the_wrong_length_is_refused_under_each_suite`, `go:TestAnEncapsulatedKeyOfTheWrongLengthIsRefused` |
-| `13.1#2` | Each of the four members is base64url (RFC 4648, Section 5) without padding, in its one canonical spelling, and a receiver **MUST** refuse (`envelope_invalid`) a member written any other way: with a character outside that alphabet — padding, whitespace and the standard alphabet's `+` and `/` among them — or with a last character whose unused bits are not zero. | `scenario:a real envelope whose protected carries a stray character`, `scenario:a real envelope whose enc is padded`, `scenario:a real envelope whose ct has a line break in it`, `scenario:a real envelope whose signature is spelled with its spare bits set` |
+| `13.1#2` | Each of the four members is base64url (RFC 4648, Section 5) without padding, in its one canonical spelling, and a receiver **MUST** refuse (`envelope_invalid`) a member written any other way: with a character outside that alphabet — padding, whitespace and the standard alphabet's `+` and `/` among them — or with a last character whose unused bits are not zero. | `scenario:a real envelope whose protected carries a stray character`, `scenario:a real envelope whose enc is padded`, `scenario:a real envelope whose ct has a line break in it`, `scenario:a real envelope whose signature is spelled with its spare bits set`, `rust:a_sig_that_is_empty_or_not_base64url_is_refused_in_either_form`, `go:TestASigThatIsEmptyOrNotBase64urlIsRefusedInEitherForm` |
 | `13.1#3` | The suite follows the recipient's key and nothing else: a receiver **MUST** refuse an envelope whose `suite` is not the one its key takes (`envelope_invalid`), so no choice is left on the wire for a sender to make badly. | `scenario:the wrong suite for the recipient's key` |
 | `13.1#4` | The HPKE `info` parameter is the ASCII string `HDTP-SEAL-v1`, and an envelope sealed under any other info string **MUST NOT** open. | `scenario:sealed with a stale info string` |
 | `13.1#5` | The HPKE ephemeral **MUST** be fresh for every envelope — a reused one repeats the key and the nonce, and two ciphertexts under them leak the XOR of their plaintexts — and both sides **MUST** refuse an all-zero DH output, which a low-order X25519 point produces (RFC 9180, Section 7.1.4). | `scenario:HPKE ephemeral reuse leaks the XOR of two plaintexts; production sealing cannot take a seed`, `scenario:a low-order X25519 recipient point`, `rust:refuses_a_low_order_point`, `go:TestALowOrderRecipientIsRefused` |
@@ -231,7 +231,7 @@ by declaration. A row with nothing in its last column would fail `js/musts.mjs`.
 | `14.4#1` | An endpoint **MUST** keep the key identifiers of every leaf it has held for an identity it still serves — fingerprints, never keys past their `notAfter`. | `scenario:a former key of a still-served identity gets the current chain`, `gateway:TestStaleKidIsAnsweredWithTheCurrentChain` |
 | `14.4#2` | A caller **MUST** follow `certificate_renewed` at most once per call, and only when the chain it carries is newer than or equal to its pin (§14.3): an older chain, a chain to another root, or a chain naming another address is discarded and the call fails as it would have. | `rust:certificate_renewed_cases`, `go:TestChainCases` |
 
-## The 2927 cross-port parity cases
+## The 2950 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -239,7 +239,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **2927** cases (**1417** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
+At the run that generated this file: **2950** cases (**1417** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
 
 ### `address_guard` — 51 cases · whole on success
 
@@ -700,7 +700,7 @@ At the run that generated this file: **2927** cases (**1417** of the run's cases
 - generated · csr_new · endpoint absent, host_pkcs8 7
 - generated · csr_new · endpoint absent, dns_name 7
 
-### `decide` — 158 cases · whole on success
+### `decide` — 181 cases · whole on success
 
 - decide on an envelope from a pinned contact
 - decide on a pinned contact's call that names no tool
@@ -734,6 +734,29 @@ At the run that generated this file: **2927** cases (**1417** of the run's cases
 - decide on a real envelope whose enc is spelled with its spare bits set
 - decide on a real envelope whose ct is spelled with its spare bits set
 - decide on a real envelope whose sig is spelled with its spare bits set
+- decide, chain form from a pinned contact: a sig that is empty
+- decide, chain form from a stranger: a sig that is empty
+- decide, chain form from a pinned contact: a sig that is not base64url at all
+- decide, chain form from a stranger: a sig that is not base64url at all
+- decide, chain form from a pinned contact: a sig that is padded
+- decide, chain form from a stranger: a sig that is padded
+- decide, chain form from a pinned contact: a sig that is with a line break in it
+- decide, chain form from a stranger: a sig that is with a line break in it
+- decide, chain form from a pinned contact: a sig that is spelled with its spare bits set
+- decide, chain form from a stranger: a sig that is spelled with its spare bits set
+- decide, small form from a pinned contact: a sig that is empty
+- decide, small form from a stranger: a sig that is empty
+- decide, small form from a pinned contact: a sig that is not base64url at all
+- decide, small form from a stranger: a sig that is not base64url at all
+- decide, small form from a pinned contact: a sig that is padded
+- decide, small form from a stranger: a sig that is padded
+- decide, small form from a pinned contact: a sig that is with a line break in it
+- decide, small form from a stranger: a sig that is with a line break in it
+- decide, small form from a pinned contact: a sig that is spelled with its spare bits set
+- decide, small form from a stranger: a sig that is spelled with its spare bits set
+- decide with an envelope whose sig is null
+- decide, small form from a pinned contact: its own sig
+- decide, small form from a pinned contact: a sig that is not the leaf's
 - decide when a held key's own leaf will not parse
 - decide in the small form when a pin's leaf will not parse
 - decide when the pinned leaf of the sender's root will not compare
