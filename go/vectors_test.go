@@ -605,12 +605,13 @@ func TestDecideOnVectors(t *testing.T) {
 	}
 }
 
-// A `sig` that is empty or not in the one spelling (§13.1) is `envelope_invalid` before the form
-// decides anything. The small form from a pinned contact answered `chain_required` to every one of
-// them, while the chain form refused them: the same envelope, two answers, by form alone. A host that
-// reads the wire into an Envelope gets "" for a `sig` that is absent or null, so those are the empty
-// case here, read the way the host reads them.
-func TestASigThatIsEmptyOrNotBase64urlIsRefusedInEitherForm(t *testing.T) {
+// A `sig` not in the one spelling (§13.1) is `envelope_invalid` before the form decides anything.
+// The small form from a pinned contact answered `chain_required` to every one of them, while the
+// chain form refused them: the same envelope, two answers, by form alone. An empty `sig` is the one
+// spelling of zero bytes and fails as a signature (§13.3 step 7). An Envelope cannot see presence: a
+// host that reads the wire into one gets "" for a `sig` that is absent or null, and Decide answers
+// those as the empty one, so a host checks presence itself before it calls Decide.
+func TestASigNotInTheOneSpellingIsRefusedInEitherForm(t *testing.T) {
 	v := loadVectors(t)
 	now := mustTime(t, v.Now)
 	rootA, _ := Parse(hexBytes(t, v.Certificates["root_a"].DerHex))
@@ -636,25 +637,11 @@ func TestASigThatIsEmptyOrNotBase64urlIsRefusedInEitherForm(t *testing.T) {
 		if standard == good {
 			standard = good[:len(good)-1] + "+"
 		}
-		arrived := map[string]Envelope{}
-		for _, raw := range []struct{ what, json string }{
-			{"absent", fmt.Sprintf(`{"protected":%q,"enc":%q,"ct":%q}`, e.Protected, e.Enc, e.Ct)},
-			{"null", fmt.Sprintf(`{"protected":%q,"enc":%q,"ct":%q,"sig":null}`, e.Protected, e.Enc, e.Ct)},
-		} {
-			var read Envelope
-			if err := json.Unmarshal([]byte(raw.json), &read); err != nil {
-				t.Fatal(err)
-			}
-			arrived[raw.what] = read
-		}
 		for _, c := range []struct {
 			what string
 			env  Envelope
 			why  string
 		}{
-			{"empty", Envelope{e.Protected, e.Enc, e.Ct, ""}, "sig is empty"},
-			{"absent, as a host reads it", arrived["absent"], "sig is empty"},
-			{"null, as a host reads it", arrived["null"], "sig is empty"},
 			{"not base64url at all", Envelope{e.Protected, e.Enc, e.Ct, "!!!"}, "sig is not base64url"},
 			{"padded", Envelope{e.Protected, e.Enc, e.Ct, good + "=="}, "sig is not base64url"},
 			{"in the standard alphabet", Envelope{e.Protected, e.Enc, e.Ct, standard}, "sig is not base64url"},
@@ -668,6 +655,37 @@ func TestASigThatIsEmptyOrNotBase64urlIsRefusedInEitherForm(t *testing.T) {
 				d := decided(t, now, c.env, bharatNode(t, v, whom.pins))
 				if d.Result["code"] != "envelope_invalid" || d.Result["why"] != c.why || len(d.Result) != 2 || len(d.Effects) != 0 {
 					t.Errorf("%s form from %s, sig %s: %v %v", form.name, whom.name, c.what, d.Result, d.Effects)
+				}
+			}
+		}
+	}
+	// Empty, and absent or null as an Envelope reads them: a signature that does not verify, answered
+	// as the form answers one (§13.2) — never a refusal of the spelling.
+	for _, form := range []struct{ name, envelope, code, why string }{
+		{"chain", "alina-to-bharat", "envelope_invalid", "signature is not the chain's leaf key"},
+		{"small", "alina-to-bharat-by-reference", "chain_required", ""},
+	} {
+		e := envOf(form.envelope)
+		for _, raw := range []struct{ what, json string }{
+			{"empty", fmt.Sprintf(`{"protected":%q,"enc":%q,"ct":%q,"sig":""}`, e.Protected, e.Enc, e.Ct)},
+			{"absent, as an Envelope reads it", fmt.Sprintf(`{"protected":%q,"enc":%q,"ct":%q}`, e.Protected, e.Enc, e.Ct)},
+			{"null, as an Envelope reads it", fmt.Sprintf(`{"protected":%q,"enc":%q,"ct":%q,"sig":null}`, e.Protected, e.Enc, e.Ct)},
+		} {
+			var read Envelope
+			if err := json.Unmarshal([]byte(raw.json), &read); err != nil {
+				t.Fatal(err)
+			}
+			for _, whom := range []struct {
+				name string
+				pins []Pin
+			}{{"a pinned contact", []Pin{pinA}}, {"a stranger", nil}} {
+				d := decided(t, now, read, bharatNode(t, v, whom.pins))
+				want := map[string]any{"code": form.code}
+				if form.why != "" {
+					want["why"] = form.why
+				}
+				if fmt.Sprint(d.Result) != fmt.Sprint(want) || len(d.Effects) != 0 {
+					t.Errorf("%s form from %s, sig %s: %v %v", form.name, whom.name, raw.what, d.Result, d.Effects)
 				}
 			}
 		}

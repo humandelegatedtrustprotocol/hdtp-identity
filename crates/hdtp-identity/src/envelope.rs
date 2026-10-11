@@ -1,7 +1,7 @@
 //! Sealed envelopes (§13): sealing in both forms, the caller's side of a result, `certificate_renewed`
 //! on the caller's side, and `decide` — the receiving side of §13.3, §6.1, §5.3 and §14.4 as one pure
 //! function over state the host supplies. `envelope.mjs receive()` is its specification, line for line,
-//! but for a `sig` that is empty or not base64url, which `decide` refuses first (CONTRACT §5.1).
+//! but for a `sig` that is not base64url, which `decide` refuses first (CONTRACT §5.1).
 use crate::canonical::{canonical, in_order};
 use crate::hpke::{self, suite_for, Suite};
 use crate::keys::{PrivateKey, PublicKey, Signer};

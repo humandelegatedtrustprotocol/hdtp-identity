@@ -496,11 +496,12 @@ fn decide_on_the_vector_envelopes() {
     assert_eq!(out["result"]["tier"], "contact");
 }
 
-/// A `sig` that is empty or not in the one spelling (§13.1) is `envelope_invalid` before the form
-/// decides anything. The small form from a pinned contact answered `chain_required` to every one of
-/// them, while the chain form refused them: the same envelope, two answers, by form alone.
+/// A `sig` not in the one spelling (§13.1) is `envelope_invalid` before the form decides anything.
+/// The small form from a pinned contact answered `chain_required` to every one of them, while the
+/// chain form refused them: the same envelope, two answers, by form alone. An empty `sig` is the one
+/// spelling of zero bytes and is not refused for its spelling: it fails as a signature (§13.3 step 7).
 #[test]
-fn a_sig_that_is_empty_or_not_base64url_is_refused_in_either_form() {
+fn a_sig_not_in_the_one_spelling_is_refused_in_either_form() {
     let v = vectors();
     let der = der_of(&v);
     let envelopes = v["envelopes"].as_array().unwrap();
@@ -524,7 +525,6 @@ fn a_sig_that_is_empty_or_not_base64url_is_refused_in_either_form() {
             standard = format!("{}+", &good[..good.len() - 1]);
         }
         for (what, sig, why) in [
-            ("empty", String::new(), "sig is empty"),
             ("not base64url at all", "!!!".to_string(), "sig is not base64url"),
             ("padded", format!("{good}=="), "sig is not base64url"),
             ("in the standard alphabet", standard, "sig is not base64url"),
@@ -536,6 +536,18 @@ fn a_sig_that_is_empty_or_not_base64url_is_refused_in_either_form() {
                 assert_eq!(out.result, json!({ "code": "envelope_invalid", "why": why }), "{form} form from {whom}, sig {what}");
                 assert!(out.effects.is_empty(), "{form} form from {whom}, sig {what}");
             }
+        }
+        // An empty `sig` reads, and fails where any signature that does not verify fails: the small
+        // form's `chain_required` (§13.2), the chain form's refusal of the signature.
+        let failed = if form == "small" {
+            json!({ "code": "chain_required" })
+        } else {
+            json!({ "code": "envelope_invalid", "why": "signature is not the chain's leaf key" })
+        };
+        for (whom, pins) in [("a pinned contact", vec![pin_a.clone()]), ("a stranger", vec![])] {
+            let out = decide(with_sig(e, json!("")), pins);
+            assert_eq!(out.result, failed, "{form} form from {whom}, sig empty");
+            assert!(out.effects.is_empty(), "{form} form from {whom}, sig empty");
         }
         // Absent or null never reaches the decision: the envelope is the host's argument, refused by its path.
         for sig in [None, Some(Value::Null)] {

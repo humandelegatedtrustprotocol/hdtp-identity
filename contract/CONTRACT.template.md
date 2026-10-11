@@ -199,9 +199,12 @@ character with a spare bit set — because `sig` covers the DECODED bytes and ev
 forgives is another envelope that verifies. This is NOT the rule for an argument a caller hands the
 boundary (§0), which stays forgiving about padding and alphabet; it is the rule for what travels.
 An unreadable `protected` is `protected is not JSON`, `enc` or `ct` is `does not open`. `decide`
-refuses a `sig` that does not read (`sig is not base64url`) or is empty (`sig is empty`) after the
-`kid` and the suite and before the open, so the small form refuses it as the chain form does and
-never answers it `chain_required`; `open_result` refuses one that does not read as `signature`.
+refuses a `sig` that does not read (`sig is not base64url`) after the `kid` and the suite and before
+the open, so the small form refuses it as the chain form does and never answers it `chain_required`;
+`open_result` refuses one that does not read as `signature`. An empty `sig` reads (the one spelling of
+zero bytes) and fails as a signature: `chain_required` in the small form, `signature is not the
+chain's leaf key` in the chain form (SPEC §13.3 step 7). A host that reads the wire into a struct
+cannot tell an absent or null `sig` from an empty one, so it checks presence itself.
 
 **A pin MAY say which leaf it holds** (`leaf_fingerprint`). A small-form envelope names a leaf, and
 finding the pin that holds it meant parsing every pinned leaf, for a sender who has proved nothing.
@@ -284,16 +287,16 @@ proved and the request's `msg_id`, so a host can seal the refusal back to the ca
 opening the envelope again; its effects are the pin's own moves, never `seen`; and
 `{"code": "ok", "replayed": true}` for a seen `msg_id`.
 The `why` strings are the seed's, verbatim, so the intrusion suite reads both ports alike, except
-`sig is not base64url` and `sig is empty`: the seed's `receive()` still reads a `sig` that does not
-read, or is empty, as a signature that fails, so its small form answers `chain_required` where both
-ports refuse, and `js/intrude.mjs` expects the ports' words for the respelled `sig` until the seed
-follows.
+`sig is not base64url`: for now the seed lags the §13.1 spelling MUST for `sig` — its `receive()` reads
+a `sig` that does not read as a signature that fails, so its small form answers `chain_required` where
+both ports refuse — and `js/intrude.mjs` expects the ports' words for the respelled `sig` until the
+seed follows.
 
 Order, as `receive()` has it (freshness also refuses `exp − ts` over 30 days, §13.1, as `exp too far from ts`): decode `protected` → header members exactly `cty,exp,kid,msg_id,suite,ts,v`
 → their types (`v`, `ts`, `exp` integers, the rest strings, else `header member types`)
 → `v` = 2 and a known suite → `kid` held (current, or superseded and not past `notAfter`), else a
 sibling's → `envelope_invalid`, a former → `certificate_renewed`, unknown → `envelope_invalid` → suite
-fits the held leaf's key → `enc` is exactly the suite's `Npk`, 65 or 32 (`encapsulated key is not the suite's length`: `sig` covers the three members concatenated, so the length is what fixes the boundary) → `sig` base64url in the one spelling (`sig is not base64url`) and not empty (`sig is empty`) → HPKE open → plaintext members exactly `chain,method,params` or
+fits the held leaf's key → `enc` is exactly the suite's `Npk`, 65 or 32 (`encapsulated key is not the suite's length`: `sig` covers the three members concatenated, so the length is what fixes the boundary) → `sig` base64url in the one spelling (`sig is not base64url`) → HPKE open → plaintext members exactly `chain,method,params` or
 `leaf,method,params`, method `tools/call` or `tools/list` → **small form**: leaf fingerprint matched
 against pins not blocked, the held leaf within validity, `sig` verifies, else `chain_required` in every
 case; then freshness (`cty` is a call, `now < exp`, `|now − ts| ≤ 300 s`, non-empty `msg_id`, replay) →

@@ -4,7 +4,7 @@ package hdtpidentity
 // certificate_renewed (§14.4), and Decide — the receiving side of §13.3 in order, §6.1 tiers, §5.3 new
 // addresses with the removal tombstone, and §14.4 — as one pure function over host-supplied state.
 // The seed's envelope.mjs is its specification line for line, and every `why` the seed's, verbatim,
-// but for a `sig` that is empty or not base64url, which Decide refuses first (CONTRACT §5.1).
+// but for a `sig` that is not base64url, which Decide refuses first (CONTRACT §5.1).
 
 import (
 	"bytes"
@@ -566,13 +566,11 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 		return invalid("encapsulated key is not the suite's length")
 	}
 	// Read before the form decides anything, so the small form cannot answer `chain_required` to a
-	// `sig` the chain form refuses: a member in any other spelling is refused (§13.1), and so is none.
+	// `sig` the chain form refuses: a member in any other spelling is refused (§13.1). An empty `sig`
+	// is the one spelling of zero bytes, and fails as a signature (§13.3 step 7).
 	sig, err := wireB64url(env.Sig)
 	if err != nil {
 		return invalid("sig is not base64url")
-	}
-	if len(sig) == 0 {
-		return invalid("sig is empty")
 	}
 	plaintext, err := Open(suite, priv, heldLeaf.PublicKey, []byte(Info), aad, enc, ct)
 	if err != nil {
