@@ -45,7 +45,16 @@ for t in "$@"; do
   case "$t" in
     darwin-arm64)
       [ "$(uname -s)-$(uname -m)" = "Darwin-arm64" ] || { echo "build-cli: darwin-arm64 builds only on an arm64 Mac" >&2; exit 1; }
-      ( cd "$WORK/src" && cargo build --release --locked -p hdtp --target aarch64-apple-darwin --target-dir "$WORK/target" )
+      # The remaps of js/build.sh, for the same reason: without them a panic location carries the
+      # builder's home directory (0.8.0's darwin binary held 230, every one a dependency's source in
+      # the cargo home). The last matching remap wins, so the general prefix goes first.
+      ( cd "$WORK/src"
+        CARGO_HOME_DIR="${CARGO_HOME:-$HOME/.cargo}"
+        RUST_SRC="$(rustc --print sysroot)/lib/rustlib/src/rust"
+        RUST_COMMIT="$(rustc -vV | sed -n 's/^commit-hash: //p')"
+        [ -n "$RUST_COMMIT" ] || { echo "build-cli: rustc did not say which commit it was built from" >&2; exit 1; }
+        export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$HOME=/home --remap-path-prefix=$WORK/src=/hdtp-identity --remap-path-prefix=$CARGO_HOME_DIR=/cargo --remap-path-prefix=$RUST_SRC=/rustc/$RUST_COMMIT"
+        cargo build --release --locked -p hdtp --target aarch64-apple-darwin --target-dir "$WORK/target" )
       cp "$WORK/target/aarch64-apple-darwin/release/hdtp" "$OUT/hdtp-$VERSION-darwin-arm64"
       ;;
     linux-arm64)

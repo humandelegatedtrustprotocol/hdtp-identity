@@ -80,6 +80,7 @@ set -eu
 tag="$1"; out="$2"; v="$3"; shift 3
 echo "cli $tag $*" >> "${log}"
 for t in "$@"; do printf 'hdtp %s %s' "$v" "$t" > "$out/hdtp-$v-$t"; done
+if [ -n "\${CLI_LEAK:-}" ]; then printf '%s' "$CLI_LEAK" >> "$out/hdtp-$v-darwin-arm64"; fi
 `);
   // The gh stub: records every call; \`release download <tag> --dir <d>\` copies from $GH_SOURCE.
   writeFileSync(join(bin, 'gh'), `#!/bin/sh
@@ -230,6 +231,17 @@ test('a release: two commits, two tags on the second, the version everywhere, ex
     const again = f.make('release', '0.2.0');
     assert.notEqual(again.status, 0);
     assert.match(again.stderr, /tag v0\.2\.0 already exists/);
+  } finally { f.cleanup(); }
+});
+
+test('refuses a CLI binary that holds this machine\'s home directory, and publishes nothing', () => {
+  const f = fixture();
+  try {
+    const r = f.make('release', '0.2.0', { CLI_LEAK: `${process.env.HOME}/.cargo/registry/src/dep/src/lib.rs` });
+    assert.notEqual(r.status, 0, `expected a refusal, got success:\n${r.stdout}`);
+    assert.match(r.stderr, /dist\/0\.2\.0\/hdtp-0\.2\.0-darwin-arm64 holds this machine's home directory/);
+    assert.equal(existsSync(join(f.work, 'dist/0.2.0/SHA256SUMS')), false, 'a refused release wrote its sums');
+    assert.doesNotMatch(f.calls(), /gh /, 'a refused release reached gh');
   } finally { f.cleanup(); }
 });
 

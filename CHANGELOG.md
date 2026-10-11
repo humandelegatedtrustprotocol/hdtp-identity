@@ -63,6 +63,12 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   template drops its checkbox: there is no sign-off and no CLA, and section 5 of the Apache License
   2.0 covers a contribution.
 
+- **The darwin-arm64 `hdtp` binary carries no path from the machine that built it.** 0.8.0's held
+  230 paths of a dependency's source file under the builder's home directory (its cargo
+  home); `scripts/build-cli.sh` now builds it with the remaps `js/build.sh` gives the Wasm, so they
+  read `/cargo/registry/src/...`. `make release` refuses an asset that holds the home directory of
+  the machine cutting it.
+
 
 ## 0.8.0 — 2026-10-10
 
