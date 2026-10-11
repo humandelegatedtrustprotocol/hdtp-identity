@@ -1287,9 +1287,10 @@ mod tests {
     }
 
     /// SPEC §9.2, what a contact controls, for every member a contact may have written: text there
-    /// that reads as a private key never stops the owner's export, no file carries it, and nothing is
-    /// lost — an id is written anew with every reference to it, a name or a topic empty, a file's name
-    /// and type neutral, the file kept — and the file reads back whole; the same text where the owner's
+    /// that reads as a private key never stops the owner's export, no file carries it, and no
+    /// conversation, message or file is left out — an id is written anew with every reference to it, a
+    /// name or a topic empty, a file's name and type neutral, the file kept — and the file reads back
+    /// whole; the same text where the owner's
     /// side wrote it is refused. Both shapes the check knows: PEM armour, and a base64 word that
     /// decodes to a PKCS #8 key.
     #[test]

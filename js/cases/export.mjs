@@ -258,9 +258,9 @@ export default function exportCases({ add, expect }, f) {
   expect('export_read_end: what a contact controls, as written, reads back', { ok: true });
 
   // ── what a contact may have written that reads as a private key (SPEC §9.2): never refused, never
-  //    written, nothing lost — an id written anew (`r-` and 62 hex digits of its sha256) with every
-  //    reference to it, a name or a topic empty, a file's name and type neutral; the same text where
-  //    the owner's side wrote it is refused. Both shapes the check knows.
+  //    written, no conversation, message or file left out — an id written anew (`r-` and 62 hex
+  //    digits of its sha256) with every reference to it, a name or a topic empty, a file's name and
+  //    type neutral; the same text where the owner's side wrote it is refused. Both shapes the check knows.
   const peerB = other('B');
   const at = '2026-09-27T10:00:00Z';
   const keyMsg = (o) => ({ id: 'q', thread: 't1', contact: peerB, msg_id: 'q-1', direction: 'in', sender: 'human', time: at, body: 'hi', reply_to: null, status: 'read', attachments: [], ...o });
