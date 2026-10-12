@@ -21,7 +21,17 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   decode's error. A Rust host: `envelope::Wire` no longer implements `Deserialize` (read one with
   `Wire::read`), and `DecideInput::read` refuses such an envelope with `envelope_invalid` where it
   answered `bad_request`; a caller of it answers that refusal as `decide`'s decision, as the boundary
-  does. Each is described below.
+  does. The node (hdtp-gateway) needs no code change to stay correct: in `internal/public/sealed.go`,
+  `envelopeOf`'s loop over the member names becomes redundant with `UnmarshalJSON`, which refuses any
+  other name byte for byte; a member absent or null, which the struct decode read as the empty string
+  (so an absent or null `sig` was decided as an empty signature, `chain_required` in the small form),
+  is now the decode's error, answered `envelope_invalid` before the open; and
+  `internal/outbound/seal.go`'s decode of a peer's result envelope refuses a fifth member, a name in
+  another case and a member absent or null as a decode error before `OpenResult`, so such an answer is
+  no longer taken for an unverifiable one and no `get_card` re-pin is tried for it. The cloud
+  (batondeck) re-vendors and changes no code: its request path already refuses another member and a
+  member that is not a string before `decide` (`decodeEnvelope`), and its outbound `open_result`
+  refuses the same peer answers, with the new words in the error it reports. Each is described below.
 
 - **An envelope is exactly four members, each a string (SEP-0005, SPEC §13.1 of the draft).** Both
   ports read an envelope by one reader, for `decide` and `open_result` alike (`Wire::read` in Rust,
