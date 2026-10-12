@@ -1,5 +1,5 @@
 {
-  "crate_version": "0.8.2",
+  "crate_version": "0.8.3",
   "rustc": "rustc 1.92.0 (ded5c06cf 2025-12-08)",
   "wasm_pack": "wasm-pack 0.15.0",
   "builder": {
@@ -10,7 +10,7 @@
     "how": "sh js/reproduce.sh"
   },
   "source": {
-    "inputs_sha256": "057ec03920c4242ace8b606846f6850fe1b8db5caaf79295688c13f05299775d",
+    "inputs_sha256": "183b3093f84356006471384e96529f1d5d21a287a35ae06227e2612a8695a131",
     "files": 55,
     "paths": [
       "crates/hdtp-identity",
@@ -39,7 +39,7 @@
       "bytes": 13410
     },
     "pkg-web/hdtp_identity_wasm_bg.wasm": {
-      "sha256": "2ce4156e8dd4f8d7c1d22296fd4e51db92d1495738100669f9508f5498298de6",
+      "sha256": "ecca6861c1e511a7ffa10867386c0ac3d1a369c69b9eb9fc41c47c32893d6f19",
       "bytes": 889928
     },
     "pkg-web/hdtp_identity_wasm_bg.wasm.d.ts": {
@@ -63,7 +63,7 @@
       "bytes": 10099
     },
     "pkg-node/hdtp_identity_wasm_bg.wasm": {
-      "sha256": "2ce4156e8dd4f8d7c1d22296fd4e51db92d1495738100669f9508f5498298de6",
+      "sha256": "ecca6861c1e511a7ffa10867386c0ac3d1a369c69b9eb9fc41c47c32893d6f19",
       "bytes": 889928
     },
     "pkg-node/hdtp_identity_wasm_bg.wasm.d.ts": {
