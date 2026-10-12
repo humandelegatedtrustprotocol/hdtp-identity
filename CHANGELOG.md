@@ -10,6 +10,15 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+- **A correction to 0.8.3's note on what a host changes.** It said the cloud (batondeck) re-vendors and
+  changes no code. The cloud changed its outbound client (batondeck #291). A peer's result that
+  `open_result` refuses as `envelope members` or `envelope member types` is now answered
+  `envelope_invalid` after one request, with no sealed `get_card` and no re-pin. Before, the client
+  took it for an answer signed by a leaf it does not hold and asked a `get_card`. The node's bump
+  (hdtp-gateway #122) also changed code beyond what the note described: a peer's result envelope that
+  fails to decode is now wrapped as `envelope_invalid`, where before it carried no code. The 0.8.3
+  entry stays as released.
+
 ## 0.8.3 — 2026-10-12
 
 - **What a host changes.** `decide` answers an envelope that is not exactly `protected`, `enc`, `ct`
