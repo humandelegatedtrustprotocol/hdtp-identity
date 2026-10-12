@@ -27,14 +27,18 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   ports read an envelope by one reader, for `decide` and `open_result` alike (`Wire::read` in Rust,
   `envelopeOf` in Go): not an object, a member absent or any other member is `envelope members`; a
   member that is not a string, null included, `envelope member types`. Names are compared byte for
-  byte. A member written twice is read at its last occurrence and an earlier one is never read or
-  judged: both ports' parse of the arguments keeps the last (a `serde_json` map, a Go map), and a test
+  byte. A member written twice is read at its last occurrence, and the reader never sees an earlier
+  one: both ports' parse of the arguments keeps the last (a `serde_json` map, a Go map), and a test
   in each measures it. Rust's `Wire` no longer derives `Deserialize` (a derive takes a fifth member,
   and on raw text refuses a repeated one), and the `hdtp` CLI's live battery reads an answer's
   envelope by `Wire::read`; Go's `Envelope` gains an `UnmarshalJSON` that is `envelopeOf`, because
   `encoding/json`'s struct decode matches names without regard to case and takes a fifth member. The
   arguments' text as a whole is still held to CONTRACT §0's boundary rules wherever in it they occur,
-  an earlier occurrence included. This changes what a host built on this library accepts: an envelope
+  an earlier occurrence included: half a UTF-16 surrogate pair, a number past a double or nesting more
+  than 127 deep inside an earlier occurrence fails the call `bad_request` (`args: …`), and is the
+  decode's error to an `Envelope`'s `UnmarshalJSON`, where the seed's `receiveText` keeps only the last
+  occurrence and answers the call. That is a stated divergence from SEP-0005, whose earlier occurrence
+  "is not read or judged" (CONTRACT, "An envelope is exactly four members"). This changes what a host built on this library accepts: an envelope
   from a 1.0 sender carrying anything but the four string members is refused.
 
 - **Step 1 reads all four spellings before the key is resolved (SPEC §13.3 of the draft).** `decide`

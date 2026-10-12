@@ -248,11 +248,16 @@ and `open_result` read an envelope by one reader (`Wire::read` in Rust, `envelop
 `sig` is `envelope_invalid` `envelope members` — not an object, a member absent, any other member — and
 a member that is not a string, null included, `envelope member types`. Names are compared byte for
 byte: `SIG` is not `sig`, and Go's struct decode, which matches names without regard to case, never
-reads one. A member written twice is read at its last occurrence and an earlier one is never read or
-judged, which is what both ports' parse of the arguments does (a `serde_json` map and a Go map keep the
-last); Rust's `Wire` derives no `Deserialize`, which would refuse a repeated member on raw text. The
-arguments' text as a whole is still held to §0's boundary rules (a lone surrogate, a number past a
-double, nesting past the limit), wherever in it they occur.
+reads one. A member written twice is read at its last occurrence, which is what both ports' parse of
+the arguments does (a `serde_json` map and a Go map keep the last): the reader never sees an earlier
+one, whatever its type. Rust's `Wire` derives no `Deserialize`, which would refuse a repeated member on
+raw text. The arguments' text as a whole is still held to §0's boundary rules, an earlier occurrence
+included: half a UTF-16 surrogate pair, a number past a double or nesting more than 127 deep inside an
+earlier occurrence fails the call `bad_request` (`args: …`, as §0 words each), and an `Envelope`'s
+`UnmarshalJSON` returns the decode's error. The seed's `receiveText` keeps only the last occurrence
+before it judges any of the three, and answers the call. This is a stated divergence from SEP-0005,
+whose earlier occurrence "is not read or judged": on those three faults of the text the library
+refuses where the seed answers.
 
 **A pin MAY say which leaf it holds** (`leaf_fingerprint`). A small-form envelope names a leaf, and
 finding the pin that holds it meant parsing every pinned leaf, for a sender who has proved nothing.

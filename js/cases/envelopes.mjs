@@ -649,7 +649,8 @@ export default function envelopes({ add, expect }, f) {
   // SEP-0005 — an envelope is exactly `protected`, `enc`, `ct` and `sig`, each a JSON string (§13.1 of
   // the draft): anything else is `envelope_invalid` at step 1 of §13.3, a decision to `decide` and an
   // error to `open_result`; names are compared byte for byte; a member written twice is read at its
-  // last occurrence and an earlier one is never read or judged; and step 1 reads all four spellings
+  // last occurrence and an earlier one is never read as the envelope's member (the arguments' text as
+  // a whole is still held to CONTRACT §0, an earlier occurrence included); and step 1 reads all four spellings
   // before the header is parsed or the key resolved. Each envelope goes to the port as TEXT, spliced
   // into the arguments as written (RawArgs), so the port's own parse decides the repeated member. Each
   // case carries the seed's answer (vectors/lib/envelope.mjs receive).
