@@ -97,7 +97,12 @@ type Envelope struct {
 }
 
 // UnmarshalJSON reads an envelope as envelopeOf does, so json.Unmarshal into an Envelope, or into a
-// struct holding one, refuses what §13.1 refuses, with envelopeOf's words.
+// struct holding one, refuses what §13.1 refuses, with envelopeOf's words. The text is decoded whole
+// first (decodeJSON), so CONTRACT §0's boundary rules hold everywhere in it, an earlier occurrence of
+// a repeated member included: half a UTF-16 surrogate pair, a number past a double or nesting more
+// than 127 deep there is the decode's error, where the seed's receiveText keeps only the last
+// occurrence and answers. A stated divergence from SEP-0005, whose earlier occurrence "is not read or
+// judged" (CONTRACT, "An envelope is exactly four members").
 func (e *Envelope) UnmarshalJSON(b []byte) error {
 	v, err := decodeJSON(b)
 	if err != nil {
