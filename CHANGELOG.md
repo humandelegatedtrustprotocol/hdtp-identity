@@ -10,6 +10,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+## 0.8.3 — 2026-10-12
+
 - **What a host changes.** `decide` answers an envelope that is not exactly `protected`, `enc`, `ct`
   and `sig`, each a JSON string, as a decision, `{"result": {"code": "envelope_invalid", "why":
   "envelope members" | "envelope member types"}, "effects": []}`, where it failed the call
