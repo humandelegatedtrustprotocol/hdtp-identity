@@ -332,8 +332,7 @@ export default function envelopes({ add, expect }, f) {
     }
   }
   // An empty `sig` is the one spelling of zero bytes: it reads, and fails as a signature (§13.3 step
-  // 7), as the form answers one. A host whose reader cannot see presence (Go's Envelope) gets this
-  // answer for an absent or null `sig` too, so it checks presence itself.
+  // 7), as the form answers one. An absent or null `sig` never reads as one (§13.1, SEP-0005 below).
   for (const [form, e, failed] of [
     ['chain form', spelt, { code: 'envelope_invalid', why: 'signature is not the chain\'s leaf key' }],
     ['small form', smallSpelt, { code: 'chain_required' }],
@@ -345,7 +344,7 @@ export default function envelopes({ add, expect }, f) {
     }
   }
   add('decide with an envelope whose sig is null', 'decide', { now, envelope: { ...smallSpelt, sig: null }, node: { ...node, pins: pinned } });
-  expect('decide with an envelope whose sig is null', { error: 'bad_request', why: 'envelope.sig is required' });
+  expect('decide with an envelope whose sig is null', { result: { code: 'envelope_invalid', why: 'envelope member types' }, effects: [] });
   // The controls: the small form's own signature passes, and one in the one spelling that is not the
   // leaf's is still `chain_required` (§13.2).
   add('decide, small form from a pinned contact: its own sig', 'decide', { now, envelope: smallSpelt, node: { ...node, pins: pinned } });
@@ -629,14 +628,12 @@ export default function envelopes({ add, expect }, f) {
   // ── the objects inside a member (T9, F11, F12, F13, R20, R22, T8, S1-1) ─────────────────────────
   // Each was read through a zero value in one port and refused in the other's words (serde's, or
   // "decide input does not read" / "envelope members" for every fault). Both ports now read them by
-  // hand, in the contract's order, and name the member by its path. To `decide` they are the host's
-  // arguments (`bad_request`); to `open_result` the envelope is the peer's answer (`envelope_invalid`,
-  // its note), and only an absent one is the caller's omission (§0).
+  // hand, in the contract's order, and name the member by its path: to `decide` the node is the host's
+  // argument (`bad_request`). The envelope is the peer's to both functions, read by one reader (§13.1,
+  // SEP-0005, below), and only an absent one is the caller's omission (§0).
   const { sig: _sig, ...noSig } = sealed;
   const { endpoint: _endpoint, ...noEndpoint } = node;
   for (const [what, args, want] of [
-    ['an envelope with no sig', { now, envelope: noSig, node }, 'envelope.sig is required'],
-    ['an envelope that is not an object', { now, envelope: 'x', node }, 'envelope is required'],
     ['a node with no endpoint', { now, envelope: sealed, node: noEndpoint }, 'node.endpoint is required'],
     ['a node that is not an object', { now, envelope: sealed, node: 5 }, 'node is required'],
     ['a held key with no kid', { now, envelope: sealed, node: { ...node, keys: [{ leaf: leafDer, pkcs8: hostPkcs8 }] } }, 'node.keys[0].kid is required'],
@@ -649,6 +646,96 @@ export default function envelopes({ add, expect }, f) {
     add(`decide with ${what}`, 'decide', args);
     expect(`decide with ${what}`, { error: 'bad_request', why: want });
   }
+  // SEP-0005 — an envelope is exactly `protected`, `enc`, `ct` and `sig`, each a JSON string (§13.1 of
+  // the draft): anything else is `envelope_invalid` at step 1 of §13.3, a decision to `decide` and an
+  // error to `open_result`; names are compared byte for byte; a member written twice is read at its
+  // last occurrence and an earlier one is never read or judged; and step 1 reads all four spellings
+  // before the header is parsed or the key resolved. Each envelope goes to the port as TEXT, spliced
+  // into the arguments as written (RawArgs), so the port's own parse decides the repeated member. Each
+  // case carries the seed's answer (vectors/lib/envelope.mjs receive).
+  const ENV = '"<the envelope>"';
+  const asText = (args, text) => RawArgs.edit({ ...args, envelope: '<the envelope>' }, ENV, text);
+  const four = (e) => ({ protected: e.protected, enc: e.enc, ct: e.ct, sig: e.sig });
+  const sigsText = (e, ...sigs) => `{"protected":${JSON.stringify(e.protected)},"enc":${JSON.stringify(e.enc)},"ct":${JSON.stringify(e.ct)},${sigs.map((x) => `"sig":${x}`).join(',')}}`;
+  const without = (e, k) => { const o = four(e); delete o[k]; return JSON.stringify(o); };
+  const withM = (e, k, x) => JSON.stringify({ ...four(e), [k]: x });
+  const closedRefusals = (e) => [
+    ['a fifth member', withM(e, 'note', 'x'), 'envelope members'],
+    ['sig spelled SIG', (() => { const { sig, ...m } = four(e); return JSON.stringify({ ...m, SIG: sig }); })(), 'envelope members'],
+    ['Protected beside protected', withM(e, 'Protected', e.protected), 'envelope members'],
+    ['no sig', without(e, 'sig'), 'envelope members'],
+    ['no protected', without(e, 'protected'), 'envelope members'],
+    ['an empty object', '{}', 'envelope members'],
+    ['an array in place of the object', JSON.stringify(Object.values(four(e))), 'envelope members'],
+    ['a string in place of the object', '"x"', 'envelope members'],
+    ['a number in place of the object', '5', 'envelope members'],
+    ['a sig that is null', withM(e, 'sig', null), 'envelope member types'],
+    ['a sig that is a number', withM(e, 'sig', 5), 'envelope member types'],
+    ['an enc that is an object', withM(e, 'enc', {}), 'envelope member types'],
+    ['a ct that is a list', withM(e, 'ct', [e.ct]), 'envelope member types'],
+    ['a protected that is true', withM(e, 'protected', true), 'envelope member types'],
+    ['a fifth member and a sig that is null', JSON.stringify({ ...four(e), sig: null, note: 'x' }), 'envelope members'],
+    ['a sig that is not base64url', withM(e, 'sig', '!!!!'), 'sig is not base64url'],
+    ['a protected that is not JSON and a sig that is not base64url', JSON.stringify({ ...four(e), protected: b64url(Buffer.from('nope')), sig: '!!!!' }), 'sig is not base64url'],
+    ['a protected that is not JSON and an enc that is not base64url', JSON.stringify({ ...four(e), protected: b64url(Buffer.from('nope')), enc: '!!!!' }), 'does not open'],
+    ['the real sig and then AAAA', sigsText(e, JSON.stringify(e.sig), '"AAAA"'), null],
+  ];
+  const pinnedNodeArgs = { now, node: { ...node, pins: pinned } };
+  for (const [form, e] of [['chain form', sealed], ['small form', small]]) {
+    for (const [what, text, why] of closedRefusals(e)) {
+      const id = `decide, SEP-0005, ${form} from a pinned contact: ${what}`;
+      add(id, 'decide', asText(pinnedNodeArgs, text));
+      const failed = form === 'chain form' ? { code: 'envelope_invalid', why: 'signature is not the chain\'s leaf key' } : { code: 'chain_required' };
+      expect(id, { result: why ? { code: 'envelope_invalid', why } : failed, effects: [] });
+    }
+    // The controls: each member once, and the real `sig` last after an earlier one that is never read
+    // or judged — a string that is not the signature, a number, null.
+    for (const [what, text] of [
+      ['each member once', sigsText(e, JSON.stringify(e.sig))],
+      ['AAAA and then the real sig', sigsText(e, '"AAAA"', JSON.stringify(e.sig))],
+      ['5 and then the real sig', sigsText(e, '5', JSON.stringify(e.sig))],
+      ['null and then the real sig', sigsText(e, 'null', JSON.stringify(e.sig))],
+      ['a protected written twice, the real one last', `{"protected":"!!!!",${sigsText(e, JSON.stringify(e.sig)).slice(1)}`],
+    ]) {
+      const id = `decide, SEP-0005, ${form} from a pinned contact: ${what} (control)`;
+      add(id, 'decide', asText(pinnedNodeArgs, text));
+      expect(id, { code: 'ok', tier: 'contact', form: form === 'chain form' ? 'chain' : 'leaf' });
+    }
+  }
+  // Step 1 before the key is resolved: to a key the node once held, the real envelope is
+  // `certificate_renewed` and a misspelled or null member `envelope_invalid`, never the current chain.
+  const formerNode = { ...node, keys: [], former: [node.keys[0].kid] };
+  add('decide, SEP-0005: the real envelope to a former key (control)', 'decide', asText({ now, node: formerNode }, JSON.stringify(four(sealed))));
+  expect('decide, SEP-0005: the real envelope to a former key (control)', { code: 'certificate_renewed' });
+  for (const [what, x, why] of [['a sig that is not base64url', '!!!!', 'sig is not base64url'], ['a sig that is null', null, 'envelope member types'], ['an enc that is padded', `${sealed.enc}=`, 'does not open']]) {
+    const id = `decide, SEP-0005: an envelope to a former key with ${what}`;
+    add(id, 'decide', asText({ now, node: formerNode }, withM(sealed, what.includes('enc') ? 'enc' : 'sig', x)));
+    expect(id, { result: { code: 'envelope_invalid', why }, effects: [] });
+  }
+  // The host's own faults come first, whatever the envelope; an absent or null envelope is the host's
+  // omission (§0).
+  add('decide, SEP-0005: a fifth member and a now that does not read', 'decide', asText({ now: 'yesterday', node }, withM(sealed, 'note', 'x')));
+  expect('decide, SEP-0005: a fifth member and a now that does not read', { error: 'parse' });
+  add('decide, SEP-0005: a fifth member and a node with no endpoint', 'decide', asText({ now, node: noEndpoint }, withM(sealed, 'note', 'x')));
+  expect('decide, SEP-0005: a fifth member and a node with no endpoint', { error: 'bad_request', why: 'node.endpoint is required' });
+  add('decide, SEP-0005: an envelope that is null', 'decide', asText({ now, node }, 'null'));
+  expect('decide, SEP-0005: an envelope that is null', { error: 'bad_request', why: 'envelope is required' });
+  // `open_result` reads a result envelope by the same reader and the same step 1 (§13.2).
+  for (const [what, text, why] of closedRefusals(chainForm)) {
+    const id = `open_result, SEP-0005: ${what}`;
+    add(id, 'open_result', asText(open(null), text));
+    expect(id, { error: 'envelope_invalid', why: why ?? 'signature is not the chain\'s leaf key' });
+  }
+  for (const [what, text] of [
+    ['each member once', sigsText(chainForm, JSON.stringify(chainForm.sig))],
+    ['AAAA and then the real sig', sigsText(chainForm, '"AAAA"', JSON.stringify(chainForm.sig))],
+    ['5 and then the real sig', sigsText(chainForm, '5', JSON.stringify(chainForm.sig))],
+  ]) {
+    const id = `open_result, SEP-0005: ${what} (control)`;
+    add(id, 'open_result', asText(open(null), text));
+    expect(id, { ok: true, result: { ok: 1 } });
+  }
+
   // `accept_new_hosts` absent is `auto` (SPEC §5.3, the contract's NodeState): a pinned contact's chain
   // at another endpoint re-pins it, where the Go port read the zero value as `ask` and held it (T8).
   const { accept_new_hosts: _policy, ...unsaid } = node;
@@ -657,8 +744,8 @@ export default function envelopes({ add, expect }, f) {
   expect('decide on a contact at a new endpoint, the node saying no accept_new_hosts', { code: 'ok', tier: 'contact', endpoint: MOVED });
   const { ct: _ct, ...noCt } = chainForm;
   for (const [what, args, want] of [
-    ['an envelope with no ct', open(noCt), { error: 'envelope_invalid', why: 'envelope.ct is required' }],
-    ['an envelope that is not an object', open('x'), { error: 'envelope_invalid', why: 'envelope is required' }],
+    ['an envelope with no ct', open(noCt), { error: 'envelope_invalid', why: 'envelope members' }],
+    ['an envelope that is not an object', open('x'), { error: 'envelope_invalid', why: 'envelope members' }],
     ['a pin with no root', open(leafForm, { pins: [{ endpoint: ENDPOINT, leaf: leafDer }] }), { error: 'bad_request', why: 'pins[0].root is required' }],
     ['a pin whose root is not a string', open(leafForm, { pins: [{ root: 5, endpoint: ENDPOINT, leaf: leafDer }] }), { error: 'bad_request', why: 'pins[0].root is required' }],
     ['a pin that is not an object', open(leafForm, { pins: ['x'] }), { error: 'bad_request', why: 'pins[0] is required' }],

@@ -6,10 +6,12 @@ use crate::hpke::{self, suite_for, Suite};
 use crate::keys::{PrivateKey, PublicKey, Signer};
 use crate::util::{b64u, err, from_b64u, wire_b64u, Error, Result};
 use crate::x509::{self, compare_leaves, parse, validate_chain, ChainResult};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{json, Map, Value};
 
 pub const HEADER_MEMBERS: &str = "cty,exp,kid,msg_id,suite,ts,v";
+/// The four members of an envelope, sorted and joined as `Wire::read` compares them (§13.1).
+pub const ENVELOPE_MEMBERS: &str = "ct,enc,protected,sig";
 pub const SKEW_S: i64 = 300;
 /// §13.1: `exp − ts` is at most 30 days, so no receiver is asked to remember a msg_id for ever.
 pub const MAX_LIFETIME_S: i64 = 30 * 86_400;
@@ -90,8 +92,9 @@ pub fn thread_id_refusal(tool: Option<&str>, args: &Value) -> Option<(&'static s
     }
 }
 
-/// The four wire members.
-#[derive(Serialize, Deserialize, Clone, Debug)]
+/// The four wire members, read only by `Wire::read` (state.rs), which holds §13.1. No `Deserialize`:
+/// a derived one takes a fifth member, and refuses on raw text a member written twice.
+#[derive(Serialize, Clone, Debug)]
 pub struct Wire {
     pub protected: String,
     pub enc: String,
@@ -244,11 +247,28 @@ fn members(v: &Value) -> String {
     }
 }
 
-fn decode_header(protected: &str) -> Result<(Vec<u8>, Map<String, Value>)> {
-    let aad = wire_b64u(protected).map_err(|_| Error::new("envelope_invalid", "protected is not JSON"))?;
-    let h: Value = serde_json::from_slice(&aad).map_err(|_| Error::new("envelope_invalid", "protected is not JSON"))?;
-    match h {
-        Value::Object(o) => Ok((aad, o)),
+/// The four members decoded: `protected` (the AAD), `enc`, `ct` and `sig`.
+struct Members {
+    aad: Vec<u8>,
+    enc: Vec<u8>,
+    ct: Vec<u8>,
+    sig: Vec<u8>,
+}
+
+/// Step 1 of §13.3, for a request and a result alike: each member in its one spelling (§13.1), in the
+/// seed's order, before the header is read or a key resolved. An empty `sig` is the one spelling of
+/// zero bytes, and fails later as a signature (§13.3 step 7).
+fn read_members(e: &Wire) -> Result<Members> {
+    let refuse = |why: &str| Error::new("envelope_invalid", why);
+    let aad = wire_b64u(&e.protected).map_err(|_| refuse("protected is not JSON"))?;
+    let (Ok(enc), Ok(ct)) = (wire_b64u(&e.enc), wire_b64u(&e.ct)) else { return Err(refuse("does not open")) };
+    let sig = wire_b64u(&e.sig).map_err(|_| refuse("sig is not base64url"))?;
+    Ok(Members { aad, enc, ct, sig })
+}
+
+fn header_of(aad: &[u8]) -> Result<Map<String, Value>> {
+    match serde_json::from_slice(aad) {
+        Ok(Value::Object(o)) => Ok(o),
         _ => err("envelope_invalid", "protected is not JSON"),
     }
 }
@@ -342,7 +362,8 @@ pub fn open_result(a: OpenResultArgs<'_>) -> Result<Value> {
         state::host_pin(&p.root, &p.state, p.leaf_fingerprint.as_deref(), &format!("pins[{i}]"))?;
     }
     let invalid = |why: &str| err::<Value>("envelope_invalid", why);
-    let (aad, h) = decode_header(&a.envelope.protected)?;
+    let Members { aad, enc, ct, sig } = read_members(a.envelope)?;
+    let h = header_of(&aad)?;
     let suite = header_checks(&h)?;
     let me = a.my_public;
     if h.get("kid").and_then(|k| k.as_str()) != Some(&me.fingerprint()) {
@@ -366,12 +387,9 @@ pub fn open_result(a: OpenResultArgs<'_>) -> Result<Value> {
         },
         _ => return invalid("outside the time window"),
     }
-    let enc = wire_b64u(&a.envelope.enc).map_err(|_| Error::new("envelope_invalid", "does not open"))?;
-    let ct = wire_b64u(&a.envelope.ct).map_err(|_| Error::new("envelope_invalid", "does not open"))?;
     if enc.len() != suite.npk() {
         return err("envelope_invalid", "encapsulated key is not the suite's length");
     }
-    let sig = wire_b64u(&a.envelope.sig).map_err(|_| Error::new("envelope_invalid", "signature"))?;
     let plaintext =
         hpke::open(suite, a.my_key, a.my_public, INFO, &aad, &enc, &ct).map_err(|_| Error::new("envelope_invalid", "does not open"))?;
     let body: Value = serde_json::from_slice(&plaintext).map_err(|_| Error::new("envelope_invalid", "does not open"))?;

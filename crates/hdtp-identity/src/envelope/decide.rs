@@ -2,14 +2,14 @@
 //! the host supplies (`state.rs`). `envelope.mjs receive()` is its specification, line for line.
 use super::state::{host_roots, DecideInput, DecideOutput, NodeState};
 use super::{
-    chain_of, decode_header, header_checks, members, pin_holding, thread_id_refusal, timing, Timing, CLAIM_WINDOW_S, CTY_CALL, GUEST_TOOLS,
-    INFO, PENDING_TOOLS, TOMBSTONE_S,
+    chain_of, header_checks, header_of, members, pin_holding, read_members, thread_id_refusal, timing, Timing, CLAIM_WINDOW_S, CTY_CALL,
+    GUEST_TOOLS, INFO, PENDING_TOOLS, TOMBSTONE_S,
 };
 use crate::card;
 use crate::hpke::{self, suite_for};
 use crate::keys::PrivateKey;
 use crate::time::{format_rfc3339, parse_rfc3339};
-use crate::util::{b64u, from_b64u, wire_b64u, Result};
+use crate::util::{b64u, from_b64u, Result};
 use crate::x509::{compare_leaves, parse, validate_chain, ChainResult};
 use serde_json::{json, Map, Value};
 use zeroize::Zeroizing;
@@ -63,8 +63,12 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
     let now = parse_rfc3339(&input.now)?;
     let e = &input.envelope;
 
-    let (aad, h) = match decode_header(&e.protected) {
-        Ok(x) => x,
+    let (aad, enc, ct, sig) = match read_members(e) {
+        Ok(m) => (m.aad, m.enc, m.ct, m.sig),
+        Err(refused) => return Ok(invalid(&refused.why)),
+    };
+    let h = match header_of(&aad) {
+        Ok(h) => h,
         Err(_) => return Ok(invalid("protected is not JSON")),
     };
     let suite = match header_checks(&h) {
@@ -99,17 +103,12 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
     }
     let key = PrivateKey::from_pkcs8(&Zeroizing::new(from_b64u(&held.pkcs8)?))?;
 
-    let (Ok(enc), Ok(ct)) = (wire_b64u(&e.enc), wire_b64u(&e.ct)) else { return Ok(invalid("does not open")) };
     // `sig` covers the three members concatenated with nothing between them, so the suite's own `enc`
     // length is what fixes the boundary: without it a byte moved from `enc` into `ct` leaves the
     // signed bytes identical.
     if enc.len() != suite.npk() {
         return Ok(invalid("encapsulated key is not the suite's length"));
     }
-    // Read before the form decides anything, so the small form cannot answer `chain_required` to a
-    // `sig` the chain form refuses: a member in any other spelling is refused (§13.1). An empty `sig`
-    // is the one spelling of zero bytes, and fails as a signature (§13.3 step 7).
-    let Ok(sig) = wire_b64u(&e.sig) else { return Ok(invalid("sig is not base64url")) };
     let body: Value =
         match hpke::open(suite, &key, &held_leaf.public_key, INFO, &aad, &enc, &ct).ok().and_then(|p| serde_json::from_slice(&p).ok()) {
             Some(b) => b,

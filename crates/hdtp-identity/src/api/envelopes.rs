@@ -88,12 +88,11 @@ pub(super) fn seal_result(a: &Value) -> Result<Value> {
 
 pub(super) fn open_result(a: &Value) -> Result<Value> {
     Ok({
-        // Absent is the caller's omission (CONTRACT §0, `envelope is required`); present, every refusal
-        // of the envelope is `envelope_invalid`, and names the member that is not there (T9, F12,
-        // S1-1): it answered "envelope members" for all five faults, and the Go port five ways.
+        // Absent is the caller's omission (CONTRACT §0, `envelope is required`); present, it is read as
+        // `decide` reads one (§13.1), and every refusal of it is `envelope_invalid`.
         let wire = match a.get("envelope").filter(|v| !v.is_null()) {
             None => return err("bad_request", "envelope is required"),
-            Some(v) => Wire::read(v).map_err(|e| Error::new("envelope_invalid", e.why))?,
+            Some(v) => Wire::read(v)?,
         };
         let key = private(a, "my_pkcs8")?;
         let me = public(a, "my_spki")?;
@@ -126,9 +125,16 @@ pub(super) fn follow_renewed(a: &Value) -> Result<Value> {
     ))
 }
 
+/// An envelope the reader refuses (§13.1, `envelope_invalid` and only that) is step 1 of §13.3 failing:
+/// a decision, as every later step's refusal is, and not an error of the call.
 pub(super) fn decide(a: &Value) -> Result<Value> {
-    let input = DecideInput::read(a)?;
-    serde_json::to_value(envelope::decide(&input)?).map_err(|_| Error::new("internal", crate::util::UNSERIALISABLE))
+    let out = match DecideInput::read(a) {
+        Err(e) if e.code == "envelope_invalid" => {
+            envelope::DecideOutput { result: json!({ "code": e.code, "why": e.why }), effects: Vec::new() }
+        }
+        input => envelope::decide(&input?)?,
+    };
+    serde_json::to_value(out).map_err(|_| Error::new("internal", crate::util::UNSERIALISABLE))
 }
 
 /// A chain proven at the TLS layer, decided by the pins (`envelope::decide_chain`). Read as `decide`

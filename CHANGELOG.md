@@ -10,6 +10,43 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+- **What a host changes.** `decide` answers an envelope that is not exactly `protected`, `enc`, `ct`
+  and `sig`, each a JSON string, as a decision, `{"result": {"code": "envelope_invalid", "why":
+  "envelope members" | "envelope member types"}, "effects": []}`, where it failed the call
+  (`bad_request`, `envelope.sig is required`) or, for a fifth member, read past it. `open_result`
+  answers the same envelopes `envelope_invalid` in the same words (it named the member,
+  `envelope.ct is required`, and read past a fifth one), and a `sig` that does not read `sig is not
+  base64url` (it said `signature`). An absent or null `envelope` is still `bad_request` `envelope is
+  required`. A Go host that decodes an `Envelope` with `encoding/json` gets the same refusals as the
+  decode's error. Each is described below.
+
+- **An envelope is exactly four members, each a string (SEP-0005, SPEC §13.1 of the draft).** Both
+  ports read an envelope by one reader, for `decide` and `open_result` alike (`Wire::read` in Rust,
+  `envelopeOf` in Go): not an object, a member absent or any other member is `envelope members`; a
+  member that is not a string, null included, `envelope member types`. Names are compared byte for
+  byte. A member written twice is read at its last occurrence and an earlier one is never read or
+  judged: both ports' parse of the arguments keeps the last (a `serde_json` map, a Go map), and a test
+  in each measures it. Rust's `Wire` no longer derives `Deserialize` (a derive takes a fifth member,
+  and on raw text refuses a repeated one), and the `hdtp` CLI's live battery reads an answer's
+  envelope by `Wire::read`; Go's `Envelope` gains an `UnmarshalJSON` that is `envelopeOf`, because
+  `encoding/json`'s struct decode matches names without regard to case and takes a fifth member. The
+  arguments' text as a whole is still held to CONTRACT §0's boundary rules wherever in it they occur,
+  an earlier occurrence included. This changes what a host built on this library accepts: an envelope
+  from a 1.0 sender carrying anything but the four string members is refused.
+
+- **Step 1 reads all four spellings before the key is resolved (SPEC §13.3 of the draft).** `decide`
+  and `open_result` read `protected`, then `enc` and `ct`, then `sig` in their one spelling before the
+  header is parsed, so an envelope with a misspelled member sealed to a former key is
+  `envelope_invalid`, not `certificate_renewed`, and a header that is not JSON beside a `sig` that does
+  not read is refused for the `sig`. One function per port does it for both (`read_members`,
+  `readMembers`). `js/intrude.mjs` runs the seed's 12 new `envelope` scenarios by their names on both
+  ports, each envelope spliced as text into `decide`'s arguments (192 of 192 agree with the seed of
+  hdtp-spec #63), and `js/cases/envelopes.mjs` holds both ports to the seed's answers for each refusal
+  and each last-occurrence control, as text.
+
+- SEP-0005's MUSTs are in the specification's draft; `js/musts.json` and PROOFS.md's MUST table read
+  1.0.0 and do not register them yet.
+
 ## 0.8.2 — 2026-10-11
 
 - **What a host changes.** `export_read_messages` requires

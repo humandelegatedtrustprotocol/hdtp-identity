@@ -40,7 +40,9 @@ the node uses it. `go doc ./...` lists it; by concern:
 - Cards and refresh: `EncodeCard`, `DecodeCard`, `RefreshCheck` (`card.go`, `refresh.go`).
 - Envelopes: `SuiteForKey`, `Seal`, `Open`, `SealRequest`, `SealResult`, `OpenResult`,
   `FollowRenewed`, `Decide`, `DecideChain`, with `Envelope`, `NodeState`, `Pin` and `Decision`
-  (`envelope.go`, `hpke.go`).
+  (`envelope.go`, `hpke.go`). An `Envelope` decoded with `encoding/json` is read by SPEC §13.1's
+  rule (its `UnmarshalJSON`): exactly the four members, each a string, names byte for byte, a
+  repeated member at its last occurrence.
 - Vault and wallet: `VaultSeal`, `VaultOpenDoc`, `CheckFile`, `CheckRecord`, `WalletIssue`,
   `LedgerCheck`, `ReadLedger` (`vault.go`, `ledger.go`).
 - The export: `ReadExportZip` and `WriteExportZip` over `archive/zip`, plus the contract's

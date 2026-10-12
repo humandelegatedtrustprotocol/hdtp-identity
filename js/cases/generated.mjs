@@ -149,9 +149,9 @@ export function undeclaredAt(args, path) {
 export const READ_FOR_WHAT_IT_NEEDS = new Set([
   'refresh_check pin', 'refresh_check answer',
   'seal_request params', 'seal_result result', 'vault_seal plaintext',
-  'open_result envelope', 'open_result pins.0',
+  'open_result pins.0',
   'follow_renewed answer', 'follow_renewed answer.data',
-  'decide envelope', 'decide node', 'decide node.keys.0', 'decide node.pins.0',
+  'decide node', 'decide node.keys.0', 'decide node.pins.0',
   'decide_chain node', 'decide_chain node.keys.0', 'decide_chain node.pins.0',
   'export_read directory.0', 'export_write media.0', 'export_merge held.0', 'export_merge rows.0',
 ]);

@@ -4,6 +4,7 @@
 import { createPublicKey } from 'node:crypto';
 import { b64url, fromB64url, pkcs8Of, spkiOf, fingerprint } from '../../hdtp-spec/vectors/lib/keys.mjs';
 import { parse } from '../../hdtp-spec/vectors/lib/x509.mjs';
+import { RawArgs } from './port.mjs';
 
 const iso = (d) => new Date(d).toISOString();
 
@@ -55,21 +56,31 @@ export function makeDefender(port) {
     const p = node.pins.get(root);
     if (p) { node.tombstones.set(root, { leafDer: p.leafDer, at: node.now }); node.pins.delete(root); }
   }
+  // `decide`'s arguments for `node`, with `envelope` as given.
+  const decideArgs = (node, envelope, siblings) => ({
+    now: iso(node.now),
+    envelope,
+    node: {
+      endpoint: node.endpoint, accept_new_hosts: node.acceptNewHosts, chain: node.chain.map(b64url),
+      keys: node.keys.map((k) => ({ kid: k.kid, leaf: b64url(k.leafDer), pkcs8: b64url(pkcs8Of(k.key.priv)), current: k.current })),
+      former: [...node.former], sibling_kids: siblings.flatMap((s) => s.keys.map((k) => k.kid)),
+      pins: [...node.pins].map(([root, p]) => ({ root, endpoint: p.endpoint, leaf: b64url(p.leafDer), state: p.state })),
+      tombstones: [...node.tombstones].map(([root, t]) => ({ root, leaf: b64url(t.leafDer), at: iso(t.at) })),
+      former_endpoints: node.formerEndpoints.map((f) => ({ root: f.root, endpoint: f.endpoint, at: iso(f.at) })),
+      seen: [...node.seen],
+    },
+  });
   function receive(node, envelope, { siblings = [] } = {}) {
-    const input = {
-      now: iso(node.now),
-      envelope: { protected: envelope.protected, enc: envelope.enc, ct: envelope.ct, sig: envelope.sig },
-      node: {
-        endpoint: node.endpoint, accept_new_hosts: node.acceptNewHosts, chain: node.chain.map(b64url),
-        keys: node.keys.map((k) => ({ kid: k.kid, leaf: b64url(k.leafDer), pkcs8: b64url(pkcs8Of(k.key.priv)), current: k.current })),
-        former: [...node.former], sibling_kids: siblings.flatMap((s) => s.keys.map((k) => k.kid)),
-        pins: [...node.pins].map(([root, p]) => ({ root, endpoint: p.endpoint, leaf: b64url(p.leafDer), state: p.state })),
-        tombstones: [...node.tombstones].map(([root, t]) => ({ root, leaf: b64url(t.leafDer), at: iso(t.at) })),
-        former_endpoints: node.formerEndpoints.map((f) => ({ root: f.root, endpoint: f.endpoint, at: iso(f.at) })),
-        seen: [...node.seen],
-      },
-    };
-    const out = must(call('decide', input));
+    return apply(node, call('decide', decideArgs(node, { protected: envelope.protected, enc: envelope.enc, ct: envelope.ct, sig: envelope.sig }, siblings)));
+  }
+  // The envelope as it arrives: JSON text, spliced into `decide`'s arguments as it is written, so the
+  // port reads it — a member written twice, a fifth one, one of another type — and not this harness.
+  function receiveText(node, text, { siblings = [] } = {}) {
+    const PLACE = '"<the envelope>"';
+    return apply(node, call('decide', RawArgs.edit(decideArgs(node, '<the envelope>', siblings), PLACE, text)));
+  }
+  function apply(node, answer) {
+    const out = must(answer);
     for (const e of out.effects) {
       switch (e.op) {
         case 'seen': node.seen.add(e.msg_id); break;
@@ -85,5 +96,5 @@ export function makeDefender(port) {
     return r;
   }
 
-  return { validateChain, open, seal, sealDeterministic, decodeCard, compareLeaves, parseCert, verify, followRenewed, makeNode, renew, forgetKeysPast, pin, removeContact, receive, call };
+  return { validateChain, open, seal, sealDeterministic, decodeCard, compareLeaves, parseCert, verify, followRenewed, makeNode, renew, forgetKeysPast, pin, removeContact, receive, receiveText, call };
 }

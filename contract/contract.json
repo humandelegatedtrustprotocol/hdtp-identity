@@ -96,16 +96,7 @@
       "description": "A sealed envelope: its four members (SPEC §13.1)."
     },
     "ArrivedEnvelope": {
-      "type": "object",
-      "properties": {
-        "protected": { "type": "string" },
-        "enc": { "type": "string" },
-        "ct": { "type": "string" },
-        "sig": { "type": "string" }
-      },
-      "required": ["protected", "enc", "ct", "sig"],
-      "additionalProperties": false,
-      "description": "An envelope as it ARRIVED: four strings, which may be anything. Judging their spelling is the function's work, not the caller's."
+      "description": "An envelope as it ARRIVED, whatever JSON value that is: judging it is the function's work, not the caller's. It is read by the rule of SPEC §13.1 (SEP-0005), the same in `decide` and `open_result`: an object of exactly `protected`, `enc`, `ct` and `sig`, names compared byte for byte, a member written twice read at its last occurrence and an earlier one never read; anything else is `envelope_invalid`, `envelope members` (not an object, a member absent, any other member) or `envelope member types` (a member that is not a string, null included). Then step 1 of §13.3 reads each member in its one spelling, in this order, before the header is parsed or a key resolved: `protected` (`protected is not JSON`), `enc` and `ct` (`does not open`), `sig` (`sig is not base64url`)."
     },
     "Certificate": {
       "type": "object",
@@ -1740,7 +1731,7 @@
         "additionalProperties": false
       },
       "errors": ["bad_request", "envelope_invalid", "parse", "unsupported"],
-      "notes": "The caller side of §13.2: opens, requires `result` xor `error` plus one of `chain`/`leaf`, validates the chain to `expected_root` and `expected_endpoint` or finds the named leaf among `pins`, refuses a superseded leaf, verifies `sig`, checks `cty` and `msg_id`. Every refusal of the ENVELOPE is `{\"error\": \"envelope_invalid\", \"why\"}`. `leaf_update` is a leaf newer than the pin, for the host to store. An absent or null `envelope` is the caller's omission, `bad_request` `envelope is required` (CONTRACT §0); a present one is read for its four members in order (`protected`, `enc`, `ct`, `sig`), and one that is not an object, or lacks a member or holds one that is not a string, is `envelope_invalid` naming it (`envelope is required`, `envelope.sig is required`). `pins` absent or null is none; a pin is read for `root`, `endpoint`, `leaf`, `state` and `leaf_fingerprint` in that order, and one that is not an object or lacks a required member, or holds one of the wrong type, is `bad_request` naming it by its path (`pins[0] is required`, `pins[0].root is required`), and a `root` that is not a fingerprint is `pins[<i>].root is not a fingerprint`, a `state` other than the three `pins[<i>].state is active, pending_out or blocked`, and a `leaf_fingerprint` that is not a fingerprint `pins[<i>].leaf_fingerprint is not a fingerprint`, as a node's pin is. A chain in the plaintext with a member that is not a string, or does not read as base64url, is `envelope_invalid` `plaintext shape`, as in `decide`. The first pin for the chain's root is the one read, as `decide` reads a node's pins; a pin whose leaf does not read is an error of the call in its reader's class (`parse`; `unsupported` for a key outside the profile), never `superseded leaf`."
+      "notes": "The caller side of §13.2: opens, requires `result` xor `error` plus one of `chain`/`leaf`, validates the chain to `expected_root` and `expected_endpoint` or finds the named leaf among `pins`, refuses a superseded leaf, verifies `sig`, checks `cty` and `msg_id`. Every refusal of the ENVELOPE is `{\"error\": \"envelope_invalid\", \"why\"}`. `leaf_update` is a leaf newer than the pin, for the host to store. An absent or null `envelope` is the caller's omission, `bad_request` `envelope is required` (CONTRACT §0); a present one is read as `ArrivedEnvelope` says, and each of its refusals is `envelope_invalid`. `pins` absent or null is none; a pin is read for `root`, `endpoint`, `leaf`, `state` and `leaf_fingerprint` in that order, and one that is not an object or lacks a required member, or holds one of the wrong type, is `bad_request` naming it by its path (`pins[0] is required`, `pins[0].root is required`), and a `root` that is not a fingerprint is `pins[<i>].root is not a fingerprint`, a `state` other than the three `pins[<i>].state is active, pending_out or blocked`, and a `leaf_fingerprint` that is not a fingerprint `pins[<i>].leaf_fingerprint is not a fingerprint`, as a node's pin is. A chain in the plaintext with a member that is not a string, or does not read as base64url, is `envelope_invalid` `plaintext shape`, as in `decide`. The first pin for the chain's root is the one read, as `decide` reads a node's pins; a pin whose leaf does not read is an error of the call in its reader's class (`parse`; `unsupported` for a key outside the profile), never `superseded leaf`."
     },
     "follow_renewed": {
       "section": "envelopes",

@@ -198,13 +198,25 @@ a character outside the alphabet, padding, whitespace, the standard alphabet's `
 character with a spare bit set — because `sig` covers the DECODED bytes and every spelling a reader
 forgives is another envelope that verifies. This is NOT the rule for an argument a caller hands the
 boundary (§0), which stays forgiving about padding and alphabet; it is the rule for what travels.
-An unreadable `protected` is `protected is not JSON`, `enc` or `ct` is `does not open`. `decide`
-refuses a `sig` that does not read (`sig is not base64url`) after the `kid` and the suite and before
-the open, so the small form refuses it as the chain form does and never answers it `chain_required`;
-`open_result` refuses one that does not read as `signature`. An empty `sig` reads (the one spelling of
-zero bytes) and fails as a signature: `chain_required` in the small form, `signature is not the
-chain's leaf key` in the chain form (SPEC §13.3 step 7). A host that reads the wire into a struct
-cannot tell an absent or null `sig` from an empty one, so it checks presence itself.
+Both read all four at step 1 of §13.3, in this order, before the header is parsed or a key resolved:
+an unreadable `protected` is `protected is not JSON`, `enc` or `ct` `does not open`, `sig` `sig is not
+base64url`. So the small form refuses a `sig` as the chain form does and never answers it
+`chain_required`, and an envelope with a misspelled member sealed to a former key is `envelope_invalid`,
+never `certificate_renewed`. An empty `sig` reads (the one spelling of zero bytes) and fails as a
+signature: `chain_required` in the small form, `signature is not the chain's leaf key` in the chain
+form (SPEC §13.3 step 7).
+
+**An envelope is exactly four members, each a string** (SPEC §13.1 of the draft, SEP-0005). `decide`
+and `open_result` read an envelope by one reader (`Wire::read` in Rust, `envelopeOf` in Go, which an
+`Envelope`'s `UnmarshalJSON` also uses): anything but an object of exactly `protected`, `enc`, `ct` and
+`sig` is `envelope_invalid` `envelope members` — not an object, a member absent, any other member — and
+a member that is not a string, null included, `envelope member types`. Names are compared byte for
+byte: `SIG` is not `sig`, and Go's struct decode, which matches names without regard to case, never
+reads one. A member written twice is read at its last occurrence and an earlier one is never read or
+judged, which is what both ports' parse of the arguments does (a `serde_json` map and a Go map keep the
+last); Rust's `Wire` derives no `Deserialize`, which would refuse a repeated member on raw text. The
+arguments' text as a whole is still held to §0's boundary rules (a lone surrogate, a number past a
+double, nesting past the limit), wherever in it they occur.
 
 **A pin MAY say which leaf it holds** (`leaf_fingerprint`). A small-form envelope names a leaf, and
 finding the pin that holds it meant parsing every pinned leaf, for a sender who has proved nothing.
@@ -229,9 +241,12 @@ effects the host must apply. `envelope.mjs receive()` is its specification, line
 
 Its arguments are the host's, decoded by the host, so a fault in them fails the call (`bad_request`)
 and is never a decision about the peer: `node`, `envelope` and `now` absent or null, in that order
-(`<name> is required`); then the node read whole as `NodeState` says, then the envelope's four
-members in order, each named by its path when it is absent, null or not the type it is
-(`node.pins[0].leaf is required`, `envelope.sig is required`); then `now`.
+(`<name> is required`); then the node read whole as `NodeState` says, each member named by its path
+when it is absent, null or not the type it is (`node.pins[0].leaf is required`); then `now`. A present
+envelope is the peer's: one the reader refuses (`ArrivedEnvelope`, SPEC §13.1) is step 1 of §13.3
+failing, answered as a decision, `{"result": {"code": "envelope_invalid", "why": "envelope members"
+| "envelope member types"}, "effects": []}` — once the node and `now` have been read, so a host's own
+fault is its answer whatever the envelope.
 
 Input:
 
@@ -291,11 +306,11 @@ contact's `send_message`, `send_media` or `book_slot` whose `thread_id` is of ne
 `seen`; and `{"code": "ok", "replayed": true}` for a seen `msg_id`.
 The `why` strings are the seed's, verbatim, so the intrusion suite reads both ports alike.
 
-Order, as `receive()` has it (freshness also refuses `exp − ts` over 30 days, §13.1, as `exp too far from ts`): decode `protected` → header members exactly `cty,exp,kid,msg_id,suite,ts,v`
+Order, as `receive()` has it (freshness also refuses `exp − ts` over 30 days, §13.1, as `exp too far from ts`): the envelope's four string members (§13.1) → each member's one spelling: `protected`, then `enc` and `ct`, then `sig` (`sig is not base64url`) → parse the header → header members exactly `cty,exp,kid,msg_id,suite,ts,v`
 → their types (`v`, `ts`, `exp` integers, the rest strings, else `header member types`)
-→ `v` = 2 and a known suite → `kid` held (current, or superseded and not past `notAfter`), else a
+→ `v` = 1 and a known suite → `kid` held (current, or superseded and not past `notAfter`), else a
 sibling's → `envelope_invalid`, a former → `certificate_renewed`, unknown → `envelope_invalid` → suite
-fits the held leaf's key → `enc` is exactly the suite's `Npk`, 65 or 32 (`encapsulated key is not the suite's length`: `sig` covers the three members concatenated, so the length is what fixes the boundary) → `sig` base64url in the one spelling (`sig is not base64url`) → HPKE open → plaintext members exactly `chain,method,params` or
+fits the held leaf's key → `enc` is exactly the suite's `Npk`, 65 or 32 (`encapsulated key is not the suite's length`: `sig` covers the three members concatenated, so the length is what fixes the boundary) → HPKE open → plaintext members exactly `chain,method,params` or
 `leaf,method,params`, method `tools/call` or `tools/list` → **small form**: leaf fingerprint matched
 against pins not blocked, the held leaf within validity, `sig` verifies, else `chain_required` in every
 case; then freshness (`cty` is a call, `now < exp`, `|now − ts| ≤ 300 s`, non-empty `msg_id`, replay) →
