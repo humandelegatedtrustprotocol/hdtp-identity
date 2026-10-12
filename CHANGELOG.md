@@ -18,7 +18,10 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   `envelope.ct is required`, and read past a fifth one), and a `sig` that does not read `sig is not
   base64url` (it said `signature`). An absent or null `envelope` is still `bad_request` `envelope is
   required`. A Go host that decodes an `Envelope` with `encoding/json` gets the same refusals as the
-  decode's error. Each is described below.
+  decode's error. A Rust host: `envelope::Wire` no longer implements `Deserialize` (read one with
+  `Wire::read`), and `DecideInput::read` refuses such an envelope with `envelope_invalid` where it
+  answered `bad_request`; a caller of it answers that refusal as `decide`'s decision, as the boundary
+  does. Each is described below.
 
 - **An envelope is exactly four members, each a string (SEP-0005, SPEC §13.1 of the draft).** Both
   ports read an envelope by one reader, for `decide` and `open_result` alike (`Wire::read` in Rust,
