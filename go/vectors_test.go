@@ -608,9 +608,8 @@ func TestDecideOnVectors(t *testing.T) {
 // A `sig` not in the one spelling (§13.1) is `envelope_invalid` before the form decides anything.
 // The small form from a pinned contact answered `chain_required` to every one of them, while the
 // chain form refused them: the same envelope, two answers, by form alone. An empty `sig` is the one
-// spelling of zero bytes and fails as a signature (§13.3 step 7). An Envelope cannot see presence: a
-// host that reads the wire into one gets "" for a `sig` that is absent or null, and Decide answers
-// those as the empty one, so a host checks presence itself before it calls Decide.
+// spelling of zero bytes and fails as a signature (§13.3 step 7). Absent or null never becomes one: an
+// Envelope is read from JSON by envelopeOf (UnmarshalJSON), which refuses both (§13.1).
 func TestASigNotInTheOneSpellingIsRefusedInEitherForm(t *testing.T) {
 	v := loadVectors(t)
 	now := mustTime(t, v.Now)
@@ -659,17 +658,24 @@ func TestASigNotInTheOneSpellingIsRefusedInEitherForm(t *testing.T) {
 			}
 		}
 	}
-	// Empty, and absent or null as an Envelope reads them: a signature that does not verify, answered
-	// as the form answers one (§13.2) — never a refusal of the spelling.
+	// Empty: a signature that does not verify, answered as the form answers one (§13.2), never a
+	// refusal of the spelling. Absent or null does not read as an Envelope at all.
 	for _, form := range []struct{ name, envelope, code, why string }{
 		{"chain", "alina-to-bharat", "envelope_invalid", "signature is not the chain's leaf key"},
 		{"small", "alina-to-bharat-by-reference", "chain_required", ""},
 	} {
 		e := envOf(form.envelope)
+		for _, raw := range []struct{ what, json, why string }{
+			{"absent", fmt.Sprintf(`{"protected":%q,"enc":%q,"ct":%q}`, e.Protected, e.Enc, e.Ct), "envelope members"},
+			{"null", fmt.Sprintf(`{"protected":%q,"enc":%q,"ct":%q,"sig":null}`, e.Protected, e.Enc, e.Ct), "envelope member types"},
+		} {
+			var read Envelope
+			if err := json.Unmarshal([]byte(raw.json), &read); err == nil || err.Error() != raw.why {
+				t.Errorf("%s form, sig %s, read as an Envelope: %v, want %s", form.name, raw.what, err, raw.why)
+			}
+		}
 		for _, raw := range []struct{ what, json string }{
 			{"empty", fmt.Sprintf(`{"protected":%q,"enc":%q,"ct":%q,"sig":""}`, e.Protected, e.Enc, e.Ct)},
-			{"absent, as an Envelope reads it", fmt.Sprintf(`{"protected":%q,"enc":%q,"ct":%q}`, e.Protected, e.Enc, e.Ct)},
-			{"null, as an Envelope reads it", fmt.Sprintf(`{"protected":%q,"enc":%q,"ct":%q,"sig":null}`, e.Protected, e.Enc, e.Ct)},
 		} {
 			var read Envelope
 			if err := json.Unmarshal([]byte(raw.json), &read); err != nil {
@@ -798,4 +804,185 @@ func TestSpecVersionIsTheDocumentsOwn(t *testing.T) {
 		}
 	}
 	t.Fatal("the specification has no version line")
+}
+
+// sigText is an envelope's four members as JSON text, `sig` written as each of sigs in turn: text,
+// because a decoded value cannot hold a member written twice.
+func sigText(protected, enc, ct string, sigs ...string) string {
+	members := make([]string, 0, len(sigs))
+	for _, s := range sigs {
+		members = append(members, `"sig":`+s)
+	}
+	return fmt.Sprintf(`{"protected":%q,"enc":%q,"ct":%q,%s}`, protected, enc, ct, strings.Join(members, ","))
+}
+
+// callWithEnvelope is Call's answer to fn with envelope spliced into rest as it is written.
+func callWithEnvelope(t *testing.T, fn string, rest map[string]any, envelope string) map[string]any {
+	t.Helper()
+	r := string(mustJSON(rest))
+	var out map[string]any
+	if err := json.Unmarshal(Call(fn, json.RawMessage(`{"envelope":`+envelope+`,`+r[1:])), &out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// withMember is e's four members with k set to x (x nil removes it), as JSON text.
+func withMember(e Envelope, k string, x any, remove bool) string {
+	o := map[string]any{"protected": e.Protected, "enc": e.Enc, "ct": e.Ct, "sig": e.Sig}
+	if remove {
+		delete(o, k)
+	} else {
+		o[k] = x
+	}
+	return string(mustJSON(o))
+}
+
+// A member written twice reaches this port's readers at its last occurrence, and is never refused:
+// encoding/json's decode into a map keeps the last. What envelopeOf relies on for §13.1, measured so
+// it cannot move under it.
+func TestARepeatedMemberIsReadAtItsLastOccurrence(t *testing.T) {
+	v, err := decodeJSON([]byte(`{"sig":5,"sig":"real"}`))
+	if err != nil || fmt.Sprint(v) != "map[sig:real]" {
+		t.Errorf("%v %v", v, err)
+	}
+	var e Envelope
+	if err := json.Unmarshal([]byte(`{"protected":"p","enc":"e","ct":"c","sig":null,"sig":"real"}`), &e); err != nil || e.Sig != "real" {
+		t.Errorf("%+v %v", e, err)
+	}
+	// Names byte for byte: a struct decode would have read SIG as sig.
+	if err := json.Unmarshal([]byte(`{"protected":"p","enc":"e","ct":"c","SIG":"real"}`), &e); err == nil || err.Error() != "envelope members" {
+		t.Errorf("SIG read as an Envelope: %v", err)
+	}
+}
+
+// §13.1 of the draft (SEP-0005), through Call as a host hands an envelope over: exactly four members,
+// each a string, names byte for byte, a repeated member read at its last occurrence, and step 1 of
+// §13.3 reading all four spellings before the key is resolved. The answers are the seed's
+// (vectors/lib/envelope.mjs receive, vectors/lib/invalid-envelopes.mjs); the core's twin is
+// decide_reads_an_envelope_of_exactly_four_string_members.
+func TestDecideReadsAnEnvelopeOfExactlyFourStringMembers(t *testing.T) {
+	v := loadVectors(t)
+	rootA, _ := Parse(hexBytes(t, v.Certificates["root_a"].DerHex))
+	pinA := Pin{Root: FingerprintOf(rootA), Endpoint: endpointA, Leaf: B64url(hexBytes(t, v.Certificates["leaf_a"].DerHex)), State: "active"}
+	envOf := func(name string) Envelope {
+		for _, e := range v.Envelopes {
+			if e.Name == name {
+				return Envelope{Protected: e.Protected, Enc: e.Enc, Ct: e.Ct, Sig: e.Sig}
+			}
+		}
+		t.Fatal("no envelope " + name)
+		return Envelope{}
+	}
+	full, small := envOf("alina-to-bharat"), envOf("alina-to-bharat-by-reference")
+	node := bharatNode(t, v, []Pin{pinA})
+	decide := func(text string) map[string]any {
+		return callWithEnvelope(t, "decide", map[string]any{"now": v.Now, "node": node}, text)
+	}
+	q := func(s string) string { return fmt.Sprintf("%q", s) }
+	notJSON := full
+	notJSON.Protected = B64url([]byte("nope"))
+	for _, c := range []struct{ what, text, why string }{
+		{"a fifth member", withMember(full, "note", "x", false), "envelope members"},
+		{"sig spelled SIG", fmt.Sprintf(`{"protected":%q,"enc":%q,"ct":%q,"SIG":%q}`, full.Protected, full.Enc, full.Ct, full.Sig), "envelope members"},
+		{"Protected beside protected", withMember(full, "Protected", full.Protected, false), "envelope members"},
+		{"sig absent, in the small form", withMember(small, "sig", nil, true), "envelope members"},
+		{"an array in place of the object", string(mustJSON([]string{full.Protected, full.Enc, full.Ct, full.Sig})), "envelope members"},
+		{"a string in place of the object", `"x"`, "envelope members"},
+		{"sig null, in the small form", withMember(small, "sig", nil, false), "envelope member types"},
+		{"sig a number", withMember(full, "sig", 5, false), "envelope member types"},
+		{"enc an object", withMember(full, "enc", map[string]any{}, false), "envelope member types"},
+		{"sig not base64url, in the small form", withMember(small, "sig", "!!!!", false), "sig is not base64url"},
+		{"sig twice, the real one then AAAA", sigText(full.Protected, full.Enc, full.Ct, q(full.Sig), `"AAAA"`), "signature is not the chain's leaf key"},
+		{"protected not JSON and sig not base64url", withMember(notJSON, "sig", "!!!!", false), "sig is not base64url"},
+	} {
+		got := decide(c.text)
+		want := map[string]any{"result": map[string]any{"code": "envelope_invalid", "why": c.why}, "effects": []any{}}
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Errorf("%s: %v", c.what, got)
+		}
+	}
+	for _, c := range []struct{ what, text, form string }{
+		{"each member once", sigText(full.Protected, full.Enc, full.Ct, q(full.Sig)), "chain"},
+		{"sig twice, AAAA then the real one", sigText(full.Protected, full.Enc, full.Ct, `"AAAA"`, q(full.Sig)), "chain"},
+		{"sig twice, 5 then the real one", sigText(full.Protected, full.Enc, full.Ct, `5`, q(full.Sig)), "chain"},
+		{"sig twice in the small form, null then the real one", sigText(small.Protected, small.Enc, small.Ct, `null`, q(small.Sig)), "leaf"},
+	} {
+		r, _ := decide(c.text)["result"].(map[string]any)
+		if r["code"] != "ok" || r["tier"] != "contact" || r["form"] != c.form {
+			t.Errorf("%s: %v", c.what, r)
+		}
+	}
+	if got := callWithEnvelope(t, "decide", map[string]any{"now": v.Now, "node": node}, "null"); fmt.Sprint(got) != fmt.Sprint(map[string]any{"error": "bad_request", "why": "envelope is required"}) {
+		t.Errorf("a null envelope: %v", got)
+	}
+	if got := callWithEnvelope(t, "decide", map[string]any{"now": "yesterday", "node": node}, withMember(full, "note", "x", false)); got["error"] != "parse" {
+		t.Errorf("a fifth member and a now that does not read: %v", got)
+	}
+}
+
+// Step 1 comes before the key is resolved (§13.3): an envelope to a key this endpoint once held is
+// certificate_renewed, and the same envelope with a sig that does not read is envelope_invalid.
+func TestAMisspelledMemberToAFormerKeyIsRefusedBeforeTheKeyIsResolved(t *testing.T) {
+	v := loadVectors(t)
+	var full Envelope
+	for _, e := range v.Envelopes {
+		if e.Name == "alina-to-bharat" {
+			full = Envelope{Protected: e.Protected, Enc: e.Enc, Ct: e.Ct, Sig: e.Sig}
+		}
+	}
+	node := bharatNode(t, v, nil)
+	node.Former, node.Keys = []string{node.Keys[0].Kid}, nil
+	decide := func(text string) map[string]any {
+		return callWithEnvelope(t, "decide", map[string]any{"now": v.Now, "node": node}, text)
+	}
+	if r, _ := decide(sigText(full.Protected, full.Enc, full.Ct, fmt.Sprintf("%q", full.Sig)))["result"].(map[string]any); r["code"] != "certificate_renewed" {
+		t.Errorf("the real envelope to a former key: %v", r)
+	}
+	for _, c := range []struct{ sig, why string }{{`"!!!!"`, "sig is not base64url"}, {`null`, "envelope member types"}} {
+		r, _ := decide(sigText(full.Protected, full.Enc, full.Ct, c.sig))["result"].(map[string]any)
+		if r["code"] != "envelope_invalid" || r["why"] != c.why {
+			t.Errorf("sig %s to a former key: %v", c.sig, r)
+		}
+	}
+}
+
+// open_result reads a result envelope as decide reads a request (§13.2, §13.1): envelopeOf, then
+// readMembers, in the same words, as {error: envelope_invalid}.
+func TestOpenResultReadsAnEnvelopeOfExactlyFourStringMembers(t *testing.T) {
+	v := loadVectors(t)
+	der := func(n string) string { return B64url(hexBytes(t, v.Certificates[n].DerHex)) }
+	leafA, _ := Parse(hexBytes(t, v.Certificates["leaf_a"].DerHex))
+	ts := mustTime(t, v.Now).Unix()
+	var e Envelope
+	if err := json.Unmarshal(Call("seal_result", mustJSON(map[string]any{
+		"recipient_spki": B64url(leafA.SPKI), "sender_pkcs8": B64url(hexBytes(t, v.LeafKeys["leaf_b"])), "form": "chain",
+		"sender_chain": []string{der("leaf_b"), der("root_b")}, "result": map[string]any{"ok": 1}, "msg_id": "m-1", "ts": ts,
+	})), &e); err != nil {
+		t.Fatal(err)
+	}
+	rest := map[string]any{"my_pkcs8": B64url(hexBytes(t, v.LeafKeys["leaf_a"])), "my_spki": B64url(leafA.SPKI), "msg_id": "m-1", "now": v.Now}
+	open := func(text string) map[string]any { return callWithEnvelope(t, "open_result", rest, text) }
+	q := fmt.Sprintf("%q", e.Sig)
+	for _, c := range []struct{ what, text, why string }{
+		{"a fifth member", withMember(e, "note", "x", false), "envelope members"},
+		{"CT beside ct", withMember(e, "CT", e.Ct, false), "envelope members"},
+		{"ct absent", withMember(e, "ct", nil, true), "envelope members"},
+		{"a string in place of the object", `"x"`, "envelope members"},
+		{"sig null", withMember(e, "sig", nil, false), "envelope member types"},
+		{"sig not base64url", withMember(e, "sig", "!!!!", false), "sig is not base64url"},
+		{"sig twice, the real one then AAAA", sigText(e.Protected, e.Enc, e.Ct, q, `"AAAA"`), "signature is not the chain's leaf key"},
+	} {
+		if got := open(c.text); fmt.Sprint(got) != fmt.Sprint(map[string]any{"error": "envelope_invalid", "why": c.why}) {
+			t.Errorf("%s: %v", c.what, got)
+		}
+	}
+	for _, c := range []struct{ what, text string }{
+		{"each member once", sigText(e.Protected, e.Enc, e.Ct, q)},
+		{"sig twice, 5 then the real one", sigText(e.Protected, e.Enc, e.Ct, `5`, q)},
+	} {
+		if got := open(c.text); got["ok"] != true || fmt.Sprint(got["result"]) != "map[ok:1]" {
+			t.Errorf("%s: %v", c.what, got)
+		}
+	}
 }

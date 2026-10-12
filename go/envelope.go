@@ -18,11 +18,14 @@ import (
 // constants_test.go holds them to (and tests/constants.rs the Rust core's).
 const (
 	HeaderMembers = "cty,exp,kid,msg_id,suite,ts,v"
-	SkewSeconds   = 300
-	ClaimWindow   = 30 * 24 * time.Hour
-	Tombstone     = 30 * 24 * time.Hour
-	CtyCall       = "application/hdtp-call+json"
-	CtyResult     = "application/hdtp-result+json"
+	// EnvelopeMembers is the four members of an envelope, sorted and joined as envelopeOf compares
+	// them (§13.1).
+	EnvelopeMembers = "ct,enc,protected,sig"
+	SkewSeconds     = 300
+	ClaimWindow     = 30 * 24 * time.Hour
+	Tombstone       = 30 * 24 * time.Hour
+	CtyCall         = "application/hdtp-call+json"
+	CtyResult       = "application/hdtp-result+json"
 )
 
 var (
@@ -83,12 +86,77 @@ func ThreadIDRefusal(tool string, params map[string]any) (string, string) {
 	return "", ""
 }
 
-// Envelope is the four-member wire object.
+// Envelope is the four-member wire object. It is read from JSON by envelopeOf (UnmarshalJSON), which
+// holds §13.1: encoding/json's struct decode matches member names without regard to case and takes
+// a fifth member.
 type Envelope struct {
 	Protected string `json:"protected"`
 	Enc       string `json:"enc"`
 	Ct        string `json:"ct"`
 	Sig       string `json:"sig"`
+}
+
+// UnmarshalJSON reads an envelope as envelopeOf does, so json.Unmarshal into an Envelope, or into a
+// struct holding one, refuses what §13.1 refuses, with envelopeOf's words.
+func (e *Envelope) UnmarshalJSON(b []byte) error {
+	v, err := decodeJSON(b)
+	if err != nil {
+		return err
+	}
+	read, err := envelopeOf(v)
+	if err != nil {
+		return err
+	}
+	*e = read
+	return nil
+}
+
+// envelopeOf is an envelope as it arrived (§13.1): an object of exactly `protected`, `enc`, `ct` and
+// `sig`, each a string that may be anything, judged later by step 1 of §13.3 (readMembers). Names are
+// compared byte for byte (a map's keys are the text's own), and a member written twice was already read
+// at its last occurrence by the decode that made `v`: a map keeps the last, which
+// TestARepeatedMemberIsReadAtItsLastOccurrence measures. Anything but an object of exactly the four is
+// `envelope members`; a member that is not a string, null included, `envelope member types`.
+func envelopeOf(v any) (Envelope, error) {
+	o, isObj := v.(map[string]any)
+	if !isObj || sortedKeys(o) != EnvelopeMembers {
+		return Envelope{}, errors.New("envelope members")
+	}
+	var e Envelope
+	for _, m := range []struct {
+		k  string
+		to *string
+	}{{"protected", &e.Protected}, {"enc", &e.Enc}, {"ct", &e.Ct}, {"sig", &e.Sig}} {
+		s, isStr := o[m.k].(string)
+		if !isStr {
+			return Envelope{}, errors.New("envelope member types")
+		}
+		*m.to = s
+	}
+	return e, nil
+}
+
+// members is an envelope's four members decoded: `protected` (the AAD), `enc`, `ct` and `sig`.
+type members struct{ aad, enc, ct, sig []byte }
+
+// readMembers is step 1 of §13.3, for a request and a result alike: each member in its one spelling
+// (§13.1), in the seed's order, before the header is read or a key resolved. An empty `sig` is the one
+// spelling of zero bytes, and fails later as a signature (§13.3 step 7).
+func readMembers(env Envelope) (members, string) {
+	aad, err := wireB64url(env.Protected)
+	if err != nil {
+		return members{}, "protected is not JSON"
+	}
+	enc, errEnc := wireB64url(env.Enc)
+	ct, errCt := wireB64url(env.Ct)
+	if errEnc != nil || errCt != nil {
+		return members{}, "does not open"
+	}
+	sig, err := wireB64url(env.Sig)
+	if err != nil {
+		return members{}, "sig is not base64url"
+	}
+	return members{aad, enc, ct, sig}, ""
 }
 
 // SealOpts is what a sender decides. Form is "chain" (the sender's leaf and root inside) or "leaf" (the
@@ -529,14 +597,11 @@ func classed(err error) error {
 
 func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Decision {
 	effects := []map[string]any{}
-	// Every member is base64url and nothing else. The lenient reader this port had skipped what it did
-	// not know, so `protected` with a stray character decoded to the same bytes, the signature — which covers the
-	// DECODED bytes — still verified, and this port accepted a second spelling of an envelope the core
-	// refuses.
-	aad, err := wireB64url(env.Protected)
-	if err != nil {
-		return invalid("protected is not JSON")
+	m, why := readMembers(env)
+	if why != "" {
+		return invalid(why)
 	}
+	aad, enc, ct, sig := m.aad, m.enc, m.ct, m.sig
 	hv, err := decodeJSON(aad)
 	if err != nil {
 		return invalid("protected is not JSON")
@@ -606,23 +671,11 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 	if err != nil {
 		return unreadableState(unreadable, err)
 	}
-	enc, errEnc := wireB64url(env.Enc)
-	ct, errCt := wireB64url(env.Ct)
-	if errEnc != nil || errCt != nil {
-		return invalid("does not open")
-	}
 	// `sig` covers the three members concatenated with nothing between them, so the suite's own `enc`
 	// length is what fixes the boundary: without it a byte moved from `enc` into `ct` leaves the signed
 	// bytes identical.
 	if len(enc) != SuiteNpk(suite) {
 		return invalid("encapsulated key is not the suite's length")
-	}
-	// Read before the form decides anything, so the small form cannot answer `chain_required` to a
-	// `sig` the chain form refuses: a member in any other spelling is refused (§13.1). An empty `sig`
-	// is the one spelling of zero bytes, and fails as a signature (§13.3 step 7).
-	sig, err := wireB64url(env.Sig)
-	if err != nil {
-		return invalid("sig is not base64url")
 	}
 	plaintext, err := Open(suite, priv, heldLeaf.PublicKey, []byte(Info), aad, enc, ct)
 	if err != nil {
@@ -1072,10 +1125,11 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 		}
 	}
 	o.Now = o.Now.Truncate(time.Second)
-	aad, err := wireB64url(env.Protected)
-	if err != nil {
-		return nil, errors.New("protected is not JSON")
+	m, why := readMembers(env)
+	if why != "" {
+		return nil, errors.New(why)
 	}
+	aad, enc, ct, sig := m.aad, m.enc, m.ct, m.sig
 	hv, err := decodeJSON(aad)
 	if err != nil {
 		return nil, errors.New("protected is not JSON")
@@ -1116,17 +1170,8 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 	if exp-ts > MaxLifetimeSeconds {
 		return nil, errors.New("exp too far from ts")
 	}
-	enc, errEnc := wireB64url(env.Enc)
-	ct, errCt := wireB64url(env.Ct)
-	if errEnc != nil || errCt != nil {
-		return nil, errors.New("does not open")
-	}
 	if len(enc) != SuiteNpk(suite) {
 		return nil, errors.New("encapsulated key is not the suite's length")
-	}
-	sig, err := wireB64url(env.Sig)
-	if err != nil {
-		return nil, errors.New("signature")
 	}
 	plaintext, err := Open(suite, o.Recipient, o.RecipientPublic, []byte(Info), aad, enc, ct)
 	if err != nil {

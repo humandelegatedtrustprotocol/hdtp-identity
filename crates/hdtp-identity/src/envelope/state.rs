@@ -1,7 +1,7 @@
 //! The state `decide` reads: what the host holds (its keys, its pins, what it has forgotten and
 //! where contacts used to live) and what it answers. Plain data; the host supplies it and applies
 //! the effects `decide` returns.
-use super::{CallerPin, Wire};
+use super::{CallerPin, Wire, ENVELOPE_MEMBERS};
 use crate::util::{err, Error, Result};
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -132,20 +132,28 @@ fn texts(o: &Map<String, Value>, k: &str, path: &str) -> Result<Vec<String>> {
     opt_list(o, k, path, |v, p| v.as_str().map(str::to_string).ok_or_else(|| required(p)))
 }
 
-/// The four members of an envelope as it arrived, in the order the contract lists them: strings that
-/// may be anything, judged later by the function.
+/// An envelope as it arrived (§13.1): an object of exactly `protected`, `enc`, `ct` and `sig`, each a
+/// string that may be anything, judged later by step 1 of §13.3. Names are compared byte for byte (the
+/// keys of a `serde_json` map are the text's own), and a member written twice was already read at its
+/// last occurrence by the parse that made `v`: a `serde_json::Value` map keeps the last, which
+/// `a_repeated_member_is_read_at_its_last_occurrence` measures.
 impl Wire {
-    /// An envelope as it arrived, from JSON.
+    /// The envelope, or `envelope_invalid`: `envelope members` for anything but an object of exactly the
+    /// four, `envelope member types` for a member that is not a string, `null` included.
     pub fn read(v: &Value) -> Result<Wire> {
-        let o = object_of(v, "envelope")?;
-        Ok(Wire {
-            protected: text(o, "protected", "envelope")?,
-            enc: text(o, "enc", "envelope")?,
-            ct: text(o, "ct", "envelope")?,
-            sig: text(o, "sig", "envelope")?,
-        })
+        let refuse = |why: &str| Error::new("envelope_invalid", why);
+        let o = v.as_object().ok_or_else(|| refuse(ENVELOPE_MEMBERS_WHY))?;
+        let mut names: Vec<&str> = o.keys().map(String::as_str).collect();
+        names.sort_unstable();
+        if names.join(",") != ENVELOPE_MEMBERS {
+            return Err(refuse(ENVELOPE_MEMBERS_WHY));
+        }
+        let member = |k: &str| o.get(k).and_then(Value::as_str).map(str::to_string).ok_or_else(|| refuse("envelope member types"));
+        Ok(Wire { protected: member("protected")?, enc: member("enc")?, ct: member("ct")?, sig: member("sig")? })
     }
 }
+
+const ENVELOPE_MEMBERS_WHY: &str = "envelope members";
 
 /// A root the host holds — a pin's, a tombstone's, a former endpoint's — is a fingerprint (the
 /// contract's `Fingerprint`): one that is not is the host's damaged state, refused by its path. Read
@@ -257,8 +265,11 @@ impl CallerPin {
 
 impl DecideInput {
     /// `decide`'s arguments, from JSON, in the order CONTRACT §5.1 reads them: `node`, `envelope` and
-    /// `now` absent or null, in that order; then the node whole, then the envelope, then `now`. Every
-    /// fault is the host's, `bad_request`, named by its path.
+    /// `now` absent or null, in that order; then the node whole, then the envelope, then `now`. A fault
+    /// of the node or of `now` is the host's, `bad_request` named by its path (or `parse`); a present
+    /// envelope that is not one (`Wire::read`) is the sender's, `envelope_invalid`, answered only once
+    /// the host's own state has been read as `decide` reads it first, so a host's fault is its answer
+    /// whatever the envelope. `api::decide` answers that refusal as a decision.
     pub fn read(a: &Value) -> Result<DecideInput> {
         // A missing `node` is not a decision against an empty node, and the member is named the way
         // the caller wrote it rather than the way serde reports a missing field — the Go port cannot
@@ -269,8 +280,16 @@ impl DecideInput {
             }
         }
         let node = NodeState::read(&a["node"])?;
-        let envelope = Wire::read(&a["envelope"])?;
+        let envelope = Wire::read(&a["envelope"]);
         let now = a["now"].as_str().ok_or_else(|| required("now"))?.to_string();
+        let envelope = match envelope {
+            Ok(e) => e,
+            Err(refused) => {
+                host_roots(&node)?;
+                crate::time::parse_rfc3339(&now)?;
+                return Err(refused);
+            }
+        };
         Ok(DecideInput { now, envelope, node })
     }
 }

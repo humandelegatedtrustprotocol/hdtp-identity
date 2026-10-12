@@ -165,13 +165,13 @@ func callSealResult(a args) json.RawMessage {
 }
 
 func callOpenResult(a args) json.RawMessage {
-	// Absent is the caller's omission (CONTRACT §0, `envelope is required`); present, every refusal
-	// of the envelope is `envelope_invalid`, and names the member that is not there (T9, F12, S1-1).
+	// Absent is the caller's omission (CONTRACT §0, `envelope is required`); present, it is read as
+	// `decide` reads one (§13.1), and every refusal of it is `envelope_invalid`.
 	raw := a.present("envelope")
 	if raw == nil {
 		return fail(codeArgs, "envelope is required")
 	}
-	env, err := wireOf(a.value("envelope"))
+	env, err := envelopeOf(a.value("envelope"))
 	if err != nil {
 		return failErr("envelope_invalid", err)
 	}
@@ -298,20 +298,24 @@ func callDecide(a args) json.RawMessage {
 			return fail(codeArgs, k+" is required")
 		}
 	}
-	// Then each is read whole, and a member it lacks is named by its path: this port decided on
-	// the zero value (a node with no endpoint was `ok`; an envelope with no `sig` a refusal of the
-	// signature) where the core refused the call (T9, F13, R22).
+	// Then the node whole, a member it lacks named by its path (T9, F13, R22); the envelope; `now`. A
+	// present envelope that is not one (§13.1) is the sender's: step 1 of §13.3 failing, answered as a
+	// decision, once the host's own state has been read as Decide reads it first, so a host's fault is
+	// its answer whatever the envelope.
 	node, err := nodeStateOf(a.value("node"))
 	if err != nil {
 		return failAs(codeArgs, err)
 	}
-	env, err := wireOf(a.value("envelope"))
-	if err != nil {
-		return failAs(codeArgs, err)
-	}
+	env, refused := envelopeOf(a.value("envelope"))
 	now, err := a.instant("now")
 	if err != nil {
 		return failAs("parse", err)
+	}
+	if refused != nil {
+		if err := hostRoots(node); err != nil {
+			return failAs("parse", err)
+		}
+		return ok(invalid(refused.Error()))
 	}
 	d, err := Decide(now, env, node)
 	if err != nil {
@@ -438,25 +442,6 @@ func (s shape) texts(k string) ([]string, error) {
 		}
 		return t, nil
 	})
-}
-
-// wireOf is the four members of an envelope as it arrived, in the order the contract lists them:
-// strings that may be anything, judged later by the function.
-func wireOf(v any) (Envelope, error) {
-	s, err := shapeOf(v, "envelope")
-	if err != nil {
-		return Envelope{}, err
-	}
-	var e Envelope
-	for _, m := range []struct {
-		k  string
-		to *string
-	}{{"protected", &e.Protected}, {"enc", &e.Enc}, {"ct", &e.Ct}, {"sig", &e.Sig}} {
-		if *m.to, err = s.text(m.k); err != nil {
-			return Envelope{}, err
-		}
-	}
-	return e, nil
 }
 
 // pinOf is a pin, open_result's or a node's: root, endpoint and leaf; `state` absent is `active`.

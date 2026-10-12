@@ -7,9 +7,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed as proven that did not pass.
 
-Specification: **1.0.0**. **101** normative sentences, **3059** cross-port parity cases over **54** guarded functions.
+Specification: **1.0.0**. **101** normative sentences, **3130** cross-port parity cases over **54** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 1.0.0): **6118** answers, of which **0** do not hold to the shape it declares. Of **131** declared error codes, **131** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 1.0.0): **6260** answers, of which **0** do not hold to the shape it declares. Of **131** declared error codes, **131** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 101 normative sentences of the specification
 
@@ -231,7 +231,7 @@ by declaration. A row with nothing in its last column would fail `js/musts.mjs`.
 | `14.4#1` | An endpoint **MUST** keep the key identifiers of every leaf it has held for an identity it still serves — fingerprints, never keys past their `notAfter`. | `scenario:a former key of a still-served identity gets the current chain`, `gateway:TestStaleKidIsAnsweredWithTheCurrentChain` |
 | `14.4#2` | A caller **MUST** follow `certificate_renewed` at most once per call, and only when the chain it carries is newer than or equal to its pin (§14.3): an older chain, a chain to another root, or a chain naming another address is discarded and the call fails as it would have. | `rust:certificate_renewed_cases`, `go:TestChainCases` |
 
-## The 3059 cross-port parity cases
+## The 3130 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -239,7 +239,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **3059** cases (**1464** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
+At the run that generated this file: **3130** cases (**1460** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
 
 ### `address_guard` — 51 cases · whole on success
 
@@ -700,7 +700,7 @@ At the run that generated this file: **3059** cases (**1464** of the run's cases
 - generated · csr_new · endpoint absent, host_pkcs8 7
 - generated · csr_new · endpoint absent, dns_name 7
 
-### `decide` — 205 cases · whole on success
+### `decide` — 257 cases · whole on success
 
 - decide on an envelope from a pinned contact
 - decide on a pinned contact's call that names no tool
@@ -829,8 +829,6 @@ At the run that generated this file: **3059** cases (**1464** of the run's cases
 - decide on an HDTP-SEAL-X25519 envelope whose encapsulated key is one byte long
 - decide on an HDTP-SEAL-P256 envelope whose encapsulated key is one byte short
 - decide on an HDTP-SEAL-P256 envelope whose encapsulated key is one byte long
-- decide with an envelope with no sig
-- decide with an envelope that is not an object
 - decide with a node with no endpoint
 - decide with a node that is not an object
 - decide with a held key with no kid
@@ -839,6 +837,61 @@ At the run that generated this file: **3059** cases (**1464** of the run's cases
 - decide with a seen entry that is not a string
 - decide with an accept_new_hosts that is neither auto nor ask
 - decide with a node and an envelope both short a member
+- decide, SEP-0005, chain form from a pinned contact: a fifth member
+- decide, SEP-0005, chain form from a pinned contact: sig spelled SIG
+- decide, SEP-0005, chain form from a pinned contact: Protected beside protected
+- decide, SEP-0005, chain form from a pinned contact: no sig
+- decide, SEP-0005, chain form from a pinned contact: no protected
+- decide, SEP-0005, chain form from a pinned contact: an empty object
+- decide, SEP-0005, chain form from a pinned contact: an array in place of the object
+- decide, SEP-0005, chain form from a pinned contact: a string in place of the object
+- decide, SEP-0005, chain form from a pinned contact: a number in place of the object
+- decide, SEP-0005, chain form from a pinned contact: a sig that is null
+- decide, SEP-0005, chain form from a pinned contact: a sig that is a number
+- decide, SEP-0005, chain form from a pinned contact: an enc that is an object
+- decide, SEP-0005, chain form from a pinned contact: a ct that is a list
+- decide, SEP-0005, chain form from a pinned contact: a protected that is true
+- decide, SEP-0005, chain form from a pinned contact: a fifth member and a sig that is null
+- decide, SEP-0005, chain form from a pinned contact: a sig that is not base64url
+- decide, SEP-0005, chain form from a pinned contact: a protected that is not JSON and a sig that is not base64url
+- decide, SEP-0005, chain form from a pinned contact: a protected that is not JSON and an enc that is not base64url
+- decide, SEP-0005, chain form from a pinned contact: the real sig and then AAAA
+- decide, SEP-0005, chain form from a pinned contact: each member once (control)
+- decide, SEP-0005, chain form from a pinned contact: AAAA and then the real sig (control)
+- decide, SEP-0005, chain form from a pinned contact: 5 and then the real sig (control)
+- decide, SEP-0005, chain form from a pinned contact: null and then the real sig (control)
+- decide, SEP-0005, chain form from a pinned contact: a protected written twice, the real one last (control)
+- decide, SEP-0005, small form from a pinned contact: a fifth member
+- decide, SEP-0005, small form from a pinned contact: sig spelled SIG
+- decide, SEP-0005, small form from a pinned contact: Protected beside protected
+- decide, SEP-0005, small form from a pinned contact: no sig
+- decide, SEP-0005, small form from a pinned contact: no protected
+- decide, SEP-0005, small form from a pinned contact: an empty object
+- decide, SEP-0005, small form from a pinned contact: an array in place of the object
+- decide, SEP-0005, small form from a pinned contact: a string in place of the object
+- decide, SEP-0005, small form from a pinned contact: a number in place of the object
+- decide, SEP-0005, small form from a pinned contact: a sig that is null
+- decide, SEP-0005, small form from a pinned contact: a sig that is a number
+- decide, SEP-0005, small form from a pinned contact: an enc that is an object
+- decide, SEP-0005, small form from a pinned contact: a ct that is a list
+- decide, SEP-0005, small form from a pinned contact: a protected that is true
+- decide, SEP-0005, small form from a pinned contact: a fifth member and a sig that is null
+- decide, SEP-0005, small form from a pinned contact: a sig that is not base64url
+- decide, SEP-0005, small form from a pinned contact: a protected that is not JSON and a sig that is not base64url
+- decide, SEP-0005, small form from a pinned contact: a protected that is not JSON and an enc that is not base64url
+- decide, SEP-0005, small form from a pinned contact: the real sig and then AAAA
+- decide, SEP-0005, small form from a pinned contact: each member once (control)
+- decide, SEP-0005, small form from a pinned contact: AAAA and then the real sig (control)
+- decide, SEP-0005, small form from a pinned contact: 5 and then the real sig (control)
+- decide, SEP-0005, small form from a pinned contact: null and then the real sig (control)
+- decide, SEP-0005, small form from a pinned contact: a protected written twice, the real one last (control)
+- decide, SEP-0005: the real envelope to a former key (control)
+- decide, SEP-0005: an envelope to a former key with a sig that is not base64url
+- decide, SEP-0005: an envelope to a former key with a sig that is null
+- decide, SEP-0005: an envelope to a former key with an enc that is padded
+- decide, SEP-0005: a fifth member and a now that does not read
+- decide, SEP-0005: a fifth member and a node with no endpoint
+- decide, SEP-0005: an envelope that is null
 - decide on a contact at a new endpoint, the node saying no accept_new_hosts
 - decide on an envelope with a body holding a number past the largest double
 - decide on an envelope with a body nested 128 deep
@@ -881,6 +934,7 @@ At the run that generated this file: **3059** cases (**1464** of the run's cases
 - generated · decide · now ""
 - generated · decide · envelope absent
 - generated · decide · envelope null
+- generated · decide · envelope ""
 - generated · decide · node absent
 - generated · decide · node null
 - generated · decide · an undeclared member
@@ -901,12 +955,10 @@ At the run that generated this file: **3059** cases (**1464** of the run's cases
 - generated · decide · an undeclared member in node
 - generated · decide · an undeclared member in node.keys.0
 - generated · decide · an undeclared member in node.pins.0
-- generated · decide · now absent, envelope "x"
 - generated · decide · now absent, node "x"
 - generated · decide · envelope absent, now 7
 - generated · decide · envelope absent, node "x"
 - generated · decide · node absent, now 7
-- generated · decide · node absent, envelope "x"
 
 ### `decide_chain` — 57 cases · whole on success
 
@@ -2370,7 +2422,7 @@ At the run that generated this file: **3059** cases (**1464** of the run's cases
 - a function nobody defines, with args holding half a surrogate pair
 - a function nobody defines, with args holding a number past the largest double
 
-### `open_result` — 141 cases · whole on success
+### `open_result` — 160 cases · whole on success
 
 - open_result of a request envelope
 - open_result with nothing to work from
@@ -2406,6 +2458,28 @@ At the run that generated this file: **3059** cases (**1464** of the run's cases
 - open_result on an HDTP-SEAL-X25519 answer whose encapsulated key is one byte long
 - open_result on an HDTP-SEAL-P256 answer whose encapsulated key is one byte short
 - open_result on an HDTP-SEAL-P256 answer whose encapsulated key is one byte long
+- open_result, SEP-0005: a fifth member
+- open_result, SEP-0005: sig spelled SIG
+- open_result, SEP-0005: Protected beside protected
+- open_result, SEP-0005: no sig
+- open_result, SEP-0005: no protected
+- open_result, SEP-0005: an empty object
+- open_result, SEP-0005: an array in place of the object
+- open_result, SEP-0005: a string in place of the object
+- open_result, SEP-0005: a number in place of the object
+- open_result, SEP-0005: a sig that is null
+- open_result, SEP-0005: a sig that is a number
+- open_result, SEP-0005: an enc that is an object
+- open_result, SEP-0005: a ct that is a list
+- open_result, SEP-0005: a protected that is true
+- open_result, SEP-0005: a fifth member and a sig that is null
+- open_result, SEP-0005: a sig that is not base64url
+- open_result, SEP-0005: a protected that is not JSON and a sig that is not base64url
+- open_result, SEP-0005: a protected that is not JSON and an enc that is not base64url
+- open_result, SEP-0005: the real sig and then AAAA
+- open_result, SEP-0005: each member once (control)
+- open_result, SEP-0005: AAAA and then the real sig (control)
+- open_result, SEP-0005: 5 and then the real sig (control)
 - open_result with an envelope with no ct
 - open_result with an envelope that is not an object
 - open_result with a pin with no root
@@ -2448,6 +2522,7 @@ At the run that generated this file: **3059** cases (**1464** of the run's cases
 - generated · open_result · the hostile object
 - generated · open_result · envelope absent
 - generated · open_result · envelope null
+- generated · open_result · envelope ""
 - generated · open_result · my_pkcs8 absent
 - generated · open_result · my_pkcs8 null
 - generated · open_result · my_pkcs8 ""
@@ -2485,28 +2560,24 @@ At the run that generated this file: **3059** cases (**1464** of the run's cases
 - generated · open_result · envelope absent, pins "x"
 - generated · open_result · envelope absent, expected_root 7
 - generated · open_result · envelope absent, expected_endpoint 7
-- generated · open_result · my_pkcs8 absent, envelope "x"
 - generated · open_result · my_pkcs8 absent, my_spki 7
 - generated · open_result · my_pkcs8 absent, msg_id 7
 - generated · open_result · my_pkcs8 absent, now 7
 - generated · open_result · my_pkcs8 absent, pins "x"
 - generated · open_result · my_pkcs8 absent, expected_root 7
 - generated · open_result · my_pkcs8 absent, expected_endpoint 7
-- generated · open_result · my_spki absent, envelope "x"
 - generated · open_result · my_spki absent, my_pkcs8 7
 - generated · open_result · my_spki absent, msg_id 7
 - generated · open_result · my_spki absent, now 7
 - generated · open_result · my_spki absent, pins "x"
 - generated · open_result · my_spki absent, expected_root 7
 - generated · open_result · my_spki absent, expected_endpoint 7
-- generated · open_result · msg_id absent, envelope "x"
 - generated · open_result · msg_id absent, my_pkcs8 7
 - generated · open_result · msg_id absent, my_spki 7
 - generated · open_result · msg_id absent, now 7
 - generated · open_result · msg_id absent, pins "x"
 - generated · open_result · msg_id absent, expected_root 7
 - generated · open_result · msg_id absent, expected_endpoint 7
-- generated · open_result · now absent, envelope "x"
 - generated · open_result · now absent, my_pkcs8 7
 - generated · open_result · now absent, my_spki 7
 - generated · open_result · now absent, msg_id 7

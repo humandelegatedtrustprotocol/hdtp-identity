@@ -165,7 +165,7 @@ test('a member undeclared inside a member is judged by CONTRACT §0: a document 
   assert.ok(expected.has('generated · decide · an undeclared member in node.pins.0'));
   // The rest of READ_FOR_WHAT_IT_NEEDS names functions this contract does not have, or ones with no base.
   assert.ok(problems.some((p) => /READ_FOR_WHAT_IT_NEEDS names refresh_check pin, and the contract has no refresh_check/.test(p)), problems.join('\n'));
-  assert.ok(problems.some((p) => /READ_FOR_WHAT_IT_NEEDS names decide envelope, which no generated case reaches/.test(p)), problems.join('\n'));
+  assert.ok(problems.some((p) => /READ_FOR_WHAT_IT_NEEDS names decide node.keys.0, which no generated case reaches/.test(p)), problems.join('\n'));
   assert.ok(!problems.some((p) => /names decide node[ ,]/.test(p)), problems.join('\n'));
 });
 

@@ -549,8 +549,9 @@ fn a_sig_not_in_the_one_spelling_is_refused_in_either_form() {
             assert_eq!(out.result, failed, "{form} form from {whom}, sig empty");
             assert!(out.effects.is_empty(), "{form} form from {whom}, sig empty");
         }
-        // Absent or null never reaches the decision: the envelope is the host's argument, refused by its path.
-        for sig in [None, Some(Value::Null)] {
+        // Absent or null is step 1 failing (§13.1): a decision, `envelope members` for an absent member and
+        // `envelope member types` for a null one, with no effect.
+        for (sig, why) in [(None, "envelope members"), (Some(Value::Null), "envelope member types")] {
             let mut envelope = with_sig(e, Value::Null);
             if sig.is_none() {
                 envelope.as_object_mut().unwrap().remove("sig");
@@ -561,7 +562,7 @@ fn a_sig_not_in_the_one_spelling_is_refused_in_either_form() {
                 &json!({ "now": NOW, "envelope": envelope, "node": node }).to_string(),
             ))
             .unwrap();
-            assert_eq!(out, json!({ "error": "bad_request", "why": "envelope.sig is required" }), "{form} form, sig {sig:?}");
+            assert_eq!(out, json!({ "result": { "code": "envelope_invalid", "why": why }, "effects": [] }), "{form} form, sig {sig:?}");
         }
     }
 
@@ -660,6 +661,184 @@ fn a_result_seals_back_and_opens_on_the_caller_side() {
     .unwrap();
     assert_eq!(out["form"], "leaf");
     assert_eq!(out["error"]["code"], "permission_denied");
+}
+
+/// An envelope's four members as JSON text, `sig` written as each of `sigs` in turn: text, because a
+/// parsed value cannot hold a member written twice.
+fn sig_text(e: &Value, sigs: &[&str]) -> String {
+    let m = |k: &str| serde_json::to_string(&e[k]).unwrap();
+    let sigs: Vec<String> = sigs.iter().map(|s| format!(r#""sig":{s}"#)).collect();
+    format!(r#"{{"protected":{},"enc":{},"ct":{},{}}}"#, m("protected"), m("enc"), m("ct"), sigs.join(","))
+}
+
+/// The answer `call` gives to `function` with `envelope` spliced into `rest` as it is written.
+fn call_with_envelope(function: &str, rest: Value, envelope: &str) -> Value {
+    let rest = rest.to_string();
+    let args = format!(r#"{{"envelope":{envelope},{}"#, &rest[1..]);
+    serde_json::from_str(&hdtp_identity::call(function, &args)).unwrap()
+}
+
+/// `serde_json` reads a member written twice at its last occurrence, and never refuses it: what the
+/// closed reader (`Wire::read`) relies on for §13.1's repeated member, measured here so it cannot move
+/// under it with a dependency.
+#[test]
+fn a_repeated_member_is_read_at_its_last_occurrence() {
+    let v: Value = serde_json::from_str(r#"{"sig":5,"sig":"real"}"#).unwrap();
+    assert_eq!(v, json!({ "sig": "real" }));
+    let v: Value = serde_json::from_str(r#"{"sig":"real","sig":null}"#).unwrap();
+    assert_eq!(v, json!({ "sig": null }));
+}
+
+/// §13.1 of the draft (SEP-0005): an envelope is exactly its four members, each a string, names
+/// compared byte for byte, a repeated member read at its last occurrence; and step 1 of §13.3 reads all
+/// four in their one spelling before the key is resolved. Each envelope reaches `decide` as text, the
+/// way a host hands it over, and each case is an Appendix B envelope with one change, the answers the
+/// seed's (vectors/lib/envelope.mjs `receive`, vectors/lib/invalid-envelopes.mjs).
+#[test]
+fn decide_reads_an_envelope_of_exactly_four_string_members() {
+    let v = vectors();
+    let der = der_of(&v);
+    let envelopes = v["envelopes"].as_array().unwrap();
+    let full = &envelopes[0];
+    let small = &envelopes[2];
+    let root_a = fingerprint_of(&parse(&der["root_a"]).unwrap());
+    let pin_a = json!({ "root": root_a, "endpoint": ENDPOINT_A, "leaf": b64u(&der["leaf_a"]), "state": "active" });
+    let node = node_for(&v, &der, "leaf_b", "root_b", vec![pin_a]);
+    let decide = |text: &str| call_with_envelope("decide", json!({ "now": NOW, "node": node }), text);
+    let refused = |why: &str| json!({ "result": { "code": "envelope_invalid", "why": why }, "effects": [] });
+    let real = |e: &Value| serde_json::to_string(&e["sig"]).unwrap();
+    let (real_full, real_small) = (real(full), real(small));
+    let without = |e: &Value, k: &str| {
+        let mut o = json!({ "protected": e["protected"], "enc": e["enc"], "ct": e["ct"], "sig": e["sig"] });
+        o.as_object_mut().unwrap().remove(k);
+        o
+    };
+    let with = |e: &Value, k: &str, x: Value| {
+        let mut o = json!({ "protected": e["protected"], "enc": e["enc"], "ct": e["ct"], "sig": e["sig"] });
+        o.as_object_mut().unwrap().insert(k.into(), x);
+        o.to_string()
+    };
+    for (what, text, why) in [
+        ("a fifth member", with(full, "note", json!("x")), "envelope members"),
+        ("sig spelled SIG", with(&without(full, "sig"), "SIG", full["sig"].clone()), "envelope members"),
+        ("Protected beside protected", with(full, "Protected", full["protected"].clone()), "envelope members"),
+        ("sig absent, in the small form", without(small, "sig").to_string(), "envelope members"),
+        (
+            "an array in place of the object",
+            json!([full["protected"], full["enc"], full["ct"], full["sig"]]).to_string(),
+            "envelope members",
+        ),
+        ("a string in place of the object", json!("x").to_string(), "envelope members"),
+        ("sig null, in the small form", with(small, "sig", Value::Null), "envelope member types"),
+        ("sig a number", with(full, "sig", json!(5)), "envelope member types"),
+        ("enc an object", with(full, "enc", json!({})), "envelope member types"),
+        ("sig not base64url, in the small form", with(small, "sig", json!("!!!!")), "sig is not base64url"),
+        ("sig twice, the real one then AAAA", sig_text(full, &[&real_full, r#""AAAA""#]), "signature is not the chain's leaf key"),
+        // Step 1 reads every spelling before the header is parsed: a `protected` that decodes to bytes
+        // that are not JSON, beside a `sig` that does not read, is refused for the `sig`.
+        (
+            "protected not JSON and sig not base64url",
+            with(&serde_json::from_str(&with(full, "protected", json!(b64u(b"nope")))).unwrap(), "sig", json!("!!!!")),
+            "sig is not base64url",
+        ),
+    ] {
+        assert_eq!(decide(&text), refused(why), "{what}");
+    }
+    // The controls that must get through: each member once, and the real `sig` last after an earlier
+    // one that is not even a string, which is never read or judged.
+    for (what, e, text) in [
+        ("each member once", full, sig_text(full, &[&real_full])),
+        ("sig twice, AAAA then the real one", full, sig_text(full, &[r#""AAAA""#, &real_full])),
+        ("sig twice, 5 then the real one", full, sig_text(full, &[r#"5"#, &real_full])),
+        ("sig twice in the small form, null then the real one", small, sig_text(small, &["null", &real_small])),
+    ] {
+        let out = decide(&text);
+        assert_eq!((out["result"]["code"].as_str(), out["result"]["tier"].as_str()), (Some("ok"), Some("contact")), "{what}: {out}");
+        assert_eq!(out["result"]["form"], if std::ptr::eq(e, small) { "leaf" } else { "chain" }, "{what}");
+    }
+    // Absent or null is the host's omission (CONTRACT §0); a host's own fault is its answer whatever the
+    // envelope is.
+    let out: Value =
+        serde_json::from_str(&hdtp_identity::call("decide", &json!({ "now": NOW, "node": node, "envelope": null }).to_string())).unwrap();
+    assert_eq!(out, json!({ "error": "bad_request", "why": "envelope is required" }));
+    let out = call_with_envelope("decide", json!({ "now": "yesterday", "node": node }), &with(full, "note", json!("x")));
+    assert_eq!(out["error"], "parse", "{out}");
+}
+
+/// Step 1 comes before the key is resolved (§13.3): an envelope sealed to a key this endpoint once held
+/// and no longer does is `certificate_renewed`, and the same envelope with a `sig` that does not read is
+/// `envelope_invalid`, never answered with the current chain.
+#[test]
+fn a_misspelled_member_to_a_former_key_is_refused_before_the_key_is_resolved() {
+    let v = vectors();
+    let der = der_of(&v);
+    let full = &v["envelopes"].as_array().unwrap()[0];
+    let mut node = node_for(&v, &der, "leaf_b", "root_b", vec![]);
+    let kid = node["keys"][0]["kid"].clone();
+    node["keys"] = json!([]);
+    node["former"] = json!([kid]);
+    let decide = |text: &str| call_with_envelope("decide", json!({ "now": NOW, "node": node }), text);
+    let real = serde_json::to_string(&full["sig"]).unwrap();
+    assert_eq!(decide(&sig_text(full, &[&real]))["result"]["code"], "certificate_renewed");
+    for (what, sig, why) in [("!!!!", r#""!!!!""#, "sig is not base64url"), ("null", "null", "envelope member types")] {
+        assert_eq!(
+            decide(&sig_text(full, &[sig])),
+            json!({ "result": { "code": "envelope_invalid", "why": why }, "effects": [] }),
+            "sig {what}"
+        );
+    }
+}
+
+/// `open_result` reads a result envelope as `decide` reads a request (§13.2, §13.1): the same reader,
+/// the same step 1, the same words, as `{error: envelope_invalid}`.
+#[test]
+fn open_result_reads_an_envelope_of_exactly_four_string_members() {
+    let v = vectors();
+    let der = der_of(&v);
+    let c = cast();
+    let ts = at(NOW);
+    let alina = &c.hosts["leaf_a"];
+    let chain_b = vec![der["leaf_b"].clone(), der["root_b"].clone()];
+    let wire = envelope::seal_result(envelope::SealResult {
+        recipient: &alina.public(),
+        sender: &c.hosts["leaf_b"],
+        form: Form::Chain,
+        sender_chain: Some(&chain_b),
+        result: Some(json!({ "ok": 1 })),
+        error: None,
+        msg_id: "m-1".into(),
+        ts,
+        exp: None,
+        ephemeral_seed: None,
+    })
+    .unwrap();
+    let e = serde_json::to_value(&wire).unwrap();
+    let rest = json!({ "my_pkcs8": b64u(&alina.to_pkcs8()), "my_spki": b64u(alina.public().spki()), "msg_id": "m-1", "now": NOW });
+    let open = |text: &str| call_with_envelope("open_result", rest.clone(), text);
+    let real = serde_json::to_string(&e["sig"]).unwrap();
+    let with = |k: &str, x: Value| {
+        let mut o = e.clone();
+        o.as_object_mut().unwrap().insert(k.into(), x);
+        o.to_string()
+    };
+    let mut no_ct = e.clone();
+    no_ct.as_object_mut().unwrap().remove("ct");
+    for (what, text, why) in [
+        ("a fifth member", with("note", json!("x")), "envelope members"),
+        ("CT beside ct", with("CT", e["ct"].clone()), "envelope members"),
+        ("ct absent", no_ct.to_string(), "envelope members"),
+        ("a string in place of the object", json!("x").to_string(), "envelope members"),
+        ("sig null", with("sig", Value::Null), "envelope member types"),
+        ("sig not base64url", with("sig", json!("!!!!")), "sig is not base64url"),
+        ("sig twice, the real one then AAAA", sig_text(&e, &[&real, r#""AAAA""#]), "signature is not the chain's leaf key"),
+    ] {
+        assert_eq!(open(&text), json!({ "error": "envelope_invalid", "why": why }), "{what}");
+    }
+    for (what, text) in [("each member once", sig_text(&e, &[&real])), ("sig twice, 5 then the real one", sig_text(&e, &["5", &real]))] {
+        let out = open(&text);
+        assert_eq!(out["ok"], true, "{what}: {out}");
+        assert_eq!(out["result"], json!({ "ok": 1 }), "{what}");
+    }
 }
 
 /// §2.1, recomputed from the published `prf` alone — so what passes is what a third implementation

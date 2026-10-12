@@ -47,7 +47,7 @@ pub fn control_opened(
     endpoint: &str,
 ) -> std::result::Result<(), String> {
     let v = rpc_body(text).map_err(|s| format!("the answer is not JSON ({s})"))?;
-    let Some(wire) = tool_texts(&v).into_iter().find_map(|inner| serde_json::from_value::<envelope::Wire>(inner).ok()) else {
+    let Some(wire) = tool_texts(&v).into_iter().find_map(|inner| envelope::Wire::read(&inner).ok()) else {
         return Err("the answer carries no envelope".into());
     };
     let opened = envelope::open_result(envelope::OpenResultArgs {
