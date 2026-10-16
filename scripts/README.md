@@ -19,6 +19,7 @@ lists what each script does and refuses.
 | `release-manifest.mjs` | writes the release's `manifest.json` (the tagged commit's `js/manifest.json` plus `version`, `commit`, `tags`, `protocol_commit` and the sha256 and size of every other asset) and `SHA256SUMS` into the assets directory |
 | `build-cli.sh` | builds the `hdtp` CLI binaries of a release from a commit (`git archive` of the ref, never the tree): `darwin-arm64` natively, `linux-arm64` natively in the image `js/builder.json` names, `linux-amd64` cross-compiled in that arm64 container (rustc crashes under amd64 emulation on an arm64 Mac) |
 | `changelog.mjs` | `--release X.Y.Z YYYY-MM-DD` moves `## Unreleased` under a dated version heading (refuses an empty Unreleased); `--notes X.Y.Z` prints a version's section |
+| `spec-patterns.mjs` | not a release step: prints, for `gate.sh`, the two text rules this repository shares with `../hdtp-spec`, read from there so each has one definition: `article` (hdtp-spec's exported `ARTICLE`, for `git grep -P`) and `local` (the `LOCAL` literal of its `scripts/check-local-paths.mjs`, for `git grep -E`; refused if it carries a backslash other than `\/`) |
 | `version.mjs` | the one version and every place it is written: `Cargo.toml`, the four crates' entries in `Cargo.lock`, `js/package.json` and `go/api.go`. No argument prints it; `--check` exits 1 unless every copy agrees; `--set X.Y.Z` writes it |
 
 ## What it refuses, and how
