@@ -16,13 +16,13 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   and the cloud record nothing there. The answer is unchanged (`pending_new_address`, the address
   held); only the `seen` effect goes. A well-formed `thread_id` on that path records its msg_id, as
   before. The core changed, so the Wasm is re-pinned. `js/intrude.mjs` runs the three scenarios
-  hdtp-spec's seed gained with it, 199 in all; both ports agree with the seed on every one. This
-  corrects the count in the 1.0.1 entry below, which said 196.
+  hdtp-spec's seed gained with it; both ports agree with the seed on every one.
 - **Implements HDTP 1.0.1.** `version` answers `"spec": "1.0.1"` in both ports, and the contract's
   `spec` is 1.0.1. A host that reads the spec version from `version` sees the new number.
-  `js/intrude.mjs` runs the four scenarios hdtp-spec's seed gained for 1.0.1 (a member named
-  `ct,enc`, `cty,exp` or `chain,method`, and a renewed chain carrying a thread_id of neither form),
-  196 in all; both ports agree with the seed on every one.
+  `js/intrude.mjs` runs the seed of hdtp-spec v1.0.1, 199 in all; both ports agree with the seed on
+  every one. Four of its scenarios are new (a member named `ct,enc`, `cty,exp` or `chain,method`, and
+  a renewed chain carrying a thread_id of neither form); hdtp-spec files them under its 1.0.2-draft
+  text, not under 1.0.1.
 - **A correction to 0.8.3's note on what a host changes.** It said the cloud (batondeck) re-vendors and
   changes no code. The cloud changed its outbound client (batondeck #291). A peer's result that
   `open_result` refuses as `envelope members` or `envelope member types` is now answered

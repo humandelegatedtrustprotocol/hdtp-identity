@@ -389,7 +389,7 @@ A `pending_new_address` result is the host's to answer as SPEC §5.3 words it: t
 brought the new address answers `{"status": "pending"}`; every other call from that address, until the
 owner decides, answers `pending_approval`. Its effects end in the envelope's `seen`, save for a call
 whose `thread_id` the rule above refuses: that call is a `pending_new_address` too, whatever its
-`thread_id`, and records nothing (SPEC §7).
+`thread_id`, and carries no `seen`; its pin effects stand (SPEC §7).
 
 `decide_chain` is the same pin decision for a chain proven outside an envelope — at the TLS layer, where
 the handshake is the leaf key's signature — so a host's two doors cannot decide one caller two ways
