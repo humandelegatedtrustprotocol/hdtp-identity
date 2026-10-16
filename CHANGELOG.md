@@ -10,6 +10,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+- **Implements HDTP 1.0.1.** `version` answers `"spec": "1.0.1"` in both ports, and the contract's
+  `spec` is 1.0.1. A host that reads the spec version from `version` sees the new number.
 - **A correction to 0.8.3's note on what a host changes.** It said the cloud (batondeck) re-vendors and
   changes no code. The cloud changed its outbound client (batondeck #291). A peer's result that
   `open_result` refuses as `envelope members` or `envelope member types` is now answered
