@@ -73,7 +73,7 @@ Gate steps: "The contract's own validator, and CONTRACT.md rendered from the con
 answer a caller alike, and both answer as contract/contract.json says" (`js/parity.mjs`, which
 also fails when a function on either dispatcher has no case, or a declared error code is never
 produced by both ports in a case they answered alike). `PROOFS.md` (the generated record) states
-the counts of the day: 55 functions, 3138 cross-port parity cases over 54 guarded functions.
+the counts of the day: 55 functions, 3142 cross-port parity cases over 54 guarded functions.
 
 ## What it does not do
 
