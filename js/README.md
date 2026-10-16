@@ -83,7 +83,7 @@ reports it. The error codes the ports answer with are the contract's, listed in
   `fixtures.mjs`), except four kinds the seed cannot build, each named where it is made.
 - `parity.mjs` has no list of excused failures.
 - The shipped package is two copies of one Wasm: `pkg-web` and `pkg-node` hold the same
-  `hdtp_identity_wasm_bg.wasm`, 890,192 bytes in `manifest.json`.
+  `hdtp_identity_wasm_bg.wasm`, 890,277 bytes in `manifest.json`.
 
 ## Held by
 
@@ -92,7 +92,7 @@ reports it. The error codes the ports answer with are the contract's, listed in
 suite; `musts.mjs`; `record.mjs --check`;
 `seed.mjs`; and `results.mjs --summary`. The numbers of the current tree are in `../PROOFS.md`
 (generated; `record.mjs --check` keeps them current, and these copies of them): 101 normative
-sentences, 3138 cross-port parity cases over 54 guarded functions, 55 contract functions, spec
+sentences, 3142 cross-port parity cases over 54 guarded functions, 55 contract functions, spec
 1.0.1. How many checks `check.mjs` runs and how many scenarios `intrude.mjs` drives is the sibling
 `hdtp-spec`'s (its vectors and its scenarios), printed by each run and held nowhere in this
 repository.
