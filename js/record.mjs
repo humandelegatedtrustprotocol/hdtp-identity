@@ -141,8 +141,48 @@ for (const f of parity.by_function) {
 }
 L.push('');
 
+// The same numbers where prose repeats them: each copy is written from its source here, and held to it
+// by `--check`, because the copies in the READMEs were written by hand and went stale (#70). A copy is
+// a pattern of literal text and values, alternating, that must match exactly once.
+const manifest = JSON.parse(readFileSync(join(here, 'manifest.json'), 'utf8'));
+const wasmBytes = manifest.files['pkg-web/hdtp_identity_wasm_bg.wasm'].bytes.toLocaleString('en-US');
+const copies = [
+  { file: 'README.md', re: /(`hdtp_identity_wasm_bg\.wasm`:\s)([\d,]+)(\sbytes in\s+the pin of this commit)/g, values: [wasmBytes] },
+  { file: 'js/README.md', re: /(`hdtp_identity_wasm_bg\.wasm`,\s)([\d,]+)(\sbytes in `manifest\.json`)/g, values: [wasmBytes] },
+  {
+    file: 'js/README.md',
+    re: /(keeps them current, and these copies of them\):\s)(\d+)(\snormative\s+sentences,\s)(\d+)(\scross-port\s+parity cases over\s)(\d+)(\sguarded functions,\s)(\d+)(\scontract functions,\sspec\s)(\d+\.\d+\.\d+)(\.)/g,
+    values: [musts.length, parity.cases, parity.functions, c.methods, c.spec],
+  },
+  {
+    file: 'contract/README.md',
+    re: /(the counts of the day:\s)(\d+)(\sfunctions,\s)(\d+)(\scross-port\s+parity cases over\s)(\d+)(\sguarded functions)/g,
+    values: [c.methods, parity.cases, parity.functions],
+  },
+];
+const texts = new Map();
+for (const { file, re, values } of copies) {
+  const before = texts.get(file) ?? readFileSync(join(here, '..', file), 'utf8');
+  let n = 0;
+  const after = before.replace(re, (...m) => {
+    n++;
+    return m.slice(1, 2 * values.length + 2).map((g, i) => (i % 2 ? String(values[(i - 1) / 2]) : g)).join('');
+  });
+  if (n !== 1) {
+    console.error(`${file}: the sentence ${re} is written ${n} times where it must be written once`);
+    process.exit(1);
+  }
+  texts.set(file, after);
+}
+const stale = [...texts].filter(([file, text]) => readFileSync(join(here, '..', file), 'utf8') !== text).map(([file]) => file);
+
 const body = L.join('\n');
 if (check) {
+  if (stale.length) {
+    console.error(`${stale.join(', ')}: a number there is not what its source says.`);
+    console.error('Run `node js/record.mjs` and commit the result.');
+    process.exit(1);
+  }
   if (!existsSync(out)) {
     console.error('PROOFS.md does not exist; run `node js/record.mjs`');
     process.exit(1);
@@ -155,5 +195,6 @@ if (check) {
   console.log(`PROOFS.md is current: ${musts.length} MUSTs, ${parity.cases} parity cases.`);
 } else {
   writeFileSync(out, body);
+  for (const file of stale) writeFileSync(join(here, '..', file), texts.get(file));
   console.log(`wrote PROOFS.md — ${musts.length} MUSTs, ${parity.cases} parity cases over ${parity.functions} functions.`);
 }

@@ -57,8 +57,8 @@ cargo deny --locked check licenses sources
 step "One version everywhere it is written"
 node scripts/version.mjs --check
 
-step "Go port: vet, tests, adapter"
-( cd go && go vet ./... && go test ./... && make build )
+step "Go port: go.mod tidy, vet, tests, adapter"
+( cd go && go mod tidy -diff && go vet ./... && go test ./... && make build )
 
 step "The corpus the CLI writes for a fresh owner reads in the Go port as its cases.json says"
 # `hdtp vectors corpus` re-issues go/exportcorpus for another owner root. This is the one port that

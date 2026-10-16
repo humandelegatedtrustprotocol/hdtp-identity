@@ -9,9 +9,11 @@ as `vX.Y.Z`, and the version is the repository's one version (`ModuleVersion` in
 to the crates' by `scripts/version.mjs --check`). The root `README.md` says how to `go get` it and
 `CONTRIBUTING.md` how the ports are held together; this file does not repeat either.
 
-Dependencies (`go.mod`): `golang.org/x/crypto` (Argon2id and ChaCha20-Poly1305) and
-`filippo.io/edwards25519` (indirect, used for the small-order check of `strict.go`); the rest is the
-standard library.
+Dependencies (`go.mod`), both imported directly: `golang.org/x/crypto` (Argon2id and
+ChaCha20-Poly1305) and `filippo.io/edwards25519` (the small-order check of `strict.go`);
+`golang.org/x/sys` is listed as indirect because `golang.org/x/crypto`'s module requires it, and no
+package here imports it. The rest is the standard library. The gate refuses a `go.mod` that `go mod
+tidy` would change (`go mod tidy -diff`).
 
 ## What it holds
 
@@ -77,8 +79,8 @@ standard alphabet and nothing else (`b64.go`, held by `js/b64url-arguments.json`
 
 ## Held by
 
-Gate steps (`gate.sh`): "Go port: vet, tests, adapter" (`go vet ./...`, `go test ./...`,
-`make build`); "The corpus the CLI writes for a fresh owner reads in the Go port as its cases.json
+Gate steps (`gate.sh`): "Go port: go.mod tidy, vet, tests, adapter" (`go mod tidy -diff`, `go vet
+./...`, `go test ./...`, `make build`); "The corpus the CLI writes for a fresh owner reads in the Go port as its cases.json
 says" (`TestReadExportZipAnswersTheCorpusWrittenForAnotherOwner`); `node js/check.mjs --port go`
 (Appendix B through the adapter); `node js/intrude.mjs --port go` (the intrusion scenarios against
 the seed's verdicts); `node js/parity.mjs` (both ports, same arguments, same answers, validated

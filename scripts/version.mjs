@@ -38,6 +38,12 @@ export const copies = (dir = root) => [
   ...workspaceCrates(dir).map((name) => ({ file: 'Cargo.lock', label: `Cargo.lock (${name})`, re: () => lockRe(name) })),
   { file: 'js/package.json', re: () => /(\n {2}"version": ")([^"]+)(")/g },
   { file: 'go/api.go', re: () => /(\n\tModuleVersion = ")([^"]+)(")/g },
+  // README.md's install snippets, which name the release a host copies them from: the version of the
+  // tree they ship in, written by `make release` with the rest. They named 0.7.3 through 0.8.3 (#70).
+  { file: 'README.md', label: 'README.md (go get)', re: () => /(\ngo get github\.com\/humandelegatedtrustprotocol\/hdtp-identity\/go@v)([^\s]+)(\n)/g },
+  { file: 'README.md', label: 'README.md (Cargo tag)', re: () => /(\nhdtp-identity = \{ git = "https:\/\/github\.com\/humandelegatedtrustprotocol\/hdtp-identity", tag = "v)([^"]+)(")/g },
+  { file: 'README.md', label: 'README.md (gh release download)', re: () => /(\ngh release download v)([^\s]+)( -R humandelegatedtrustprotocol\/hdtp-identity )/g },
+  { file: 'README.md', label: 'README.md (the web package)', re: () => /(tar -xzf vendor\/hdtp-identity-wasm-web-)([^\s]+?)(\.tgz )/g },
 ];
 
 export function read(dir = root) {

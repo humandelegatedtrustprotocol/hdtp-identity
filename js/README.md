@@ -43,7 +43,7 @@ The proofs (each exits non-zero on a failure):
 | `live.mjs` | the black-box half, aimed at a live endpoint (`--endpoint`, `--card`, `--insecure`); `live-scenarios.json` is its data, which the `hdtp` CLI also compiles in |
 | `parity.mjs` | both ports, the same arguments, the same answers, every answer validated against `contract/contract.json`; `--only`, `--verbose`, `--manifest <file>` |
 | `musts.mjs` | every MUST in the specification and what holds it, from `musts.json`; fails on MISSING, DRIFTED or DANGLING entries and prints ONE PORT and GAP entries |
-| `record.mjs` | regenerates `../PROOFS.md` from `musts.json` and the parity manifest; `--check` fails if it is stale |
+| `record.mjs` | regenerates `../PROOFS.md` from `musts.json` and the parity manifest, and the counts and the Wasm size the READMEs repeat (from the same run and `manifest.json`); `--check` fails if any is stale |
 | `seed.mjs` | runs the seed's intrusion suite once per gate run and reads Appendix B's vector blocks |
 
 Support and test tooling: `port.mjs` and `go-adapter.mjs` (a port is `{ kind, call }`: the Wasm
@@ -64,7 +64,7 @@ The `*.test.mjs` files are `node --test` suites: `cases`, `doors`, `export-limit
 Every script prints what failed and exits 1: `verify.mjs` on a pin that is not of this commit, on a
 builder that moved, or on a file whose SHA-256 differs from the manifest; `parity.mjs` on any
 disagreement between the ports, on an answer off the contract, and when the contract's surface grows
-without a case; `musts.mjs` on a MUST nothing names; `record.mjs --check` on a stale `PROOFS.md`;
+without a case; `musts.mjs` on a MUST nothing names; `record.mjs --check` on a stale `PROOFS.md` or a stale count in a README;
 `reproduce.sh --pin` while a build input is uncommitted (`inputs.mjs --dirty` exits 1 for dirty and
 2 for "could not tell", which `reproduce.sh` treats as fatal). `intrude.mjs --port go` exits 2 with
 "the Go port is not built" when `go/bin/hdtp-identity-go` is missing; `check.mjs --port go` also
@@ -83,7 +83,7 @@ reports it. The error codes the ports answer with are the contract's, listed in
   `fixtures.mjs`), except four kinds the seed cannot build, each named where it is made.
 - `parity.mjs` has no list of excused failures.
 - The shipped package is two copies of one Wasm: `pkg-web` and `pkg-node` hold the same
-  `hdtp_identity_wasm_bg.wasm`, 876,471 bytes in `manifest.json`.
+  `hdtp_identity_wasm_bg.wasm`, 890,192 bytes in `manifest.json`.
 
 ## Held by
 
@@ -91,11 +91,11 @@ reports it. The error codes the ports answer with are the contract's, listed in
 `intrude.mjs --port go`; `parity.mjs --manifest`; `node --test js/*.test.mjs` as the `js-tests`
 suite; `musts.mjs`; `record.mjs --check`;
 `seed.mjs`; and `results.mjs --summary`. The numbers of the current tree are in `../PROOFS.md`
-(generated; `record.mjs --check` keeps them current): 101 normative sentences, 2895 cross-port
-parity cases over 54 guarded functions, 55 contract functions, spec 1.0.0; `check.mjs` printed
-148/148 checks passed and `intrude.mjs` 157 scenarios (151 blocked, 6 residual by decision,
-0 reproduce) on the run that wrote this file. Those last two counts come from the sibling
-`hdtp-spec` at the time and are not held anywhere in this repository.
+(generated; `record.mjs --check` keeps them current, and these copies of them): 101 normative
+sentences, 3138 cross-port parity cases over 54 guarded functions, 55 contract functions, spec
+1.0.0. How many checks `check.mjs` runs and how many scenarios `intrude.mjs` drives is the sibling
+`hdtp-spec`'s (its vectors and its scenarios), printed by each run and held nowhere in this
+repository.
 
 ## What it does not do
 

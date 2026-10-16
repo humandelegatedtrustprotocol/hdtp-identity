@@ -46,7 +46,7 @@ gate run (`js/parity.mjs`), so the document, the Rust core and the Go port descr
 `vX.Y.Z`; the version a `go get` names is the plain one:
 
 ```sh
-go get github.com/humandelegatedtrustprotocol/hdtp-identity/go@v0.7.3
+go get github.com/humandelegatedtrustprotocol/hdtp-identity/go@v0.8.3
 ```
 
 ```go
@@ -60,7 +60,7 @@ tag:
 
 ```toml
 [dependencies]
-hdtp-identity = { git = "https://github.com/humandelegatedtrustprotocol/hdtp-identity", tag = "v0.7.3" }
+hdtp-identity = { git = "https://github.com/humandelegatedtrustprotocol/hdtp-identity", tag = "v0.8.3" }
 ```
 
 **Wasm.** Take the release asset, not a build of your own: the bytes are pinned, and only the pinned
@@ -75,8 +75,8 @@ bytes are what every other host runs. Each GitHub release `vX.Y.Z` carries:
 | `hdtp-X.Y.Z-darwin-arm64`, `-linux-arm64`, `-linux-amd64` | the `hdtp` CLI. The Linux builds link `libpcsclite` dynamically (the PIV feature): `apt install libpcsclite1` |
 
 ```sh
-gh release download v0.7.3 -R humandelegatedtrustprotocol/hdtp-identity -D vendor/
-( cd vendor && shasum -a 256 -c SHA256SUMS ) && tar -xzf vendor/hdtp-identity-wasm-web-0.7.3.tgz -C vendor/
+gh release download v0.8.3 -R humandelegatedtrustprotocol/hdtp-identity -D vendor/
+( cd vendor && shasum -a 256 -c SHA256SUMS ) && tar -xzf vendor/hdtp-identity-wasm-web-0.8.3.tgz -C vendor/
 ```
 
 Check every unpacked file against `manifest.json`'s `files["pkg-web/<name>"]` before shipping it.
@@ -84,8 +84,8 @@ Check every unpacked file against `manifest.json`'s `files["pkg-web/<name>"]` be
 module), `js/index.mjs` for Node and the browser.
 
 **Versions.** One semver version for the crates, the Go module and the Wasm package, written in
-seven places — the workspace `Cargo.toml`, the four crates' entries in `Cargo.lock`,
-`js/package.json`, `go/api.go` — and held equal by `node scripts/version.mjs --check` (a gate
+the workspace `Cargo.toml`, each crate's entry in `Cargo.lock`, `js/package.json`, `go/api.go` and
+the install snippets above, and held equal by `node scripts/version.mjs --check` (a gate
 step); what each release changed is in `CHANGELOG.md`. Releases stay on 0.8.x, and each
 changelog entry lists what a host has to change, the contract included. `make release VERSION=X.Y.Z` cuts a release locally (gate, version commit, pin, tags,
 assets in `dist/X.Y.Z/`), `make publish VERSION=X.Y.Z` pushes it and creates the GitHub release,
@@ -95,10 +95,11 @@ leaves the machine before `make publish`; there is no CI (see "The gate is local
 
 ## Verifying the Wasm pin
 
-`js/manifest.json` is the authority on the bytes of `hdtp_identity_wasm_bg.wasm`: 876,471 bytes
-(843 KiB) in the pin of this commit, the same bytes in `pkg-web` and `pkg-node`, with the SHA-256
-of every package file beside it (release profile: `opt-level = "z"`, LTO, one codegen unit,
-`panic = "abort"`; `js/build.sh` passes `--no-opt`, so no `wasm-opt`).
+`js/manifest.json` is the authority on the bytes of `hdtp_identity_wasm_bg.wasm`: 890,192 bytes in
+the pin of this commit (`node js/record.mjs` writes the number here from the manifest), the same
+bytes in `pkg-web` and `pkg-node`, with the SHA-256 of every package file beside it (release
+profile: `opt-level = "z"`, LTO, one codegen unit, `panic = "abort"`; `js/build.sh` passes
+`--no-opt`, so no `wasm-opt`).
 
 ```sh
 node js/verify.mjs              # HEAD's build inputs are the ones the pin was built from, then the SHA-256 of
@@ -181,9 +182,10 @@ node contract/render.mjs --check  # CONTRACT.md is what contract/contract.json a
                                 # hdtp-spec's committed schema/*/schema.json is what this contract generates; when
                                 # it is not, the schema is regenerated in hdtp-spec first, as a spec PR
 node js/musts.mjs               # every MUST in hdtp-spec's specification names something that holds it, or says who does
-node js/record.mjs             # regenerate PROOFS.md: every MUST with its holder, every parity case (it prints both counts)
+node js/record.mjs             # regenerate PROOFS.md: every MUST with its holder, every parity case (it prints both counts),
+                                # and the counts and the Wasm size the READMEs repeat
 node js/record.mjs --check     # ...and fail if it is stale (what gate.sh runs)
-node scripts/version.mjs --check  # the one version, in all seven places it is written
+node scripts/version.mjs --check  # the one version, in every place it is written
 ```
 
 Toolchain: Rust 1.92.0 with the `wasm32-unknown-unknown` target (`rust-toolchain.toml`),
