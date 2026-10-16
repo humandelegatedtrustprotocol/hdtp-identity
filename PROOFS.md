@@ -7,9 +7,9 @@ the same extractor `js/musts.mjs` uses, with holders from `js/musts.json`; the p
 `js/parity.mjs --manifest`, which writes its manifest only after the comparison agreed — so no
 case can be listed as proven that did not pass.
 
-Specification: **1.0.0**. **101** normative sentences, **3130** cross-port parity cases over **54** guarded functions.
+Specification: **1.0.0**. **101** normative sentences, **3138** cross-port parity cases over **54** guarded functions.
 
-Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 1.0.0): **6260** answers, of which **0** do not hold to the shape it declares. Of **131** declared error codes, **131** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
+Every answer of both ports is validated against `contract/contract.json` (**55** functions, spec 1.0.0): **6276** answers, of which **0** do not hold to the shape it declares. Of **131** declared error codes, **131** were produced by both ports in a case they answered alike; `js/parity.mjs` fails when a declared code is not.
 
 ## The 101 normative sentences of the specification
 
@@ -231,7 +231,7 @@ by declaration. A row with nothing in its last column would fail `js/musts.mjs`.
 | `14.4#1` | An endpoint **MUST** keep the key identifiers of every leaf it has held for an identity it still serves — fingerprints, never keys past their `notAfter`. | `scenario:a former key of a still-served identity gets the current chain`, `gateway:TestStaleKidIsAnsweredWithTheCurrentChain` |
 | `14.4#2` | A caller **MUST** follow `certificate_renewed` at most once per call, and only when the chain it carries is newer than or equal to its pin (§14.3): an older chain, a chain to another root, or a chain naming another address is discarded and the call fails as it would have. | `rust:certificate_renewed_cases`, `go:TestChainCases` |
 
-## The 3130 cross-port parity cases
+## The 3138 cross-port parity cases
 
 Each case feeds one argument shape to both the Rust core (through its WebAssembly bindings) and
 the Go port and compares the whole answer — code, shape and `why` string. A function marked
@@ -239,7 +239,7 @@ the Go port and compares the whole answer — code, shape and `why` string. A fu
 which is the only kind that notices a member going missing; a refusal compared whole proves both
 ports refuse alike. `js/parity.mjs` fails if any guarded function lacks either.
 
-At the run that generated this file: **3130** cases (**1460** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
+At the run that generated this file: **3138** cases (**1460** of the run's cases are generated from the contract by `js/cases/generated.mjs`, the ones that pass are listed here), **0** disagreements, **54** of **54** functions compared whole on success.
 
 ### `address_guard` — 51 cases · whole on success
 
@@ -700,7 +700,7 @@ At the run that generated this file: **3130** cases (**1460** of the run's cases
 - generated · csr_new · endpoint absent, host_pkcs8 7
 - generated · csr_new · endpoint absent, dns_name 7
 
-### `decide` — 257 cases · whole on success
+### `decide` — 260 cases · whole on success
 
 - decide on an envelope from a pinned contact
 - decide on a pinned contact's call that names no tool
@@ -924,6 +924,9 @@ At the run that generated this file: **3130** cases (**1460** of the run's cases
 - decide on a call whose plaintext chain's leaf has a stray character
 - decide on a call whose plaintext chain's leaf has a vertical tab
 - decide on a call whose plaintext chain's leaf has padding (the control)
+- decide on an envelope with a member named ct,enc for ct and enc
+- decide on a header with a member named cty,exp for cty and exp
+- decide on a call whose plaintext has a member named chain,method for chain and method
 - decide with a held key whose PKCS #8 is not base64url
 - decide with a held key whose PKCS #8 is not a key
 - decide with a held key whose PKCS #8 holds a key outside the profile
@@ -1106,7 +1109,7 @@ At the run that generated this file: **3130** cases (**1460** of the run's cases
 - generated · export_merge · held absent, rows "x"
 - generated · export_merge · rows absent, held "x"
 
-### `export_read` — 118 cases · whole on success
+### `export_read` — 120 cases · whole on success
 
 - export_read: a thread whose id is empty is left out, not refused
 - export_read: what export_write wrote
@@ -1177,6 +1180,8 @@ At the run that generated this file: **3130** cases (**1460** of the run's cases
 - export_read: a contact whose root_cert is a leaf
 - export_read: a contact whose root_cert is another identity's root
 - export_read: a manifest with a member it does not hold
+- export_read: a threads.csv header of the longer one's names with a NUL for its first comma
+- export_read: a threads.csv header of the longer one's names with a NUL for its last comma
 - export_read: threads.csv with one control character over the ceiling
 - export_read: contacts.csv with one control character over the ceiling
 - export_read: a contact added at an instant with a lower-case z
@@ -2422,7 +2427,7 @@ At the run that generated this file: **3130** cases (**1460** of the run's cases
 - a function nobody defines, with args holding half a surrogate pair
 - a function nobody defines, with args holding a number past the largest double
 
-### `open_result` — 160 cases · whole on success
+### `open_result` — 163 cases · whole on success
 
 - open_result of a request envelope
 - open_result with nothing to work from
@@ -2506,6 +2511,9 @@ At the run that generated this file: **3130** cases (**1460** of the run's cases
 - open_result on an answer whose plaintext chain's leaf has a stray character
 - open_result on an answer whose plaintext chain's leaf has a vertical tab
 - open_result on an answer whose plaintext chain's leaf has padding (the control)
+- open_result on an envelope with a member named ct,enc for ct and enc
+- open_result on an answer whose header has a member named cty,exp for cty and exp
+- open_result on an answer whose plaintext has a member named chain,result for chain and result
 - open_result in the chain form, with a pin whose leaf is not base64url
 - open_result in the chain form, with a pin whose leaf is not a certificate
 - open_result in the chain form, with a pin whose leaf has a stray character
