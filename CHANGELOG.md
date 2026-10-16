@@ -10,7 +10,7 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
-- **A call from a held address whose `thread_id` is of neither form records nothing, in both ports**
+- **A call from a held address whose `thread_id` is of neither form carries no `seen`, in both ports**
   (hdtp-spec #69). On the `pending_new_address` path, under `ask` and for a root returned after
   removal, `decide` added the envelope's `seen` whatever the call's `thread_id`; the seed, the node
   and the cloud record nothing there. The answer is unchanged (`pending_new_address`, the address
