@@ -46,7 +46,9 @@ manifest's; the branch not at the release commit.
 - A push is a plain `git push`, through the hooks; nothing here forces.
 - The heavy steps of `release.sh` are commands overridable from the environment (`RELEASE_GATE`,
   `RELEASE_PIN`, `RELEASE_LOCKCHECK`, `RELEASE_CLI`, `RELEASE_CLI_TARGETS`, `PROTOCOL_DIR`,
-  `RELEASE_DATE`; `RELEASE_COMMIT_TRAILER`), so the recipe can be run against stubs.
+  `RELEASE_DATE`; `RELEASE_COMMIT_TRAILER`), so the recipe can be run against stubs. `RELEASE_GATE`
+  is refused unless the git directory holds `hdtp-release-fixture`, which only
+  `js/release.test.mjs`'s fixture writes: no variable cuts a release without the gate.
 
 ## Held by
 
