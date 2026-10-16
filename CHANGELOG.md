@@ -12,6 +12,9 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 - **Implements HDTP 1.0.1.** `version` answers `"spec": "1.0.1"` in both ports, and the contract's
   `spec` is 1.0.1. A host that reads the spec version from `version` sees the new number.
+  `js/intrude.mjs` runs the four scenarios hdtp-spec's seed gained for 1.0.1 (a member named
+  `ct,enc`, `cty,exp` or `chain,method`, and a renewed chain carrying a thread_id of neither form),
+  196 in all; both ports agree with the seed on every one.
 - **A correction to 0.8.3's note on what a host changes.** It said the cloud (batondeck) re-vendors and
   changes no code. The cloud changed its outbound client (batondeck #291). A peer's result that
   `open_result` refuses as `envelope members` or `envelope member types` is now answered
