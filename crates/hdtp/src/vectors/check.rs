@@ -244,9 +244,7 @@ pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
             let ct = from_b64u(e["ct"].as_str().unwrap_or("")).map_err(|e| e.why)?;
             let sig = from_b64u(e["sig"].as_str().unwrap_or("")).map_err(|e| e.why)?;
             let header: Value = serde_json::from_slice(&aad).map_err(|e| e.to_string())?;
-            let mut members: Vec<&str> = header.as_object().map(|o| o.keys().map(|k| k.as_str()).collect()).unwrap_or_default();
-            members.sort_unstable();
-            t.ok(members.join(",") == envelope::HEADER_MEMBERS, format!("{name}: header members"));
+            t.ok(header.as_object().is_some_and(|o| envelope::members_are(o, envelope::HEADER_MEMBERS)), format!("{name}: header members"));
             let suite = suite_for(&recipient_leaf.public_key);
             t.ok(
                 header["v"] == 1 && header["suite"] == e["suite"] && Suite::parse(e["suite"].as_str().unwrap_or("")) == Some(suite),

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -380,13 +381,13 @@ func sealedInteger(s string) bool {
 	return err == nil
 }
 
-// sortedKeys joins an object's member names in code-point order with commas — the seed's
-// Object.keys(x).sort().join(',') — which is how header and plaintext shapes are checked.
-func sortedKeys(m map[string]any) string {
+// membersAre reports whether an object's member names are exactly members, which lists them sorted
+// and joined with commas: compared name by name, so a name that holds a comma is never read as two.
+func membersAre(m map[string]any, members string) bool {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)
 	}
 	sort.Slice(keys, func(i, j int) bool { return lessUTF16(keys[i], keys[j]) })
-	return strings.Join(keys, ",")
+	return slices.Equal(keys, strings.Split(members, ","))
 }

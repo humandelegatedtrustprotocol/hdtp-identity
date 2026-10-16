@@ -10,7 +10,7 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 
 pub const HEADER_MEMBERS: &str = "cty,exp,kid,msg_id,suite,ts,v";
-/// The four members of an envelope, sorted and joined as `Wire::read` compares them (§13.1).
+/// The four members of an envelope, sorted and joined, as `Wire::read` reads them with `members_are` (§13.1).
 pub const ENVELOPE_MEMBERS: &str = "ct,enc,protected,sig";
 pub const SKEW_S: i64 = 300;
 /// §13.1: `exp − ts` is at most 30 days, so no receiver is asked to remember a msg_id for ever.
@@ -236,15 +236,12 @@ pub fn seal_result(r: SealResult<'_>) -> Result<Wire> {
     seal_body(r.recipient, &signer, &Value::Object(body), &r.msg_id, ts, exp, CTY_RESULT, r.ephemeral_seed)
 }
 
-fn members(v: &Value) -> String {
-    match v.as_object() {
-        Some(o) => {
-            let mut k: Vec<&str> = o.keys().map(|s| s.as_str()).collect();
-            k.sort_unstable();
-            k.join(",")
-        }
-        None => String::new(),
-    }
+/// Whether `o`'s member names are exactly `members`, which lists them sorted and joined with
+/// commas: compared name by name, so a name that holds a comma is never read as two.
+pub fn members_are(o: &Map<String, Value>, members: &str) -> bool {
+    let mut names: Vec<&str> = o.keys().map(String::as_str).collect();
+    names.sort_unstable();
+    names.into_iter().eq(members.split(','))
 }
 
 /// The four members decoded: `protected` (the AAD), `enc`, `ct` and `sig`.
@@ -274,9 +271,7 @@ fn header_of(aad: &[u8]) -> Result<Map<String, Value>> {
 }
 
 fn header_checks(h: &Map<String, Value>) -> Result<Suite> {
-    let mut keys: Vec<&str> = h.keys().map(|s| s.as_str()).collect();
-    keys.sort_unstable();
-    if keys.join(",") != HEADER_MEMBERS {
+    if !members_are(h, HEADER_MEMBERS) {
         return err("envelope_invalid", "header members");
     }
     // The closed set of names exists so two implementations cannot disagree about what was signed;
@@ -393,13 +388,14 @@ pub fn open_result(a: OpenResultArgs<'_>) -> Result<Value> {
     let plaintext =
         hpke::open(suite, a.my_key, a.my_public, INFO, &aad, &enc, &ct).map_err(|_| Error::new("envelope_invalid", "does not open"))?;
     let body: Value = serde_json::from_slice(&plaintext).map_err(|_| Error::new("envelope_invalid", "does not open"))?;
-    let m = members(&body);
-    let (payload_key, proof_key) = match m.as_str() {
-        "chain,result" => ("result", "chain"),
-        "leaf,result" => ("result", "leaf"),
-        "chain,error" => ("error", "chain"),
-        "error,leaf" => ("error", "leaf"),
-        _ => return invalid("plaintext members"),
+    let shapes = [
+        ("chain,result", "result", "chain"),
+        ("leaf,result", "result", "leaf"),
+        ("chain,error", "error", "chain"),
+        ("error,leaf", "error", "leaf"),
+    ];
+    let Some((_, payload_key, proof_key)) = shapes.into_iter().find(|(m, _, _)| body.as_object().is_some_and(|o| members_are(o, m))) else {
+        return invalid("plaintext members");
     };
     let mut signed = aad.clone();
     signed.extend_from_slice(&enc);

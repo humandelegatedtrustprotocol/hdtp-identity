@@ -25,6 +25,16 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   compared field by field, as the Rust core does, and refused naming both (`the header is not
   id,contact,topic,created_at,last_at, nor that and contact_name,contact_display_name`). No file is
   read differently; a host changes nothing.
+- **A member whose name holds a comma is refused as the wrong set of members, in both ports** (#71).
+  Both compared an object's member names sorted and joined with commas, so a name holding one could
+  join to the right string: an envelope of `ct,enc`, `protected` and `sig` was refused `envelope
+  member types` (now `envelope members`, as the contract says of a member absent), a header with
+  `cty,exp` for `cty` and `exp` `header member types` (now `header members`), and a plaintext with
+  `chain,method` or `chain,result` for its two members `plaintext shape` (now `plaintext members`),
+  in `decide` and `open_result` alike. The names are now compared one by one. Every such envelope
+  was refused before and is refused now; only the `why` changes. The core changed, so the Wasm is
+  re-pinned: a host that vendors it (the cloud) takes the new bytes. A Rust host gains
+  `envelope::members_are`; the Go port's constants are unchanged.
 
 ## 0.8.3 — 2026-10-12
 

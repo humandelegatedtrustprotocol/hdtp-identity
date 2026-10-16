@@ -480,8 +480,8 @@ func TestEnvelopesOpenAndReproduce(t *testing.T) {
 			t.Fatal(err)
 		}
 		header := hv.(map[string]any)
-		if sortedKeys(header) != HeaderMembers {
-			t.Errorf("%s: header members %s", e.Name, sortedKeys(header))
+		if !membersAre(header, HeaderMembers) {
+			t.Errorf("%s: header members", e.Name)
 		}
 		vv, _ := numberOf(header["v"])
 		suite, _ := SuiteForKey(recipientLeaf.PublicKey)
@@ -507,7 +507,7 @@ func TestEnvelopesOpenAndReproduce(t *testing.T) {
 		senderLeaf, _ := Parse(der(e.SenderChain[0]))
 		signed := concat(aad, enc, ct)
 		if e.Form == "leaf" {
-			if sortedKeys(body) != "leaf,method,params" {
+			if !membersAre(body, "leaf,method,params") {
 				t.Errorf("%s: small form members", e.Name)
 			}
 			if body["leaf"] != Fingerprint(senderLeaf.SPKI) {
@@ -520,7 +520,7 @@ func TestEnvelopesOpenAndReproduce(t *testing.T) {
 				t.Errorf("%s: small form is %d bytes sealed", e.Name, len(ct))
 			}
 		} else {
-			if sortedKeys(body) != "chain,method,params" {
+			if !membersAre(body, "chain,method,params") {
 				t.Errorf("%s: full form members", e.Name)
 			}
 			var chain [][]byte
@@ -886,6 +886,7 @@ func TestDecideReadsAnEnvelopeOfExactlyFourStringMembers(t *testing.T) {
 		{"a fifth member", withMember(full, "note", "x", false), "envelope members"},
 		{"sig spelled SIG", fmt.Sprintf(`{"protected":%q,"enc":%q,"ct":%q,"SIG":%q}`, full.Protected, full.Enc, full.Ct, full.Sig), "envelope members"},
 		{"Protected beside protected", withMember(full, "Protected", full.Protected, false), "envelope members"},
+		{"a member named ct,enc for ct and enc", fmt.Sprintf(`{"ct,enc":%q,"protected":%q,"sig":%q}`, full.Ct, full.Protected, full.Sig), "envelope members"},
 		{"sig absent, in the small form", withMember(small, "sig", nil, true), "envelope members"},
 		{"an array in place of the object", string(mustJSON([]string{full.Protected, full.Enc, full.Ct, full.Sig})), "envelope members"},
 		{"a string in place of the object", `"x"`, "envelope members"},
