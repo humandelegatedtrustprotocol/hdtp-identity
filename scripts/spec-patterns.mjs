@@ -7,7 +7,10 @@
 // The article is hdtp-spec's exported ARTICLE (vectors/lib/stated.mjs). The local-path pattern is the
 // regular-expression literal `const LOCAL = /…/` in scripts/local-paths.mjs, read as text: that
 // module exports only the function that applies it. Only `\/` is unescaped; any other backslash would
-// mean something else in an extended regular expression, so it is refused rather than passed on.
+// mean something else in an extended regular expression, so it is refused rather than passed on, and so
+// are the JavaScript groups `(?…)` and lazy quantifiers, which an extended regular expression does not
+// have (git grep -E exits 128 on them). Either pattern carrying a flag other than `g` is refused: a flag
+// changes what the pattern matches and does not travel with its source.
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -23,12 +26,15 @@ if (which === 'article') {
   const file = join(resolve(spec), 'vectors/lib/stated.mjs');
   const { ARTICLE } = await import(pathToFileURL(file).href);
   if (!(ARTICLE instanceof RegExp)) refuse(`${file} exports no ARTICLE pattern`);
+  if (/[^g]/.test(ARTICLE.flags)) refuse(`${file}'s ARTICLE carries a flag other than g: /${ARTICLE.flags}`);
   process.stdout.write(ARTICLE.source);
 } else {
   const file = join(spec, 'scripts/local-paths.mjs');
-  const m = /^const LOCAL = \/(.+)\/[a-z]*$/m.exec(readFileSync(file, 'utf8'));
+  const m = /^const LOCAL = \/(.+)\/([a-z]*)$/m.exec(readFileSync(file, 'utf8'));
   if (!m) refuse(`${file} holds no line 'const LOCAL = /…/'`);
+  if (/[^g]/.test(m[2])) refuse(`${file}'s LOCAL carries a flag other than g: /${m[2]}`);
   const ere = m[1].replaceAll('\\/', '/');
   if (ere.includes('\\')) refuse(`${file}'s LOCAL carries a backslash other than \\/, which an extended regular expression reads otherwise: ${m[1]}`);
+  if (/\(\?|[*+?}]\?/.test(ere)) refuse(`${file}'s LOCAL carries a group (?…) or a lazy quantifier, which an extended regular expression does not have: ${m[1]}`);
   process.stdout.write(ere);
 }
