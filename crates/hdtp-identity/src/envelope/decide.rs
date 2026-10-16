@@ -273,8 +273,14 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
             }
             ok("guest", &root, &endpoint, "chain", &leaf_b64, guest_members(why, demote, address_claim), Vec::new())
         }
+        // §7: a call §5.3 holds is answered so whatever its thread_id; one of neither form records nothing.
         Pinned::NewAddress { forced, effects } => {
-            ok("pending_new_address", &root, &endpoint, "chain", &leaf_b64, new_address_members(forced), effects)
+            let r = ok("pending_new_address", &root, &endpoint, "chain", &leaf_b64, new_address_members(forced), effects);
+            if thread_refusal.is_none() {
+                r
+            } else {
+                DecideOutput { result: r.result, effects: r.effects.into_iter().filter(|e| e["op"] != "seen").collect() }
+            }
         }
         Pinned::Contact { pending_out, effects } => {
             // The pin may move (a peer may move between my request and their answer) while the call waits.
@@ -320,7 +326,8 @@ pub fn decide_chain(node: &NodeState, chain: &[Vec<u8>], now: i64) -> Result<Dec
 /// an envelope or in a TLS handshake: the chain half of `decide`, which `decide_chain` answers on its
 /// own for a host's TLS door. The node's TLS door made this decision itself and parted from the
 /// envelope's on a removal tombstone and on a conflicting leaf (N1, N2); both doors now take it from
-/// here. Changes nothing: the effects are the pin's moves, and `decide` adds the envelope's `seen`.
+/// here. Changes nothing: the effects are the pin's moves, and `decide` adds the envelope's `seen`
+/// (none for a `pending_new_address` call whose `thread_id` §7 refuses).
 enum Pinned {
     /// The pin stands, or renewed, or moved under `auto`: tier `contact`, or `pending` while the pin is
     /// `pending_out`, whose calls wait for the answer save the pending tier's own (`decide` judges the
