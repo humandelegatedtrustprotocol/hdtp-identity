@@ -18,6 +18,13 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   (hdtp-gateway #122) also changed code beyond what the note described: a peer's result envelope that
   fails to decode is now wrapped as `envelope_invalid`, where before it carried no code. The 0.8.3
   entry stays as released.
+- **`export_read` in the Go port: a threads.csv header that is neither is refused in the contract's
+  words** (#69). A header of the longer header's seven names in six fields, a NUL for one of its
+  commas, joined with NULs to the longer header, and the Go port refused it naming that header (`the
+  header is not id,contact,topic,created_at,last_at,contact_name,contact_display_name`); it is now
+  compared field by field, as the Rust core does, and refused naming both (`the header is not
+  id,contact,topic,created_at,last_at, nor that and contact_name,contact_display_name`). No file is
+  read differently; a host changes nothing.
 
 ## 0.8.3 — 2026-10-12
 

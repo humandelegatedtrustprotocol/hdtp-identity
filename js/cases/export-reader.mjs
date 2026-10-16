@@ -11,6 +11,7 @@ import { readZip } from '../zip.mjs';
 const CORPUS = new URL('../../go/exportcorpus/', import.meta.url);
 const sha = (b) => createHash('sha256').update(b).digest('hex');
 const MiB = 1024 * 1024;
+const THREADS_HEADER_REFUSAL = 'threads.csv: row 1: the header is not id,contact,topic,created_at,last_at, nor that and contact_name,contact_display_name';
 
 export default function readerCases({ add, expect }) {
   const index = JSON.parse(readFileSync(new URL('cases.json', CORPUS), 'utf8'));
@@ -66,6 +67,11 @@ export default function readerCases({ add, expect }) {
     ['a contact whose root_cert is a leaf', withCell(4, 9, chenLeaf), 'contacts.csv: row 4, column root_cert: not a root of §14.1\'s profile'],
     ['a contact whose root_cert is another identity\'s root', withCell(4, 9, bharatRoot), 'contacts.csv: row 4, column root_cert: not the certificate of this row\'s root'],
     ['a manifest with a member it does not hold', (m) => { m.manifest.note = 'hello'; }, 'manifest.json: "note" is not a member of a manifest'],
+    // The longer header's seven names in six fields, a NUL for one comma: neither header (#69).
+    ...[
+      ['first', 'id\u0000contact,topic,created_at,last_at,contact_name,contact_display_name'],
+      ['last', 'id,contact,topic,created_at,last_at,contact_name\u0000contact_display_name'],
+    ].map(([where, header]) => [`a threads.csv header of the longer one's names with a NUL for its ${where} comma`, (m) => { m.threads = m.threads.replace(/^[^\r]*/, header); }, THREADS_HEADER_REFUSAL]),
   ];
   // ── the library's ceiling on control characters in one member (ExportLimits.control_characters) ──
   // Each is answered as two bytes (U+0008, U+000C) or six; more than the ceiling is refused before the member is parsed, and

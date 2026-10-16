@@ -572,7 +572,7 @@ const threadsHeaderRefusal = "threads.csv: row 1: the header is not id,contact,t
 func threadsHeader(text string) []string {
 	named := false
 	csvEach(text, func(n int, fields []string) bool {
-		named = strings.Join(fields, "\x00") == strings.Join(threadColumnsNamed, "\x00")
+		named = slices.Equal(fields, threadColumnsNamed)
 		return false
 	})
 	if named {
