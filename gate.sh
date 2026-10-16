@@ -193,10 +193,12 @@ HOOK_LOCAL_PATH="$(bash -c 'eval "$(grep "^LOCAL_PATH=" githooks/commit-msg)" &&
   printf '        hook: %s\n        spec: %s\n' "$HOOK_LOCAL_PATH" "$LOCAL_PATH" >&2
   exit 1
 }
-if git grep -n -I -E "$LOCAL_PATH" -- . >&2; then
-  echo "gate: the lines above carry a path from the machine that wrote them; say \"the worktree\" or \"the sibling checkout\"" >&2
-  exit 1
-fi
+rc=0; git grep -n -I -E "$LOCAL_PATH" -- . >&2 || rc=$?
+case "$rc" in
+  1) ;;
+  0) echo "gate: the lines above carry a path from the machine that wrote them; say \"the worktree\" or \"the sibling checkout\"" >&2; exit 1 ;;
+  *) echo "gate: git grep -E failed (exit $rc)" >&2; exit 1 ;;
+esac
 # The hook and hdtp-spec's pattern are two copies of one rule: each planted message is judged by both.
 # The hook reads the whole message: git keeps comment lines and the scissors' tail for -m and -F.
 MSGS="$(mktemp -d)"
