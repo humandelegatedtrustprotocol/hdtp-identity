@@ -16,16 +16,7 @@
     "./worker": "./worker.mjs"
   },
   "scripts": {
-    "build": "sh build.sh",
-    "verify": "node verify.mjs",
-    "check": "node check.mjs",
-    "intrude": "node intrude.mjs",
-    "intrude:go": "node intrude.mjs --port go",
-    "parity": "node parity.mjs",
-    "musts": "node musts.mjs",
-    "record": "node record.mjs",
-    "record:check": "node record.mjs --check",
-    "live": "node --test live.test.mjs"
+    "build": "sh build.sh"
   },
   "engines": { "node": ">=22" }
 }
