@@ -9,7 +9,9 @@
 # The whole message file is read. A message given with -m or -F keeps its comment lines and anything
 # under a scissors line (git's cleanup is then "whitespace"), so neither is skipped. The cost: a
 # `git commit -v` whose diff removes such a path from the tree is refused; commit that without -v.
-# The pattern is gate.sh's LOCAL_PATH, and gate.sh holds the two to each other.
+# The pattern is a copy of hdtp-spec's LOCAL (scripts/check-local-paths.mjs), kept here because a
+# commit cannot depend on the sibling checkout; gate.sh holds the two to each other, by this line's
+# text and by planted messages.
 #
 # This project does not bypass its hooks: a gate that is wrong is fixed, not skipped.
 set -euo pipefail

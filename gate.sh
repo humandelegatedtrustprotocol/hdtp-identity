@@ -19,8 +19,8 @@
 set -eu
 cd "$(dirname "$0")"
 
-[ -f ../hdtp-spec/site/spec-source.mjs ] && [ -d ../hdtp-spec/docs/specification ] && [ -f ../hdtp-spec/vectors/lib/x509.mjs ] && [ -f ../hdtp-spec/schema/gen.mjs ] || {
-  echo "gate: ../hdtp-spec is not checked out beside this directory (docs/specification, vectors/lib and schema/gen.mjs are read from it)" >&2
+[ -f ../hdtp-spec/site/spec-source.mjs ] && [ -d ../hdtp-spec/docs/specification ] && [ -f ../hdtp-spec/vectors/lib/x509.mjs ] && [ -f ../hdtp-spec/vectors/lib/stated.mjs ] && [ -f ../hdtp-spec/scripts/check-local-paths.mjs ] && [ -f ../hdtp-spec/schema/gen.mjs ] || {
+  echo "gate: ../hdtp-spec is not checked out beside this directory (docs/specification, vectors/lib, scripts/check-local-paths.mjs and schema/gen.mjs are read from it)" >&2
   exit 2
 }
 
@@ -132,10 +132,24 @@ node_tests js-tests js/*.test.mjs
 step "The name takes \"an\": no tracked text writes \"a\" before it"
 # A rename leaves the old article behind ("a" before a name that now begins with a vowel sound), in
 # prose, in comments and in the refusal strings a caller reads. Bare, or behind a mark or the X- prefix.
-if git grep -n -I -E '(^|[^[:alnum:]_])[Aa] [`*_"(]*(X-)?(HDTP|hdtp)' -- . >&2; then
-  echo "gate: the lines above write \"a\" before the name; it takes \"an\"" >&2
-  exit 1
-fi
+# The pattern is hdtp-spec's ARTICLE (vectors/lib/stated.mjs), read by scripts/spec-patterns.mjs, so
+# the two repositories hold one rule with one definition. Before the tree, it must catch the plants
+# and pass the controls through git grep -P; a git built without PCRE fails here, never passes.
+ARTICLE="$(node scripts/spec-patterns.mjs ../hdtp-spec article)"
+PLANTS="$(mktemp -d)"
+NAME="HD""TP"
+printf 'a %s\nA `X-%s-VERSION`\n(a **%s** node)\n' "$NAME" "$NAME" "$(echo "$NAME" | tr A-Z a-z)" > "$PLANTS/plant"
+printf 'an %s\ndata %s\n' "$NAME" "$NAME" > "$PLANTS/control"
+[ "$(cd "$PLANTS" && git grep --no-index -h -c -P "$ARTICLE" -- plant)" = 3 ] || { echo "gate: hdtp-spec's ARTICLE, through git grep -P, does not catch the three plants" >&2; exit 1; }
+rc=0; ( cd "$PLANTS" && git grep --no-index -q -P "$ARTICLE" -- control ) || rc=$?
+[ "$rc" = 1 ] || { echo "gate: hdtp-spec's ARTICLE, through git grep -P, refuses a control or did not run (exit $rc)" >&2; exit 1; }
+rm -r "$PLANTS"
+rc=0; git grep -n -I -P "$ARTICLE" -- . >&2 || rc=$?
+case "$rc" in
+  1) ;;
+  0) echo "gate: the lines above write \"a\" before the name; it takes \"an\"" >&2; exit 1 ;;
+  *) echo "gate: git grep -P failed (exit $rc)" >&2; exit 1 ;;
+esac
 
 step "No identifier and no file name carries a generation suffix"
 # HDTP has one generation. A test or a function named for another one's number says otherwise while
@@ -159,13 +173,22 @@ step "No tracked text carries a path from the machine that wrote it"
 # same rule by githooks/commit-msg, which this step cannot see. A /home path counts where it begins a
 # path (not inside one, as in a route like a/home/x) and names someone, whatever follows the name (a
 # slash, a space, punctuation or the end of the line).
-# The pattern and the plants are spelled in halves so that this file does not carry what it refuses.
-LOCAL_PATH="/Users""/|(^|[^A-Za-z0-9_/-])/home""/[A-Za-z0-9._-]+"
+# The pattern is hdtp-spec's LOCAL (scripts/check-local-paths.mjs), read by scripts/spec-patterns.mjs:
+# one rule, one definition. githooks/commit-msg keeps a copy, because a commit cannot depend on the
+# sibling checkout; it is held to this one below, by its text and by the plants. The plants are
+# spelled in halves so that this file does not carry what it refuses.
+LOCAL_PATH="$(node scripts/spec-patterns.mjs ../hdtp-spec local)"
+HOOK_LOCAL_PATH="$(bash -c 'eval "$(grep "^LOCAL_PATH=" githooks/commit-msg)" && printf %s "$LOCAL_PATH"')"
+[ "$HOOK_LOCAL_PATH" = "$LOCAL_PATH" ] || {
+  echo "gate: githooks/commit-msg's LOCAL_PATH is not hdtp-spec's LOCAL:" >&2
+  printf '        hook: %s\n        spec: %s\n' "$HOOK_LOCAL_PATH" "$LOCAL_PATH" >&2
+  exit 1
+}
 if git grep -n -I -E "$LOCAL_PATH" -- . >&2; then
   echo "gate: the lines above carry a path from the machine that wrote them; say \"the worktree\" or \"the sibling checkout\"" >&2
   exit 1
 fi
-# The hook and the pattern above are two copies of one rule: each planted message is judged by both.
+# The hook and hdtp-spec's pattern are two copies of one rule: each planted message is judged by both.
 # The hook reads the whole message: git keeps comment lines and the scissors' tail for -m and -F.
 MSGS="$(mktemp -d)"
 MAC="/Users""/alina/x"
