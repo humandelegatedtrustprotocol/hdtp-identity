@@ -8,7 +8,7 @@ One library, several homes: a Rust core (`crates/hdtp-identity`) compiled to Web
 browser, Cloudflare Workers and Node (`crates/hdtp-identity-wasm`, loaders in `js/`), compiled
 natively for the `hdtp` CLI (`crates/hdtp`), and an independent Go port (`go/`) that the vectors tie
 to the first. This file is the boundary all of them present: **bytes in, JSON out**, no state, the
-same names, the same shapes. The specification is hdtp-spec's `docs/specification/` (1.0.0) and, where
+same names, the same shapes. The specification is hdtp-spec's `docs/specification/` (1.0.1) and, where
 the spec leaves a byte to the implementer, `hdtp-spec/vectors/lib/*.mjs` — the seed library —
 which every port must match byte for byte on the vectors in
 `hdtp-spec/vectors/hdtp-1.0-vectors.json` and in the specification's Appendix B.
