@@ -9,7 +9,7 @@ import (
 )
 
 // The constants the two ports each write down, held to the one copy contract/contract.json carries
-// ($defs Windows, Kdf, KdfArgs, KdfDefault and LimitsIdle). crates/hdtp-identity/tests/constants.rs
+// ($defs Windows, Kdf, KdfArgs, KdfDefault and LimitsIdle, and its spec). crates/hdtp-identity/tests/constants.rs
 // and vault.rs's tests hold the core's to the same file. (The export's bounds are held by
 // export_limits_test.go; the canonical number table by review_test.go.)
 func contractDefs(t *testing.T) map[string]json.RawMessage {
@@ -41,6 +41,22 @@ func TestTheContractsWindowsAreThePortsConstants(t *testing.T) {
 	}
 	if !reflect.DeepEqual(windows.Const, port) {
 		t.Fatalf("contract/contract.json's Windows %v and the Go port's constants %v", windows.Const, port)
+	}
+}
+
+func TestTheContractsSpecIsThePortsSpecVersion(t *testing.T) {
+	raw, err := os.ReadFile("../contract/contract.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var contract struct {
+		Spec string `json:"spec"`
+	}
+	if err := json.Unmarshal(raw, &contract); err != nil {
+		t.Fatal(err)
+	}
+	if contract.Spec != SpecVersion {
+		t.Fatalf("contract/contract.json's spec %q and SpecVersion %q", contract.Spec, SpecVersion)
 	}
 }
 

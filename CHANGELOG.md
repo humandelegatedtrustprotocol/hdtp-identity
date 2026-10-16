@@ -35,6 +35,15 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   was refused before and is refused now; only the `why` changes. The core changed, so the Wasm is
   re-pinned: a host that vendors it (the cloud) takes the new bytes. A Rust host gains
   `envelope::members_are`; the Go port's constants are unchanged.
+- **A correction to #71's commit message** (d131e4a). It said the vector checks (tests/vectors.rs, the
+  CLI's `vectors check`, go/vectors_test.go) use the same helper. Go's did, and the two Rust checks'
+  header members did; their plaintext members were still sorted and joined with commas, and
+  `js/check.mjs` joined all three (header, small form, full form). All of them now compare name by
+  name. These are checks of Appendix B's vectors, none of which has such a name; a host changes
+  nothing.
+- **The spec version each port claims is held to the contract's `spec`**, by a test in each
+  (`tests/constants.rs`, `go/constants_test.go`), as it was already held to the specification's own
+  version line. A host changes nothing.
 - **Documents and the Go module, held to the tree** (#70). The README's install snippets named
   0.7.3; they name the release they ship in, and `scripts/version.mjs` now writes and checks them
   with the other copies of the version. The Wasm size in `README.md` and `js/README.md` (876,471

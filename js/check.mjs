@@ -26,7 +26,12 @@ const [vec] = blocks;
 let failures = 0, checks = 0;
 const rec = recorder(`check-${port.kind}`);
 const ok = (cond, what) => { checks++; rec.add(what, cond ? 'PASS' : 'FAIL', { reason: cond ? null : 'the check did not hold' }); if (!cond) { failures++; console.log('  FAIL ' + what); } };
-const spkiOfPkcs8 = (hexKey) => fromB64url(port.call('public_key', { pkcs8: b64url(Buffer.from(hexKey, 'hex')) }).spki);
+// Name by name, as envelope.rs's members_are: joined with commas, a name holding one could pass.
+const membersAre = (o, members) => {
+  const names = Object.keys(o).sort(), want = members.split(',');
+  return names.length === want.length && names.every((n, i) => n === want[i]);
+};
+const spkiOfPkcs8 =(hexKey) => fromB64url(port.call('public_key', { pkcs8: b64url(Buffer.from(hexKey, 'hex')) }).spki);
 
 if (!vec) {
   console.log('no vector block in Appendix B');
@@ -95,7 +100,7 @@ if (!vec) {
     const recipientPriv = createPrivateKey({ key: Buffer.from(vec.leaf_keys_pkcs8_hex[v.recipient_chain[0]], 'hex'), format: 'der', type: 'pkcs8' });
     const aad = fromB64url(v.protected), enc = fromB64url(v.enc), ct = fromB64url(v.ct);
     const header = JSON.parse(aad.toString());
-    ok(Object.keys(header).sort().join(',') === 'cty,exp,kid,msg_id,suite,ts,v', `${v.name}: header members`);
+    ok(membersAre(header, 'cty,exp,kid,msg_id,suite,ts,v'), `${v.name}: header members`);
     ok(header.v === 1 && header.suite === v.suite && header.suite === port.call('suite_for', { spki: recipientLeaf.spki }).suite, `${v.name}: version and suite`);
     ok(header.kid === recipientLeaf.fingerprint, `${v.name}: kid is the recipient leaf key`);
     ok(createPublicKey(recipientPriv).export({ format: 'der', type: 'spki' }).equals(fromB64url(recipientLeaf.spki)), `${v.name}: the recipient key is the leaf's`);
@@ -106,12 +111,12 @@ if (!vec) {
       const body = JSON.parse(plaintext.toString());
       const senderLeaf = d.parseCert(der[v.sender_chain[0]]);
       if (v.form === 'leaf') {
-        ok(Object.keys(body).sort().join(',') === 'leaf,method,params', `${v.name}: small form carries leaf, method, params`);
+        ok(membersAre(body, 'leaf,method,params'), `${v.name}: small form carries leaf, method, params`);
         ok(body.leaf === senderLeaf.fingerprint, `${v.name}: leaf names the sender's held leaf`);
         ok(d.verify(fromB64url(senderLeaf.spki), Buffer.concat([aad, enc, ct]), fromB64url(v.sig)), `${v.name}: signature under the held leaf's key`);
         ok(ct.length < 400, `${v.name}: small form stays small (${ct.length} bytes sealed)`);
       } else {
-        ok(Object.keys(body).sort().join(',') === 'chain,method,params', `${v.name}: full form carries chain, method, params`);
+        ok(membersAre(body, 'chain,method,params'), `${v.name}: full form carries chain, method, params`);
         const chain = body.chain.map(fromB64url);
         const r = d.validateChain(chain, { now: new Date(vec.now) });
         ok(r.ok, `${v.name}: chain inside validates`);
