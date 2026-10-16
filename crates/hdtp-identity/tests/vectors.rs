@@ -378,15 +378,14 @@ fn envelopes_open_and_reproduce() {
         signed.extend_from_slice(&enc);
         signed.extend_from_slice(&ct);
         let sender_leaf = parse(&der[sender_name]).unwrap();
-        let mut bm: Vec<&str> = body.as_object().unwrap().keys().map(|k| k.as_str()).collect();
-        bm.sort();
+        let bm = body.as_object().unwrap();
         if form == "leaf" {
-            assert_eq!(bm.join(","), "leaf,method,params");
+            assert!(envelope::members_are(bm, "leaf,method,params"), "{name}: small form carries leaf, method, params");
             assert_eq!(body["leaf"], sender_leaf.public_key.fingerprint(), "{name}: leaf names the sender's held leaf");
             assert!(sender_leaf.public_key.verify(&signed, &sig), "{name}: signature under the held leaf's key");
             assert!(ct.len() < 400, "{name}: small form stays small ({} bytes sealed)", ct.len());
         } else {
-            assert_eq!(bm.join(","), "chain,method,params");
+            assert!(envelope::members_are(bm, "chain,method,params"), "{name}: full form carries chain, method, params");
             let chain: Vec<Vec<u8>> = body["chain"].as_array().unwrap().iter().map(|x| from_b64u(x.as_str().unwrap()).unwrap()).collect();
             let r = validate_chain(&chain, at(v["now"].as_str().unwrap()), None, None);
             let ChainResult::Ok(ok) = r else { panic!("{name}: chain inside validates") };

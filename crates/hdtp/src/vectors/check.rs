@@ -259,15 +259,14 @@ pub fn check(spec: Option<&str>, file: Option<&str>) -> Res<i32> {
             signed.extend_from_slice(&enc);
             signed.extend_from_slice(&ct);
             let sender_leaf = parse(&get(sn)).map_err(|e| e.why)?;
-            let mut bm: Vec<&str> = body.as_object().map(|o| o.keys().map(|k| k.as_str()).collect()).unwrap_or_default();
-            bm.sort_unstable();
+            let members = |m: &str| body.as_object().is_some_and(|o| envelope::members_are(o, m));
             if form == "leaf" {
-                t.ok(bm.join(",") == "leaf,method,params", format!("{name}: small form carries leaf, method, params"));
+                t.ok(members("leaf,method,params"), format!("{name}: small form carries leaf, method, params"));
                 t.ok(body["leaf"] == sender_leaf.public_key.fingerprint(), format!("{name}: leaf names the sender's held leaf"));
                 t.ok(sender_leaf.public_key.verify(&signed, &sig), format!("{name}: signature under the held leaf's key"));
                 t.ok(ct.len() < 400, format!("{name}: small form stays small ({} bytes sealed)", ct.len()));
             } else {
-                t.ok(bm.join(",") == "chain,method,params", format!("{name}: full form carries chain, method, params"));
+                t.ok(members("chain,method,params"), format!("{name}: full form carries chain, method, params"));
                 let chain: Vec<Vec<u8>> =
                     body["chain"].as_array().map(|a| a.iter().filter_map(|x| from_b64u(x.as_str()?).ok()).collect()).unwrap_or_default();
                 match validate_chain(&chain, now2, None, None) {

@@ -51,8 +51,9 @@ the node uses it. `go doc ./...` lists it; by concern:
   `export_*` functions (`export.go`, `export_csv.go`, `export_zip.go`).
 - Call budgets: `LimitsDecide`, `LimitsRules`, `LimitsCharge`, `LimitsStore`, `LimitsMemoryStore`
   (`limits.go`).
-- Constants held to the contract: `ModuleVersion`, `SpecVersion`, `VaultFormat`, `DefaultKDF`,
-  `MaxLifetimeSeconds`, `SigningMaxAhead`, `LimitsIdleMS`, the `Export...Max` bounds.
+- Constants held to the contract: `SpecVersion`, `VaultFormat`, `DefaultKDF`, `MaxLifetimeSeconds`,
+  `SigningMaxAhead`, `LimitsIdleMS`, the `Export...Max` bounds. `ModuleVersion` is held to the
+  crates' version by `scripts/version.mjs`.
 
 ## What it refuses, and how
 
