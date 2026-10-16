@@ -27,7 +27,7 @@ lists what each script does and refuses.
 `release.sh` and `publish.sh` refuse with `release: <why>` or `publish: <why>` on stderr and exit 1.
 In `release.sh` the refusals of its first step (down to the hdtp-spec checkout below) come before anything is
 committed or tagged; the later ones follow the commits and tags it has made. `release.sh` refuses:
-`RELEASE_GATE` set outside `js/release.test.mjs`'s fixture; a VERSION that is not X.Y.Z; a branch other than `main`; a dirty tree; a tag that already exists;
+`RELEASE_GATE`, `RELEASE_PIN`, `RELEASE_LOCKCHECK` or `RELEASE_CLI` set outside `js/release.test.mjs`'s fixture; a VERSION that is not X.Y.Z; a branch other than `main`; a dirty tree; a tag that already exists;
 a VERSION not above the highest existing `vX.Y.Z` tag; an empty or missing `## Unreleased` in
 `CHANGELOG.md`; an hdtp-spec checkout that is not a git checkout or has uncommitted changes (its
 commit goes into the manifest); a lock file that does not resolve offline after the version change;
@@ -47,9 +47,11 @@ manifest's; the branch not at the release commit.
 - A push is a plain `git push`, through the hooks; nothing here forces.
 - The heavy steps of `release.sh` are commands overridable from the environment (`RELEASE_GATE`,
   `RELEASE_PIN`, `RELEASE_LOCKCHECK`, `RELEASE_CLI`, `RELEASE_CLI_TARGETS`, `PROTOCOL_DIR`,
-  `RELEASE_DATE`; `RELEASE_COMMIT_TRAILER`), so the recipe can be run against stubs. `RELEASE_GATE`
-  is refused unless the git directory holds `hdtp-release-fixture`, which only
-  `js/release.test.mjs`'s fixture writes: no variable cuts a release without the gate.
+  `RELEASE_DATE`; `RELEASE_COMMIT_TRAILER`), so the recipe can be run against stubs. The four step
+  seams (`RELEASE_GATE`, `RELEASE_PIN`, `RELEASE_LOCKCHECK`, `RELEASE_CLI`) are refused, by one
+  check, unless the git directory holds `hdtp-release-fixture`, which only `js/release.test.mjs`'s
+  fixture writes: no variable cuts a release without the gate, the pin, the lock check or the real
+  CLI build.
 
 ## Held by
 

@@ -4,7 +4,8 @@
 #   make release VERSION=X.Y.Z        (then `make publish VERSION=X.Y.Z` pushes and creates the release)
 #
 # In order, stopping at the first failure:
-#   1. refuses: RELEASE_GATE outside js/release.test.mjs's fixture; a VERSION that is not X.Y.Z;
+#   1. refuses: RELEASE_GATE, RELEASE_PIN, RELEASE_LOCKCHECK or RELEASE_CLI outside
+#      js/release.test.mjs's fixture; a VERSION that is not X.Y.Z;
 #      a branch other than $RELEASE_BRANCH (main); a dirty tree; a VERSION not above the highest
 #      vX.Y.Z tag, or one already tagged; an empty `## Unreleased` in CHANGELOG.md; an hdtp-spec
 #      checkout that is dirty (its commit goes into the manifest);
@@ -26,9 +27,10 @@
 # js/release.test.mjs can run this recipe against stubs: RELEASE_GATE, RELEASE_PIN,
 # RELEASE_LOCKCHECK, RELEASE_CLI (called with <tag> <out-dir> <version> <targets...>),
 # RELEASE_CLI_TARGETS, PROTOCOL_DIR, RELEASE_DATE. RELEASE_COMMIT_TRAILER, when set, is appended to
-# both commit messages. RELEASE_GATE is refused unless the git directory holds hdtp-release-fixture,
-# which only that test's fixture writes: `RELEASE_GATE=true make release` cannot cut a release
-# without the gate.
+# both commit messages. The four step seams (RELEASE_GATE, RELEASE_PIN, RELEASE_LOCKCHECK,
+# RELEASE_CLI) are refused unless the git directory holds hdtp-release-fixture, which only that
+# test's fixture writes: `RELEASE_CLI=true make release` cannot cut a release with stub binaries,
+# nor any of the others one without its step.
 set -eu
 cd "$(dirname "$0")/.."
 
@@ -46,8 +48,12 @@ TRAILER="${RELEASE_COMMIT_TRAILER:-}"
 refuse() { echo "release: $*" >&2; exit 1; }
 
 # 1. Refusals.
-[ -z "${RELEASE_GATE:-}" ] || [ -f "$(git rev-parse --git-dir)/hdtp-release-fixture" ] ||
-  refuse "RELEASE_GATE replaces the gate only in js/release.test.mjs's fixture; a release runs sh gate.sh"
+seams=""
+for seam in RELEASE_GATE RELEASE_PIN RELEASE_LOCKCHECK RELEASE_CLI; do
+  eval "[ -z \"\${$seam:-}\" ]" || seams="$seams $seam"
+done
+[ -z "$seams" ] || [ -f "$(git rev-parse --git-dir)/hdtp-release-fixture" ] ||
+  refuse "${seams# } replaces a release step only in js/release.test.mjs's fixture; a release runs its own gate, pin, lock check and CLI build"
 echo "$VERSION" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' ||
   refuse "VERSION must be X.Y.Z (got '${VERSION}'): make release VERSION=0.2.0"
 current="$(git symbolic-ref --quiet --short HEAD || echo '(detached)')"
