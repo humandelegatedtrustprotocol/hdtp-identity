@@ -53,6 +53,9 @@ function fixture({ branch = 'main' } = {}) {
   git(work, 'init', '-q', '-b', branch);
   for (const [k, v] of [['user.name', 'release test'], ['user.email', 'release@test.invalid'], ['commit.gpgsign', 'false'], ['tag.gpgsign', 'false']]) git(work, 'config', k, v);
   git(work, 'add', '-A'); git(work, 'commit', '-q', '-m', 'fixture');
+  // The marker that lets RELEASE_GATE replace the gate: in the fixture's git directory, where no
+  // checkout anybody releases from has it.
+  writeFileSync(join(work, '.git', 'hdtp-release-fixture'), '');
   git(root, 'init', '-q', '--bare', 'origin.git');
   git(work, 'remote', 'add', 'origin', join(root, 'origin.git'));
   const protocol = join(root, 'protocol');
@@ -127,6 +130,14 @@ test('refuses a branch other than main, unless RELEASE_BRANCH names it', () => {
     refused(f, '0.2.0', /on branch feature; a release is cut from main/);
     const r = f.make('release', '0.2.0', { RELEASE_BRANCH: 'feature' });
     assert.equal(r.status, 0, r.stderr);
+  } finally { f.cleanup(); }
+});
+
+test('refuses RELEASE_GATE outside the fixture: no variable cuts a release without the gate', () => {
+  const f = fixture();
+  try {
+    rmSync(join(f.work, '.git', 'hdtp-release-fixture'));
+    refused(f, '0.2.0', /RELEASE_GATE replaces the gate only in js\/release\.test\.mjs's fixture/);
   } finally { f.cleanup(); }
 });
 
