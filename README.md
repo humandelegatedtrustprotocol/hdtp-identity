@@ -46,7 +46,7 @@ gate run (`js/parity.mjs`), so the document, the Rust core and the Go port descr
 `vX.Y.Z`; the version a `go get` names is the plain one:
 
 ```sh
-go get github.com/humandelegatedtrustprotocol/hdtp-identity/go@v0.8.3
+go get github.com/humandelegatedtrustprotocol/hdtp-identity/go@v0.8.4
 ```
 
 ```go
@@ -60,7 +60,7 @@ tag:
 
 ```toml
 [dependencies]
-hdtp-identity = { git = "https://github.com/humandelegatedtrustprotocol/hdtp-identity", tag = "v0.8.3" }
+hdtp-identity = { git = "https://github.com/humandelegatedtrustprotocol/hdtp-identity", tag = "v0.8.4" }
 ```
 
 **Wasm.** Take the release asset, not a build of your own: the bytes are pinned, and only the pinned
@@ -75,8 +75,8 @@ bytes are what every other host runs. Each GitHub release `vX.Y.Z` carries:
 | `hdtp-X.Y.Z-darwin-arm64`, `-linux-arm64`, `-linux-amd64` | the `hdtp` CLI. The Linux builds link `libpcsclite` dynamically (the PIV feature): `apt install libpcsclite1` |
 
 ```sh
-gh release download v0.8.3 -R humandelegatedtrustprotocol/hdtp-identity -D vendor/
-( cd vendor && shasum -a 256 -c SHA256SUMS ) && tar -xzf vendor/hdtp-identity-wasm-web-0.8.3.tgz -C vendor/
+gh release download v0.8.4 -R humandelegatedtrustprotocol/hdtp-identity -D vendor/
+( cd vendor && shasum -a 256 -c SHA256SUMS ) && tar -xzf vendor/hdtp-identity-wasm-web-0.8.4.tgz -C vendor/
 ```
 
 Check every unpacked file against `manifest.json`'s `files["pkg-web/<name>"]` before shipping it.

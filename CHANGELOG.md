@@ -10,6 +10,8 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+## 0.8.4 — 2026-10-16
+
 - **A call from a held address whose `thread_id` is of neither form carries no `seen`, in both ports**
   (hdtp-spec #69). On the `pending_new_address` path, under `ask` and for a root returned after
   removal, `decide` added the envelope's `seen` whatever the call's `thread_id`; the seed, the node
