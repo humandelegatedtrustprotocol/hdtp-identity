@@ -39,8 +39,17 @@ step() { printf '\n── %s\n' "$1"; }
 
 step "Rust core, CLI and Wasm crate: style, clippy, tests"
 cargo fmt --all -- --check
+# The pre-commit hook runs this clippy too, and both stay: the hook runs only when a commit stages a
+# .rs file and judges the working tree, so a Cargo.toml, Cargo.lock or rust-toolchain.toml change, a
+# merge, a rebase or a cherry-pick (which run no pre-commit) reaches the push unlinted without this.
 cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --locked
+# The dependencies, not this workspace's crates, are optimised for the tests: unoptimised, tests/cli.rs
+# took 114 s and tests/memory.rs 86 s; with them optimised, 7 s and 45 s (measured 2026-10-16). The
+# workspace's crates build as `dev` always does, and every crate keeps its debug assertions and
+# overflow checks (neither setting moves with opt-level). It is a flag, not a profile in Cargo.toml,
+# which is an input of the Wasm pin.
+FAST_DEPS='profile.dev.package."*".opt-level=3'
+cargo test --workspace --locked --config "$FAST_DEPS"
 
 step "Every Rust dependency's licence is one deny.toml allows, and its source is crates.io"
 # One version of cargo-deny, so a check's meaning does not move with whatever a machine installed.
@@ -66,7 +75,7 @@ step "The corpus the CLI writes for a fresh owner reads in the Go port as its ca
 REISSUED="$(mktemp -d)"
 trap 'rm -rf "$REISSUED"' EXIT
 OWNER="sha256:$(node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))")"
-cargo run -q --locked -p hdtp -- vectors corpus --owner "$OWNER" --out "$REISSUED/corpus"
+cargo run -q --locked --config "$FAST_DEPS" -p hdtp -- vectors corpus --owner "$OWNER" --out "$REISSUED/corpus"
 ( cd go && HDTP_REISSUED_CORPUS="$REISSUED/corpus" go test -count=1 -v -run '^TestReadExportZipAnswersTheCorpusWrittenForAnotherOwner$' . ) >"$REISSUED/go.txt" 2>&1 || {
   cat "$REISSUED/go.txt"
   exit 1
