@@ -35,6 +35,15 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
   was refused before and is refused now; only the `why` changes. The core changed, so the Wasm is
   re-pinned: a host that vendors it (the cloud) takes the new bytes. A Rust host gains
   `envelope::members_are`; the Go port's constants are unchanged.
+- **Documents and the Go module, held to the tree** (#70). The README's install snippets named
+  0.7.3; they name the release they ship in, and `scripts/version.mjs` now writes and checks them
+  with the other copies of the version. The Wasm size in `README.md` and `js/README.md` (876,471
+  bytes, the 0.8.0 pin's) and the parity count in `js/README.md` and `contract/README.md` (2895)
+  are written by `node js/record.mjs` from `js/manifest.json` and the parity run, and
+  `record.mjs --check` (a gate step) fails when one is stale. `go/go.mod` listed
+  `filippo.io/edwards25519` as indirect, which `go/strict.go` imports; it is tidied, and the gate
+  runs `go mod tidy -diff`; tidy also lists `golang.org/x/sys` as indirect, which
+  `golang.org/x/crypto`'s module requires. A host changes nothing.
 
 ## 0.8.3 — 2026-10-12
 

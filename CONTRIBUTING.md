@@ -82,7 +82,7 @@ node js/intrude.mjs [--port go]           # hdtp-spec's intrusion scenarios agai
 node js/parity.mjs                        # both ports, the same arguments, the same answers
 node js/musts.mjs                         # every MUST of the specification names what holds it
 node contract/render.mjs                  # CONTRACT.md from contract/contract.json (after a contract change)
-node js/record.mjs                        # PROOFS.md (after a change to js/musts.json or the parity cases)
+node js/record.mjs                        # PROOFS.md and the counts the READMEs repeat (after a change to js/musts.json, the parity cases or the pin)
 sh gate.sh                                # everything, in the order the pre-push hook runs it
 ```
 
@@ -100,7 +100,7 @@ will be none. This repository's hooks are its own, in `githooks/`, installed by
 | `pre-push` | `sh gate.sh` |
 
 `sh gate.sh`, in order: rustfmt, clippy and the tests of every crate; cargo-deny over licences and
-sources; the one version in every place it is written; the Go port's vet, tests and adapter; the
+sources; the one version in every place it is written; the Go port's `go.mod` tidy, its vet, tests and adapter; the
 export corpus the CLI writes read back by the Go port; the pin — HEAD's build inputs are the ones
 the pin was built from, and the bytes in `js/pkg-*` are the pinned ones; Appendix B through the
 Wasm and through the Go port; the intrusion scenarios through both; the contract's validator and
