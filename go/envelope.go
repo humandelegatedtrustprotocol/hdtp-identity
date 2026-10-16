@@ -18,8 +18,8 @@ import (
 // constants_test.go holds them to (and tests/constants.rs the Rust core's).
 const (
 	HeaderMembers = "cty,exp,kid,msg_id,suite,ts,v"
-	// EnvelopeMembers is the four members of an envelope, sorted and joined as envelopeOf compares
-	// them (§13.1).
+	// EnvelopeMembers is the four members of an envelope, sorted and joined, as envelopeOf reads them
+	// with membersAre (§13.1).
 	EnvelopeMembers = "ct,enc,protected,sig"
 	SkewSeconds     = 300
 	ClaimWindow     = 30 * 24 * time.Hour
@@ -124,7 +124,7 @@ func (e *Envelope) UnmarshalJSON(b []byte) error {
 // `envelope members`; a member that is not a string, null included, `envelope member types`.
 func envelopeOf(v any) (Envelope, error) {
 	o, isObj := v.(map[string]any)
-	if !isObj || sortedKeys(o) != EnvelopeMembers {
+	if !isObj || !membersAre(o, EnvelopeMembers) {
 		return Envelope{}, errors.New("envelope members")
 	}
 	var e Envelope
@@ -612,7 +612,7 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 		return invalid("protected is not JSON")
 	}
 	header, ok := hv.(map[string]any)
-	if !ok || sortedKeys(header) != HeaderMembers {
+	if !ok || !membersAre(header, HeaderMembers) {
 		return invalid("header members")
 	}
 	if !headerTypesOK(header) {
@@ -691,11 +691,8 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 		return invalid("does not open")
 	}
 	body, _ := bv.(map[string]any)
-	members := ""
-	if body != nil {
-		members = sortedKeys(body)
-	}
-	if members != "chain,method,params" && members != "leaf,method,params" {
+	small := membersAre(body, "leaf,method,params")
+	if !small && !membersAre(body, "chain,method,params") {
 		return invalid("plaintext members")
 	}
 	method, _ := body["method"].(string)
@@ -785,7 +782,7 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 
 	// The small form: the sender names a leaf this node already holds. Anything that cannot be verified
 	// against a held leaf — unknown, blocked, or a bad signature — gets the same answer, so nothing leaks.
-	if members == "leaf,method,params" {
+	if small {
 		ref, ok := body["leaf"].(string)
 		if !ok {
 			return invalid("plaintext shape")
@@ -1140,7 +1137,7 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 		return nil, errors.New("protected is not JSON")
 	}
 	header, ok := hv.(map[string]any)
-	if !ok || sortedKeys(header) != HeaderMembers {
+	if !ok || !membersAre(header, HeaderMembers) {
 		return nil, errors.New("header members")
 	}
 	if !headerTypesOK(header) {
@@ -1187,15 +1184,11 @@ func OpenResult(env Envelope, o OpenOpts) (*Opened, error) {
 		return nil, errors.New("does not open")
 	}
 	body, _ := bv.(map[string]any)
-	members := ""
-	if body != nil {
-		members = sortedKeys(body)
-	}
 	var out Opened
-	switch members {
-	case "chain,result", "leaf,result":
+	switch {
+	case membersAre(body, "chain,result"), membersAre(body, "leaf,result"):
 		out.Result, _ = json.Marshal(body["result"])
-	case "chain,error", "error,leaf":
+	case membersAre(body, "chain,error"), membersAre(body, "error,leaf"):
 		out.Error, _ = json.Marshal(body["error"])
 	default:
 		return nil, errors.New("plaintext members")

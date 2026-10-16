@@ -1,7 +1,7 @@
 //! The state `decide` reads: what the host holds (its keys, its pins, what it has forgotten and
 //! where contacts used to live) and what it answers. Plain data; the host supplies it and applies
 //! the effects `decide` returns.
-use super::{CallerPin, Wire, ENVELOPE_MEMBERS};
+use super::{members_are, CallerPin, Wire, ENVELOPE_MEMBERS};
 use crate::util::{err, Error, Result};
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -143,9 +143,7 @@ impl Wire {
     pub fn read(v: &Value) -> Result<Wire> {
         let refuse = |why: &str| Error::new("envelope_invalid", why);
         let o = v.as_object().ok_or_else(|| refuse(ENVELOPE_MEMBERS_WHY))?;
-        let mut names: Vec<&str> = o.keys().map(String::as_str).collect();
-        names.sort_unstable();
-        if names.join(",") != ENVELOPE_MEMBERS {
+        if !members_are(o, ENVELOPE_MEMBERS) {
             return Err(refuse(ENVELOPE_MEMBERS_WHY));
         }
         let member = |k: &str| o.get(k).and_then(Value::as_str).map(str::to_string).ok_or_else(|| refuse("envelope member types"));

@@ -363,9 +363,7 @@ fn envelopes_open_and_reproduce() {
         let ct = from_b64u(e["ct"].as_str().unwrap()).unwrap();
         let sig = from_b64u(e["sig"].as_str().unwrap()).unwrap();
         let header: Value = serde_json::from_slice(&aad).unwrap();
-        let mut members: Vec<&str> = header.as_object().unwrap().keys().map(|k| k.as_str()).collect();
-        members.sort();
-        assert_eq!(members.join(","), envelope::HEADER_MEMBERS, "{name}: header members");
+        assert!(envelope::members_are(header.as_object().unwrap(), envelope::HEADER_MEMBERS), "{name}: header members");
         let suite = Suite::parse(e["suite"].as_str().unwrap()).unwrap();
         assert_eq!(header["v"], 1);
         assert_eq!(header["suite"], e["suite"]);
@@ -722,6 +720,11 @@ fn decide_reads_an_envelope_of_exactly_four_string_members() {
         ("a fifth member", with(full, "note", json!("x")), "envelope members"),
         ("sig spelled SIG", with(&without(full, "sig"), "SIG", full["sig"].clone()), "envelope members"),
         ("Protected beside protected", with(full, "Protected", full["protected"].clone()), "envelope members"),
+        (
+            "a member named ct,enc for ct and enc",
+            json!({ "ct,enc": full["ct"], "protected": full["protected"], "sig": full["sig"] }).to_string(),
+            "envelope members",
+        ),
         ("sig absent, in the small form", without(small, "sig").to_string(), "envelope members"),
         (
             "an array in place of the object",

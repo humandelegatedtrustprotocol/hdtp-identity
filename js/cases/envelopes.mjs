@@ -998,6 +998,31 @@ export default function envelopes({ add, expect }, f) {
     expect(onOpen, reads ? { ok: 1 } : { error: 'envelope_invalid', why: 'plaintext shape' });
   }
 
+  // #71: a member whose name holds a comma. Both ports compared an object's names sorted and joined
+  // with commas, so `ct,enc` beside `protected` and `sig` joined to the envelope's four and was refused
+  // as `envelope member types`, `cty,exp` in a header as `header member types`, and `chain,method` in a
+  // call's body as `plaintext shape`. Each is the wrong set of members, refused as one.
+  const commaEnvelope = { 'ct,enc': sealed.ct, protected: sealed.protected, sig: sealed.sig };
+  const commaHeader = (t) => t.replace(/"cty":"[^"]*","exp":\d+/, '"cty,exp":"x"');
+  const commaCall = sealText({ to: toMyself, cty: 'application/hdtp-call+json', msgId: 'p-71', body: '{"chain,method":"tools/call","params":{"name":"send_message","arguments":{}}}' });
+  const commaAnswer = sealText({ to: callerKey.pub, cty: 'application/hdtp-result+json', msgId: 'r-1', body: `{"chain,result":${chainText}}` });
+  for (const [what, envelope, why] of [
+    ['an envelope with a member named ct,enc for ct and enc', commaEnvelope, 'envelope members'],
+    ['a header with a member named cty,exp for cty and exp', callText('p-71-h', '{}', { header: commaHeader }), 'header members'],
+    ['a call whose plaintext has a member named chain,method for chain and method', commaCall, 'plaintext members'],
+  ]) {
+    add(`decide on ${what}`, 'decide', { now, envelope, node: pinnedNode });
+    expect(`decide on ${what}`, { code: 'envelope_invalid', why });
+  }
+  for (const [what, envelope, why] of [
+    ['an envelope with a member named ct,enc for ct and enc', commaEnvelope, 'envelope members'],
+    ['an answer whose header has a member named cty,exp for cty and exp', sealText({ to: callerKey.pub, cty: 'application/hdtp-result+json', msgId: 'r-1', body: `{"result":{},"chain":${chainText}}`, header: commaHeader }), 'header members'],
+    ['an answer whose plaintext has a member named chain,result for chain and result', commaAnswer, 'plaintext members'],
+  ]) {
+    add(`open_result on ${what}`, 'open_result', open(envelope));
+    expect(`open_result on ${what}`, { error: 'envelope_invalid', why });
+  }
+
   // The caller's pin, in the chain form: one whose leaf does not read, or reads to a key outside the
   // profile, is an error of the call in its reader's class, as the core's `?` has it. The Go port read
   // it leniently and answered `superseded leaf` for any that did not parse (T10).

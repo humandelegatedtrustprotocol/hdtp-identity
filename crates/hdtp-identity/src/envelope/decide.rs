@@ -2,8 +2,8 @@
 //! the host supplies (`state.rs`). `envelope.mjs receive()` is its specification, line for line.
 use super::state::{host_roots, DecideInput, DecideOutput, NodeState};
 use super::{
-    chain_of, header_checks, header_of, members, pin_holding, read_members, thread_id_refusal, timing, Timing, CLAIM_WINDOW_S, CTY_CALL,
-    GUEST_TOOLS, INFO, PENDING_TOOLS, TOMBSTONE_S,
+    chain_of, header_checks, header_of, members_are, pin_holding, read_members, thread_id_refusal, timing, Timing, CLAIM_WINDOW_S,
+    CTY_CALL, GUEST_TOOLS, INFO, PENDING_TOOLS, TOMBSTONE_S,
 };
 use crate::card;
 use crate::hpke::{self, suite_for};
@@ -114,10 +114,11 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
             Some(b) => b,
             None => return Ok(invalid("does not open")),
         };
-    let m = members(&body);
-    if m != "chain,method,params" && m != "leaf,method,params" {
-        return Ok(invalid("plaintext members"));
-    }
+    let small = match body.as_object() {
+        Some(o) if members_are(o, "leaf,method,params") => true,
+        Some(o) if members_are(o, "chain,method,params") => false,
+        _ => return Ok(invalid("plaintext members")),
+    };
     let method = body["method"].as_str().unwrap_or("");
     if method != "tools/call" && method != "tools/list" {
         return Ok(invalid("plaintext shape"));
@@ -206,7 +207,7 @@ pub fn decide(input: &DecideInput) -> Result<DecideOutput> {
 
     // The small form: the sender names a leaf this node already holds. Anything that cannot be
     // verified against a held leaf — unknown, blocked, or a bad signature — gets the same answer.
-    if m == "leaf,method,params" {
+    if small {
         let Some(named) = body["leaf"].as_str() else { return Ok(invalid("plaintext shape")) };
         let chain_required = done(json!({ "code": "chain_required" }));
         let hit =
