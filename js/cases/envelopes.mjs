@@ -743,6 +743,28 @@ export default function envelopes({ add, expect }, f) {
   const movedCall = request({ senderChain: [movedLeaf, f.rootDerBytes], params: { name: 'send_message' }, msgId: 'p-t8' });
   add('decide on a contact at a new endpoint, the node saying no accept_new_hosts', 'decide', { now, envelope: movedCall, node: { ...unsaid, pins: pinned } });
   expect('decide on a contact at a new endpoint, the node saying no accept_new_hosts', { code: 'ok', tier: 'contact', endpoint: MOVED });
+
+  // SPEC §7: a call §5.3 holds for the owner is answered pending_new_address whatever its thread_id,
+  // and one whose thread_id is of neither form records nothing (hdtp-spec #69): no `seen`, the address
+  // still held. A well-formed thread_id on that path records its msg_id, as it did.
+  {
+    const tombstoneNode = { ...node, tombstones: [{ root: rootFp, at: f.before(60), leaf: olderLeaf }] };
+    const askNode = { ...node, accept_new_hosts: 'ask', pins: pinned };
+    const heldPaths = [
+      ['a root returned after removal', tombstoneNode, {}, ENDPOINT, leafDer, { forced: 'tombstone', decision: 'ask' }, 'returned after removal'],
+      ['a pinned root at another endpoint under ask', askNode, { senderChain: [movedLeaf, f.rootDerBytes] }, MOVED, b64url(movedLeaf), { decision: 'ask' }, 'ask'],
+    ];
+    for (const [whom, held, sealWith, endpoint, leaf, members, why] of heldPaths) {
+      for (const [what, threadId, records] of [['of neither form', '..', false], ['that is a lower-case UUID (control)', UUID, true]]) {
+        const { msgId, envelope } = threaded('send_message', threadId, { seal: sealWith });
+        const id = `decide, ${whom}: a send_message with a thread_id ${what}`;
+        add(id, 'decide', { now, envelope, node: held });
+        const result = { code: 'ok', tier: 'pending_new_address', root: rootFp, endpoint, leaf, form: 'chain', method: 'tools/call', tool: 'send_message', params: { name: 'send_message', arguments: { ...TOOL_ARGS.send_message, thread_id: threadId } }, ...members };
+        const pendingEffect = { op: 'pending', root: rootFp, endpoint, why, leaf };
+        expect(id, { result, effects: records ? [pendingEffect, { op: 'seen', msg_id: msgId }] : [pendingEffect] });
+      }
+    }
+  }
   const { ct: _ct, ...noCt } = chainForm;
   for (const [what, args, want] of [
     ['an envelope with no ct', open(noCt), { error: 'envelope_invalid', why: 'envelope members' }],

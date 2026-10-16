@@ -10,6 +10,14 @@ Entries go under `## Unreleased` as they land; `make release` dates them.
 
 ## Unreleased
 
+- **A call from a held address whose `thread_id` is of neither form records nothing, in both ports**
+  (hdtp-spec #69). On the `pending_new_address` path, under `ask` and for a root returned after
+  removal, `decide` added the envelope's `seen` whatever the call's `thread_id`; the seed, the node
+  and the cloud record nothing there. The answer is unchanged (`pending_new_address`, the address
+  held); only the `seen` effect goes. A well-formed `thread_id` on that path records its msg_id, as
+  before. The core changed, so the Wasm is re-pinned. `js/intrude.mjs` runs the three scenarios
+  hdtp-spec's seed gained with it, 199 in all; both ports agree with the seed on every one. This
+  corrects the count in the 1.0.1 entry below, which said 196.
 - **Implements HDTP 1.0.1.** `version` answers `"spec": "1.0.1"` in both ports, and the contract's
   `spec` is 1.0.1. A host that reads the spec version from `version` sees the new number.
   `js/intrude.mjs` runs the four scenarios hdtp-spec's seed gained for 1.0.1 (a member named

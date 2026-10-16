@@ -881,8 +881,14 @@ func decide(now time.Time, env Envelope, node NodeState, unreadable *error) Deci
 		}
 		return result("guest", root, endpoint, "chain", guestMembers(out))
 	case pinNewAddress:
+		// §7: a call §5.3 holds is answered so whatever its thread_id; one of neither form records nothing.
 		effects = append(effects, out.effects...)
-		return result("pending_new_address", root, endpoint, "chain", newAddressMembers(out))
+		held := effects
+		d := result("pending_new_address", root, endpoint, "chain", newAddressMembers(out))
+		if code, _ := ThreadIDRefusal(tool, params); code != "" {
+			d.Effects = held
+		}
+		return d
 	}
 	effects = append(effects, out.effects...)
 	if out.pendingOut {
@@ -953,7 +959,8 @@ const (
 // leaf's key in an envelope or in a TLS handshake: the chain half of Decide, which DecideChain answers
 // on its own for a host's TLS door, as the core's `pinned`. The node's TLS door made this decision
 // itself and parted from the envelope's on a removal tombstone and on a conflicting leaf (N1, N2). The
-// effects are the pin's moves; Decide adds the envelope's `seen`.
+// effects are the pin's moves; Decide adds the envelope's `seen` (none for a
+// pending_new_address call whose thread_id §7 refuses).
 //
 //	contact      the pin stands, renewed, or moved under auto; pendingOut while the pin is pending_out,
 //	             whose calls wait for the answer save the pending tier's own
