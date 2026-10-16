@@ -1,11 +1,7 @@
-# The Go port of hdtp-identity: `make test` proves it against the vectors, `make build` produces the
-# stdin adapter the JavaScript intrusion driver aims at (`--port go`).
+# The Go port of hdtp-identity: `make build` produces the stdin adapter the JavaScript intrusion driver
+# aims at (`--port go`). gate.sh vets and tests the port with go itself.
 GO ?= go
 
-.PHONY: build test vet
+.PHONY: build
 build:
 	mkdir -p bin && $(GO) build -o bin/hdtp-identity-go ./cmd/hdtp-identity-go
-test:
-	$(GO) test ./...
-vet:
-	$(GO) vet ./...
