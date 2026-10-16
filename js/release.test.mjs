@@ -53,8 +53,8 @@ function fixture({ branch = 'main' } = {}) {
   git(work, 'init', '-q', '-b', branch);
   for (const [k, v] of [['user.name', 'release test'], ['user.email', 'release@test.invalid'], ['commit.gpgsign', 'false'], ['tag.gpgsign', 'false']]) git(work, 'config', k, v);
   git(work, 'add', '-A'); git(work, 'commit', '-q', '-m', 'fixture');
-  // The marker that lets RELEASE_GATE replace the gate: in the fixture's git directory, where no
-  // checkout anybody releases from has it.
+  // The marker that lets the step seams (RELEASE_GATE, _PIN, _LOCKCHECK, _CLI) replace their steps:
+  // in the fixture's git directory, where no checkout anybody releases from has it.
   writeFileSync(join(work, '.git', 'hdtp-release-fixture'), '');
   git(root, 'init', '-q', '--bare', 'origin.git');
   git(work, 'remote', 'add', 'origin', join(root, 'origin.git'));
@@ -106,9 +106,9 @@ if [ "$1 $2" = "release download" ]; then cp "$GH_SOURCE"/* "$5"/; fi
   return { root, work, log, protocol, git: (...a) => git(work, ...a), gitIn: git, make, cleanup, calls: () => readFileSync(log, 'utf8') };
 }
 
-function refused(f, version, pattern) {
+function refused(f, version, pattern, extra = {}) {
   const [head, tags, status] = [f.git('rev-parse', 'HEAD'), f.git('tag', '-l'), f.git('status', '--porcelain')];
-  const r = f.make('release', version);
+  const r = f.make('release', version, extra);
   assert.notEqual(r.status, 0, `expected a refusal, got success:\n${r.stdout}`);
   assert.match(r.stderr, pattern);
   assert.equal(f.git('rev-parse', 'HEAD'), head, 'a refusal committed something');
@@ -133,11 +133,21 @@ test('refuses a branch other than main, unless RELEASE_BRANCH names it', () => {
   } finally { f.cleanup(); }
 });
 
-test('refuses RELEASE_GATE outside the fixture: no variable cuts a release without the gate', () => {
+test('refuses each step seam outside the fixture: no variable replaces the gate, the pin, the lock check or the CLI build', () => {
   const f = fixture();
   try {
+    // Tripwires for the real steps, so a seam that is not refused runs into one at once and is
+    // seen in the log, instead of starting the real gate or the container pin.
+    for (const [file, step] of [['gate.sh', 'real-gate'], ['js/reproduce.sh', 'real-pin'], ['scripts/build-cli.sh', 'real-cli']]) {
+      writeFileSync(join(f.work, file), `echo ${step} >> "${f.log}"; exit 1\n`);
+    }
+    f.git('commit', '-q', '-am', 'tripwires');
     rmSync(join(f.work, '.git', 'hdtp-release-fixture'));
-    refused(f, '0.2.0', /RELEASE_GATE replaces the gate only in js\/release\.test\.mjs's fixture/);
+    const seams = ['RELEASE_PIN', 'RELEASE_LOCKCHECK', 'RELEASE_CLI', 'RELEASE_GATE'];
+    for (const seam of seams) {
+      const only = Object.fromEntries(seams.map((s) => [s, s === seam ? 'true' : '']));
+      refused(f, '0.2.0', new RegExp(`${seam} replaces a release step only in js/release\\.test\\.mjs's fixture`), only);
+    }
   } finally { f.cleanup(); }
 });
 
