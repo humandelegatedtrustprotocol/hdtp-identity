@@ -10,7 +10,7 @@
     "how": "sh js/reproduce.sh"
   },
   "source": {
-    "inputs_sha256": "c6e114a18ca556262dd3f4ac91cd4b6757b7b0acfae1961533b7fae009bc6c98",
+    "inputs_sha256": "35847425d0597eb0f3d763c3fbfb7162226c8c9a8f5507aa202f6aaea27ea0a7",
     "files": 55,
     "paths": [
       "crates/hdtp-identity",
@@ -39,8 +39,8 @@
       "bytes": 13410
     },
     "pkg-web/hdtp_identity_wasm_bg.wasm": {
-      "sha256": "e8de03faaf119fedb1fc6d72dc32cab52e9d784344c2cd2ca98c7354ce3663a5",
-      "bytes": 890192
+      "sha256": "bb78a14df6c52fe9012d7ad87dba5e962eaa9d749577be6c030b6f15a0088f35",
+      "bytes": 890277
     },
     "pkg-web/hdtp_identity_wasm_bg.wasm.d.ts": {
       "sha256": "73433108b7f9e722ba01bba916f3b5a2294d42ce7ab53ae1fa7630186df89bf2",
@@ -63,8 +63,8 @@
       "bytes": 10099
     },
     "pkg-node/hdtp_identity_wasm_bg.wasm": {
-      "sha256": "e8de03faaf119fedb1fc6d72dc32cab52e9d784344c2cd2ca98c7354ce3663a5",
-      "bytes": 890192
+      "sha256": "bb78a14df6c52fe9012d7ad87dba5e962eaa9d749577be6c030b6f15a0088f35",
+      "bytes": 890277
     },
     "pkg-node/hdtp_identity_wasm_bg.wasm.d.ts": {
       "sha256": "73433108b7f9e722ba01bba916f3b5a2294d42ce7ab53ae1fa7630186df89bf2",
