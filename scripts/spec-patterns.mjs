@@ -5,8 +5,8 @@
 //   node scripts/spec-patterns.mjs <hdtp-spec> local     the pattern for `git grep -E` and `grep -E`
 //
 // The article is hdtp-spec's exported ARTICLE (vectors/lib/stated.mjs). The local-path pattern is the
-// regular-expression literal `const LOCAL = /…/` in scripts/check-local-paths.mjs, read as text: that
-// module runs its own check when it is imported. Only `\/` is unescaped; any other backslash would
+// regular-expression literal `const LOCAL = /…/` in scripts/local-paths.mjs, read as text: that
+// module exports only the function that applies it. Only `\/` is unescaped; any other backslash would
 // mean something else in an extended regular expression, so it is refused rather than passed on.
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -25,7 +25,7 @@ if (which === 'article') {
   if (!(ARTICLE instanceof RegExp)) refuse(`${file} exports no ARTICLE pattern`);
   process.stdout.write(ARTICLE.source);
 } else {
-  const file = join(spec, 'scripts/check-local-paths.mjs');
+  const file = join(spec, 'scripts/local-paths.mjs');
   const m = /^const LOCAL = \/(.+)\/[a-z]*$/m.exec(readFileSync(file, 'utf8'));
   if (!m) refuse(`${file} holds no line 'const LOCAL = /…/'`);
   const ere = m[1].replaceAll('\\/', '/');

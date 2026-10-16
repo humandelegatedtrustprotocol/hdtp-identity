@@ -19,8 +19,8 @@
 set -eu
 cd "$(dirname "$0")"
 
-[ -f ../hdtp-spec/site/spec-source.mjs ] && [ -d ../hdtp-spec/docs/specification ] && [ -f ../hdtp-spec/vectors/lib/x509.mjs ] && [ -f ../hdtp-spec/vectors/lib/stated.mjs ] && [ -f ../hdtp-spec/scripts/check-local-paths.mjs ] && [ -f ../hdtp-spec/schema/gen.mjs ] || {
-  echo "gate: ../hdtp-spec is not checked out beside this directory (docs/specification, vectors/lib, scripts/check-local-paths.mjs and schema/gen.mjs are read from it)" >&2
+[ -f ../hdtp-spec/site/spec-source.mjs ] && [ -d ../hdtp-spec/docs/specification ] && [ -f ../hdtp-spec/vectors/lib/x509.mjs ] && [ -f ../hdtp-spec/vectors/lib/stated.mjs ] && [ -f ../hdtp-spec/scripts/local-paths.mjs ] && [ -f ../hdtp-spec/schema/gen.mjs ] || {
+  echo "gate: ../hdtp-spec is not checked out beside this directory (docs/specification, vectors/lib, scripts/local-paths.mjs and schema/gen.mjs are read from it)" >&2
   exit 2
 }
 
@@ -182,7 +182,7 @@ step "No tracked text carries a path from the machine that wrote it"
 # same rule by githooks/commit-msg, which this step cannot see. A /home path counts where it begins a
 # path (not inside one, as in a route like a/home/x) and names someone, whatever follows the name (a
 # slash, a space, punctuation or the end of the line).
-# The pattern is hdtp-spec's LOCAL (scripts/check-local-paths.mjs), read by scripts/spec-patterns.mjs:
+# The pattern is hdtp-spec's LOCAL (scripts/local-paths.mjs), read by scripts/spec-patterns.mjs:
 # one rule, one definition. githooks/commit-msg keeps a copy, because a commit cannot depend on the
 # sibling checkout; it is held to this one below, by its text and by the plants. The plants are
 # spelled in halves so that this file does not carry what it refuses.
