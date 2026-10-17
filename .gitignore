@@ -3,3 +3,6 @@ js/pkg-*/
 js/node_modules/
 go/bin/
 dist/
+
+.env
+.dev.vars
